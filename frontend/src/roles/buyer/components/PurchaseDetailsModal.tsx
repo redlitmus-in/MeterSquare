@@ -196,11 +196,12 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
     onClose();
   };
 
-  // Pre-compute store requested materials array
-  const storeRequestedMaterials = useMemo(() =>
-    localPurchase.store_requested_materials || [],
-    [localPurchase.store_requested_materials]
-  );
+  // Pre-compute store requested materials array (normalized for case-insensitive matching)
+  const storeRequestedMaterials = useMemo(() => {
+    const materials = localPurchase.store_requested_materials || [];
+    // Normalize to lowercase and trim for accurate matching
+    return materials.map((name: string) => name.toLowerCase().trim());
+  }, [localPurchase.store_requested_materials]);
 
   // Pre-compute POChild lookup map for O(1) material status lookup (vs O(n²))
   const materialToPOChildMap = useMemo(() => {
@@ -284,6 +285,37 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* ✅ Mixed Routing Alert Banner - Show when materials are split between store and vendor */}
+              {localPurchase.store_requested_materials && localPurchase.store_requested_materials.length > 0 && localPurchase.po_children && localPurchase.po_children.length > 0 && (
+                <div className="bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 border-b border-indigo-200 px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 text-indigo-700">
+                      <Store className="w-5 h-5" />
+                      <Package className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm font-bold text-indigo-900 mb-1">
+                        🔀 Mixed Routing - Purchase Split Between Store & Vendor
+                      </div>
+                      <div className="text-xs text-indigo-700 flex items-center gap-4">
+                        <span className="flex items-center gap-1.5 font-medium">
+                          <Store className="w-3.5 h-3.5" />
+                          {localPurchase.store_requested_materials.length} material(s) sent to M2 Store
+                        </span>
+                        <span className="text-indigo-400">|</span>
+                        <span className="flex items-center gap-1.5 font-medium">
+                          <Package className="w-3.5 h-3.5" />
+                          {localPurchase.po_children.reduce((sum: number, pc: any) => sum + (pc.materials_count || 0), 0)} material(s) sent to Vendor (PO Children created)
+                        </span>
+                      </div>
+                    </div>
+                    <Badge className="bg-indigo-600 text-white text-xs px-3 py-1 border-2 border-indigo-700 shadow-sm">
+                      SPLIT PURCHASE
+                    </Badge>
+                  </div>
+                </div>
+              )}
 
               {/* Body */}
               <div className="p-6 max-h-[70vh] overflow-y-auto">
@@ -556,7 +588,8 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                           <TableHead className="font-semibold text-sm">Material Name</TableHead>
                           <TableHead className="font-semibold text-sm">Sub-Item</TableHead>
                           <TableHead className="font-semibold text-sm">Brand</TableHead>
-                          <TableHead className="font-semibold text-sm">Specs</TableHead>
+                          <TableHead className="font-semibold text-sm">Size</TableHead>
+                          <TableHead className="font-semibold text-sm">Specification</TableHead>
                           <TableHead className="font-semibold text-sm">Quantity</TableHead>
                           <TableHead className="font-semibold text-sm">Unit</TableHead>
                           <TableHead className="font-semibold text-sm">Unit Price</TableHead>
@@ -567,8 +600,8 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         {localPurchase.materials.map((material, idx) => {
                           // Check if material is NEW (only show badge for truly new materials, not BOQ materials)
                           const isNewMaterial = material.master_material_id == null;
-                          // Check if material is sent to store (using pre-computed array)
-                          const isSentToStore = storeRequestedMaterials.includes(material.material_name);
+                          // Check if material is sent to store (using pre-computed array with case-insensitive matching)
+                          const isSentToStore = storeRequestedMaterials.includes(material.material_name.toLowerCase().trim());
 
                           // Use pre-computed POChild lookup map for O(1) lookup
                           const materialNameLower = material.material_name.toLowerCase().trim();
@@ -631,7 +664,8 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                                   )}
                                 </TableCell>
                                 <TableCell className="text-sm">{(material as any).brand || '-'}</TableCell>
-                                <TableCell className="text-sm">{(material as any).size || (material as any).specification || '-'}</TableCell>
+                                <TableCell className="text-sm">{(material as any).size || '-'}</TableCell>
+                                <TableCell className="text-sm">{(material as any).specification || '-'}</TableCell>
                                 <TableCell className="text-sm">{material.quantity}</TableCell>
                                 <TableCell className="text-sm">{material.unit}</TableCell>
                                 <TableCell className={`text-sm ${isSentToStore ? 'text-purple-600' : ''}`}>
@@ -644,7 +678,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                               {/* Per-Material Supplier Notes Row */}
                               {(material as any).supplier_notes && (material as any).supplier_notes.trim().length > 0 && (
                                 <TableRow>
-                                  <TableCell colSpan={8} className="bg-blue-50/50 py-2 px-4 border-t-0">
+                                  <TableCell colSpan={9} className="bg-blue-50/50 py-2 px-4 border-t-0">
                                     <div className="flex items-start gap-2 text-xs">
                                       <span className="font-semibold text-blue-700 whitespace-nowrap">📝 Note:</span>
                                       <span className="text-blue-800">{(material as any).supplier_notes}</span>
@@ -657,8 +691,8 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                         })}
                         {/* Show separate totals if there are store materials */}
                         {(() => {
-                          // Using pre-computed storeRequestedMaterials
-                          const vendorMaterials = localPurchase.materials.filter(m => !storeRequestedMaterials.includes(m.material_name));
+                          // Using pre-computed storeRequestedMaterials with case-insensitive matching
+                          const vendorMaterials = localPurchase.materials.filter(m => !storeRequestedMaterials.includes(m.material_name.toLowerCase().trim()));
                           const vendorTotal = vendorMaterials.reduce((sum, mat) => sum + (mat.total_price || 0), 0);
                           const storeMaterialsCount = storeRequestedMaterials.length;
 
@@ -666,7 +700,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                             return (
                               <>
                                 <TableRow className="bg-purple-50">
-                                  <TableCell colSpan={7} className="text-right text-sm text-purple-700">
+                                  <TableCell colSpan={8} className="text-right text-sm text-purple-700">
                                     Store Materials ({storeMaterialsCount}):
                                   </TableCell>
                                   <TableCell className="text-right text-purple-700 text-sm font-medium">
@@ -674,7 +708,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                                   </TableCell>
                                 </TableRow>
                                 <TableRow className="bg-blue-50 font-bold">
-                                  <TableCell colSpan={7} className="text-right text-sm">Vendor Total ({vendorMaterials.length} items):</TableCell>
+                                  <TableCell colSpan={8} className="text-right text-sm">Vendor Total ({vendorMaterials.length} items):</TableCell>
                                   <TableCell className="text-right text-green-700 text-base">
                                     {formatCurrency(vendorTotal)}
                                   </TableCell>
@@ -693,7 +727,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                             <>
                               {/* Subtotal Row */}
                               <TableRow className="bg-gray-50">
-                                <TableCell colSpan={7} className="text-right text-sm font-semibold">Subtotal:</TableCell>
+                                <TableCell colSpan={8} className="text-right text-sm font-semibold">Subtotal:</TableCell>
                                 <TableCell className="text-right text-gray-900 font-semibold">
                                   {formatCurrency(subtotal)}
                                 </TableCell>
@@ -702,7 +736,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                               {/* VAT Row */}
                               {vatPercent > 0 && (
                                 <TableRow className="bg-gray-50">
-                                  <TableCell colSpan={7} className="text-right text-sm font-semibold">VAT ({vatPercent}%):</TableCell>
+                                  <TableCell colSpan={8} className="text-right text-sm font-semibold">VAT ({vatPercent}%):</TableCell>
                                   <TableCell className="text-right text-gray-900 font-semibold">
                                     {formatCurrency(vatAmount)}
                                   </TableCell>
@@ -711,7 +745,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
 
                               {/* Total Row */}
                               <TableRow className="bg-blue-50 font-bold border-t-2 border-blue-300">
-                                <TableCell colSpan={7} className="text-right text-sm">Total Cost:</TableCell>
+                                <TableCell colSpan={8} className="text-right text-sm">Total Cost:</TableCell>
                                 <TableCell className="text-right text-green-700 text-base">
                                   {formatCurrency(grandTotal)}
                                 </TableCell>

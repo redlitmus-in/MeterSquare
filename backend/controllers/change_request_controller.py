@@ -98,8 +98,10 @@ def create_change_request():
                 for sub_item_idx, sub_item in enumerate(item.get('sub_items', [])):
                     for mat_idx, boq_material in enumerate(sub_item.get('materials', [])):
                         material_data = {
+                            'sub_item_name': sub_item.get('sub_item_name'),
                             'brand': boq_material.get('brand'),
-                            'specification': boq_material.get('specification')
+                            'specification': boq_material.get('specification'),
+                            'size': boq_material.get('size')
                         }
 
                         # Lookup by master_material_id if exists
@@ -126,13 +128,15 @@ def create_change_request():
             total_price = quantity * unit_price
             materials_total_cost += total_price
 
-            # Get brand/specification from request, or lookup from BOQ if missing
+            # Get brand/specification/size/sub_item_name from request, or lookup from BOQ if missing
             brand = mat.get('brand')
             specification = mat.get('specification')
+            size = mat.get('size')
+            sub_item_name = mat.get('sub_item_name')
             master_material_id = mat.get('master_material_id')
 
-            # If brand/spec not provided, lookup from BOQ
-            if not brand or not specification:
+            # If brand/spec/size/sub_item_name not provided, lookup from BOQ
+            if not brand or not specification or not size or not sub_item_name:
                 boq_mat = None
 
                 # Try lookup by material ID first
@@ -145,17 +149,22 @@ def create_change_request():
                     if material_name and material_name in material_lookup_by_name:
                         boq_mat = material_lookup_by_name[material_name]
 
-                # Populate brand/spec from BOQ if found
+                # Populate brand/spec/size/sub_item_name from BOQ if found
                 if boq_mat:
                     if not brand:
                         brand = boq_mat.get('brand')
                     if not specification:
                         specification = boq_mat.get('specification')
+                    if not size:
+                        size = boq_mat.get('size')
+                    if not sub_item_name:
+                        sub_item_name = boq_mat.get('sub_item_name')
 
             # Determine if this is a new material (doesn't exist in BOQ masters)
             is_new_material = master_material_id is None
 
             materials_data.append({
+                'sub_item_name': sub_item_name,  # Sub-item name (looked up from BOQ if not provided)
                 'material_name': mat.get('material_name'),
                 'quantity': quantity,
                 'unit': mat.get('unit', 'nos'),
@@ -172,7 +181,7 @@ def create_change_request():
                 'reason': mat.get('reason', ''),  # Reason for new material (used in routing logic)
                 'brand': brand,  # Brand for materials (from request or BOQ)
                 'specification': specification,  # Specification for materials (from request or BOQ)
-                'size': mat.get('size')  # Size for materials
+                'size': size  # Size for materials (from request or BOQ)
             })
 
         # Calculate already consumed from change requests that reserve material quantities
@@ -198,13 +207,15 @@ def create_change_request():
         else:
             # Direct API call - convert materials to sub_items format
             for mat in materials:
-                # Get brand/specification from request, or lookup from BOQ if missing
+                # Get brand/specification/size/sub_item_name from request, or lookup from BOQ if missing
                 brand = mat.get('brand')
                 specification = mat.get('specification')
+                size = mat.get('size')
+                sub_item_name = mat.get('sub_item_name')
                 master_material_id = mat.get('master_material_id')
 
-                # If brand/spec not provided, lookup from BOQ
-                if not brand or not specification:
+                # If brand/spec/size/sub_item_name not provided, lookup from BOQ
+                if not brand or not specification or not size or not sub_item_name:
                     boq_mat = None
 
                     # Try lookup by material ID first
@@ -217,12 +228,16 @@ def create_change_request():
                         if material_name and material_name in material_lookup_by_name:
                             boq_mat = material_lookup_by_name[material_name]
 
-                    # Populate brand/spec from BOQ if found
+                    # Populate brand/spec/size/sub_item_name from BOQ if found
                     if boq_mat:
                         if not brand:
                             brand = boq_mat.get('brand')
                         if not specification:
                             specification = boq_mat.get('specification')
+                        if not size:
+                            size = boq_mat.get('size')
+                        if not sub_item_name:
+                            sub_item_name = boq_mat.get('sub_item_name')
 
                 quantity = float(mat.get('quantity', 0))
                 unit_price = float(mat.get('unit_price', 0))
@@ -230,7 +245,7 @@ def create_change_request():
 
                 sub_items_data.append({
                     'sub_item_id': mat.get('sub_item_id'),  # Sub-item ID (INTEGER from boq_sub_items table)
-                    'sub_item_name': mat.get('sub_item_name'),  # Sub-item name (e.g., "Protection")
+                    'sub_item_name': sub_item_name,  # Sub-item name (e.g., "Protection") - looked up from BOQ if not provided
                     'material_name': mat.get('material_name'),  # Material name (e.g., "Bubble Wrap")
                     'quantity': quantity,
                     'unit': mat.get('unit', 'nos'),
@@ -247,7 +262,7 @@ def create_change_request():
                     'reason': mat.get('reason'),
                     'brand': brand,  # Brand for materials (from request or BOQ)
                     'specification': specification,  # Specification for materials (from request or BOQ)
-                    'size': mat.get('size')  # Size for materials
+                    'size': size  # Size for materials (from request or BOQ)
                 })
 
         # Get item info from request data or extra_material_data
@@ -1509,20 +1524,24 @@ def get_all_change_requests():
                     # Use batch-loaded BOQ details (no N+1 query)
                     boq_details = boq_details_map.get(cr.boq_id)
                     if boq_details and boq_details.boq_details:
-                        # Build material price lookup from BOQ
+                        # Build material price and sub_item_name lookup from BOQ
                         material_prices = {}
+                        material_sub_items = {}  # Map material_id -> sub_item_name
                         boq_items = boq_details.boq_details.get('items', [])
                         for item_idx, item in enumerate(boq_items):
                             for sub_item_idx, sub_item in enumerate(item.get('sub_items', [])):
+                                sub_item_name = sub_item.get('sub_item_name')
                                 for mat_idx, boq_material in enumerate(sub_item.get('materials', [])):
                                     material_id = f"mat_{cr.boq_id}_{item_idx+1}_{sub_item_idx+1}_{mat_idx+1}"
                                     material_prices[material_id] = boq_material.get('unit_price', 0)
+                                    material_sub_items[material_id] = sub_item_name  # Store sub_item_name
                                     # Also store by material name for fallback lookup
                                     mat_name = boq_material.get('material_name', '').lower().strip()
                                     if mat_name:
                                         material_prices[f"name:{mat_name}"] = boq_material.get('unit_price', 0)
+                                        material_sub_items[f"name:{mat_name}"] = sub_item_name  # Store sub_item_name by name
 
-                        # Calculate total cost from materials
+                        # Calculate total cost from materials and enrich with sub_item_name
                         total_cost = 0.0
                         for mat in cr_dict.get('materials_data', []):
                             try:
@@ -1543,9 +1562,20 @@ def get_all_change_requests():
                                     if mat_name and f"name:{mat_name}" in material_prices:
                                         unit_price = float(material_prices[f"name:{mat_name}"] or 0)
 
+                            # Enrich sub_item_name if missing
+                            if not mat.get('sub_item_name'):
+                                mat_id = mat.get('master_material_id')
+                                if mat_id and mat_id in material_sub_items:
+                                    mat['sub_item_name'] = material_sub_items[mat_id]
+                                else:
+                                    # Fallback to name lookup
+                                    mat_name = mat.get('material_name', '').lower().strip()
+                                    if mat_name and f"name:{mat_name}" in material_sub_items:
+                                        mat['sub_item_name'] = material_sub_items[f"name:{mat_name}"]
+
                             total_cost += quantity * unit_price
 
-                        # Also check sub_items_data if materials_data total is 0
+                        # Also check sub_items_data if materials_data total is 0, and enrich sub_item_name
                         if total_cost == 0:
                             for sub in cr_dict.get('sub_items_data', []):
                                 try:
@@ -1564,6 +1594,17 @@ def get_all_change_requests():
                                         mat_name = sub.get('material_name', '').lower().strip()
                                         if mat_name and f"name:{mat_name}" in material_prices:
                                             unit_price = float(material_prices[f"name:{mat_name}"] or 0)
+
+                                # Enrich sub_item_name if missing
+                                if not sub.get('sub_item_name'):
+                                    mat_id = sub.get('master_material_id')
+                                    if mat_id and mat_id in material_sub_items:
+                                        sub['sub_item_name'] = material_sub_items[mat_id]
+                                    else:
+                                        # Fallback to name lookup
+                                        mat_name = sub.get('material_name', '').lower().strip()
+                                        if mat_name and f"name:{mat_name}" in material_sub_items:
+                                            sub['sub_item_name'] = material_sub_items[f"name:{mat_name}"]
 
                                 total_cost += quantity * unit_price
 
@@ -1688,22 +1729,32 @@ def get_change_request_by_id(cr_id):
         if change_request.boq:
             boq_details = BOQDetails.query.filter_by(boq_id=change_request.boq_id, is_deleted=False).first()
             if boq_details:
-                # Build material lookup map for BOQ quantities AND unit prices
+                # Build material lookup map for BOQ quantities, unit prices, AND sub_item_name
                 # This enriches SE-created requests that were saved with unit_price=0
                 material_boq_data = {}
+                material_sub_items = {}  # Map material_id -> sub_item_name
                 if boq_details.boq_details:
                     boq_items = boq_details.boq_details.get('items', [])
                     for item_idx, item in enumerate(boq_items):
                         for sub_item_idx, sub_item in enumerate(item.get('sub_items', [])):
+                            sub_item_name = sub_item.get('sub_item_name')
                             for mat_idx, boq_material in enumerate(sub_item.get('materials', [])):
                                 material_id = f"mat_{change_request.boq_id}_{item_idx+1}_{sub_item_idx+1}_{mat_idx+1}"
                                 material_boq_data[material_id] = {
                                     'quantity': boq_material.get('quantity', 0),
                                     'unit': boq_material.get('unit', 'nos'),
-                                    'unit_price': boq_material.get('unit_price', 0)
+                                    'unit_price': boq_material.get('unit_price', 0),
+                                    'size': boq_material.get('size'),
+                                    'brand': boq_material.get('brand'),
+                                    'specification': boq_material.get('specification')
                                 }
+                                material_sub_items[material_id] = sub_item_name  # Store sub_item_name
+                                # Also store by material name for fallback lookup
+                                mat_name = boq_material.get('material_name', '').lower().strip()
+                                if mat_name:
+                                    material_sub_items[f"name:{mat_name}"] = sub_item_name
 
-                # Enrich materials_data with BOQ prices if stored value is 0
+                # Enrich materials_data with BOQ prices and sub_item_name if stored value is 0
                 if result.get('materials_data'):
                     for material in result['materials_data']:
                         material_id = material.get('master_material_id')
@@ -1713,8 +1764,25 @@ def get_change_request_by_id(cr_id):
                             if not material.get('unit_price') or material.get('unit_price') == 0:
                                 material['unit_price'] = boq_data.get('unit_price', 0)
                                 material['total_price'] = material.get('quantity', 0) * material.get('unit_price', 0)
+                            # Enrich size, brand, specification if missing
+                            if not material.get('size') and boq_data.get('size'):
+                                material['size'] = boq_data.get('size')
+                            if not material.get('brand') and boq_data.get('brand'):
+                                material['brand'] = boq_data.get('brand')
+                            if not material.get('specification') and boq_data.get('specification'):
+                                material['specification'] = boq_data.get('specification')
 
-                # Enrich sub_items_data with BOQ prices if stored value is 0
+                        # Enrich sub_item_name if missing
+                        if not material.get('sub_item_name'):
+                            if material_id and material_id in material_sub_items:
+                                material['sub_item_name'] = material_sub_items[material_id]
+                            else:
+                                # Fallback to name lookup
+                                mat_name = material.get('material_name', '').lower().strip()
+                                if mat_name and f"name:{mat_name}" in material_sub_items:
+                                    material['sub_item_name'] = material_sub_items[f"name:{mat_name}"]
+
+                # Enrich sub_items_data with BOQ prices and sub_item_name if stored value is 0
                 if result.get('sub_items_data'):
                     for sub_item in result['sub_items_data']:
                         material_id = sub_item.get('master_material_id')
@@ -1724,6 +1792,23 @@ def get_change_request_by_id(cr_id):
                             if not sub_item.get('unit_price') or sub_item.get('unit_price') == 0:
                                 sub_item['unit_price'] = boq_data.get('unit_price', 0)
                                 sub_item['total_price'] = sub_item.get('quantity', 0) * sub_item.get('unit_price', 0)
+                            # Enrich size, brand, specification if missing
+                            if not sub_item.get('size') and boq_data.get('size'):
+                                sub_item['size'] = boq_data.get('size')
+                            if not sub_item.get('brand') and boq_data.get('brand'):
+                                sub_item['brand'] = boq_data.get('brand')
+                            if not sub_item.get('specification') and boq_data.get('specification'):
+                                sub_item['specification'] = boq_data.get('specification')
+
+                        # Enrich sub_item_name if missing
+                        if not sub_item.get('sub_item_name'):
+                            if material_id and material_id in material_sub_items:
+                                sub_item['sub_item_name'] = material_sub_items[material_id]
+                            else:
+                                # Fallback to name lookup
+                                mat_name = sub_item.get('material_name', '').lower().strip()
+                                if mat_name and f"name:{mat_name}" in material_sub_items:
+                                    sub_item['sub_item_name'] = material_sub_items[f"name:{mat_name}"]
 
                 # ALWAYS recalculate materials_total_cost from enriched materials data
                 # Frontend uses: sub_items_data || materials_data (prefers sub_items_data)
@@ -2472,7 +2557,10 @@ def get_boq_change_requests(boq_id):
                         material_boq_quantities[material_id] = {
                             'quantity': boq_material.get('quantity', 0),
                             'unit': boq_material.get('unit', 'nos'),
-                            'unit_price': boq_material.get('unit_price', 0)  # Include unit price for enrichment
+                            'unit_price': boq_material.get('unit_price', 0),  # Include unit price for enrichment
+                            'size': boq_material.get('size'),
+                            'brand': boq_material.get('brand'),
+                            'specification': boq_material.get('specification')
                         }
 
         # Get all change requests for this BOQ
@@ -2499,6 +2587,13 @@ def get_boq_change_requests(boq_id):
                             material['unit_price'] = boq_data.get('unit_price', 0)
                             # Also recalculate total_price
                             material['total_price'] = material.get('quantity', 0) * material.get('unit_price', 0)
+                        # Enrich size, brand, specification if missing
+                        if not material.get('size') and boq_data.get('size'):
+                            material['size'] = boq_data.get('size')
+                        if not material.get('brand') and boq_data.get('brand'):
+                            material['brand'] = boq_data.get('brand')
+                        if not material.get('specification') and boq_data.get('specification'):
+                            material['specification'] = boq_data.get('specification')
                     enriched_materials.append(material)
                 request_data['materials_data'] = enriched_materials
 
@@ -2515,6 +2610,13 @@ def get_boq_change_requests(boq_id):
                             sub_item['unit_price'] = boq_data.get('unit_price', 0)
                             # Also recalculate total_price
                             sub_item['total_price'] = sub_item.get('quantity', 0) * sub_item.get('unit_price', 0)
+                        # Enrich size, brand, specification if missing
+                        if not sub_item.get('size') and boq_data.get('size'):
+                            sub_item['size'] = boq_data.get('size')
+                        if not sub_item.get('brand') and boq_data.get('brand'):
+                            sub_item['brand'] = boq_data.get('brand')
+                        if not sub_item.get('specification') and boq_data.get('specification'):
+                            sub_item['specification'] = boq_data.get('specification')
                     enriched_sub_items.append(sub_item)
                 request_data['sub_items_data'] = enriched_sub_items
 
@@ -2692,6 +2794,7 @@ def update_change_request(cr_id):
                 total_cost_increase += cost_difference
 
             materials_data.append({
+                'sub_item_name': mat.get('sub_item_name'),
                 'material_name': mat.get('material_name'),
                 'quantity': quantity,
                 'unit': mat.get('unit', 'nos'),

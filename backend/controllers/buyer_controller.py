@@ -48,9 +48,16 @@ def is_admin_role(user_role: str) -> bool:
     return user_role.lower() == 'admin'
 
 
+def is_estimator_role(user_role: str) -> bool:
+    """Check if user role is Estimator"""
+    if not user_role:
+        return False
+    return user_role.lower() == 'estimator'
+
+
 def has_buyer_permissions(user_role: str) -> bool:
-    """Check if user has buyer-level permissions (buyer, TD, or admin)"""
-    return is_buyer_role(user_role) or is_technical_director(user_role) or is_admin_role(user_role)
+    """Check if user has buyer-level permissions (buyer, estimator, TD, or admin)"""
+    return is_buyer_role(user_role) or is_estimator_role(user_role) or is_technical_director(user_role) or is_admin_role(user_role)
 
 
 # ============================================================================
@@ -322,8 +329,9 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                         # FIXED: Use vendor price for cr_total when approved
                         cr_total += material_total
 
-                        # ✅ Get brand and specification - prefer vendor selection, fallback to material data (same as POChild)
+                        # ✅ Get brand, size, and specification - prefer vendor selection, fallback to material data (same as POChild)
                         final_brand = vendor_brand or material.get('brand', '')
+                        final_size = material.get('size', '')
                         final_specification = vendor_specification or material.get('specification', '')
 
                         # ✅ Get supplier notes from vendor selection or material data
@@ -334,6 +342,7 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                             "master_material_id": master_material_id,
                             "is_new_material": material.get('is_new_material', False),  # From change request
                             "justification": material.get('justification', ''),  # Individual material justification
+                            "sub_item_name": sub_item_name_for_material,  # ✅ FIXED: Add sub_item_name to match other branches
                             "quantity": quantity,
                             "unit": material.get('unit', ''),
                             "unit_price": display_unit_price,  # Vendor price when approved, BOQ otherwise
@@ -343,6 +352,7 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
                             "original_unit_price": original_unit_price,  # Add original for reference
                             "boq_unit_price": original_unit_price,  # For PDF comparison
                             "brand": final_brand,  # ✅ Brand from vendor selection (same as POChild)
+                            "size": final_size,  # ✅ Size from material data
                             "specification": final_specification,  # ✅ Specification from vendor selection (same as POChild)
                             "supplier_notes": supplier_notes  # ✅ Supplier notes from vendor selection
                         })
@@ -823,6 +833,7 @@ def get_buyer_boq_materials():
                                     "master_material_id": material.get('master_material_id'),
                                     "material_type": "BOQ",
                                     "brand": material.get('brand'),
+                                    "size": material.get('size'),
                                     "specification": material.get('specification')
                                 })
 
@@ -939,6 +950,11 @@ def get_buyer_pending_purchases():
                     and_(
                         func.trim(ChangeRequest.status).in_(['approved_by_pm', 'send_to_buyer']),
                         ChangeRequest.approval_required_from == 'buyer',
+                        ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
+                    ),
+                    # ✅ FIX: CRs pending TD approval (vendor selection sent to TD) - buyer should still see them
+                    and_(
+                        func.trim(ChangeRequest.status) == 'pending_td_approval',
                         ChangeRequest.assigned_to_buyer_user_id == buyer_id_int
                     )
                 ),
@@ -1087,13 +1103,14 @@ def get_buyer_pending_purchases():
                 all_store_requests_approved = approved_count == len(store_requests) and len(store_requests) > 0
                 any_store_request_rejected = rejected_count > 0
 
-                # IMPORTANT: Only mark as "store_requests_pending" if ALL materials are sent to store
-                # If only some materials are sent, keep PO in "Pending Purchase" so remaining can go to vendor
+                # ✅ FIX: Mark as "store_requests_pending" if ANY materials are sent to store
+                # This moves the purchase to "Pending Approval" tab so PM can see it
+                # Even if some materials still need vendor selection, PM needs to know about store requests
                 total_materials = len(materials_list)
                 store_requested_count = len(store_requested_material_names)
 
-                # store_requests_pending = True only when ALL materials have pending store requests
-                store_requests_pending = pending_count > 0 and store_requested_count >= total_materials
+                # store_requests_pending = True when ANY materials have pending store requests
+                store_requests_pending = pending_count > 0 and store_requested_count > 0
 
             # ✅ PERFORMANCE: Use preloaded po_children relationship
             # Get POChild records for this CR (if any exist)
@@ -1127,9 +1144,28 @@ def get_buyer_pending_purchases():
                     for po_child in po_children_for_parent
                 )
 
-            # For buyer/TD view: Skip parent PO if all children are sent for TD approval or approved
-            # Parent is hidden because the split children (POChild) are shown separately
-            if is_admin_viewing and all_children_sent_to_td_or_approved:
+            # ✅ FIX: Check if all materials are handled by POChildren
+            # Only hide parent if POChildren exist AND handle all unrouted materials
+            # Don't hide if vendor selections are in parent CR (not POChildren)
+            routed_materials = cr.routed_materials or {}
+            total_materials_count = len(cr.materials_data or cr.sub_items_data or [])
+            routed_count = len(routed_materials)
+
+            # Count materials in POChildren
+            po_child_materials_count = 0
+            if po_children_for_parent:
+                for po_child in po_children_for_parent:
+                    po_child_materials = po_child.materials_data or po_child.sub_items_data or []
+                    po_child_materials_count += len(po_child_materials) if isinstance(po_child_materials, list) else 0
+
+            # Hide parent CR only if ALL materials are in POChildren (complete vendor split, no store)
+            hide_parent_due_to_po_children = po_child_materials_count >= total_materials_count and total_materials_count > 0 and len(po_children_for_parent) > 0
+
+            # For buyer/TD view: Skip parent PO if:
+            # 1. Admin viewing AND all children sent to TD or approved
+            # 2. OR all materials are in POChildren (complete vendor split, no store materials)
+            # NOTE: Parent stays visible for mixed routing (store + vendor) to show complete picture
+            if (is_admin_viewing and all_children_sent_to_td_or_approved) or hide_parent_due_to_po_children:
                 continue
 
             # Get submission_group_id from first POChild if any exist
@@ -1186,6 +1222,7 @@ def get_buyer_pending_purchases():
                 "vendor_whatsapp_sent_at": cr.vendor_whatsapp_sent_at.isoformat() if cr.vendor_whatsapp_sent_at else None,
                 "use_per_material_vendors": cr.use_per_material_vendors or False,
                 "material_vendor_selections": validated_material_vendor_selections,
+                "routed_materials": cr.routed_materials or {},  # Material routing tracking (store/vendor)
                 "has_store_requests": has_store_requests,
                 "store_request_count": len(store_requests),
                 "store_requested_materials": store_requested_material_names,  # List of material names sent to store
@@ -1348,6 +1385,21 @@ def get_buyer_completed_purchases():
                     # Skip this parent CR - children will be shown separately
                     continue
 
+            # ✅ FIX: Skip if all materials are handled by POChildren (complete split)
+            total_materials_completed = len(cr.materials_data or cr.sub_items_data or [])
+
+            # Count materials in POChildren
+            po_child_materials_completed = 0
+            if po_children_for_cr:
+                for pc in po_children_for_cr:
+                    pc_materials = pc.materials_data or pc.sub_items_data or []
+                    po_child_materials_completed += len(pc_materials) if isinstance(pc_materials, list) else 0
+
+            # Skip parent CR only if ALL materials are in POChildren (complete vendor split, no store)
+            # NOTE: Parent stays visible for mixed routing (store + vendor) to show complete picture
+            if po_child_materials_completed >= total_materials_completed and total_materials_completed > 0 and len(po_children_for_cr) > 0:
+                continue
+
             # Process materials
             sub_items_data = cr.sub_items_data or cr.materials_data or []
             cr_total = 0
@@ -1361,13 +1413,17 @@ def get_buyer_completed_purchases():
                             for material in sub_materials:
                                 material_total = float(material.get('total_price', 0) or 0)
                                 cr_total += material_total
+                                # Get sub_item_name from material or parent sub_item
+                                sub_item_name_for_material = material.get('sub_item_name', '') or sub_item.get('sub_item_name', '')
                                 materials_list.append({
                                     "material_name": material.get('material_name', ''),
+                                    "sub_item_name": sub_item_name_for_material,  # ✅ FIXED: Add sub_item_name
                                     "quantity": material.get('quantity', 0),
                                     "unit": material.get('unit', ''),
                                     "unit_price": material.get('unit_price', 0),
                                     "total_price": material_total,
                                     "brand": material.get('brand'),
+                                    "size": material.get('size'),
                                     "specification": material.get('specification')
                                 })
                         else:
@@ -1381,6 +1437,7 @@ def get_buyer_completed_purchases():
                                 "unit_price": sub_item.get('unit_price', 0),
                                 "total_price": sub_total,
                                 "brand": sub_item.get('brand'),
+                                "size": sub_item.get('size'),
                                 "specification": sub_item.get('specification')
                             })
             else:
@@ -1395,6 +1452,7 @@ def get_buyer_completed_purchases():
                         "unit_price": material.get('unit_price', 0),
                         "total_price": material_total,
                         "brand": material.get('brand'),
+                        "size": material.get('size'),
                         "specification": material.get('specification')
                     })
 
@@ -1726,13 +1784,17 @@ def get_buyer_rejected_purchases():
                             for material in sub_materials:
                                 material_total = float(material.get('total_price', 0) or 0)
                                 cr_total += material_total
+                                # Get sub_item_name from material or parent sub_item
+                                sub_item_name_for_material = material.get('sub_item_name', '') or sub_item.get('sub_item_name', '')
                                 materials_list.append({
                                     "material_name": material.get('material_name', ''),
+                                    "sub_item_name": sub_item_name_for_material,  # ✅ FIXED: Add sub_item_name
                                     "quantity": material.get('quantity', 0),
                                     "unit": material.get('unit', ''),
                                     "unit_price": material.get('unit_price', 0),
                                     "total_price": material_total,
                                     "brand": material.get('brand'),
+                                    "size": material.get('size'),
                                     "specification": material.get('specification')
                                 })
                         else:
@@ -1746,6 +1808,7 @@ def get_buyer_rejected_purchases():
                                 "unit_price": sub_item.get('unit_price', 0),
                                 "total_price": sub_total,
                                 "brand": sub_item.get('brand'),
+                                "size": sub_item.get('size'),
                                 "specification": sub_item.get('specification')
                             })
             else:
@@ -1971,8 +2034,8 @@ def complete_purchase():
             return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Verify it's in the correct status
-        # Allow: assigned_to_buyer, vendor_approved, or pending_td_approval (if vendor already approved)
-        allowed_statuses = ['assigned_to_buyer', 'vendor_approved', 'pending_td_approval']
+        # Allow: assigned_to_buyer, vendor_approved, pending_td_approval, or send_to_buyer
+        allowed_statuses = ['assigned_to_buyer', 'vendor_approved', 'pending_td_approval', 'send_to_buyer']
         if cr.status not in allowed_statuses:
             return jsonify({"error": f"Purchase cannot be completed. Current status: {cr.status}"}), 400
 
@@ -2201,6 +2264,22 @@ def complete_purchase():
                     created_imr_count = 1
 
                     log.info(f"✅ Created 1 grouped Internal Material Request for CR-{cr_id} with {len(grouped_materials)} materials")
+
+                    # ✅ FIX: Mark all materials as routed to vendor (via production manager)
+                    routed_materials_to_add = {}
+                    for mat in grouped_materials:
+                        mat_name = mat.get('material_name')
+                        if mat_name:
+                            routed_materials_to_add[mat_name] = {
+                                'routing': 'store',  # Routed via PM to store first
+                                'routed_at': datetime.utcnow().isoformat(),
+                                'routed_by': buyer_id
+                            }
+
+                    # Update routed_materials field
+                    current_routed = cr.routed_materials or {}
+                    current_routed.update(routed_materials_to_add)
+                    cr.routed_materials = current_routed
                 else:
                     log.warning(f"No valid materials found for CR-{cr_id}")
 
@@ -2304,8 +2383,12 @@ def get_purchase_by_id(cr_id):
         user_context = get_effective_user_context()
         is_admin_viewing = user_context.get('is_admin_viewing', False)
 
-        # Verify it's assigned to this buyer or completed by this buyer (skip check for admin)
-        if not is_admin and not is_admin_viewing and cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
+        # Allow Estimators and TDs to view any purchase (they need to see details for approval/review)
+        is_estimator = is_estimator_role(user_role)
+        is_td = is_technical_director(user_role)
+
+        # Verify access: admin, estimator, TD, assigned buyer, or buyer who completed purchase
+        if not is_admin and not is_admin_viewing and not is_estimator and not is_td and cr.assigned_to_buyer_user_id != buyer_id and cr.purchase_completed_by_user_id != buyer_id:
             return jsonify({"error": "You don't have access to this purchase"}), 403
 
         # Get project details
@@ -3381,16 +3464,23 @@ def select_vendor_for_material(cr_id):
         from sqlalchemy.orm.attributes import flag_modified
         flag_modified(cr, 'material_vendor_selections')
 
-        # Check if ALL materials now have vendors selected
+        # ✅ FIX: Check if ALL UNROUTED materials now have vendors selected
+        # Don't check materials that have already been routed to store or vendor
         all_materials_have_vendors = True
+        routed_materials = cr.routed_materials or {}
+
         if cr.materials_data and isinstance(cr.materials_data, list):
             for material in cr.materials_data:
                 material_name = material.get('material_name')
+                # Skip materials that have already been routed
+                if material_name in routed_materials:
+                    continue
+                # Check if this unrouted material has a vendor selected
                 if material_name and material_name not in cr.material_vendor_selections:
                     all_materials_have_vendors = False
                     break
 
-        # If all materials have vendors selected, change CR status to pending_td_approval
+        # If all UNROUTED materials have vendors selected, change CR status to pending_td_approval
         # TD selecting vendors does NOT auto-approve - TD must manually click "Approve Vendor"
         if all_materials_have_vendors:
             cr.status = 'pending_td_approval'
@@ -3862,8 +3952,14 @@ def create_po_children(cr_id):
             vendor_id = vendor_group.get('vendor_id')
             vendor_name = vendor_group.get('vendor_name')
             materials = vendor_group.get('materials')
+            routing_type = vendor_group.get('routing_type', 'vendor')  # 'store' or 'vendor'
 
-            if not vendor_id or not materials:
+            if not materials:
+                continue
+
+            # For store routing, vendor_id is optional (will be None)
+            if routing_type == 'vendor' and not vendor_id:
+                log.warning(f"Vendor routing requires vendor_id, skipping group")
                 continue
 
             # Extract child_notes from material_vendor_selections for this vendor
@@ -3913,24 +4009,27 @@ def create_po_children(cr_id):
             # Use filtered materials for the rest of the function
             materials = filtered_materials
 
-            # Verify vendor exists and is active
-            vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
-            if not vendor:
-                return jsonify({"error": f"Vendor {vendor_id} not found"}), 404
-
-            if vendor.status != 'active':
-                return jsonify({"error": f"Vendor '{vendor.company_name}' is not active"}), 400
-
-            # Get vendor's product prices as fallback
-            from models.vendor import VendorProduct
+            # Verify vendor exists and is active (only for vendor routing)
+            vendor = None
             vendor_product_prices = {}
-            vendor_products = VendorProduct.query.filter_by(
-                vendor_id=vendor_id,
-                is_deleted=False
-            ).all()
-            for vp in vendor_products:
-                if vp.product_name:
-                    vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
+
+            if routing_type == 'vendor':
+                vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+                if not vendor:
+                    return jsonify({"error": f"Vendor {vendor_id} not found"}), 404
+
+                if vendor.status != 'active':
+                    return jsonify({"error": f"Vendor '{vendor.company_name}' is not active"}), 400
+
+                # Get vendor's product prices as fallback
+                from models.vendor import VendorProduct
+                vendor_products = VendorProduct.query.filter_by(
+                    vendor_id=vendor_id,
+                    is_deleted=False
+                ).all()
+                for vp in vendor_products:
+                    if vp.product_name:
+                        vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
 
             # Extract materials data for this vendor group
             po_materials = []
@@ -4048,7 +4147,7 @@ def create_po_children(cr_id):
                     log.info(f"✅ Existing POChild {existing_po_child.get_formatted_id()} for vendor {vendor.company_name} has status '{existing_po_child.status}' (approved/completed) - will create NEW POChild for new purchase")
 
             if should_consolidate and existing_po_child:
-                # Consolidate: Add new materials to existing POChild for same vendor
+                # Consolidate: Add new materials to existing POChild for same vendor/routing
                 # Get existing materials and build a lookup by material_name
                 existing_materials = list(existing_po_child.materials_data or [])  # Make a copy
                 existing_material_names = {m.get('material_name'): idx for idx, m in enumerate(existing_materials)}
@@ -4072,14 +4171,22 @@ def create_po_children(cr_id):
                 # Update existing POChild
                 existing_po_child.materials_data = existing_materials
                 existing_po_child.materials_total_cost = new_total_cost
-                existing_po_child.vendor_selected_by_buyer_id = user_id
-                existing_po_child.vendor_selected_by_buyer_name = user_name
-                existing_po_child.vendor_selection_date = datetime.utcnow()
-                existing_po_child.vendor_selection_status = 'pending_td_approval'
-                existing_po_child.status = 'pending_td_approval'
+                existing_po_child.routing_type = routing_type  # Ensure routing_type is set
                 existing_po_child.updated_at = datetime.utcnow()
-                # Clear any previous rejection
-                existing_po_child.rejection_reason = None
+
+                # Update vendor-specific fields only for vendor routing
+                if routing_type == 'vendor':
+                    existing_po_child.vendor_selected_by_buyer_id = user_id
+                    existing_po_child.vendor_selected_by_buyer_name = user_name
+                    existing_po_child.vendor_selection_date = datetime.utcnow()
+                    existing_po_child.vendor_selection_status = 'pending_td_approval'
+                    existing_po_child.status = 'pending_td_approval'
+                    # Clear any previous rejection
+                    existing_po_child.rejection_reason = None
+                else:
+                    # Store routing
+                    existing_po_child.status = 'routed_to_store'
+
                 # Update child_notes if provided
                 if child_notes_for_vendor:
                     existing_po_child.child_notes = child_notes_for_vendor
@@ -4089,13 +4196,15 @@ def create_po_children(cr_id):
                 flag_modified(existing_po_child, 'materials_data')
 
                 po_child = existing_po_child
-                log.info(f"📦 Consolidated into POChild {po_child.get_formatted_id()} for vendor {vendor.company_name}: {materials_added} added, {materials_updated} updated. Total: {len(existing_materials)} materials, AED {new_total_cost:.2f}")
+                routing_label = "vendor" if routing_type == 'vendor' else "store"
+                log.info(f"📦 Consolidated into POChild {po_child.get_formatted_id()} for {routing_label} routing: {materials_added} added, {materials_updated} updated. Total: {len(existing_materials)} materials, AED {new_total_cost:.2f}")
 
                 created_po_children.append({
                     'id': po_child.id,
                     'formatted_id': po_child.get_formatted_id(),
+                    'routing_type': routing_type,
                     'vendor_id': vendor_id,
-                    'vendor_name': vendor.company_name,
+                    'vendor_name': vendor.company_name if vendor else 'M2 Store',
                     'materials_count': len(existing_materials),
                     'total_cost': new_total_cost,
                     'consolidated': True,
@@ -4103,7 +4212,19 @@ def create_po_children(cr_id):
                     'materials_updated': materials_updated
                 })
             else:
-                # Create NEW POChild record for this vendor
+                # Create NEW POChild record
+                # Set status and fields based on routing_type
+                if routing_type == 'store':
+                    # Store routing: No vendor approval needed
+                    po_child_status = 'routed_to_store'
+                    vendor_sel_status = None
+                    log_message = f"📦 Created new POChild {next_suffix_number} for STORE routing"
+                else:
+                    # Vendor routing: Requires TD approval
+                    po_child_status = 'pending_td_approval'
+                    vendor_sel_status = 'pending_td_approval'
+                    log_message = f"📦 Created new POChild {next_suffix_number} for vendor {vendor.company_name}"
+
                 po_child = POChild(
                     parent_cr_id=parent_cr.cr_id,
                     suffix=f".{next_suffix_number}",
@@ -4115,13 +4236,14 @@ def create_po_children(cr_id):
                     materials_data=po_materials,
                     materials_total_cost=total_cost,
                     child_notes=child_notes_for_vendor,  # Copy supplier notes to child_notes column
-                    vendor_id=vendor_id,
-                    vendor_name=vendor.company_name,
-                    vendor_selected_by_buyer_id=user_id,
-                    vendor_selected_by_buyer_name=user_name,
-                    vendor_selection_date=datetime.utcnow(),
-                    vendor_selection_status='pending_td_approval',
-                    status='pending_td_approval',
+                    routing_type=routing_type,  # 'store' or 'vendor'
+                    vendor_id=vendor_id if routing_type == 'vendor' else None,
+                    vendor_name=vendor.company_name if vendor else 'M2 Store',
+                    vendor_selected_by_buyer_id=user_id if routing_type == 'vendor' else None,
+                    vendor_selected_by_buyer_name=user_name if routing_type == 'vendor' else None,
+                    vendor_selection_date=datetime.utcnow() if routing_type == 'vendor' else None,
+                    vendor_selection_status=vendor_sel_status,
+                    status=po_child_status,
                     created_at=datetime.utcnow(),
                     updated_at=datetime.utcnow()
                 )
@@ -4129,54 +4251,46 @@ def create_po_children(cr_id):
                 db.session.add(po_child)
                 db.session.flush()  # Get the id
 
-                # Add to existing map to prevent duplicates in same batch
-                existing_vendor_po_children[vendor_id] = po_child
+                # Add to existing map to prevent duplicates in same batch (use routing_type as key for store)
+                map_key = vendor_id if routing_type == 'vendor' else f"store_{next_suffix_number}"
+                existing_vendor_po_children[map_key] = po_child
                 next_suffix_number += 1
 
-                log.info(f"📦 Created new POChild {po_child.get_formatted_id()} for vendor {vendor.company_name}, child_notes: {child_notes_for_vendor[:50] if child_notes_for_vendor else 'None'}")
+                log.info(f"{log_message}, {len(po_materials)} materials, child_notes: {child_notes_for_vendor[:50] if child_notes_for_vendor else 'None'}")
 
                 created_po_children.append({
                     'id': po_child.id,
                     'formatted_id': po_child.get_formatted_id(),
+                    'routing_type': routing_type,
                     'vendor_id': vendor_id,
-                    'vendor_name': vendor.company_name,
+                    'vendor_name': vendor.company_name if vendor else 'M2 Store',
                     'materials_count': len(po_materials),
                     'total_cost': total_cost,
                     'consolidated': False
                 })
 
-        # Check if ALL materials from parent CR have been assigned to PO children with eager loading
-        all_po_children = POChild.query.options(
-            joinedload(POChild.vendor)
-        ).filter_by(
+        # ✅ CLEAN ARCHITECTURE: Always hide parent CR when POChildren are created
+        # The parent CR becomes just a container - POChildren handle the actual workflow
+        # This prevents confusion where parent CR appears/disappears from buyer view
+        all_po_children = POChild.query.filter_by(
             parent_cr_id=parent_cr.cr_id,
             is_deleted=False
-        ).all()
+        ).count()
 
-        materials_in_po_children = set()
-        for po_child in all_po_children:
-            if po_child.materials_data:
-                for material in po_child.materials_data:
-                    material_name = material.get('material_name')
-                    if material_name:
-                        materials_in_po_children.add(material_name)
-
-        parent_materials = set()
-        if parent_cr.materials_data:
-            for material in parent_cr.materials_data:
-                material_name = material.get('material_name')
-                if material_name:
-                    parent_materials.add(material_name)
-
-        # Mark parent as 'split_to_po_children' if all materials assigned
-        if parent_materials and materials_in_po_children >= parent_materials:
-            parent_cr.status = 'split_to_sub_crs'  # Keep same status name for compatibility
+        if all_po_children > 0:
+            # Mark parent as split - it should not appear in buyer's active lists
+            parent_cr.status = 'split_to_sub_crs'  # Parent becomes container only
             parent_cr.updated_at = datetime.utcnow()
+            log.info(f"✅ Parent CR-{parent_cr.cr_id} marked as 'split_to_sub_crs' - {all_po_children} POChildren exist")
 
         db.session.commit()
 
-        # Send notifications to TD if buyer created PO children
-        if not is_td and created_po_children:
+        # Filter POChildren by routing type for different notifications
+        vendor_routed_po_children = [pc for pc in created_po_children if pc.get('routing_type') == 'vendor']
+        store_routed_po_children = [pc for pc in created_po_children if pc.get('routing_type') == 'store']
+
+        # Send notifications to TD for VENDOR-routed POChildren only
+        if not is_td and vendor_routed_po_children:
             try:
                 from models.role import Role
                 from utils.notification_utils import NotificationManager
@@ -4190,21 +4304,21 @@ def create_po_children(cr_id):
 
                     for td_user in td_users:
                         try:
-                            po_child_ids = [pc.get('formatted_id', f"PO-{pc.get('id')}") for pc in created_po_children]
+                            po_child_ids = [pc.get('formatted_id', f"PO-{pc.get('id')}") for pc in vendor_routed_po_children]
 
                             notification = NotificationManager.create_notification(
                                 user_id=td_user.user_id,
                                 type='action_required',
                                 title='Purchase Order Needs Approval',
-                                message=f'{user_name} sent {len(created_po_children)} purchase order(s) for vendor approval: {", ".join(po_child_ids)}',
+                                message=f'{user_name} sent {len(vendor_routed_po_children)} purchase order(s) for vendor approval: {", ".join(po_child_ids)}',
                                 priority='high',
                                 category='purchase',
                                 action_url='/technical-director/change-requests?tab=vendor_approvals&subtab=pending',
                                 action_label='Review Purchase Orders',
                                 metadata={
                                     'parent_cr_id': str(cr_id),
-                                    'po_children_count': len(created_po_children),
-                                    'po_child_ids': [pc.get('id') for pc in created_po_children],
+                                    'po_children_count': len(vendor_routed_po_children),
+                                    'po_child_ids': [pc.get('id') for pc in vendor_routed_po_children],
                                     'submission_group_id': submission_group_id,
                                     'target_role': 'technical-director'
                                 },
@@ -4218,12 +4332,59 @@ def create_po_children(cr_id):
             except Exception as notif_error:
                 log.error(f"Failed to send TD notifications: {notif_error}")
 
+        # Send notification to Production Manager for STORE-routed POChildren
+        if store_routed_po_children:
+            try:
+                from models.role import Role
+                pm_role = Role.query.filter_by(role='production_manager').first()
+                if pm_role:
+                    pms = User.query.filter_by(
+                        role_id=pm_role.role_id,
+                        is_deleted=False,
+                        is_active=True
+                    ).all()
+
+                    project_name = parent_cr.project.project_name if parent_cr.project else f'Project {parent_cr.project_id}'
+                    po_child_ids = [pc.get('formatted_id', f"PO-{pc.get('id')}") for pc in store_routed_po_children]
+
+                    for pm in pms:
+                        notification_service.create_notification(
+                            user_id=pm.user_id,
+                            title=f"📦 Materials Routed to Store - {project_name}",
+                            message=f"{user_name} routed {len(store_routed_po_children)} material group(s) to M2 Store: {', '.join(po_child_ids)}. Awaiting vendor delivery.",
+                            type='store_routing',
+                            reference_type='po_child',
+                            reference_id=store_routed_po_children[0].get('id'),  # First POChild ID
+                            action_url='/store/incoming-deliveries'
+                        )
+                        log.info(f"✅ Notified PM {pm.full_name} about store-routed materials")
+            except Exception as pm_notif_error:
+                log.error(f"Failed to send PM notification: {pm_notif_error}")
+
+        # Build success message based on routing types
+        vendor_count = len(vendor_routed_po_children)
+        store_count = len(store_routed_po_children)
+
+        if vendor_count > 0 and store_count > 0:
+            message = f"Successfully split materials: {vendor_count} to vendor approval, {store_count} routed to store"
+        elif vendor_count > 0:
+            message = f"Successfully created {vendor_count} purchase order(s) for vendor approval"
+        elif store_count > 0:
+            message = f"Successfully routed {store_count} material group(s) to M2 Store"
+        else:
+            message = f"Successfully created {len(created_po_children)} purchase orders"
+
         return jsonify({
             "success": True,
-            "message": f"Successfully created {len(created_po_children)} separate purchase orders!",
+            "message": message,
             "parent_cr_id": parent_cr.cr_id,
             "submission_group_id": submission_group_id,
-            "po_children": created_po_children
+            "po_children": created_po_children,
+            "routing_summary": {
+                "vendor_routed": vendor_count,
+                "store_routed": store_count,
+                "total": len(created_po_children)
+            }
         }), 200
 
     except Exception as e:
@@ -5109,19 +5270,34 @@ def complete_po_child_purchase(po_child_id):
                 return jsonify({"error": "This purchase is not assigned to you"}), 403
 
         # Verify it's in the correct status
-        if po_child.status != 'vendor_approved':
+        # Store-routed POChildren start with 'routed_to_store' and can be completed immediately
+        # Vendor-routed POChildren need TD approval first ('vendor_approved')
+        allowed_po_statuses = ['vendor_approved', 'send_to_buyer', 'routed_to_store']
+        if po_child.status not in allowed_po_statuses:
             return jsonify({"error": f"Purchase cannot be completed. Current status: {po_child.status}"}), 400
 
-        # Update the PO child - Route through Production Manager (M2 Store)
-        po_child.status = 'routed_to_store'  # Changed from 'purchase_completed'
+        # Get routing type to determine flow
+        routing_type = po_child.routing_type or 'vendor'  # Default to vendor for old records
+
+        # Update the PO child based on routing type
+        if routing_type == 'store':
+            # Store routing: Already routed, just complete purchase
+            po_child.status = 'purchase_completed'  # Mark as fully completed
+            log.info(f"Store-routed POChild {po_child.get_formatted_id()}: Completing purchase")
+        else:
+            # Vendor routing: Route through Production Manager (M2 Store)
+            po_child.status = 'routed_to_store'  # Intermediate status
+            log.info(f"Vendor-routed POChild {po_child.get_formatted_id()}: Routing to store")
+
         po_child.purchase_completed_by_user_id = buyer_id
         po_child.purchase_completed_by_name = buyer_name
         po_child.purchase_completion_date = datetime.utcnow()
         po_child.updated_at = datetime.utcnow()
 
-        # Set delivery routing fields
-        po_child.delivery_routing = 'via_production_manager'
-        po_child.store_request_status = 'pending_vendor_delivery'
+        # Set delivery routing fields (for vendor-routed)
+        if routing_type == 'vendor':
+            po_child.delivery_routing = 'via_production_manager'
+            po_child.store_request_status = 'pending_vendor_delivery'
 
         # NOTE: Don't commit yet - wait until IMR is also created so they're atomic
         # db.session.commit() - REMOVED to fix bug where POChild status was committed but IMR wasn't created
@@ -5224,6 +5400,24 @@ def complete_po_child_purchase(po_child_id):
                 )
                 db.session.add(imr)
                 created_imr_count = 1
+
+                # ✅ FIX: Mark materials as routed in parent CR to prevent duplicates
+                if parent_cr:
+                    routed_materials_to_add = {}
+                    for mat in grouped_materials:
+                        mat_name = mat.get('material_name')
+                        if mat_name:
+                            routed_materials_to_add[mat_name] = {
+                                'routing': 'vendor',  # Routed to specific vendor (via POChild)
+                                'po_child_id': po_child.id,
+                                'routed_at': datetime.utcnow().isoformat(),
+                                'routed_by': buyer_id
+                            }
+
+                    # Update parent CR's routed_materials field
+                    current_routed = parent_cr.routed_materials or {}
+                    current_routed.update(routed_materials_to_add)
+                    parent_cr.routed_materials = current_routed
 
             db.session.commit()
             log.info(f"POChild {po_child_id}: Created 1 grouped request with {len(grouped_materials)} materials")
@@ -5943,10 +6137,11 @@ def get_approved_po_children():
 
         # Check roles
         is_buyer = user_role == 'buyer'
+        is_estimator = user_role == 'estimator'
         is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
         is_admin = user_role == 'admin'
 
-        log.info(f"Role check: is_buyer={is_buyer}, is_td={is_td}, is_admin={is_admin}")
+        log.info(f"Role check: is_buyer={is_buyer}, is_estimator={is_estimator}, is_td={is_td}, is_admin={is_admin}")
 
         # Check if admin is viewing as buyer
         context = get_effective_user_context()
@@ -5955,8 +6150,8 @@ def get_approved_po_children():
         if user_role == 'admin':
             is_admin_viewing = True
 
-        if not is_buyer and not is_td and not is_admin:
-            return jsonify({"error": "Access denied. Buyer, TD, or Admin role required."}), 403
+        if not is_buyer and not is_estimator and not is_td and not is_admin:
+            return jsonify({"error": "Access denied. Buyer, Estimator, TD, or Admin role required."}), 403
 
         # Get all POChild records with approved vendor selection (not yet completed) with eager loading
         approved_po_children = POChild.query.options(
@@ -8209,6 +8404,16 @@ def complete_from_store(cr_id):
         if not isinstance(materials, list):
             return jsonify({"error": "No materials found in this CR"}), 400
 
+        # ✅ FIX: Filter out materials that have already been routed to store or vendor
+        routed_materials = cr.routed_materials or {}
+        materials = [
+            mat for mat in materials
+            if (mat.get('material_name') or mat.get('name') or '') not in routed_materials
+        ]
+
+        if not materials:
+            return jsonify({"error": "All materials from this CR have already been routed"}), 400
+
         # Filter to selected materials if provided
         if selected_materials and isinstance(selected_materials, list):
             # Only include materials whose name is in selected_materials list
@@ -8219,18 +8424,15 @@ def complete_from_store(cr_id):
             if not materials:
                 return jsonify({"error": "No matching materials found in selection"}), 400
 
-        # Check if materials from this CR were already requested from store
-        existing_request = InternalMaterialRequest.query.filter_by(
-            cr_id=cr_id
-        ).first()
-        if existing_request:
-            return jsonify({"error": f"Materials from this CR were already requested from store"}), 400
+        # Prepare grouped materials list and validate availability
+        grouped_materials = []
+        routed_materials_to_add = {}
 
-        requests_created = 0
-        # Check availability and create internal requests
+        # Check availability for all materials first
         for mat in materials:
             mat_name = mat.get('material_name') or mat.get('name') or ''
             mat_qty = mat.get('quantity', 0)
+            mat_unit = mat.get('unit', 'pcs')
 
             # Find in inventory
             inventory_item = InventoryMaterial.query.filter(
@@ -8244,33 +8446,77 @@ def complete_from_store(cr_id):
             if inventory_item.current_stock < mat_qty:
                 return jsonify({"error": f"Insufficient stock for '{mat_name}'. Need {mat_qty}, have {inventory_item.current_stock}"}), 400
 
-            # Create internal material request
+            # Add to grouped materials
+            grouped_materials.append({
+                'material_name': mat_name,
+                'quantity': mat_qty,
+                'brand': mat.get('brand'),
+                'size': mat.get('size'),
+                'unit': mat_unit,
+                'unit_price': mat.get('unit_price', 0),
+                'total_price': mat.get('total_price', 0),
+                'inventory_material_id': inventory_item.inventory_material_id
+            })
+
+            # Track this material as routed to store
+            routed_materials_to_add[mat_name] = {
+                'routing': 'store',
+                'routed_at': datetime.utcnow().isoformat(),
+                'routed_by': current_user.get('user_id')
+            }
+
+        # Create ONE grouped Internal Material Request (not multiple)
+        requests_created = 0
+        if grouped_materials:
+            # Get project details for final destination
+            project = Project.query.get(cr.project_id)
+            final_destination = project.project_name if project else f"Project {cr.project_id}"
+
             new_request = InternalMaterialRequest(
                 project_id=cr.project_id,
                 cr_id=cr_id,
-                item_name=cr.item_name,  # Store CR's item name, not material name
-                inventory_material_id=inventory_item.inventory_material_id,
-                quantity=float(mat_qty),
-                notes=f"Requested from CR-{cr_id}",
+                item_name=cr.item_name,  # Store CR item name
+                quantity=len(grouped_materials),  # Number of materials
+                brand=None,
+                size=None,
+                notes=f"Requested from M2 Store for CR-{cr_id} - {len(grouped_materials)} material(s)",
                 request_send=True,
                 status='send_request',
                 created_by=current_user.get('email', 'system'),
                 request_buyer_id=current_user.get('user_id'),
-                last_modified_by=current_user.get('email', 'system')
+                last_modified_by=current_user.get('email', 'system'),
+                # Grouped materials data
+                materials_data=grouped_materials,
+                materials_count=len(grouped_materials),
+                source_type='manual',  # Manual store request (not vendor delivery)
+                final_destination_site=final_destination
             )
             db.session.add(new_request)
-            requests_created += 1
+            requests_created = 1
 
-        # Update CR notes to indicate store request was made (DON'T mark as completed yet)
+            log.info(f"✅ Created 1 grouped Internal Material Request for CR-{cr_id} with {len(grouped_materials)} materials from store")
+
+        # ✅ FIX: Update routed_materials to prevent duplicates
+        current_routed = cr.routed_materials or {}
+        current_routed.update(routed_materials_to_add)
+        cr.routed_materials = current_routed
+
+        # Update CR status to indicate materials sent to store (pending PM approval)
+        # Only update status if this is the first time materials are being sent
+        if cr.status == 'pending':
+            cr.status = 'sent_to_store'
+
         cr.purchase_notes = f"Requested from M2 Store by {current_user.get('full_name', current_user.get('email'))} on {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+        cr.updated_at = datetime.utcnow()
 
         db.session.commit()
 
         return jsonify({
             "success": True,
-            "message": f"Material requests sent to M2 Store. {requests_created} request(s) created.",
+            "message": f"Material request sent to M2 Store. {len(grouped_materials)} material(s) grouped in {requests_created} request.",
             "cr_id": cr_id,
-            "requests_created": requests_created
+            "requests_created": requests_created,
+            "materials_count": len(grouped_materials)
         }), 200
 
     except Exception as e:
@@ -8331,9 +8577,9 @@ def get_vendor_selection_data(cr_id):
         current_user = g.user
         user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
 
-        # Allow buyer, TD, or admin
-        if not any(role in user_role for role in ['buyer', 'technicaldirector', 'admin']):
-            return jsonify({"error": "Access denied. Buyer, TD, or Admin role required."}), 403
+        # Allow buyer, estimator, TD, or admin
+        if not any(role in user_role for role in ['buyer', 'estimator', 'technicaldirector', 'admin']):
+            return jsonify({"error": "Access denied. Buyer, Estimator, TD, or Admin role required."}), 403
 
         # Get change request
         cr = ChangeRequest.query.filter_by(
@@ -8349,9 +8595,16 @@ def get_vendor_selection_data(cr_id):
         boq = BOQ.query.filter_by(boq_id=cr.boq_id).first()
 
         # Prepare materials list (use sub_items_data, NOT materials_data)
-        materials = cr.sub_items_data if cr.sub_items_data else cr.materials_data
+        all_materials = cr.sub_items_data if cr.sub_items_data else cr.materials_data
 
-        # Calculate materials count
+        # ✅ FIX: Filter out materials that have already been routed to store or vendor
+        routed_materials = cr.routed_materials or {}
+        materials = [
+            mat for mat in (all_materials or [])
+            if (mat.get('material_name') or mat.get('name') or '') not in routed_materials
+        ]
+
+        # Calculate materials count (only unrouted materials)
         materials_count = len(materials) if materials else 0
 
         # Validate and refresh material_vendor_selections with current vendor data
@@ -8973,6 +9226,7 @@ def preview_lpo_pdf(cr_id):
                     'boq_unit_price': float(boq_unit_price) if boq_unit_price else 0,
                     'original_unit_price': float(boq_unit_price) if boq_unit_price else 0,
                     'brand': final_brand,
+                    'size': material.get('size', ''),
                     'specification': final_specification,
                     'supplier_notes': supplier_notes
                 })
@@ -9047,9 +9301,10 @@ def preview_lpo_pdf(cr_id):
             # Get BOQ rate for comparison display
             boq_rate = material.get('boq_unit_price') or material.get('original_unit_price') or 0
 
-            # Get separate fields for material name, brand, and specification
+            # Get separate fields for material name, brand, size, and specification
             material_name = material.get('material_name', '') or material.get('sub_item_name', '')
             brand = material.get('brand', '')
+            size = material.get('size', '')
             specification = material.get('specification', '')
 
             # Get vendor's material name from material_vendor_selections if available
@@ -9066,6 +9321,7 @@ def preview_lpo_pdf(cr_id):
                 "sl_no": i,
                 "material_name": vendor_material_name,  # Use vendor's material name
                 "brand": brand,
+                "size": size,
                 "specification": specification,
                 "description": vendor_material_name,  # Use vendor's material name for LPO
                 "qty": qty,
@@ -10307,6 +10563,20 @@ def get_buyer_dashboard_analytics():
                 if all_children_sent_to_td_or_approved:
                     # Skip this parent CR - it will be counted via POChildren stats
                     continue
+
+            # ✅ FIX: Skip if all materials are handled by POChildren (complete split)
+            total_mats_dashboard = len(cr.materials_data or cr.sub_items_data or [])
+
+            # Count materials in POChildren
+            po_child_mats_dashboard = 0
+            if po_children:
+                for pc in po_children:
+                    pc_mats = pc.materials_data or pc.sub_items_data or []
+                    po_child_mats_dashboard += len(pc_mats) if isinstance(pc_mats, list) else 0
+
+            # Skip if all materials are in POChildren (complete vendor split)
+            if po_child_mats_dashboard >= total_mats_dashboard and total_mats_dashboard > 0 and len(po_children) > 0:
+                continue
 
             # Categorize matching PurchaseOrders.tsx EXACTLY
 

@@ -760,11 +760,11 @@ const ChangeRequestsPage: React.FC = () => {
       // Pending tab: Items awaiting TD approval
       matchesTab = ['under_review', 'approved_by_pm', 'pending'].includes(status);
     } else if (activeTab === 'approved') {
-      // Approved tab: CRs approved by TD, buyer selecting vendor
-      matchesTab = status === 'assigned_to_buyer' && !req.vendor_selection_status;
+      // Approved tab: CRs approved by TD, buyer selecting vendor or sent to store
+      matchesTab = (status === 'assigned_to_buyer' && !req.vendor_selection_status) || status === 'sent_to_store';
     } else if (activeTab === 'completed') {
-      // Only show truly completed purchases (purchase_completed status)
-      matchesTab = status === 'purchase_completed';
+      // Completed purchases (purchase_completed or routed_to_store)
+      matchesTab = status === 'purchase_completed' || status === 'routed_to_store';
     }
     // vendor_approvals tab uses vendorApprovals data, not changeRequests
 

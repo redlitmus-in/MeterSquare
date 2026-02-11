@@ -34,11 +34,15 @@ class POChild(db.Model):
     # Child notes - additional specifications/requirements for this PO child
     child_notes = db.Column(db.Text, nullable=True)
 
-    # Vendor info
+    # Routing Type: 'store' or 'vendor'
+    routing_type = db.Column(db.String(20), default='vendor', nullable=False, index=True)
+    # Values: 'store' (route via PM to store), 'vendor' (requires TD approval)
+
+    # Vendor info (nullable for store-routed POChildren)
     vendor_id = db.Column(db.Integer, db.ForeignKey('vendors.vendor_id'), nullable=True, index=True)
     vendor_name = db.Column(db.String(255), nullable=True)
 
-    # Vendor selection tracking
+    # Vendor selection tracking (only for routing_type='vendor')
     vendor_selected_by_buyer_id = db.Column(db.Integer, nullable=True)
     vendor_selected_by_buyer_name = db.Column(db.String(255), nullable=True)
     vendor_selection_date = db.Column(db.DateTime, nullable=True)
@@ -63,7 +67,9 @@ class POChild(db.Model):
 
     # Status
     status = db.Column(db.String(50), default='pending_td_approval', index=True)
-    # Values: 'pending_td_approval', 'vendor_approved', 'purchase_completed', 'rejected'
+    # Values:
+    #   Vendor routing: 'pending_td_approval', 'vendor_approved', 'purchase_completed', 'rejected'
+    #   Store routing: 'routed_to_store', 'purchase_completed'
 
     rejection_reason = db.Column(db.Text, nullable=True)
 
@@ -77,6 +83,7 @@ class POChild(db.Model):
         db.Index('idx_po_child_parent_status', 'parent_cr_id', 'status'),
         db.Index('idx_po_child_vendor_status', 'vendor_id', 'status'),
         db.Index('idx_po_child_deleted_status', 'is_deleted', 'status'),
+        db.Index('idx_po_child_routing_status', 'routing_type', 'status', 'is_deleted'),  # For filtering by routing type
     )
 
     # Relationships
@@ -104,6 +111,7 @@ class POChild(db.Model):
             'materials_count': len(self.materials_data) if self.materials_data else 0,
             'materials_total_cost': round(self.materials_total_cost, 2) if self.materials_total_cost else 0,
             'child_notes': self.child_notes,
+            'routing_type': self.routing_type,  # 'store' or 'vendor'
             'vendor_id': self.vendor_id,
             'vendor_name': self.vendor_name,
             'vendor_selected_by_buyer_id': self.vendor_selected_by_buyer_id,

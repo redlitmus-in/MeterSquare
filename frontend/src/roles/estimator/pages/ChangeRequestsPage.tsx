@@ -232,10 +232,67 @@ const ChangeRequestsPage: React.FC = () => {
       assigned_to_buyer: 'bg-purple-100 text-purple-800',
       approved_td: 'bg-blue-100 text-blue-800',
       purchase_completed: 'bg-green-100 text-green-800',
+      routed_to_store: 'bg-teal-100 text-teal-800',
       rejected: 'bg-red-100 text-red-800',
       split_to_sub_crs: 'bg-indigo-100 text-indigo-800'
     };
     return colors[status as keyof typeof colors] || colors.pending;
+  };
+
+  // Helper to get store routing status info
+  const getStoreRoutingStatusInfo = (status: string | null | undefined) => {
+    if (!status) return null;
+
+    const statusMap: Record<string, { label: string; color: string; icon: string }> = {
+      pending_vendor_delivery: {
+        label: 'Pending Vendor Delivery to Store',
+        color: 'bg-amber-100 text-amber-700 border-amber-200',
+        icon: '🚚'
+      },
+      delivered_to_store: {
+        label: 'Delivered to M2 Store',
+        color: 'bg-blue-100 text-blue-700 border-blue-200',
+        icon: '📦'
+      },
+      dispatched_to_site: {
+        label: 'Dispatched to Site',
+        color: 'bg-purple-100 text-purple-700 border-purple-200',
+        icon: '🚛'
+      },
+      delivered_to_site: {
+        label: 'Delivered to Site',
+        color: 'bg-green-100 text-green-700 border-green-200',
+        icon: '✅'
+      }
+    };
+
+    return statusMap[status] || null;
+  };
+
+  // Helper to render store routing status
+  const renderStoreRoutingStatus = (request: ChangeRequestItem) => {
+    if (!request.store_request_status) {
+      return null;
+    }
+
+    const statusInfo = getStoreRoutingStatusInfo(request.store_request_status);
+    if (!statusInfo) return null;
+
+    return (
+      <div className="px-4 pb-3">
+        <div className={`rounded-lg p-3 border ${statusInfo.color}`}>
+          <div className="flex items-center gap-2">
+            <span className="text-base">{statusInfo.icon}</span>
+            <span className="text-xs font-semibold">{statusInfo.label}</span>
+          </div>
+          {request.vendor_delivery_date && request.store_request_status !== 'pending_vendor_delivery' && (
+            <div className="mt-1 text-[10px] opacity-75">
+              Vendor delivered: {new Date(request.vendor_delivery_date).toLocaleDateString()}
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   // Helper to render POChildren (vendor splits) info
@@ -302,18 +359,18 @@ const ChangeRequestsPage: React.FC = () => {
                          idString.includes(searchLower) ||
                          req.cr_id.toString().includes(searchTerm.trim());
     const matchesTab = (
-      (activeTab === 'pending' && (req.status === 'send_to_est' || req.status === 'under_review' || (req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'approved_by_pm' && req.status !== 'rejected' && req.status !== 'purchase_completed' && req.status !== 'pending_td_approval'))) ||
-      (activeTab === 'approved' && (req.status === 'assigned_to_buyer' || req.status === 'approved_by_pm' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs')) ||
-      (activeTab === 'escalated' && req.status === 'purchase_completed') ||
+      (activeTab === 'pending' && (req.status === 'send_to_est' || req.status === 'under_review' || (req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'approved_by_pm' && req.status !== 'rejected' && req.status !== 'purchase_completed' && req.status !== 'routed_to_store' && req.status !== 'sent_to_store' && req.status !== 'pending_td_approval'))) ||
+      (activeTab === 'approved' && (req.status === 'assigned_to_buyer' || req.status === 'approved_by_pm' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs' || req.status === 'sent_to_store')) ||
+      (activeTab === 'escalated' && (req.status === 'purchase_completed' || req.status === 'routed_to_store')) ||
       (activeTab === 'rejected' && req.status === 'rejected')
     );
     return matchesSearch && matchesTab;
   });
 
   const stats = {
-    pending: changeRequests.filter(r => r.status === 'send_to_est' || r.status === 'under_review' || (r.approval_required_from === 'estimator' && r.status !== 'assigned_to_buyer' && r.status !== 'approved_by_pm' && r.status !== 'rejected' && r.status !== 'purchase_completed' && r.status !== 'pending_td_approval')).length,
-    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer' || r.status === 'approved_by_pm' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs').length,
-    escalated: changeRequests.filter(r => r.status === 'purchase_completed').length,
+    pending: changeRequests.filter(r => r.status === 'send_to_est' || r.status === 'under_review' || (r.approval_required_from === 'estimator' && r.status !== 'assigned_to_buyer' && r.status !== 'approved_by_pm' && r.status !== 'rejected' && r.status !== 'purchase_completed' && r.status !== 'routed_to_store' && r.status !== 'sent_to_store' && r.status !== 'pending_td_approval')).length,
+    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer' || r.status === 'approved_by_pm' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs' || r.status === 'sent_to_store').length,
+    escalated: changeRequests.filter(r => r.status === 'purchase_completed' || r.status === 'routed_to_store').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length
   };
 

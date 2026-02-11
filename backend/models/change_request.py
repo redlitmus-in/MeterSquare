@@ -132,6 +132,10 @@ class ChangeRequest(db.Model):
     material_vendor_selections = db.Column(JSONB, nullable=True, default=dict)
     use_per_material_vendors = db.Column(db.Boolean, default=False)
 
+    # Material Routing Tracking - Track which materials have been sent to store or vendor
+    # Format: {material_name: {routing: 'store'|'vendor', po_child_id: int, routed_at: timestamp, routed_by: user_id}}
+    routed_materials = db.Column(JSONB, nullable=True, default=dict)
+
     # 🗑️ REMOVED 2025-12-19: Deprecated parent-child CR columns (3 columns) - Replaced by po_children table
     # parent_cr_id, cr_number_suffix, submission_group_id
     # NOTE: Now use the po_children table and POChild model for parent-child relationships
@@ -352,6 +356,9 @@ class ChangeRequest(db.Model):
             'vendor_delivery_date': self.vendor_delivery_date.isoformat() if self.vendor_delivery_date else None,
             'buyer_completion_notes': self.buyer_completion_notes,
             'store_request_status': self.store_request_status,
+
+            # Material Routing Tracking (Prevent duplicates)
+            'routed_materials': self.routed_materials if self.routed_materials else {},
 
             # Timestamps
             'created_at': self.created_at.isoformat() if self.created_at else None,

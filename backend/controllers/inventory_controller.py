@@ -6,6 +6,7 @@ from models.inventory import *
 from models.project import Project
 from models.user import User
 from models.system_settings import SystemSettings
+from models.change_request import ChangeRequest
 from datetime import datetime
 from utils.comprehensive_notification_service import ComprehensiveNotificationService
 from utils.rdn_pdf_generator import RDNPDFGenerator
@@ -2113,6 +2114,14 @@ def approve_internal_request(request_id):
             internal_req.vendor_delivery_confirmed = True
             internal_req.last_modified_by = current_user
 
+            # ✅ FIX: Update CR status when PM approves vendor delivery
+            # This moves the CR to "Completed" tab in all roles
+            if internal_req.cr_id:
+                cr = ChangeRequest.query.get(internal_req.cr_id)
+                if cr and cr.status != 'routed_to_store':
+                    cr.status = 'routed_to_store'
+                    cr.updated_at = datetime.utcnow()
+
             db.session.commit()
 
             processed_count = len([t for t in transaction_details if t.get('action') == 'received_and_dispatched'])
@@ -2221,6 +2230,14 @@ def approve_internal_request(request_id):
             internal_req.approved_at = datetime.utcnow()
             internal_req.last_modified_by = current_user
 
+            # ✅ FIX: Update CR status when PM approves store request (grouped materials)
+            # This moves the CR to "Completed" tab in all roles
+            if internal_req.cr_id:
+                cr = ChangeRequest.query.get(internal_req.cr_id)
+                if cr and cr.status == 'sent_to_store':
+                    cr.status = 'routed_to_store'
+                    cr.updated_at = datetime.utcnow()
+
             db.session.commit()
 
             return jsonify({
@@ -2272,6 +2289,14 @@ def approve_internal_request(request_id):
         internal_req.approved_at = datetime.utcnow()
         internal_req.inventory_transaction_id = new_transaction.inventory_transaction_id
         internal_req.last_modified_by = current_user
+
+        # ✅ FIX: Update CR status when PM approves store request (single material)
+        # This moves the CR to "Completed" tab in all roles
+        if internal_req.cr_id:
+            cr = ChangeRequest.query.get(internal_req.cr_id)
+            if cr and cr.status == 'sent_to_store':
+                cr.status = 'routed_to_store'
+                cr.updated_at = datetime.utcnow()
 
         db.session.add(new_transaction)
         db.session.commit()

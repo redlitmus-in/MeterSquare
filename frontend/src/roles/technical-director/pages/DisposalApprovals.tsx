@@ -82,7 +82,8 @@ const DisposalApprovals: React.FC = () => {
         ret.disposal_status === 'pending_review' ||
         ret.disposal_status === 'approved_disposal' ||
         ret.disposal_status === 'disposed' ||
-        ret.disposal_status === 'rejected'
+        ret.disposal_status === 'rejected' ||
+        ret.disposal_status === 'backup_added'
       );
 
       setDisposalRequests(disposals);
@@ -104,7 +105,7 @@ const DisposalApprovals: React.FC = () => {
     } else if (statusFilter === 'approved') {
       filtered = filtered.filter(req => req.disposal_status === 'approved_disposal' || req.disposal_status === 'disposed');
     } else if (statusFilter === 'rejected') {
-      filtered = filtered.filter(req => req.disposal_status === 'rejected' || req.disposal_status === 'repaired');
+      filtered = filtered.filter(req => req.disposal_status === 'rejected' || req.disposal_status === 'repaired' || req.disposal_status === 'backup_added');
     }
 
     // Search filter
@@ -231,10 +232,11 @@ const DisposalApprovals: React.FC = () => {
         );
       case 'rejected':
       case 'repaired':
+      case 'backup_added':
         return (
           <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
             <XCircle className="w-3 h-3" />
-            Rejected
+            {status === 'backup_added' ? 'Backup Added' : 'Rejected'}
           </span>
         );
       default:
@@ -247,7 +249,7 @@ const DisposalApprovals: React.FC = () => {
     req.disposal_status === 'approved_disposal' || req.disposal_status === 'disposed'
   ).length;
   const rejectedCount = disposalRequests.filter(req =>
-    req.disposal_status === 'rejected' || req.disposal_status === 'repaired'
+    req.disposal_status === 'rejected' || req.disposal_status === 'repaired' || req.disposal_status === 'backup_added'
   ).length;
   const totalValue = disposalRequests
     .filter(req => req.disposal_status === 'pending_review')

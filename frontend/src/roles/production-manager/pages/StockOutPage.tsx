@@ -1052,10 +1052,14 @@ const StockOutPage: React.FC = () => {
                                 const mat = req.materials_data[0];
                                 const inventoryMatch = findInventoryMatch(mat.material_name, mat.brand, req.item_name);
                                 const isInInventory = !!inventoryMatch;
+                                // Use material_details if available, otherwise use materials_data
+                                const displayName = req.material_details?.material_name || mat.material_name || req.item_name;
                                 return (
                                   <div>
-                                    <div className="font-semibold text-gray-900">{req.item_name}</div>
-                                    <div className="text-xs text-gray-500">{mat.material_name}</div>
+                                    <div className="font-semibold text-gray-900">{displayName}</div>
+                                    {req.material_details?.material_code && (
+                                      <div className="text-xs text-gray-400">{req.material_details.material_code}</div>
+                                    )}
                                     {/* Inventory status indicator - checks sub-item */}
                                     {isInInventory ? (
                                       <div className="flex items-center gap-1 mt-1">
@@ -1074,7 +1078,10 @@ const StockOutPage: React.FC = () => {
                             ) : (
                               // Multiple materials - show item name first, then View button
                               <div>
-                                <div className="font-semibold text-gray-900 mb-2">{req.item_name}</div>
+                                <div className="font-semibold text-gray-900 mb-2">{req.material_details?.material_name || req.item_name}</div>
+                                {req.material_details?.material_code && (
+                                  <div className="text-xs text-gray-400 mb-2">{req.material_details.material_code}</div>
+                                )}
                                 <button
                                   onClick={() => setMaterialsViewModal({
                                     show: true,
@@ -1094,11 +1101,13 @@ const StockOutPage: React.FC = () => {
                             (() => {
                               const inventoryMatch = findInventoryMatch(req.item_name, req.brand);
                               const isInInventory = !!inventoryMatch;
+                              // Use material_details if available, otherwise use item_name
+                              const displayName = req.material_details?.material_name || req.item_name;
                               return (
                                 <div>
-                                  <div className="font-semibold text-gray-900">{req.item_name}</div>
-                                  {req.sub_item_name && (
-                                    <div className="text-xs text-gray-500">{req.sub_item_name}</div>
+                                  <div className="font-semibold text-gray-900">{displayName}</div>
+                                  {req.material_details?.material_code && (
+                                    <div className="text-xs text-gray-400">{req.material_details.material_code}</div>
                                   )}
                                   {/* Inventory status indicator - checks sub-item */}
                                   {isInInventory ? (
