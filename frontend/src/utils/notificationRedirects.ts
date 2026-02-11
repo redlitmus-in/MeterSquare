@@ -584,21 +584,29 @@ const REDIRECT_RULES: RedirectRule[] = [
     id: 'boq_client_confirmed',
     match: ({ titleLower, messageLower }) =>
       (has(titleLower, 'boq') || has(messageLower, 'boq')) &&
-      (has(messageLower, 'client confirmed', 'client approved') || has(titleLower, 'approved by client')),
-    resolve: ({ buildPath, metadata, role }) => ({
-      path: buildPath(projectsPath(role)),
-      queryParams: { tab: 'client_response', ...(metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {}) }
-    })
+      (has(messageLower, 'client confirmed', 'client approved', 'approved by client') || has(titleLower, 'approved by client')),
+    resolve: ({ buildPath, metadata, role }) => {
+      // TD goes to project-approvals, PM goes to my-projects, others to projects
+      const targetPath = role === 'technical-director' ? '/project-approvals' : projectsPath(role);
+      return {
+        path: buildPath(targetPath),
+        queryParams: { tab: 'client_response', ...(metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {}) }
+      };
+    }
   },
   {
     id: 'boq_client_rejected',
     match: ({ titleLower, messageLower }) =>
       (has(titleLower, 'boq') || has(messageLower, 'boq')) &&
       (has(messageLower, 'client rejected') || has(titleLower, 'rejected by client')),
-    resolve: ({ buildPath, metadata, role }) => ({
-      path: buildPath(projectsPath(role)),
-      queryParams: { tab: 'client_response', ...(metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {}) }
-    })
+    resolve: ({ buildPath, metadata, role }) => {
+      // TD goes to project-approvals, PM goes to my-projects, others to projects
+      const targetPath = role === 'technical-director' ? '/project-approvals' : projectsPath(role);
+      return {
+        path: buildPath(targetPath),
+        queryParams: { tab: 'client_response', ...(metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {}) }
+      };
+    }
   },
   {
     id: 'boq_sent_to_client',

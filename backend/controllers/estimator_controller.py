@@ -34,7 +34,7 @@ def confirm_client_approval(boq_id):
         estimator_name = current_user.get('full_name', 'Estimator') if current_user else 'Estimator'
         estimator_id = current_user.get('user_id') if current_user else None
 
-        # Update status to Client_Confirmed
+        # Update status to Client_Confirmed (lowercase for frontend consistency)
         boq.status = "Client_Confirmed"
         boq.client_status = True
         boq.last_modified_at = datetime.utcnow()
@@ -203,7 +203,7 @@ def reject_client_approval(boq_id):
                 "error": f"BOQ must be in 'Sent_for_Confirmation' status. Current status: {boq.status}"
             }), 400
 
-        # Update status to Client_Rejected
+        # Update status to client_rejected (lowercase for frontend consistency)
         boq.status = "Client_Rejected"
         boq.client_status = False
         boq.client_rejection_reason = rejection_reason  # Store rejection reason in client_rejection_reason

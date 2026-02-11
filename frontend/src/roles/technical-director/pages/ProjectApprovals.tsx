@@ -231,7 +231,7 @@ const ProjectApprovals: React.FC = () => {
     const urlTab = searchParams.get('tab');
     if (urlTab === 'internal-revisions' || urlTab === 'revisions') return 'revisions';
     if (urlTab === 'approved') return 'approved';
-    if (urlTab === 'sent' || urlTab === 'client-response') return 'sent';
+    if (urlTab === 'sent' || urlTab === 'client-response' || urlTab === 'client_response') return 'sent';
     if (urlTab === 'assigned') return 'assigned';
     if (urlTab === 'rejected') return 'rejected';
     if (urlTab === 'completed') return 'approved'; // completed shows in approved filter
@@ -383,7 +383,7 @@ const ProjectApprovals: React.FC = () => {
       let newFilterStatus: 'pending' | 'revisions' | 'approved' | 'sent' | 'assigned' | 'rejected' = 'pending';
       if (urlTab === 'internal-revisions' || urlTab === 'revisions') newFilterStatus = 'revisions';
       else if (urlTab === 'approved') newFilterStatus = 'approved';
-      else if (urlTab === 'sent' || urlTab === 'client-response') newFilterStatus = 'sent';
+      else if (urlTab === 'sent' || urlTab === 'client-response' || urlTab === 'client_response') newFilterStatus = 'sent';
       else if (urlTab === 'assigned') newFilterStatus = 'assigned';
       else if (urlTab === 'rejected') newFilterStatus = 'rejected';
       else if (urlTab === 'completed') newFilterStatus = 'approved';
