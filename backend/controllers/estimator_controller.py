@@ -115,30 +115,66 @@ def confirm_client_approval(boq_id):
             )
             db.session.add(boq_history)
 
+        # Cache fields BEFORE commit to avoid SQLAlchemy lazy-loading issues
+        cached_project_name = project.project_name if project else "project"
+
         db.session.commit()
+        log.info(f"[confirm_client_approval] BOQ {boq_id} committed with status Client_Confirmed")
 
         # Send notification to TD about client approval using comprehensive service
+        notification_sent = False
         try:
             from utils.comprehensive_notification_service import ComprehensiveNotificationService
             ComprehensiveNotificationService.notify_client_confirmed(
                 boq_id=boq_id,
-                project_name=project.project_name if project else "project",
+                project_name=cached_project_name,
                 estimator_id=estimator_id,
                 estimator_name=estimator_name,
                 client_name=client_name
             )
+            notification_sent = True
+            log.info(f"[confirm_client_approval] Notification sent to TD(s) for BOQ {boq_id}")
         except Exception as notif_error:
-            log.error(f"Failed to send client approval notification: {notif_error}")
+            log.error(f"[confirm_client_approval] Failed to send notification: {notif_error}")
             import traceback
             log.error(traceback.format_exc())
+
+            # Fallback: create notification directly in DB
+            if not notification_sent:
+                try:
+                    from utils.notification_utils import NotificationManager
+                    from socketio_server import send_notification_to_user
+                    from models.role import Role as RoleModel
+                    td_role = RoleModel.query.filter(RoleModel.role.ilike('%technical%director%')).first()
+                    if td_role:
+                        td_users = User.query.filter_by(role_id=td_role.role_id, is_active=True, is_deleted=False).all()
+                        for td in td_users:
+                            fallback_notif = NotificationManager.create_notification(
+                                user_id=td.user_id,
+                                type='success',
+                                title='Client Approved BOQ',
+                                message=f'BOQ for {cached_project_name} has been approved. Confirmed by {estimator_name}',
+                                priority='high',
+                                category='boq',
+                                action_label='View BOQ',
+                                metadata={'boq_id': boq_id, 'client_confirmed': True},
+                                sender_id=estimator_id,
+                                sender_name=estimator_name
+                            )
+                            send_notification_to_user(td.user_id, fallback_notif.to_dict())
+                            notification_sent = True
+                            log.info(f"[confirm_client_approval] Fallback notification sent to TD {td.user_id}")
+                except Exception as fallback_err:
+                    log.error(f"[confirm_client_approval] Fallback also failed: {fallback_err}")
 
         return jsonify({
             "success": True,
             "message": "Client approval confirmed successfully",
             "boq_id": boq_id,
-            "status": boq.status,
+            "status": "Client_Confirmed",
             "client_status": True,
-            "action_appended": True
+            "action_appended": True,
+            "notification_sent": notification_sent
         }), 200
 
     except Exception as e:
@@ -180,21 +216,25 @@ def reject_client_approval(boq_id):
             boq.last_modified_by = current_user.get('email', 'Unknown')
 
         project = boq.project
+        # Cache fields BEFORE commit to avoid SQLAlchemy lazy-loading issues
+        cached_project_name = project.project_name if project else "project"
 
         db.session.commit()
+        log.info(f"[reject_client_approval] BOQ {boq_id} committed with status Client_Rejected")
 
         # Send notification to TD about client rejection using comprehensive service
         try:
             from utils.comprehensive_notification_service import ComprehensiveNotificationService
             ComprehensiveNotificationService.notify_client_rejected(
                 boq_id=boq_id,
-                project_name=project.project_name if project else "project",
+                project_name=cached_project_name,
                 estimator_id=estimator_id,
                 estimator_name=estimator_name,
                 rejection_reason=rejection_reason
             )
+            log.info(f"[reject_client_approval] Notification sent to TD(s) for BOQ {boq_id}")
         except Exception as notif_error:
-            log.error(f"Failed to send client rejection notification: {notif_error}")
+            log.error(f"[reject_client_approval] Failed to send notification: {notif_error}")
             import traceback
             log.error(traceback.format_exc())
 
@@ -202,7 +242,7 @@ def reject_client_approval(boq_id):
             "success": True,
             "message": "Client rejection recorded successfully",
             "boq_id": boq_id,
-            "status": boq.status,
+            "status": "Client_Rejected",
             "client_status": False,
             "rejection_reason": rejection_reason
         }), 200

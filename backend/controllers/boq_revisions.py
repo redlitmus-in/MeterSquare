@@ -547,51 +547,131 @@ def client_revision_td_mail_send():
         log.info(f"BOQ {boq_id} - Database committed successfully")
 
         # Send real-time notification to estimator
+        notification_sent = False
+        notification_error_msg = None
         try:
             from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+
             estimator_user_id = estimator.user_id if estimator else None
+            decision = 'approved' if technical_director_status.lower() == 'approved' else 'rejected'
+            log.info(f"BOQ {boq_id} - Client revision {decision}: estimator_user_id={estimator_user_id}, estimator_name={estimator_name}")
 
             if estimator_user_id:
-                if technical_director_status.lower() == 'approved':
-                    ComprehensiveNotificationService.notify_client_revision_approved(
-                        boq_id=boq_id,
-                        project_name=project_data.get('project_name', boq.boq_name),
-                        td_id=td_user_id,
-                        td_name=td_name,
-                        estimator_user_id=estimator_user_id,
-                        estimator_name=estimator_name,
-                        revision_number=boq.revision_number
-                    )
-                    log.info(f"Sent client revision approved notification to estimator {estimator_user_id} for BOQ {boq_id}")
-                else:
-                    ComprehensiveNotificationService.notify_client_revision_rejected(
-                        boq_id=boq_id,
-                        project_name=project_data.get('project_name', boq.boq_name),
-                        td_id=td_user_id,
-                        td_name=td_name,
-                        estimator_user_id=estimator_user_id,
-                        estimator_name=estimator_name,
-                        rejection_reason=rejection_reason or comments or "No reason provided",
-                        revision_number=boq.revision_number
-                    )
-                    log.info(f"Sent client revision rejected notification to estimator {estimator_user_id} for BOQ {boq_id}")
+                try:
+                    if technical_director_status.lower() == 'approved':
+                        ComprehensiveNotificationService.notify_client_revision_approved(
+                            boq_id=boq_id,
+                            project_name=project_data.get('project_name', boq.boq_name),
+                            td_id=td_user_id,
+                            td_name=td_name,
+                            estimator_user_id=estimator_user_id,
+                            estimator_name=estimator_name,
+                            revision_number=boq.revision_number
+                        )
+                    else:
+                        ComprehensiveNotificationService.notify_client_revision_rejected(
+                            boq_id=boq_id,
+                            project_name=project_data.get('project_name', boq.boq_name),
+                            td_id=td_user_id,
+                            td_name=td_name,
+                            estimator_user_id=estimator_user_id,
+                            estimator_name=estimator_name,
+                            rejection_reason=rejection_reason or comments or "No reason provided",
+                            revision_number=boq.revision_number
+                        )
+                    notification_sent = True
+                    log.info(f"BOQ {boq_id} - Client revision {decision} notification sent to estimator {estimator_user_id}")
+                except Exception as svc_err:
+                    log.error(f"BOQ {boq_id} - Client revision notification service failed: {svc_err}")
+                    # Fallback: create notification directly in DB
+                    try:
+                        from utils.role_route_mapper import get_boq_view_url
+                        rev_info = f' R{boq.revision_number}' if boq.revision_number and boq.revision_number > 0 else ''
+                        fallback_title = f'Client Revision {"Approved" if decision == "approved" else "Rejected"}'
+                        fallback_msg = (
+                            f'Client revision{rev_info} for {project_data.get("project_name", boq.boq_name)} '
+                            f'was {decision} by {td_name}'
+                        )
+                        if decision == 'rejected':
+                            fallback_msg += f'. Reason: {rejection_reason or comments or "No reason provided"}'
+                        fallback_notif = NotificationManager.create_notification(
+                            user_id=estimator_user_id,
+                            type='success' if decision == 'approved' else 'rejection',
+                            title=fallback_title,
+                            message=fallback_msg,
+                            priority='high',
+                            category='boq',
+                            action_url=get_boq_view_url(estimator_user_id, boq_id, tab='revisions'),
+                            action_label='View BOQ',
+                            metadata={'boq_id': boq_id, 'decision': decision, 'revision_number': boq.revision_number},
+                            sender_id=td_user_id,
+                            sender_name=td_name,
+                            target_role='estimator'
+                        )
+                        send_notification_to_user(estimator_user_id, fallback_notif.to_dict())
+                        notification_sent = True
+                        log.info(f"BOQ {boq_id} - Fallback client revision notification sent to estimator {estimator_user_id}")
+                    except Exception as fallback_err:
+                        log.error(f"BOQ {boq_id} - Fallback client revision notification also failed: {fallback_err}")
+                        notification_error_msg = str(fallback_err)
+
+                # Also notify PM/forwarder if exists
+                try:
+                    forwarder_user_id = None
+                    if current_actions:
+                        for action in reversed(current_actions):
+                            if action.get('type') == 'sent_to_td' and action.get('decided_by_user_id'):
+                                fwd_id = action.get('decided_by_user_id')
+                                if fwd_id and fwd_id != estimator_user_id:
+                                    forwarder_user_id = fwd_id
+                                break
+                    if forwarder_user_id:
+                        from utils.role_route_mapper import get_boq_view_url
+                        pm_title = f'Client Revision {"Approved" if decision == "approved" else "Rejected"}'
+                        pm_msg = (
+                            f'Client revision for {project_data.get("project_name", boq.boq_name)} '
+                            f'was {decision} by {td_name}'
+                        )
+                        pm_notif = NotificationManager.create_notification(
+                            user_id=forwarder_user_id,
+                            type='success' if decision == 'approved' else 'rejection',
+                            title=pm_title,
+                            message=pm_msg,
+                            priority='high',
+                            category='boq',
+                            action_url=get_boq_view_url(forwarder_user_id, boq_id, tab='revisions'),
+                            action_label='View BOQ',
+                            metadata={'boq_id': boq_id, 'decision': decision},
+                            sender_id=td_user_id,
+                            sender_name=td_name
+                        )
+                        send_notification_to_user(forwarder_user_id, pm_notif.to_dict())
+                        log.info(f"BOQ {boq_id} - PM/forwarder notification sent to user {forwarder_user_id}")
+                except Exception as pm_err:
+                    log.error(f"BOQ {boq_id} - PM/forwarder notification failed (non-critical): {pm_err}")
             else:
-                log.warning(f"Could not find estimator user_id for BOQ {boq_id} client revision notification - estimator lookup failed")
+                log.warning(f"BOQ {boq_id} - No estimator user_id found for client revision notification. estimator={estimator}")
+                notification_error_msg = "Estimator user_id not found"
         except Exception as notif_error:
-            log.error(f"Failed to send client revision notification: {notif_error}")
+            log.error(f"BOQ {boq_id} - Critical: Failed to send client revision notification: {notif_error}")
             import traceback
             log.error(traceback.format_exc())
+            notification_error_msg = str(notif_error)
 
-        log.info(f"BOQ {boq_id} {new_status.lower()} by TD, email sent to {recipient_email}")
+        log.info(f"BOQ {boq_id} {new_status.lower()} by TD, notification_sent={notification_sent}")
 
         return jsonify({
             "success": True,
-            "message": f"BOQ {new_status.lower()} successfully and email sent to {recipient_role}",
+            "message": f"BOQ {new_status.lower()} successfully",
             "boq_id": boq_id,
             "status": new_status,
             "recipient": recipient_email,
             "recipient_role": recipient_role,
-            "recipient_name": recipient_name
+            "recipient_name": recipient_name,
+            "notification_sent": notification_sent,
+            "notification_error": notification_error_msg
         }), 200
 
     except Exception as e:
@@ -658,17 +738,17 @@ def send_td_client_boq_email(boq_id):
         # Initialize email service
         # boq_email_service = BOQEmailService()
 
-        # Get TD email from request or fetch all Technical Directors
-        # Handle GET request with optional JSON body (non-standard but supported)
+        # Get TD email from request - support both JSON body and query params (GET request)
         try:
             data = request.get_json(silent=True) or {}
         except Exception as e:
             log.warning(f"Failed to parse JSON body: {e}")
             data = {}
 
-        td_email = data.get('td_email')
-        td_name = data.get('full_name')
-        comments = data.get('comments')  # Get comments from request
+        # Read from JSON body first, fallback to query params for GET requests
+        td_email = data.get('td_email') or request.args.get('td_email')
+        td_name = data.get('full_name') or request.args.get('full_name')
+        comments = data.get('comments') or request.args.get('comments')
 
         if td_email:
             # Send to specific TD
@@ -773,32 +853,78 @@ def send_td_client_boq_email(boq_id):
                 )
                 db.session.add(boq_history)
 
+            # Cache fields BEFORE commit to avoid SQLAlchemy lazy-loading issues
+            cached_project_name = project.project_name
+
             db.session.commit()
+            log.info(f"[send_client_revision] BOQ {boq_id} committed with status {new_status}")
 
             # Send notification to TD
+            notification_sent = False
             try:
                 from utils.comprehensive_notification_service import notification_service
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user, send_notification_to_role
                 from models.user import User as UserModel
                 # Find TD user by email
                 td_user = UserModel.query.filter_by(email=td_email).first()
                 if td_user:
-                    log.info(f"[send_boq_email] Sending notification to TD {td_user.user_id}")
-                    notification_service.notify_boq_sent_to_td(
-                        boq_id=boq_id,
-                        project_name=project.project_name,
-                        estimator_id=user_id,
-                        estimator_name=user_name,
-                        td_user_id=td_user.user_id
-                    )
-                    log.info(f"[send_boq_email] Notification sent successfully")
+                    cached_td_user_id = td_user.user_id
+                    log.info(f"[send_client_revision] Sending notification to TD {cached_td_user_id}")
+                    try:
+                        notification_service.notify_boq_sent_to_td(
+                            boq_id=boq_id,
+                            project_name=cached_project_name,
+                            estimator_id=user_id,
+                            estimator_name=user_name,
+                            td_user_id=cached_td_user_id
+                        )
+                        notification_sent = True
+                        log.info(f"[send_client_revision] Notification sent successfully")
+                    except Exception as svc_err:
+                        log.error(f"[send_client_revision] Service notification failed: {svc_err}")
+                        import traceback
+                        log.error(traceback.format_exc())
+
+                    # Fallback: create notification directly if service failed
+                    if not notification_sent:
+                        try:
+                            from utils.role_route_mapper import get_td_approval_url
+                            action_url = get_td_approval_url(cached_td_user_id, boq_id, tab='pending')
+                            fallback_notif = NotificationManager.create_notification(
+                                user_id=cached_td_user_id,
+                                type='approval',
+                                title='New BOQ for Approval',
+                                message=f'BOQ for {cached_project_name} requires your approval. Submitted by {user_name}',
+                                priority='urgent',
+                                category='boq',
+                                action_required=True,
+                                action_url=action_url,
+                                action_label='Review BOQ',
+                                metadata={'boq_id': boq_id},
+                                sender_id=user_id,
+                                sender_name=user_name,
+                                target_role='technical_director'
+                            )
+                            send_notification_to_user(cached_td_user_id, fallback_notif.to_dict())
+                            send_notification_to_role('technicalDirector', fallback_notif.to_dict())
+                            notification_sent = True
+                            log.info(f"[send_client_revision] Fallback notification sent to TD {cached_td_user_id}")
+                        except Exception as fallback_err:
+                            log.error(f"[send_client_revision] Fallback also failed: {fallback_err}")
+                else:
+                    log.warning(f"[send_client_revision] TD user not found by email: {td_email}")
             except Exception as notif_err:
-                log.error(f"[send_boq_email] Failed to send notification: {notif_err}")
+                log.error(f"[send_client_revision] Failed to send notification: {notif_err}")
+                import traceback
+                log.error(traceback.format_exc())
 
             return jsonify({
                 "success": True,
                 "message": "BOQ review email sent successfully to Technical Director",
                 "boq_id": boq_id,
-                "recipient": td_email
+                "recipient": td_email,
+                "notification_sent": notification_sent
             }), 200
             # else:
             #     return jsonify({
@@ -941,32 +1067,76 @@ def send_td_client_boq_email(boq_id):
                 )
                 db.session.add(boq_history)
 
+            # Cache fields BEFORE commit to avoid SQLAlchemy lazy-loading issues
+            cached_project_name = project.project_name
+            cached_td_list = [(td.user_id, td.full_name, td.email) for td in technical_directors]
+            cached_td_email = technical_director.email
+
             db.session.commit()
+            log.info(f"[send_client_revision] BOQ {boq_id} committed with status {new_status}")
 
             # Send notification to ALL TDs
+            notification_sent = False
             try:
                 from utils.comprehensive_notification_service import notification_service
-                log.info(f"[send_boq_email] Sending notification to {len(technical_directors)} Technical Director(s)")
-                for td in technical_directors:
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user, send_notification_to_role
+                log.info(f"[send_client_revision] Sending notification to {len(cached_td_list)} Technical Director(s)")
+                for td_user_id, td_full_name, td_email_addr in cached_td_list:
+                    td_notif_sent = False
                     try:
                         notification_service.notify_boq_sent_to_td(
                             boq_id=boq_id,
-                            project_name=project.project_name,
+                            project_name=cached_project_name,
                             estimator_id=user_id,
                             estimator_name=user_name,
-                            td_user_id=td.user_id
+                            td_user_id=td_user_id
                         )
-                        log.info(f"[send_boq_email] Notification sent successfully to TD {td.user_id} ({td.full_name})")
+                        td_notif_sent = True
+                        notification_sent = True
+                        log.info(f"[send_client_revision] Notification sent successfully to TD {td_user_id} ({td_full_name})")
                     except Exception as td_notif_err:
-                        log.error(f"[send_boq_email] Failed to send notification to TD {td.user_id}: {td_notif_err}")
+                        log.error(f"[send_client_revision] Failed to send notification to TD {td_user_id}: {td_notif_err}")
+                        import traceback
+                        log.error(traceback.format_exc())
+
+                    # Fallback: create notification directly in DB if service failed
+                    if not td_notif_sent:
+                        try:
+                            from utils.role_route_mapper import get_td_approval_url
+                            action_url = get_td_approval_url(td_user_id, boq_id, tab='pending')
+                            fallback_notif = NotificationManager.create_notification(
+                                user_id=td_user_id,
+                                type='approval',
+                                title='New BOQ for Approval',
+                                message=f'BOQ for {cached_project_name} requires your approval. Submitted by {user_name}',
+                                priority='urgent',
+                                category='boq',
+                                action_required=True,
+                                action_url=action_url,
+                                action_label='Review BOQ',
+                                metadata={'boq_id': boq_id},
+                                sender_id=user_id,
+                                sender_name=user_name,
+                                target_role='technical_director'
+                            )
+                            send_notification_to_user(td_user_id, fallback_notif.to_dict())
+                            send_notification_to_role('technicalDirector', fallback_notif.to_dict())
+                            notification_sent = True
+                            log.info(f"[send_client_revision] Fallback notification sent to TD {td_user_id}")
+                        except Exception as fallback_err:
+                            log.error(f"[send_client_revision] Fallback also failed for TD {td_user_id}: {fallback_err}")
             except Exception as notif_err:
-                log.error(f"[send_boq_email] Failed to send notifications to TDs: {notif_err}")
+                log.error(f"[send_client_revision] Failed to send notifications to TDs: {notif_err}")
+                import traceback
+                log.error(traceback.format_exc())
 
             return jsonify({
                 "success": True,
                 "message": "BOQ review email sent successfully to Technical Director",
                 "boq_id": boq_id,
-                "email": technical_director.email,
+                "email": cached_td_email,
+                "notification_sent": notification_sent
             }), 200
             # else:
             #     return jsonify({

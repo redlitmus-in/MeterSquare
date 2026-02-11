@@ -8,9 +8,10 @@ import { supabase } from '@/api/config';
 import { getSecureUserData } from '@/utils/notificationSecurity';
 import { useNotificationStore } from '@/store/notificationStore';
 import { toast } from 'sonner';
-import { isNotificationAlreadyProcessed, markNotificationAsProcessed } from '@/middleware/notificationMiddleware';
 // NOTE: notificationPollingService imported lazily to avoid circular dependency
 import { navigateTo } from '@/utils/navigationService';
+import { normalizeRole, rolesMatch } from '@/utils/roleNormalization';
+import { getApiClient } from '@/utils/apiClientLoader';
 
 // NOTE: We use toast for INCOMING notifications but with DIFFERENT styling
 // - YOUR actions: toast.success/error (green/red) - shown by component
@@ -37,12 +38,14 @@ class RealtimeNotificationHub {
   private supabaseChannel: any = null;
   private isConnected = false;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = Infinity;
   private userId: string | null = null;
   private userRole: string | null = null;
   private authToken: string | null = null;
   private processedNotificationIds: Set<string> = new Set();
   private shownToastIds: Set<string> = new Set(); // Track shown toasts to prevent duplicates
+  private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+  private authPollInterval: ReturnType<typeof setInterval> | null = null;
 
   private constructor() {
     this.initialize();
@@ -62,21 +65,34 @@ class RealtimeNotificationHub {
     this.setupSupabaseRealtime();
     this.setupAuthListener();
     this.setupPeriodicHealthCheck();
+    // Always start polling as safety net (runs alongside Socket.IO)
+    this.startPollingFallback();
   }
 
   /**
    * Periodic health check to ensure Socket.IO connection and room membership is maintained
-   * This helps recover from silent disconnections
+   * This helps recover from silent disconnections and server restarts
    */
   private setupPeriodicHealthCheck() {
+    if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
     // Re-join rooms every 30 seconds to ensure we stay connected
-    setInterval(() => {
+    this.healthCheckInterval = setInterval(() => {
       if (this.socket && this.isConnected && this.userId) {
         console.log('[RealtimeNotificationHub] 🔄 Periodic room re-join for reliability');
         this.joinRooms();
+        // Also fetch missed notifications as safety net (catches anything Socket.IO missed)
+        this.fetchMissedNotifications();
       } else if (!this.isConnected && this.authToken) {
         console.log('[RealtimeNotificationHub] ⚠️ Health check: Socket disconnected, reconnecting...');
+        // Clean up old socket before creating new one
+        if (this.socket) {
+          this.socket.removeAllListeners();
+          this.socket.disconnect();
+          this.socket = null;
+        }
         this.setupSocketConnection();
+        // Fetch missed notifications while reconnecting
+        this.fetchMissedNotifications();
       }
     }, 30000); // Every 30 seconds
   }
@@ -142,8 +158,8 @@ class RealtimeNotificationHub {
         query: { token: this.authToken },
         reconnection: true,
         reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        reconnectionAttempts: this.maxReconnectAttempts,
+        reconnectionDelayMax: 10000,
+        reconnectionAttempts: Infinity,
         transports: ['websocket', 'polling']
       });
 
@@ -167,6 +183,8 @@ class RealtimeNotificationHub {
         console.log('[RealtimeNotificationHub] ❌ Socket.IO disconnected:', { reason });
         // Start polling fallback when Socket.IO disconnects
         this.startPollingFallback();
+        // Immediately fetch missed notifications on disconnect (catches anything in-flight)
+        setTimeout(() => this.fetchMissedNotifications(), 2000);
       });
 
       this.socket.on('connect_error', () => {
@@ -208,19 +226,8 @@ class RealtimeNotificationHub {
         }
       });
 
-      // Start polling fallback if Socket.IO doesn't connect within 5 seconds
-      setTimeout(() => {
-        if (!this.isConnected) {
-          if (import.meta.env.DEV) {
-            console.log('[RealtimeNotificationHub] Socket.IO connection timeout, starting polling fallback');
-          }
-          this.startPollingFallback();
-        }
-      }, 5000);
-
     } catch (error) {
-      // Silent fail - start polling as fallback
-      this.startPollingFallback();
+      console.error('[RealtimeNotificationHub] Socket.IO setup error:', error);
     }
   }
 
@@ -244,18 +251,15 @@ class RealtimeNotificationHub {
   }
 
   /**
-   * Start polling fallback when Socket.IO is not connected
+   * Start polling as backup - always runs regardless of Socket.IO status
+   * Acts as a safety net for server restarts, silent disconnections, etc.
    */
   private startPollingFallback() {
-    if (!this.isConnected) {
-      if (import.meta.env.DEV) {
-        console.log('[RealtimeNotificationHub] Socket.IO not connected, starting polling fallback');
-      }
-      // Lazy import to avoid circular dependency
-      import('./notificationPollingService').then(({ notificationPollingService }) => {
-        notificationPollingService.startPolling();
-      });
-    }
+    console.log('[RealtimeNotificationHub] Starting polling backup (safety net)');
+    // Lazy import to avoid circular dependency
+    import('./notificationPollingService').then(({ notificationPollingService }) => {
+      notificationPollingService.startPolling();
+    });
   }
 
   /**
@@ -307,28 +311,21 @@ class RealtimeNotificationHub {
     // Check if notification is for current role - ONLY if no specific user was targeted
     // If the notification was sent to a specific user (like estimator from TD), skip role check
     if (!userIdMatched && notification.targetRole && this.userRole) {
-      const normalizeRole = (role: string) => role.toLowerCase().replace(/[\s\-_]/g, '');
-      const targetRole = normalizeRole(notification.targetRole);
-      const currentRole = normalizeRole(this.userRole);
+      const targetNorm = normalizeRole(notification.targetRole);
+      const currentNorm = normalizeRole(this.userRole);
 
       if (import.meta.env.DEV) {
         console.log('[RealtimeNotificationHub] Role check (no specific user target):', {
-          targetRole,
-          currentRole
+          targetRole: targetNorm,
+          currentRole: currentNorm
         });
       }
 
-      // Also check common role mappings
-      const roleMatches = targetRole === currentRole ||
-        (targetRole === 'technicaldirector' && (currentRole === 'technicaldirector' || currentRole === 'td')) ||
-        (targetRole === 'projectmanager' && (currentRole === 'projectmanager' || currentRole === 'pm')) ||
-        (targetRole === 'siteengineer' && (currentRole === 'siteengineer' || currentRole === 'se')) ||
-        (targetRole === 'buyer' && (currentRole === 'buyer' || currentRole === 'procurement')) ||
-        (targetRole === 'procurement' && (currentRole === 'buyer' || currentRole === 'procurement')) ||
-        (targetRole === 'estimator' && (currentRole === 'estimator' || currentRole === 'estimation')) ||
-        targetRole === 'client' || targetRole === 'all';  // Allow client and all roles
+      // Use centralized role matching (handles all abbreviations & variants)
+      const isMatch = rolesMatch(notification.targetRole, this.userRole) ||
+        targetNorm === 'client' || targetNorm === 'all';
 
-      if (!roleMatches) {
+      if (!isMatch) {
         if (import.meta.env.DEV) {
           console.log('[RealtimeNotificationHub] ❌ Skipping - role mismatch');
         }
@@ -341,7 +338,7 @@ class RealtimeNotificationHub {
     }
 
     const notificationData = {
-      id: notification.id,
+      id: String(notification.id),
       type: notification.type || 'info',
       title: notification.title,
       message: notification.message,
@@ -490,15 +487,16 @@ class RealtimeNotificationHub {
     const userData = getSecureUserData();
     const currentUserId = userData?.id || userData?.userId;
 
-    const isSender = data.senderId === currentUserId ||
-                    data.submittedBy === currentUserId ||
-                    data.rejectedBy === currentUserId ||
-                    data.approvedBy === currentUserId;
+    const uid = String(currentUserId);
+    const isSender = String(data.senderId) === uid ||
+                    String(data.submittedBy) === uid ||
+                    String(data.rejectedBy) === uid ||
+                    String(data.approvedBy) === uid;
 
     if (isSender) {
       // Sender already gets toast from the component that performed the action
       // No need to show another toast here - would be duplicate
-    } else if (data.targetRole === this.userRole || data.targetUserId === currentUserId) {
+    } else if (rolesMatch(data.targetRole || '', this.userRole || '') || String(data.targetUserId) === uid) {
       // Receiver gets desktop notification + panel notification (no toast)
       const notification: RealtimeNotification = {
         id: `pr-${type}-${data.documentId}-${Date.now()}`,
@@ -527,7 +525,8 @@ class RealtimeNotificationHub {
     });
 
     // Poll for credential changes every 2 seconds (catches same-tab login)
-    setInterval(() => {
+    if (this.authPollInterval) clearInterval(this.authPollInterval);
+    this.authPollInterval = setInterval(() => {
       const currentToken = localStorage.getItem('access_token');
       if (currentToken && !this.authToken) {
         // User just logged in
@@ -611,6 +610,14 @@ class RealtimeNotificationHub {
   }
 
   disconnect() {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+    if (this.authPollInterval) {
+      clearInterval(this.authPollInterval);
+      this.authPollInterval = null;
+    }
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
@@ -639,29 +646,27 @@ class RealtimeNotificationHub {
     if (!this.authToken) return;
 
     try {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL;
-      if (!baseUrl) return;
+      const client = await getApiClient();
+      if (!client) return;
 
-      // Fetch unread notifications from API
-      const response = await fetch(`${baseUrl}/notifications?unread_only=true&limit=50`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${this.authToken}`,
-          'Content-Type': 'application/json'
-        }
+      // Fetch recent notifications (read + unread) so read notifications persist after page reload
+      const response = await client.get('/notifications', {
+        params: { unread_only: false, limit: 50 }
       });
 
-      if (!response.ok) return;
-
-      const data = await response.json();
+      const data = response.data;
 
       if (data.success && data.notifications && Array.isArray(data.notifications)) {
-        // Process each notification
         const now = Date.now();
         const RECENT_THRESHOLD = 5 * 60 * 1000; // 5 minutes - show popup for recent notifications
+        const store = useNotificationStore.getState();
+        const existingIds = new Set(store.notifications.map(n => String(n.id)));
+
+        // Collect batch for single store update
+        const batch: any[] = [];
+        const recentNew: RealtimeNotification[] = [];
 
         for (const notif of data.notifications) {
-          // Convert backend format to frontend format
           const notification: RealtimeNotification = {
             id: notif.id,
             type: notif.type,
@@ -674,12 +679,13 @@ class RealtimeNotificationHub {
             targetRole: notif.targetRole,
             senderId: notif.senderId,
             senderName: notif.senderName,
+            category: notif.category,
             metadata: {
               ...notif.metadata,
               actionUrl: notif.actionUrl,
               actionLabel: notif.actionLabel
             }
-          };
+          } as any;
 
           // Skip if already processed (normalize ID to string)
           const notifIdStr = String(notification.id);
@@ -689,46 +695,41 @@ class RealtimeNotificationHub {
           this.processedNotificationIds.add(notifIdStr);
 
           const notificationData = {
-            id: notification.id,
+            id: String(notification.id),
             type: notification.type || 'info',
             title: notification.title,
             message: notification.message,
             priority: notification.priority || 'medium',
             timestamp: new Date(notification.timestamp || Date.now()),
-            read: false,
+            read: notif.read === true,
             metadata: notification.metadata,
             actionUrl: (notification as any).actionUrl || notification.metadata?.actionUrl,
             actionLabel: (notification as any).actionLabel || notification.metadata?.actionLabel,
             senderName: notification.senderName,
-            category: (notification as any).category || notification.metadata?.category || 'system'
+            category: (notification as any).category || notif.category || notification.metadata?.category || 'system'
           };
 
-          // Check if notification already exists in store (to avoid duplicate desktop notifications)
-          const store = useNotificationStore.getState();
-          const alreadyExists = store.notifications.some(n => String(n.id) === String(notification.id));
+          batch.push(notificationData);
 
-          // Add to notification store (shows in notification panel + badge count)
-          store.addNotification(notificationData);
-
-          // Check if notification is recent (within 5 minutes)
+          // Track recent + truly new notifications for popups
+          const alreadyExists = existingIds.has(notifIdStr);
           const notificationTime = new Date(notification.timestamp || Date.now()).getTime();
           const isRecent = (now - notificationTime) < RECENT_THRESHOLD;
-
-          // Show popup and desktop notification ONLY for recent AND truly new notifications
-          // Skip if notification already existed in store (prevents spam on page reload)
           if (isRecent && !alreadyExists) {
-            // Check if page is visible or hidden/minimized
-            const isPageHidden = document.hidden || document.visibilityState === 'hidden';
-
-            if (isPageHidden) {
-              // Page is HIDDEN/MINIMIZED: Show BOTH desktop AND in-app notification
-              this.showDesktopNotification(notification);
-              this.showIncomingNotificationPopup(notification);
-            } else {
-              // Page is VISIBLE: Show in-app notification popup only
-              this.showIncomingNotificationPopup(notification);
-            }
+            recentNew.push(notification);
           }
+        }
+
+        // Single store update for all notifications
+        store.addNotifications(batch);
+
+        // Show popups for recent new notifications
+        const isPageHidden = document.hidden || document.visibilityState === 'hidden';
+        for (const notification of recentNew) {
+          if (isPageHidden) {
+            this.showDesktopNotification(notification);
+          }
+          this.showIncomingNotificationPopup(notification);
         }
       }
     } catch {

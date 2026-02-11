@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate, useLocation } from 'react-router-dom'; // Add router imports
+import { useNavigate } from 'react-router-dom';
 import {
   Bell,
   Check,
   X,
-  AlertCircle,
   Info,
   CheckCircle,
   XCircle,
@@ -17,28 +16,14 @@ import {
   AlertTriangle,
   Calendar,
   Trash2,
-  ChevronRight,
   Mail,
   BellRing,
-  Search,
-  Folder,
-  Tag,
-  Eye,
-  Archive,
-  Maximize2,
-  Minimize2
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-// Tabs removed - using custom buttons for better mobile support
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
 import { formatRelativeTime } from '@/utils/dateFormatter';
 import { useNotificationStore } from '@/store/notificationStore';
 import { NotificationData } from '@/services/notificationService';
-import { sanitizeNotification, sanitizeText } from '@/utils/sanitizer';
 import { cn } from '@/lib/utils';
 import { getNotificationRedirectPath, buildNotificationUrl } from '@/utils/notificationRedirects';
 import { useAuthStore } from '@/store/authStore';
@@ -56,7 +41,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   onNavigate
 }) => {
   const navigate = useNavigate();
-  const location = useLocation();
+
   const { user } = useAuthStore();
 
   const {
@@ -73,9 +58,6 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
 
   const [showPanel, setShowPanel] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedPriority, setSelectedPriority] = useState<string>('all');
-  // NOTE: toastNotifications state removed - toast is now handled by realtimeNotificationHub.ts
 
   // Delay rendering to prevent flash during page load
   const [isReady, setIsReady] = useState(false);
@@ -90,8 +72,6 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   // Refs for click outside detection
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  // Ref for toast timeout management
-  const toastTimeoutRefs = useRef<Map<string | number, NodeJS.Timeout>>(new Map());
 
   // Handle click outside with proper cleanup
   useEffect(() => {
@@ -125,57 +105,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     return undefined;
   }, [isPermissionRequested, requestPermission]);
 
-  // Clean up all toast timeouts on unmount
-  useEffect(() => {
-    return () => {
-      toastTimeoutRefs.current.forEach(timeout => clearTimeout(timeout));
-      toastTimeoutRefs.current.clear();
-    };
-  }, []);
 
-  // NOTE: Toast notifications are now handled by realtimeNotificationHub.showIncomingNotificationPopup()
-  // This custom toast display has been disabled to prevent duplicate toasts.
-  // The realtimeNotificationHub uses Sonner toast with emojis, while this used custom components with Clock icons.
-  // Keeping the effect commented for reference in case we need to restore custom toast styling later.
-  /*
-  useEffect(() => {
-    if (notifications.length === 0) return;
-
-    const latestNotification = notifications[0];
-
-    // Only show toast for new notifications (less than 10 seconds old)
-    const notificationTime = latestNotification.timestamp instanceof Date
-      ? latestNotification.timestamp.getTime()
-      : new Date(latestNotification.timestamp).getTime();
-    const isRecent = new Date().getTime() - notificationTime < 10000;
-
-    if (isRecent && !latestNotification.read) {
-      setToastNotifications(prev => {
-        const exists = prev.find(n => n.id === latestNotification.id);
-        if (exists) return prev;
-
-        const sanitized = sanitizeNotification(latestNotification);
-        const newToasts = [sanitized, ...prev.slice(0, maxNotifications - 1)];
-
-        const existingTimeout = toastTimeoutRefs.current.get(latestNotification.id);
-        if (existingTimeout) {
-          clearTimeout(existingTimeout);
-        }
-
-        const timeoutId = setTimeout(() => {
-          setToastNotifications(current =>
-            current.filter(n => n.id !== latestNotification.id)
-          );
-          toastTimeoutRefs.current.delete(latestNotification.id);
-        }, 5000);
-
-        toastTimeoutRefs.current.set(latestNotification.id, timeoutId);
-
-        return newToasts;
-      });
-    }
-  }, [notifications, maxNotifications]);
-  */
 
   const getNotificationIcon = useCallback((type: NotificationData['type']) => {
     switch (type) {
@@ -242,34 +172,17 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   const counts = useMemo(() => {
     const all = notifications.length;
     const unread = notifications.filter(n => !n.read).length;
-    const pr = notifications.filter(n => n.category === 'approval').length;
-    const system = notifications.filter(n => n.category === 'system').length;
     const urgent = notifications.filter(n => n.priority === 'urgent' && !n.read).length;
-    return { all, unread, pr, system, urgent };
+    return { all, unread, urgent };
   }, [notifications]);
 
+  // Notifications are already sanitized in notificationStore.addNotification via sanitizeNotificationData
   const filteredNotifications = useMemo(() => {
-    return notifications
-      .map(n => sanitizeNotification(n))
-      .filter(n => {
-        if (activeTab === 'unread' && n.read) return false;
-        if (activeTab === 'pr' && n.category !== 'approval') return false;
-        if (activeTab === 'system' && n.category !== 'system') return false;
-
-        if (selectedPriority !== 'all' && n.priority !== selectedPriority) return false;
-
-        if (searchQuery) {
-          const query = searchQuery.toLowerCase();
-          return (
-            n.title.toLowerCase().includes(query) ||
-            n.message.toLowerCase().includes(query) ||
-            n.metadata?.project?.toLowerCase().includes(query) ||
-            n.metadata?.sender?.toLowerCase().includes(query)
-          );
-        }
-        return true;
-      });
-  }, [notifications, activeTab, selectedPriority, searchQuery]);
+    return notifications.filter(n => {
+      if (activeTab === 'unread' && n.read) return false;
+      return true;
+    });
+  }, [notifications, activeTab]);
 
   const formatTimestamp = useCallback((date: Date) => {
     return formatRelativeTime(date);
@@ -277,252 +190,73 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
 
   // NOTE: removeToast callback removed - toast is now handled by realtimeNotificationHub.ts
 
-  // Enhanced notification action handler with smart redirects
-  const handleNotificationAction = useCallback((notification: NotificationData) => {
-    // Get user role for building proper paths - use role name (string), NOT role_id (number)
-    // role is the string name like "buyer", "technicalDirector", etc.
-    const userRole = user?.role || '';
+  // Helper: navigate to a path (SPA-aware, closes panel, marks read)
+  const doNavigate = useCallback((path: string, notificationId?: string) => {
+    setShowPanel(false);
 
-    console.log('[NotificationSystem] Handling notification:', {
-      title: notification.title,
-      category: notification.category,
-      metadata: notification.metadata,
-      actionUrl: notification.actionUrl,
-      userRole
-    });
-
-    // PRIORITY 1: Use smart redirect based on notification content (most reliable)
-    // This ensures correct routing based on what the notification is about
-    const redirectConfig = getNotificationRedirectPath(notification, userRole);
-
-    if (redirectConfig) {
-      const redirectUrl = buildNotificationUrl(redirectConfig);
-      console.log('[NotificationSystem] Smart redirect URL:', redirectUrl);
-
-      try {
-        if (onNavigate) {
-          onNavigate(redirectUrl);
-        } else {
-          navigate(redirectUrl, {
-            replace: false,
-            state: {
-              from: location.pathname,
-              notification: notification.id,
-              autoFocus: true
-            }
-          });
-        }
-        setShowPanel(false);
-        markAsRead(notification.id);
-        return;
-      } catch (error) {
-        console.error('[NotificationSystem] Navigation error:', error);
-      }
-    }
-
-
-    // PRIORITY 2: Use backend actionUrl if smart redirect didn't work
-    const backendActionUrl = notification.actionUrl || notification.metadata?.actionUrl || notification.metadata?.action_url;
-    if (backendActionUrl && typeof backendActionUrl === 'string') {
-      try {
-        // SPECIAL CASE: Estimators receiving purchase/material-purchase notifications
-        // Should go to their change-requests page, not buyer's purchase-orders page
-        const isEstimator = userRole && (
-          userRole.toString().toLowerCase().includes('estimator') ||
-          userRole === '3' || userRole === 3
-        );
-
-        // Check if URL is for buyer/purchase pages that Estimator shouldn't access
-        // Handle both /extra-material and /estimator/extra-material formats
-        const isBuyerPurchaseUrl =
-          backendActionUrl.includes('/material-purchase') ||
-          backendActionUrl.includes('/purchase-orders') ||
-          backendActionUrl.includes('/extra-material') ||
-          backendActionUrl.includes('/buyer/');
-
-        if (isEstimator && isBuyerPurchaseUrl) {
-          // Redirect Estimator to their change-requests page instead
-          const redirectPath = buildRolePath(userRole, '/change-requests');
-          const queryParams = new URLSearchParams();
-
-          // Extract cr_id from the original URL or metadata
-          if (notification.metadata?.cr_id) {
-            queryParams.set('cr_id', String(notification.metadata.cr_id));
-          } else {
-            // Try to extract from URL query params
-            try {
-              const urlObj = new URL(backendActionUrl, window.location.origin);
-              const crId = urlObj.searchParams.get('cr_id');
-              if (crId) {
-                queryParams.set('cr_id', crId);
-              }
-            } catch {
-              // Invalid URL, ignore
-            }
-          }
-
-          const fullPath = queryParams.toString()
-            ? `${redirectPath}?${queryParams.toString()}`
-            : redirectPath;
-
-          if (onNavigate) {
-            onNavigate(fullPath);
-          } else {
-            navigate(fullPath, {
-              replace: false,
-              state: {
-                from: location.pathname,
-                notification: notification.id,
-                autoFocus: true
-              }
-            });
-          }
-          setShowPanel(false);
-          markAsRead(notification.id);
-          return;
-        }
-
-        // SPECIAL CASE: TD receiving vendor approval notifications
-        // Old notifications may have /vendor-approval URL, should go to /change-requests
-        const isTD = userRole && (
-          userRole.toString().toLowerCase().includes('technical') ||
-          userRole.toString().toLowerCase().includes('director') ||
-          userRole === '2' || userRole === 2
-        );
-
-        const isOldVendorApprovalUrl = backendActionUrl.includes('/vendor-approval');
-
-        if (isTD && isOldVendorApprovalUrl) {
-          // Redirect TD to their change-requests page instead
-          const redirectPath = buildRolePath(userRole, '/change-requests');
-          const queryParams = new URLSearchParams();
-
-          // Extract cr_id from the original URL or metadata
-          if (notification.metadata?.cr_id) {
-            queryParams.set('cr_id', String(notification.metadata.cr_id));
-          } else {
-            // Try to extract from URL query params
-            try {
-              const urlObj = new URL(backendActionUrl, window.location.origin);
-              const crId = urlObj.searchParams.get('cr_id');
-              if (crId) {
-                queryParams.set('cr_id', crId);
-              }
-            } catch {
-              // Invalid URL, ignore
-            }
-          }
-
-          const fullPath = queryParams.toString()
-            ? `${redirectPath}?${queryParams.toString()}`
-            : redirectPath;
-
-          if (onNavigate) {
-            onNavigate(fullPath);
-          } else {
-            navigate(fullPath, {
-              replace: false,
-              state: {
-                from: location.pathname,
-                notification: notification.id,
-                autoFocus: true
-              }
-            });
-          }
-          setShowPanel(false);
-          markAsRead(notification.id);
-          return;
-        }
-
-        // Normal backend URL handling
-        const knownRolePrefixes = [
-          '/technical-director', '/estimator', '/project-manager',
-          '/site-engineer', '/buyer', '/admin', '/production-manager',
-          '/site-supervisor', '/mep-supervisor', '/mep', '/accounts'
-        ];
-        const hasRolePrefix = knownRolePrefixes.some(prefix =>
-          backendActionUrl.startsWith(prefix + '/') || backendActionUrl.startsWith(prefix + '?')
-        );
-
-        const fullPath = backendActionUrl.startsWith('/') && !hasRolePrefix
-          ? buildRolePath(userRole, backendActionUrl)
-          : backendActionUrl;
-
-        console.log('[NotificationSystem] Backend action URL fallback:', fullPath);
-
-        if (onNavigate) {
-          onNavigate(fullPath);
-        } else {
-          navigate(fullPath, {
-            replace: false,
-            state: {
-              from: location.pathname,
-              notification: notification.id,
-              autoFocus: true
-            }
-          });
-        }
-        setShowPanel(false);
-        markAsRead(notification.id);
-        return;
-      } catch (error) {
-        console.error('[NotificationSystem] Backend URL navigation error:', error);
-      }
-    }
-
-    // PRIORITY 3: Fallback to metadata.link
-    if (notification.metadata?.link) {
-      try {
-        const link = notification.metadata.link;
-        if (link.includes('/boq/')) {
-          const boqId = link.split('/boq/').pop()?.split('?')[0];
-          const isTD = userRole && (
-            userRole.toString().toLowerCase().includes('technical') ||
-            userRole.toString().toLowerCase().includes('director') ||
-            userRole === '2' || userRole === 2
-          );
-          const targetPath = isTD ? '/project-approvals' : '/projects';
-          const fullPath = buildRolePath(userRole, targetPath);
-          navigate(`${fullPath}?boq_id=${boqId}&tab=pending`, {
-            replace: false,
-            state: { from: location.pathname }
-          });
-        } else if (link.startsWith('http')) {
-          window.open(link, '_blank', 'noopener,noreferrer');
-        } else {
-          const fullPath = link.startsWith('/') ? link : `/${link}`;
-          navigate(fullPath, {
-            replace: false,
-            state: { from: location.pathname }
-          });
-        }
-        setShowPanel(false);
-      } catch (error) {
-        console.error('[NotificationSystem] Link navigation error:', error);
-        window.location.href = notification.metadata.link;
-      }
-    }
-
-    markAsRead(notification.id);
-  }, [markAsRead, navigate, location.pathname, onNavigate, user]);
-
-  // ADDED: Helper function to safely navigate
-  const safeNavigate = useCallback((path: string) => {
     try {
       if (onNavigate) {
+        if (notificationId) markAsRead(notificationId);
         onNavigate(path);
+        return;
+      }
+
+      if (notificationId) markAsRead(notificationId);
+
+      const currentPathname = window.location.pathname;
+      const targetPathname = path.split('?')[0].split('#')[0];
+      const navState = { from: currentPathname, notification: notificationId, autoFocus: true, ts: Date.now() };
+
+      if (currentPathname === targetPathname) {
+        // Same-page navigation: defer to next tick so the panel-close state update
+        // and the route change are processed in separate React render cycles.
+        // Without this, React 18 batching can prevent useSearchParams from
+        // detecting the URL change when the pathname hasn't changed.
+        setTimeout(() => {
+          navigate(path, { replace: true, state: navState });
+        }, 0);
       } else {
-        navigate(path, {
-          replace: false,
-          state: { from: location.pathname }
-        });
+        navigate(path, { replace: false, state: navState });
       }
     } catch (error) {
-      console.error('Safe navigation error:', error);
-      // Fallback
+      console.error('[NotificationSystem] Navigation error:', error);
       window.location.href = path;
     }
-  }, [navigate, location.pathname, onNavigate]);
+  }, [navigate, onNavigate, markAsRead]);
+
+  // Notification click handler: determines the correct redirect path
+  const handleNotificationAction = useCallback((notification: NotificationData) => {
+    const userRole = user?.role || '';
+
+    // ── PRIORITY 1: Smart content-based redirect (handles all 50+ notification types) ──
+    const redirectConfig = getNotificationRedirectPath(notification, userRole);
+    if (redirectConfig) {
+      const redirectUrl = buildNotificationUrl(redirectConfig);
+      doNavigate(redirectUrl, String(notification.id));
+      return;
+    }
+
+    // ── PRIORITY 2: Backend actionUrl (already has role-prefix from server) ──
+    const backendUrl = notification.actionUrl || notification.metadata?.actionUrl || notification.metadata?.action_url;
+    if (backendUrl && typeof backendUrl === 'string' && backendUrl.startsWith('/')) {
+      doNavigate(backendUrl, String(notification.id));
+      return;
+    }
+
+    // ── PRIORITY 3: metadata.link (legacy fallback) ──
+    if (notification.metadata?.link) {
+      const link = notification.metadata.link;
+      if (link.startsWith('http')) {
+        window.open(link, '_blank', 'noopener,noreferrer');
+      } else {
+        doNavigate(link.startsWith('/') ? link : `/${link}`, String(notification.id));
+        return;
+      }
+    }
+
+    // No redirect available – just mark as read
+    markAsRead(String(notification.id));
+  }, [markAsRead, doNavigate, user]);
 
   // Register desktop notification click handler
   useEffect(() => {
@@ -548,7 +282,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
     return () => {
       // Cleanup handlers on unmount
       import('@/services/notificationService').then(({ notificationService }) => {
-        notificationService.setNotificationClickHandler(null);
+        notificationService.setNotificationClickHandler(null as any);
       });
 
       if ('serviceWorker' in navigator) {
@@ -661,7 +395,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                     variant="ghost"
                     onClick={() => {
                       // Build role-based path for notifications
-                      const userRole = user?.role_id || user?.role || '';
+                      const userRole = String(user?.role_id || user?.role || '');
                       const notificationsPath = buildRolePath(userRole, '/notifications');
                       navigate(notificationsPath);
                       setShowPanel(false);
@@ -777,10 +511,10 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
 
                             <div className="flex items-center gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                               <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
-                                {/* Temporarily hidden - timestamp showing incorrect time */}
-                                {/* <span className="text-xs text-gray-400">
-                                    {formatTimestamp(notification.timestamp)}
-                                  </span> */}
+                                <span className="text-[10px] sm:text-xs text-gray-400 whitespace-nowrap">
+                                  <Clock className="w-2.5 sm:w-3 h-2.5 sm:h-3 inline mr-0.5" />
+                                  {formatTimestamp(notification.timestamp)}
+                                </span>
                                 {notification.metadata?.sender && (
                                   <span className="text-[10px] sm:text-xs text-gray-500 truncate">
                                     <Users className="w-2.5 sm:w-3 h-2.5 sm:h-3 inline mr-0.5 sm:mr-1" />
@@ -800,7 +534,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                                     size="sm"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      markAsRead(notification.id);
+                                      markAsRead(String(notification.id));
                                     }}
                                     className="h-5 w-5 sm:h-6 sm:w-6 p-0"
                                     title="Mark as read"
@@ -813,7 +547,7 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
                                   size="sm"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    deleteNotification(notification.id);
+                                    deleteNotification(String(notification.id));
                                   }}
                                   className="h-5 w-5 sm:h-6 sm:w-6 p-0 text-gray-400 hover:text-red-600"
                                   title="Delete"

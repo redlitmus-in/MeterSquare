@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useSearchParams, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   BuildingOfficeIcon,
@@ -142,6 +143,8 @@ interface Buyer {
 
 const MyProjects: React.FC = () => {
   const { user } = useAuthStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
 
   // ROLE-AWARE: Determine page title based on URL path (for admin viewing different roles) or user role
   const currentPath = window.location.pathname;
@@ -169,8 +172,12 @@ const MyProjects: React.FC = () => {
   const [selectedItemsInfo, setSelectedItemsInfo] = useState<Array<{ item_code: string; description: string }>>([]);
   const [itemAssignmentRefreshTrigger, setItemAssignmentRefreshTrigger] = useState(0);
 
-  // Tab filter state - must be declared before useProjectsAutoSync
-  const [filterStatus, setFilterStatus] = useState<'for_approval' | 'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('for_approval');
+  // Tab filter state - initialize from URL ?tab= param so notification redirects work
+  const validTabs = ['for_approval', 'pending', 'assigned', 'completed', 'approved', 'rejected'] as const;
+  type TabType = typeof validTabs[number];
+  const urlTab = searchParams.get('tab') as TabType | null;
+  const initialTab: TabType = urlTab && validTabs.includes(urlTab) ? urlTab : 'for_approval';
+  const [filterStatus, setFilterStatus] = useState<TabType>(initialTab);
   const [tabCounts, setTabCounts] = useState({
     for_approval: 0,
     pending: 0,
@@ -179,6 +186,30 @@ const MyProjects: React.FC = () => {
     rejected: 0,
     completed: 0
   });
+
+  // Sync tab from URL when navigating via notification clicks.
+  // Uses location.key (changes on every navigation) instead of searchParams
+  // to reliably detect same-page navigations from notifications.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tabParam = params.get('tab') as TabType | null;
+    if (tabParam && validTabs.includes(tabParam)) {
+      setFilterStatus(prev => prev === tabParam ? prev : tabParam);
+    }
+
+    // For notification clicks with project_id/boq_id but no tab,
+    // reset guards so auto-open and auto-tab-detection can re-run
+    if (location.state?.notification) {
+      const hasProjectId = params.has('project_id') || params.has('boq_id');
+      if (hasProjectId) {
+        lastProcessedProjectIdRef.current = null;
+        setAutoTabDetected(false);
+      }
+    }
+  }, [location.key]);
+
+  // Auto-detect correct tab when project_id is in URL (from notification click)
+  const [autoTabDetected, setAutoTabDetected] = useState(false);
 
   // Pause auto-refresh when any modal is open to prevent flickering during editing
   const isAnyModalOpen = showEditBOQModal || showAssignModal || showCreateBOQModal || showItemAssignmentModal;
@@ -343,6 +374,52 @@ const MyProjects: React.FC = () => {
   const [completionDetails, setCompletionDetails] = useState<any>(null);
   const [loadingCompletionDetails, setLoadingCompletionDetails] = useState(false);
 
+  // Track last processed project_id to prevent duplicate opens but allow new notification clicks
+  const lastProcessedProjectIdRef = useRef<string | null>(null);
+
+  // Auto-open project details when navigating from notification (project_id in URL)
+  useEffect(() => {
+    const projectIdParam = searchParams.get('project_id');
+    if (!projectIdParam) return;
+    if (lastProcessedProjectIdRef.current === projectIdParam) return;
+    if (!projects || projects.length === 0 || loading) return;
+
+    const targetProjectId = parseInt(projectIdParam, 10);
+    if (isNaN(targetProjectId)) {
+      lastProcessedProjectIdRef.current = projectIdParam;
+      return;
+    }
+
+    lastProcessedProjectIdRef.current = projectIdParam;
+
+    // Find the matching project in loaded data
+    const matchingProject = projects.find((p: any) =>
+      p.project_id === targetProjectId || p.id === targetProjectId
+    );
+
+    if (matchingProject) {
+      setSelectedProject(matchingProject);
+
+      // If the project has a BOQ, open it in fullscreen view
+      if (matchingProject.boq_id) {
+        loadBOQDetails(matchingProject.boq_id).then(() => {
+          setFullScreenBoqMode('view');
+          setShowFullScreenBOQ(true);
+        }).catch((err: any) => {
+          console.error('[MyProjects] Error loading BOQ from notification:', err);
+          lastProcessedProjectIdRef.current = null;
+        });
+      }
+
+      // Clean notification params from URL
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete('project_id');
+      setSearchParams(newParams, { replace: true });
+    } else {
+      lastProcessedProjectIdRef.current = null; // Allow retry when data loads
+    }
+  }, [projects, searchParams, loading]);
+
   useEffect(() => {
     if (showAssignModal) {
       loadAvailableSEs();
@@ -377,6 +454,7 @@ const MyProjects: React.FC = () => {
   }, [filterStatus, refetch]);
 
   // Fetch all tab counts once on component mount (not on every tab change)
+  // Also auto-detect correct tab when project_id is in URL (from notification click)
   useEffect(() => {
     const fetchTabCounts = async () => {
       try {
@@ -403,6 +481,37 @@ const MyProjects: React.FC = () => {
           rejected: (rejectedRes.data || []).length,
           completed: (completedRes.data || []).length,
         });
+
+        // Auto-detect correct tab when project_id or boq_id is in URL (from notification click)
+        // Only auto-detect if no explicit tab was provided
+        const targetProjectId = searchParams.get('project_id');
+        const targetBoqId = searchParams.get('boq_id');
+        if ((targetProjectId || targetBoqId) && !autoTabDetected && !searchParams.get('tab')) {
+          const tabDataMap: Record<TabType, any[]> = {
+            for_approval: forApprovalRes.data || [],
+            pending: pendingRes.data || [],
+            assigned: assignedRes.data || [],
+            approved: approvedRes.data || [],
+            rejected: rejectedRes.data || [],
+            completed: completedRes.data || [],
+          };
+
+          // Search all tabs to find which one contains the project/BOQ
+          for (const tab of validTabs) {
+            const found = tabDataMap[tab].some((p: any) => {
+              if (targetProjectId && p.project_id === Number(targetProjectId)) return true;
+              if (targetBoqId && p.boq_id === Number(targetBoqId)) return true;
+              return false;
+            });
+            if (found) {
+              setAutoTabDetected(true);
+              if (tab !== filterStatus) {
+                setFilterStatus(tab);
+              }
+              break;
+            }
+          }
+        }
       } catch (error) {
         console.error('Error fetching tab counts:', error);
       }

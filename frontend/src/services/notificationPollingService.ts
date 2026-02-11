@@ -95,19 +95,16 @@ class NotificationPollingService {
 
   /**
    * Fetch latest notifications from API
-   * Only fetches when Socket.IO is disconnected to minimize server load
+   * Always fetches as safety net - Socket.IO can silently fail after server restarts
    */
   private async fetchNotifications() {
     try {
-      // OPTIMIZATION: Only poll if Socket.IO is disconnected
       const hubStatus = realtimeNotificationHub.getStatus();
       if (hubStatus.socketConnected) {
-        if (import.meta.env.DEV) {
-          console.log('[Polling] Skipping poll - Socket.IO is connected');
+        // Socket.IO connected - use max backoff to reduce server load but still poll
+        if (this.backoffMultiplier < this.maxBackoffMultiplier) {
+          this.backoffMultiplier = this.maxBackoffMultiplier;
         }
-        // Reset backoff when Socket.IO is connected
-        this.backoffMultiplier = 1;
-        return;
       }
 
       const token = localStorage.getItem('access_token');
@@ -156,8 +153,9 @@ class NotificationPollingService {
         }
 
         const newNotifications = data.notifications.filter((notif: any) => {
-          // Skip if already processed
-          if (this.processedNotificationIds.has(notif.id)) {
+          // Skip if already processed (normalize to string for consistent comparison)
+          const notifIdStr = String(notif.id);
+          if (this.processedNotificationIds.has(notifIdStr)) {
             return false;
           }
 
@@ -171,8 +169,11 @@ class NotificationPollingService {
           // Add each new notification to the store AND show popup
           const store = useNotificationStore.getState();
           for (const notif of newNotifications) {
+            // Normalize ID to string for consistent comparison
+            const notifIdStr = String(notif.id);
+
             // Mark as processed BEFORE adding to store
-            this.processedNotificationIds.add(notif.id);
+            this.processedNotificationIds.add(notifIdStr);
 
             // Limit processed IDs set size to prevent memory leaks
             if (this.processedNotificationIds.size > this.maxProcessedIds) {
@@ -182,7 +183,7 @@ class NotificationPollingService {
             }
 
             const notificationData = {
-              id: notif.id,
+              id: notifIdStr,
               type: notif.type || 'info',
               title: notif.title,
               message: notif.message,

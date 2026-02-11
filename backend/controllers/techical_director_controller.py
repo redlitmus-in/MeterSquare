@@ -448,25 +448,30 @@ def td_mail_send():
             log.info(f"✅ TD rejection - BOQ {boq_id} will show only in Rejected tab")
  
         # ==================== UPDATE BOQ & HISTORY ====================
+        # Cache BOQ fields BEFORE commit (avoid lazy-loading issues after commit)
+        cached_has_internal_revisions = bool(boq.has_internal_revisions)
+        cached_internal_revision_number = boq.internal_revision_number or 0
+        cached_project_name = project.project_name
+
         # Update BOQ status
         boq.status = new_status
         boq.email_sent = True
         boq.last_modified_by = td_name
         boq.last_modified_at = datetime.utcnow()
- 
+
         # Append new action to existing actions array
         current_actions.append(new_action)
- 
+
         log.info(f"BOQ {boq_id} - New action created: {new_action}")
         log.info(f"BOQ {boq_id} - Current actions after append: {current_actions}")
- 
+
         if existing_history:
             # Update existing history
             existing_history.action = current_actions
             # Mark the JSONB field as modified for SQLAlchemy to detect changes
             from sqlalchemy.orm.attributes import flag_modified
             flag_modified(existing_history, "action")
- 
+
             existing_history.action_by = td_name
             existing_history.boq_status = new_status
             existing_history.sender = td_name
@@ -477,7 +482,7 @@ def td_mail_send():
             existing_history.action_date = datetime.utcnow()
             existing_history.last_modified_by = td_name
             existing_history.last_modified_at = datetime.utcnow()
- 
+
             log.info(f"BOQ {boq_id} - Updated existing history with {len(current_actions)} actions")
         else:
             # Create new history entry
@@ -496,83 +501,190 @@ def td_mail_send():
             )
             db.session.add(boq_history)
             log.info(f"BOQ {boq_id} - Created new history with {len(current_actions)} actions")
- 
+
         db.session.commit()
         log.info(f"BOQ {boq_id} - Database committed successfully")
- 
-        # Send notification about TD's decision
-        try:
-            # Get estimator user_id for notification from BOQHistory actions
-            # This ensures we notify the CORRECT estimator who sent the BOQ to TD
-            estimator_user_id = None
 
-            # Find the latest "sent_to_td" action to get the estimator's user_id
+        # ==================== SEND NOTIFICATION ====================
+        notification_sent = False
+        notification_error_msg = None
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+            from utils.role_route_mapper import get_boq_view_url
+
+            # Build recipient list: notify both the estimator (BOQ creator) and
+            # the PM who forwarded the BOQ to TD (if different from estimator)
+            recipient_user_ids = set()
+
+            # 1. Get the real estimator (BOQ creator) user_id
+            if estimator and hasattr(estimator, 'user_id') and estimator.user_id:
+                recipient_user_ids.add(estimator.user_id)
+                log.info(f"BOQ {boq_id} - Estimator recipient: user_id={estimator.user_id}, name={estimator_name}")
+
+            # 2. Get PM/user who forwarded BOQ to TD (from sent_to_td action)
             if current_actions:
-                for action in reversed(current_actions):  # Check from most recent
+                for action in reversed(current_actions):
                     if action.get('type') == 'sent_to_td' and action.get('decided_by_user_id'):
-                        estimator_user_id = action.get('decided_by_user_id')
+                        fwd_uid = action.get('decided_by_user_id')
+                        recipient_user_ids.add(fwd_uid)
+                        log.info(f"BOQ {boq_id} - Forwarder recipient: user_id={fwd_uid}")
                         break
 
-            # Fallback: Try to get from estimator object (old logic for backwards compatibility)
-            if not estimator_user_id and estimator and hasattr(estimator, 'user_id'):
-                estimator_user_id = estimator.user_id
+            # 3. Final fallback: use the estimator object directly
+            if not recipient_user_ids and estimator:
+                try:
+                    est_id = getattr(estimator, 'user_id', None)
+                    if est_id:
+                        recipient_user_ids.add(est_id)
+                        log.info(f"BOQ {boq_id} - Fallback estimator recipient: user_id={est_id}")
+                except Exception:
+                    pass
 
-            if estimator_user_id:
-                log.info(f"Sending notification to estimator user_id {estimator_user_id} ({estimator_name})")
+            if not recipient_user_ids:
+                log.warning(f"BOQ {boq_id} - No recipients found for notification. estimator={estimator}, estimator.user_id={getattr(estimator, 'user_id', None)}")
+                notification_error_msg = "No recipient found for notification"
+            else:
+                decision = 'approved' if technical_director_status.lower() == 'approved' else 'rejected'
+                log.info(f"BOQ {boq_id} - Sending TD {decision} notification to {len(recipient_user_ids)} recipient(s): {recipient_user_ids}")
+                log.info(f"BOQ {boq_id} - cached_has_internal_revisions={cached_has_internal_revisions}, cached_internal_revision_number={cached_internal_revision_number}")
+
                 # Check if this BOQ has internal revisions - send specific notification
-                if boq.has_internal_revisions and boq.internal_revision_number and boq.internal_revision_number > 0:
-                    from utils.comprehensive_notification_service import ComprehensiveNotificationService
-                    if technical_director_status.lower() == 'approved':
-                        ComprehensiveNotificationService.notify_internal_revision_approved(
-                            boq_id=boq_id,
-                            project_name=project.project_name,
-                            revision_number=boq.internal_revision_number,
-                            td_id=td_user_id,
-                            td_name=td_name,
-                            actor_user_id=estimator_user_id,
-                            actor_name=estimator_name
-                        )
-                        log.info(f"Sent internal revision approved notification for BOQ {boq_id}")
-                    else:
-                        ComprehensiveNotificationService.notify_internal_revision_rejected(
-                            boq_id=boq_id,
-                            project_name=project.project_name,
-                            revision_number=boq.internal_revision_number,
-                            td_id=td_user_id,
-                            td_name=td_name,
-                            actor_user_id=estimator_user_id,
-                            actor_name=estimator_name,
-                            rejection_reason=rejection_reason or comments or "No reason provided"
-                        )
-                        log.info(f"Sent internal revision rejected notification for BOQ {boq_id}")
+                is_internal_revision = cached_has_internal_revisions and cached_internal_revision_number > 0
+
+                if is_internal_revision:
+                    log.info(f"BOQ {boq_id} - Using INTERNAL REVISION notification path")
+                    try:
+                        from utils.comprehensive_notification_service import ComprehensiveNotificationService
+                        for uid in recipient_user_ids:
+                            try:
+                                if decision == 'approved':
+                                    ComprehensiveNotificationService.notify_internal_revision_approved(
+                                        boq_id=boq_id,
+                                        project_name=cached_project_name,
+                                        revision_number=cached_internal_revision_number,
+                                        td_id=td_user_id,
+                                        td_name=td_name,
+                                        actor_user_id=uid,
+                                        actor_name=estimator_name
+                                    )
+                                else:
+                                    ComprehensiveNotificationService.notify_internal_revision_rejected(
+                                        boq_id=boq_id,
+                                        project_name=cached_project_name,
+                                        revision_number=cached_internal_revision_number,
+                                        td_id=td_user_id,
+                                        td_name=td_name,
+                                        actor_user_id=uid,
+                                        actor_name=estimator_name,
+                                        rejection_reason=rejection_reason or comments or "No reason provided"
+                                    )
+                                notification_sent = True
+                                log.info(f"BOQ {boq_id} - Internal revision {decision} notification sent to user {uid}")
+                            except Exception as per_user_err:
+                                log.error(f"BOQ {boq_id} - Service notification failed for user {uid}: {per_user_err}")
+                                import traceback
+                                log.error(traceback.format_exc())
+                    except Exception as svc_import_err:
+                        log.error(f"BOQ {boq_id} - ComprehensiveNotificationService import/call failed: {svc_import_err}")
+
+                    # If service notification failed, create directly in DB
+                    if not notification_sent:
+                        log.info(f"BOQ {boq_id} - Service failed, creating notification directly in DB")
+                        for uid in recipient_user_ids:
+                            try:
+                                notif_title = f'Internal Revision {"Approved" if decision == "approved" else "Rejected"}'
+                                notif_msg = (
+                                    f'Internal revision #{cached_internal_revision_number} for {cached_project_name} '
+                                    f'was {decision} by {td_name}'
+                                )
+                                if decision == 'rejected':
+                                    notif_msg += f'. Reason: {rejection_reason or comments or "No reason provided"}'
+                                fallback_notif = NotificationManager.create_notification(
+                                    user_id=uid,
+                                    type='success' if decision == 'approved' else 'rejection',
+                                    title=notif_title,
+                                    message=notif_msg,
+                                    priority='high',
+                                    category='boq',
+                                    action_url=get_boq_view_url(uid, boq_id, tab='rejected' if decision == 'rejected' else 'revisions'),
+                                    action_label='View BOQ',
+                                    metadata={'boq_id': boq_id, 'internal_revision_number': cached_internal_revision_number, 'decision': decision},
+                                    sender_id=td_user_id,
+                                    sender_name=td_name,
+                                    target_role='estimator'
+                                )
+                                send_notification_to_user(uid, fallback_notif.to_dict())
+                                notification_sent = True
+                                log.info(f"BOQ {boq_id} - Direct DB notification created for user {uid}, id={fallback_notif.id}")
+                            except Exception as fallback_err:
+                                log.error(f"BOQ {boq_id} - Direct DB notification also failed for user {uid}: {fallback_err}")
                 else:
                     # Regular BOQ approval/rejection notification
-                    notification_service.notify_td_boq_decision(
-                        boq_id=boq_id,
-                        project_name=project.project_name,
-                        td_id=td_user_id,
-                        td_name=td_name,
-                        recipient_user_ids=[estimator_user_id],
-                        approved=(technical_director_status.lower() == 'approved'),
-                        rejection_reason=rejection_reason if technical_director_status.lower() == 'rejected' else None
-                    )
-            else:
-                log.warning(f"Could not find estimator user_id for BOQ {boq_id} notification")
+                    log.info(f"BOQ {boq_id} - Using REGULAR BOQ notification path")
+                    try:
+                        notification_service.notify_td_boq_decision(
+                            boq_id=boq_id,
+                            project_name=cached_project_name,
+                            td_id=td_user_id,
+                            td_name=td_name,
+                            recipient_user_ids=list(recipient_user_ids),
+                            approved=(decision == 'approved'),
+                            rejection_reason=rejection_reason if decision == 'rejected' else None
+                        )
+                        notification_sent = True
+                        log.info(f"BOQ {boq_id} - Regular TD {decision} notification sent via service")
+                    except Exception as regular_err:
+                        log.error(f"BOQ {boq_id} - Regular notification service failed: {regular_err}")
+                        import traceback
+                        log.error(traceback.format_exc())
+
+                    # If service notification failed, create directly in DB
+                    if not notification_sent:
+                        log.info(f"BOQ {boq_id} - Service failed, creating notification directly in DB")
+                        for uid in recipient_user_ids:
+                            try:
+                                notif_title = f'BOQ {"Approved" if decision == "approved" else "Rejected"} by Technical Director'
+                                notif_msg = f'BOQ for {cached_project_name} has been {decision} by {td_name}'
+                                if decision == 'rejected':
+                                    notif_msg += f'. Reason: {rejection_reason or "No reason provided"}'
+                                fallback_notif = NotificationManager.create_notification(
+                                    user_id=uid,
+                                    type='success' if decision == 'approved' else 'rejection',
+                                    title=notif_title,
+                                    message=notif_msg,
+                                    priority='high',
+                                    category='boq',
+                                    action_url=get_boq_view_url(uid, boq_id, tab='approved' if decision == 'approved' else 'rejected'),
+                                    action_label='View BOQ',
+                                    metadata={'boq_id': boq_id, 'decision': decision},
+                                    sender_id=td_user_id,
+                                    sender_name=td_name,
+                                    target_role='estimator'
+                                )
+                                send_notification_to_user(uid, fallback_notif.to_dict())
+                                notification_sent = True
+                                log.info(f"BOQ {boq_id} - Direct DB notification created for user {uid}, id={fallback_notif.id}")
+                            except Exception as fallback_err:
+                                log.error(f"BOQ {boq_id} - Direct DB notification also failed for user {uid}: {fallback_err}")
         except Exception as notif_error:
-            log.error(f"Failed to send TD decision notification: {notif_error}")
+            log.error(f"BOQ {boq_id} - Critical: Failed to send TD decision notification: {notif_error}")
             import traceback
             log.error(traceback.format_exc())
- 
-        log.info(f"BOQ {boq_id} {new_status.lower()} by TD, email sent to {recipient_email}")
- 
+            notification_error_msg = str(notif_error)
+
+        log.info(f"BOQ {boq_id} {new_status.lower()} by TD, notification_sent={notification_sent}")
+
         return jsonify({
             "success": True,
-            "message": f"BOQ {new_status.lower()} successfully and email sent to {recipient_role}",
+            "message": f"BOQ {new_status.lower()} successfully",
             "boq_id": boq_id,
             "status": new_status,
             "recipient": recipient_email,
             "recipient_role": recipient_role,
-            "recipient_name": recipient_name
+            "recipient_name": recipient_name,
+            "notification_sent": notification_sent,
+            "notification_error": "Notification delivery failed" if notification_error_msg else None
         }), 200
  
     except Exception as e:

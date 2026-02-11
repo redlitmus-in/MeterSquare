@@ -20,10 +20,11 @@ export interface NotificationData {
   timestamp: Date;
   read: boolean;
   priority: 'low' | 'medium' | 'high' | 'urgent';
-  category: 'procurement' | 'approval' | 'vendor' | 'system' | 'project' | 'material' | 'task' | 'change_request' | 'production' | 'general';
+  category: string;
   actionRequired?: boolean;
   actionUrl?: string;
   actionLabel?: string;
+  senderName?: string;
   metadata?: {
     documentId?: string;
     documentType?: string;
@@ -33,10 +34,14 @@ export interface NotificationData {
     emailId?: string;
     recipient?: string;
     link?: string;
+    actionUrl?: string;
+    action_url?: string;
+    // IDs for all entity types
     boq_id?: string;
     cr_id?: string;
     vendor_id?: string;
     po_id?: string;
+    po_child_id?: string;
     material_id?: string;
     request_id?: string;
     dispatch_id?: string;
@@ -44,6 +49,15 @@ export interface NotificationData {
     project_id?: string;
     extension_id?: string;
     grn_id?: string;
+    return_id?: string;
+    delivery_note_id?: string;
+    requisition_id?: string;
+    ticket_id?: string;
+    assignment_id?: string;
+    request_type?: string;
+    target_role?: string;
+    // Allow additional dynamic fields from backend
+    [key: string]: any;
   };
   targetRole?: string;
 }

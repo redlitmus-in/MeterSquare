@@ -4014,17 +4014,17 @@ def send_boq_email(boq_id):
         # Initialize email service
         # boq_email_service = BOQEmailService()
 
-        # Get TD email from request or fetch all Technical Directors
-        # Handle GET request with optional JSON body (non-standard but supported)
+        # Get TD email from request - support both JSON body and query params (GET request)
         try:
             data = request.get_json(silent=True) or {}
         except Exception as e:
             log.warning(f"Failed to parse JSON body: {e}")
             data = {}
 
-        td_email = data.get('td_email')
-        td_name = data.get('full_name')
-        comments = data.get('comments')  # Get comments from request
+        # Read from JSON body first, fallback to query params for GET requests
+        td_email = data.get('td_email') or request.args.get('td_email')
+        td_name = data.get('full_name') or request.args.get('full_name')
+        comments = data.get('comments') or request.args.get('comments')
 
         if td_email:
             # Send to specific TD
@@ -4139,19 +4139,50 @@ def send_boq_email(boq_id):
             # Send notification to TD
             try:
                 from utils.comprehensive_notification_service import notification_service
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user, send_notification_to_role
                 from models.user import User as UserModel
                 # Find TD user by email
                 td_user = UserModel.query.filter_by(email=td_email).first()
                 if td_user:
                     log.info(f"[send_boq_email] Sending notification to TD {td_user.user_id}")
-                    notification_service.notify_boq_sent_to_td(
-                        boq_id=boq_id,
-                        project_name=project.project_name,
-                        estimator_id=user_id,
-                        estimator_name=user_name,
-                        td_user_id=td_user.user_id
-                    )
-                    log.info(f"[send_boq_email] Notification sent successfully")
+                    try:
+                        notification_service.notify_boq_sent_to_td(
+                            boq_id=boq_id,
+                            project_name=project.project_name,
+                            estimator_id=user_id,
+                            estimator_name=user_name,
+                            td_user_id=td_user.user_id
+                        )
+                        log.info(f"[send_boq_email] Notification sent successfully")
+                    except Exception as svc_err:
+                        log.error(f"[send_boq_email] Service notification failed: {svc_err}")
+                        # Fallback: create notification directly
+                        try:
+                            from utils.role_route_mapper import get_td_approval_url
+                            action_url = get_td_approval_url(td_user.user_id, boq_id, tab='pending')
+                            fallback_notif = NotificationManager.create_notification(
+                                user_id=td_user.user_id,
+                                type='approval',
+                                title='New BOQ for Approval',
+                                message=f'BOQ for {project.project_name} requires your approval. Submitted by {user_name}',
+                                priority='urgent',
+                                category='boq',
+                                action_required=True,
+                                action_url=action_url,
+                                action_label='Review BOQ',
+                                metadata={'boq_id': boq_id},
+                                sender_id=user_id,
+                                sender_name=user_name,
+                                target_role='technical_director'
+                            )
+                            send_notification_to_user(td_user.user_id, fallback_notif.to_dict())
+                            send_notification_to_role('technicalDirector', fallback_notif.to_dict())
+                            log.info(f"[send_boq_email] Fallback notification sent to TD {td_user.user_id}")
+                        except Exception as fallback_err:
+                            log.error(f"[send_boq_email] Fallback notification also failed: {fallback_err}")
+                else:
+                    log.warning(f"[send_boq_email] TD user not found by email: {td_email}")
             except Exception as notif_err:
                 log.error(f"[send_boq_email] Failed to send notification: {notif_err}")
 
@@ -4313,6 +4344,8 @@ def send_boq_email(boq_id):
             # Send notification to ALL TDs
             try:
                 from utils.comprehensive_notification_service import notification_service
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user, send_notification_to_role
                 log.info(f"[send_boq_email] Sending notification to {len(technical_directors)} Technical Director(s)")
                 for td in technical_directors:
                     try:
@@ -4326,6 +4359,30 @@ def send_boq_email(boq_id):
                         log.info(f"[send_boq_email] Notification sent successfully to TD {td.user_id} ({td.full_name})")
                     except Exception as td_notif_err:
                         log.error(f"[send_boq_email] Failed to send notification to TD {td.user_id}: {td_notif_err}")
+                        # Fallback: create notification directly in DB
+                        try:
+                            from utils.role_route_mapper import get_td_approval_url
+                            action_url = get_td_approval_url(td.user_id, boq_id, tab='pending')
+                            fallback_notif = NotificationManager.create_notification(
+                                user_id=td.user_id,
+                                type='approval',
+                                title='New BOQ for Approval',
+                                message=f'BOQ for {project.project_name} requires your approval. Submitted by {user_name}',
+                                priority='urgent',
+                                category='boq',
+                                action_required=True,
+                                action_url=action_url,
+                                action_label='Review BOQ',
+                                metadata={'boq_id': boq_id},
+                                sender_id=user_id,
+                                sender_name=user_name,
+                                target_role='technical_director'
+                            )
+                            send_notification_to_user(td.user_id, fallback_notif.to_dict())
+                            send_notification_to_role('technicalDirector', fallback_notif.to_dict())
+                            log.info(f"[send_boq_email] Fallback notification sent to TD {td.user_id}")
+                        except Exception as fallback_err:
+                            log.error(f"[send_boq_email] Fallback notification also failed for TD {td.user_id}: {fallback_err}")
             except Exception as notif_err:
                 log.error(f"[send_boq_email] Failed to send notifications to TDs: {notif_err}")
 

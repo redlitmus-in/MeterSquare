@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -324,6 +324,7 @@ const ProjectCreationForm: React.FC<{
 const EstimatorHub: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
 
   // Initialize tab from URL param or default to 'projects'
   const urlTab = searchParams.get('tab');
@@ -834,19 +835,56 @@ const EstimatorHub: React.FC = () => {
     loadTabSpecificData();
   }, [activeTab]);
 
-  // Sync activeTab with URL when URL changes (e.g., from notification click)
+  // Track last processed boq_id to prevent duplicate opens but allow new notification clicks
+  const lastProcessedBoqIdRef = useRef<string | null>(null);
+
+  // Sync activeTab with URL when URL changes (e.g., from notification click).
+  // Uses location.key (changes on every navigation) for reliable same-page detection.
   useEffect(() => {
-    const tabFromUrl = searchParams.get('tab');
-    if (tabFromUrl && validTabs.includes(tabFromUrl) && tabFromUrl !== activeTab) {
-      setActiveTab(tabFromUrl);
+    const params = new URLSearchParams(location.search);
+    const tabFromUrl = params.get('tab');
+    if (tabFromUrl && validTabs.includes(tabFromUrl)) {
+      setActiveTab(prev => prev === tabFromUrl ? prev : tabFromUrl);
+    }
+  }, [location.key]);
+
+  // Auto-open BOQ details when navigating from notification (boq_id in URL)
+  useEffect(() => {
+    const boqIdParam = searchParams.get('boq_id');
+    if (!boqIdParam) return;
+
+    // Skip if we already processed this exact boq_id
+    if (lastProcessedBoqIdRef.current === boqIdParam) return;
+
+    const targetBoqId = parseInt(boqIdParam, 10);
+    if (isNaN(targetBoqId)) {
+      lastProcessedBoqIdRef.current = boqIdParam;
+      return;
     }
 
-    // Check if boq_id param is present - could be used to highlight specific BOQ
-    const boqIdFromUrl = searchParams.get('boq_id');
-    if (boqIdFromUrl) {
-      // Store for potential use in highlighting the specific BOQ
-      sessionStorage.setItem('highlight_boq_id', boqIdFromUrl);
-    }
+    lastProcessedBoqIdRef.current = boqIdParam;
+
+    // Load BOQ by ID and open in fullscreen view
+    estimatorService.getBOQById(targetBoqId).then((result) => {
+      if (result.success && result.data) {
+        setSelectedBoqForDetails(result.data as any);
+        setFullScreenBoqMode('view');
+        setShowFullScreenBOQ(true);
+
+        // Clean notification params from URL
+        const newParams = new URLSearchParams(searchParams);
+        newParams.delete('boq_id');
+        newParams.delete('tab');
+        setSearchParams(newParams, { replace: true });
+      } else {
+        showError('Could not open the requested BOQ.');
+        lastProcessedBoqIdRef.current = null; // Allow retry
+      }
+    }).catch((err) => {
+      console.error('[EstimatorHub] Error loading BOQ from notification:', err);
+      showError('Could not open the requested BOQ.');
+      lastProcessedBoqIdRef.current = null; // Allow retry
+    });
   }, [searchParams]);
 
   // Check for saved draft on component mount
