@@ -364,7 +364,32 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       const fetchFreshData = async () => {
         try {
           const freshData = await buyerService.getPurchaseById(purchase.cr_id);
-          setFreshPurchaseData(freshData);
+
+          // When opening for a specific POChild (e.g. store-rejected reselection),
+          // the purchase prop has only the POChild's materials (e.g. 5 out of 7).
+          // Filter fresh parent CR data to only include those POChild materials.
+          if (purchase.po_child_id && purchase.materials && purchase.materials.length > 0 && freshData.materials) {
+            const poChildMaterialNames = new Set(
+              purchase.materials
+                .map((m: any) => normalizeForComparison(m.material_name || ''))
+                .filter((name: string) => name.length > 0)
+            );
+
+            const filteredMaterials = freshData.materials.filter((m: any) => {
+              const materialName = normalizeForComparison(m.material_name || '');
+              return materialName.length > 0 && poChildMaterialNames.has(materialName);
+            });
+
+            // Safety fallback: if filtering removed ALL materials, use prop materials
+            if (filteredMaterials.length === 0 && purchase.materials.length > 0) {
+              console.error('[Material Filter] Filtering removed all materials - using purchase.materials as fallback');
+              setFreshPurchaseData({ ...freshData, materials: purchase.materials });
+            } else {
+              setFreshPurchaseData({ ...freshData, materials: filteredMaterials });
+            }
+          } else {
+            setFreshPurchaseData(freshData);
+          }
         } catch (error) {
           console.error('Failed to fetch fresh purchase data:', error);
           // Fall back to prop data if fetch fails
@@ -1522,7 +1547,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       </h2>
                     </div>
                     <div className="text-sm text-gray-600">
-                      <span className="font-medium">Purchase Order:</span> PO #{purchase.cr_id} - {purchase.item_name}
+                      <span className="font-medium">Purchase Order:</span> {purchase.formatted_cr_id || `PO #${purchase.cr_id}`} - {purchase.item_name}
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
                       {viewMode === 'td'

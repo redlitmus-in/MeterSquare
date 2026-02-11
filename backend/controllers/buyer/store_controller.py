@@ -459,6 +459,11 @@ def complete_from_store(cr_id):
                 store_po_child_suffix = f".{next_suffix}"
                 log.info(f"Created store POChild PO-{cr_id}{store_po_child_suffix} with {len(grouped_materials)} materials")
 
+                # Link the IMR to this POChild so PM rejection can propagate correctly
+                if new_request and store_po_child_id:
+                    new_request.po_child_id = store_po_child_id
+                    log.info(f"Linked IMR to store POChild {store_po_child_id}")
+
         # Check if ALL materials in CR are now routed (store + vendor)
         all_cr_materials = cr.materials_data or cr.sub_items_data or []
         all_material_names = {

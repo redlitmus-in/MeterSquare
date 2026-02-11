@@ -224,7 +224,8 @@ const PurchaseOrders: React.FC = () => {
       !p.rejection_type &&
       // Only exclude if ALL materials are sent to store (no remaining materials for vendor)
       !(p.store_requests_pending && (p.store_requested_materials?.length || 0) >= (p.materials_count || 0)) &&
-      !p.all_store_requests_approved  // Items with approved store requests go to Store Approved
+      !p.all_store_requests_approved &&  // Items with approved store requests go to Store Approved
+      !p.all_store_requests_rejected  // Items with ALL store requests rejected go to Rejected tab
     );
   }, [pendingPurchases]);
 
@@ -261,8 +262,13 @@ const PurchaseOrders: React.FC = () => {
   }, [approvedPOChildren]);
 
   // Store-routed → "Pending Approval > Sent to Store" tab (not Ongoing > Store Approved)
+  // Exclude store-rejected POChildren (they go to Rejected tab)
   const storePOChildren = useMemo(() => {
-    return approvedPOChildren.filter(pc => pc.routing_type === 'store');
+    return approvedPOChildren.filter(pc =>
+      pc.routing_type === 'store' &&
+      pc.status !== 'store_rejected' &&
+      pc.vendor_selection_status !== 'store_rejected'
+    );
   }, [approvedPOChildren]);
 
   // Pending POChildren (sent to TD, waiting for approval)
@@ -1208,12 +1214,15 @@ const PurchaseOrders: React.FC = () => {
                   // Determine colors based on status
                   const isPending = poChild.vendor_selection_status === 'pending_td_approval';
                   const isApproved = poChild.vendor_selection_status === 'approved';
-                  const isRejected = poChild.vendor_selection_status === 'rejected';
+                  const isStoreRouted = poChild.routing_type === 'store' && poChild.status === 'routed_to_store';
+                  const isRejected = poChild.vendor_selection_status === 'rejected' || poChild.vendor_selection_status === 'td_rejected' || poChild.vendor_selection_status === 'store_rejected';
+                  const isStoreRejected = poChild.vendor_selection_status === 'store_rejected' || poChild.status === 'store_rejected';
                   const isCompleted = poChild.status === 'routed_to_store' || poChild.status === 'purchase_completed' || poChild.status === 'completed';
 
-                  const borderColor = isPending ? 'border-amber-300' : isApproved ? 'border-green-300' : 'border-red-300';
-                  const headerBg = isPending ? 'from-amber-50 to-amber-100' : isApproved ? 'from-green-50 to-green-100' : 'from-red-50 to-red-100';
-                  const headerBorder = isPending ? 'border-amber-200' : isApproved ? 'border-green-200' : 'border-red-200';
+                  // Store-routed items use purple styling, not the vendor-approval color logic
+                  const borderColor = isStoreRejected ? 'border-red-300' : isStoreRouted ? 'border-purple-300' : isPending ? 'border-amber-300' : isApproved ? 'border-green-300' : isRejected ? 'border-red-300' : 'border-blue-300';
+                  const headerBg = isStoreRejected ? 'from-red-50 to-red-100' : isStoreRouted ? 'from-purple-50 to-purple-100' : isPending ? 'from-amber-50 to-amber-100' : isApproved ? 'from-green-50 to-green-100' : isRejected ? 'from-red-50 to-red-100' : 'from-blue-50 to-blue-100';
+                  const headerBorder = isStoreRejected ? 'border-red-200' : isStoreRouted ? 'border-purple-200' : isPending ? 'border-amber-200' : isApproved ? 'border-green-200' : isRejected ? 'border-red-200' : 'border-blue-200';
 
                   return (
                     <motion.div
@@ -1287,22 +1296,22 @@ const PurchaseOrders: React.FC = () => {
 
                       {/* Vendor Info Banner */}
                       <div className={`px-4 py-2 border-b ${
-                        isPending ? 'bg-amber-50 border-amber-200' : isApproved ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+                        isStoreRejected ? 'bg-red-50 border-red-200' : isStoreRouted ? 'bg-purple-50 border-purple-200' : isPending ? 'bg-amber-50 border-amber-200' : isApproved ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
                       }`}>
                         <div className="flex items-center gap-2">
-                          <Store className={`w-4 h-4 ${isPending ? 'text-amber-600' : isApproved ? 'text-green-600' : 'text-red-600'}`} />
+                          <Store className={`w-4 h-4 ${isStoreRejected ? 'text-red-600' : isStoreRouted ? 'text-purple-600' : isPending ? 'text-amber-600' : isApproved ? 'text-green-600' : 'text-red-600'}`} />
                           <div className="flex-1 min-w-0">
-                            <div className={`text-xs font-medium ${isPending ? 'text-amber-600' : isApproved ? 'text-green-600' : 'text-red-600'}`}>
+                            <div className={`text-xs font-medium ${isStoreRejected ? 'text-red-600' : isStoreRouted ? 'text-purple-600' : isPending ? 'text-amber-600' : isApproved ? 'text-green-600' : 'text-red-600'}`}>
                               {poChild.routing_type === 'store' ? 'Destination' : 'Selected Vendor'}
                             </div>
-                            <div className={`text-sm font-bold truncate ${isPending ? 'text-amber-900' : isApproved ? 'text-green-900' : 'text-red-900'}`}>
-                              {poChild.vendor_name || (poChild.routing_type === 'store' ? 'M2 Store Warehouse' : 'No Vendor')}
+                            <div className={`text-sm font-bold truncate ${isStoreRejected ? 'text-red-900' : isStoreRouted ? 'text-purple-900' : isPending ? 'text-amber-900' : isApproved ? 'text-green-900' : 'text-red-900'}`}>
+                              {poChild.vendor_name || (poChild.routing_type === 'store' ? 'M2 Store' : 'No Vendor')}
                             </div>
                           </div>
                           <Badge className={`text-[10px] ${
-                            isPending ? 'bg-amber-100 text-amber-800' : isApproved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            isStoreRejected ? 'bg-red-100 text-red-800' : isStoreRouted ? 'bg-purple-100 text-purple-800' : isPending ? 'bg-amber-100 text-amber-800' : isApproved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                           }`}>
-                            {isPending ? 'Awaiting TD' : isApproved ? 'TD Approved' : 'Rejected'}
+                            {isStoreRejected ? 'Rejected by PM' : isStoreRouted ? 'Sent to Store' : isPending ? 'Awaiting TD' : isApproved ? 'TD Approved' : 'Rejected'}
                           </Badge>
                         </div>
                       </div>
@@ -1336,7 +1345,7 @@ const PurchaseOrders: React.FC = () => {
 
                           <div className="flex items-center justify-between pt-2 border-t border-gray-100">
                             <span className="text-xs text-gray-500">Total Cost</span>
-                            <span className="text-sm font-bold text-green-700">{formatCurrency(poChild.materials_total_cost || 0)}</span>
+                            <span className="text-sm font-bold text-green-700">{formatCurrency(poChild.materials_total_cost || (poChild as any).total_cost || 0)}</span>
                           </div>
 
                           {/* Supplier Notes */}
@@ -1389,8 +1398,12 @@ const PurchaseOrders: React.FC = () => {
                             <div className="flex items-center gap-2">
                               <XCircleIcon className="w-4 h-4 text-red-600" />
                               <div>
-                                <div className="text-xs font-semibold text-red-900">Rejected by TD</div>
-                                <div className="text-[10px] text-red-600">{poChild.rejection_reason || 'Please select a different vendor'}</div>
+                                <div className="text-xs font-semibold text-red-900">
+                                  {isStoreRejected ? 'Store Request Rejected by PM' : 'Rejected by TD'}
+                                </div>
+                                <div className="text-[10px] text-red-600">
+                                  {poChild.rejection_reason || (isStoreRejected ? 'Store material request was rejected' : 'Please select a different vendor')}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1440,8 +1453,8 @@ const PurchaseOrders: React.FC = () => {
                             </div>
                           )}
 
-                          {/* Select New Vendor for Rejected POChildren */}
-                          {isRejected && (
+                          {/* Select New Vendor for TD-Rejected POChildren (not store rejections) */}
+                          {isRejected && !isStoreRejected && (
                             <>
                               <Button
                                 onClick={() => {
@@ -1496,6 +1509,65 @@ const PurchaseOrders: React.FC = () => {
                               >
                                 <Eye className="w-3.5 h-3.5 mr-1.5" />
                                 View Details
+                              </Button>
+                            </>
+                          )}
+
+                          {/* Store-rejected POChildren - show details + select vendor option */}
+                          {isStoreRejected && (
+                            <>
+                              <Button
+                                onClick={() => {
+                                  const purchaseLike: Purchase = {
+                                    ...poChild,
+                                    cr_id: poChild.parent_cr_id,
+                                    vendor_id: 0,
+                                    status: 'rejected',
+                                  } as any;
+                                  setSelectedPurchase(purchaseLike);
+                                  setIsDetailsModalOpen(true);
+                                }}
+                                variant="outline"
+                                className="w-full text-xs"
+                                size="sm"
+                              >
+                                <Eye className="w-3.5 h-3.5 mr-1.5" />
+                                View Details
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  const purchaseLike: Purchase = {
+                                    cr_id: poChild.parent_cr_id,
+                                    formatted_cr_id: poChild.formatted_id,
+                                    project_id: poChild.project_id || 0,
+                                    project_name: poChild.project_name || 'Unknown Project',
+                                    project_code: poChild.project_code,
+                                    client: poChild.client || '',
+                                    location: poChild.location || '',
+                                    boq_id: poChild.boq_id || 0,
+                                    boq_name: poChild.boq_name || '',
+                                    item_name: poChild.item_name || '',
+                                    sub_item_name: '',
+                                    request_type: '',
+                                    reason: '',
+                                    materials: poChild.materials || [],
+                                    materials_count: poChild.materials_count || poChild.materials?.length || 0,
+                                    total_cost: poChild.materials_total_cost || 0,
+                                    approved_by: 0,
+                                    approved_at: null,
+                                    created_at: poChild.created_at || '',
+                                    status: 'pending',
+                                    po_child_id: getPOChildId(poChild),
+                                    child_notes: (poChild as any).child_notes || '',
+                                  } as any;
+                                  setSelectedPurchase(purchaseLike);
+                                  setIsVendorSelectionModalOpen(true);
+                                }}
+                                className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs"
+                                size="sm"
+                              >
+                                <Store className="w-3.5 h-3.5 mr-1.5" />
+                                Select Vendor Instead
                               </Button>
                             </>
                           )}
@@ -1630,8 +1702,8 @@ const PurchaseOrders: React.FC = () => {
                             </>
                           )}
 
-                          {/* View Details - Always show */}
-                          <Button
+                          {/* View Details - Show only when not already rendered by rejected sections above */}
+                          {!isRejected && <Button
                             onClick={() => {
                               const purchaseLike: Purchase = {
                                 ...poChild,
@@ -1667,7 +1739,7 @@ const PurchaseOrders: React.FC = () => {
                           >
                             <Eye className="w-3 h-3 mr-1" />
                             View Details
-                          </Button>
+                          </Button>}
                         </div>
                       </div>
                     </motion.div>
@@ -1676,6 +1748,8 @@ const PurchaseOrders: React.FC = () => {
 
                 // Render Purchase card
                 const purchase = item as Purchase;
+                const isStoreRejectedCR = purchase.rejection_type === 'store_rejection' || purchase.store_request_status === 'store_rejected';
+                const isRejectedCR = purchase.status === 'rejected' || isStoreRejectedCR;
                 return (
                 <motion.div
                   key={purchase.cr_id}
@@ -1684,7 +1758,7 @@ const PurchaseOrders: React.FC = () => {
                   className={`bg-white rounded-xl border shadow-sm hover:shadow-md transition-all flex flex-col ${
                     purchase.status === 'completed'
                       ? 'border-green-200'
-                      : purchase.status === 'rejected'
+                      : isRejectedCR
                         ? 'border-red-300'
                         : purchase.store_requests_pending || purchase.all_store_requests_approved
                           ? 'border-purple-200'
@@ -1697,7 +1771,7 @@ const PurchaseOrders: React.FC = () => {
                   <div className={`px-4 py-3 border-b ${
                     purchase.status === 'completed'
                       ? 'bg-gradient-to-r from-green-50 to-green-100 border-green-200'
-                      : purchase.status === 'rejected'
+                      : isRejectedCR
                         ? 'bg-gradient-to-r from-red-50 to-red-100 border-red-200'
                         : purchase.store_requests_pending || purchase.all_store_requests_approved
                           ? 'bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200'
@@ -1710,11 +1784,13 @@ const PurchaseOrders: React.FC = () => {
                       <Badge className={`${
                         purchase.status === 'completed'
                           ? 'bg-green-100 text-green-800'
-                          : purchase.store_requests_pending || purchase.all_store_requests_approved
-                            ? 'bg-purple-100 text-purple-800'
-                            : purchase.vendor_selection_pending_td_approval
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-blue-100 text-blue-800'
+                          : isRejectedCR
+                            ? 'bg-red-100 text-red-800'
+                            : purchase.store_requests_pending || purchase.all_store_requests_approved
+                              ? 'bg-purple-100 text-purple-800'
+                              : purchase.vendor_selection_pending_td_approval
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-blue-100 text-blue-800'
                       } text-xs whitespace-nowrap`}>
                         {purchase.formatted_cr_id || `PO-${purchase.cr_id}`}
                       </Badge>
@@ -1757,14 +1833,14 @@ const PurchaseOrders: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Rejection Reason Banner - Show for rejected items */}
-                  {purchase.status === 'rejected' && (purchase.rejection_reason || purchase.vendor_rejection_reason) && (
+                  {/* Rejection Reason Banner - Show for rejected items (CR rejected, vendor rejected, or store rejected) */}
+                  {isRejectedCR && (purchase.rejection_reason || purchase.vendor_rejection_reason) && (
                     <div className="px-4 py-2 bg-red-50 border-b border-red-200">
                       <div className="flex items-start gap-2">
                         <XCircleIcon className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
                         <div className="flex-1 min-w-0">
                           <div className="text-xs text-red-600 font-medium mb-0.5">
-                            {purchase.rejection_type === 'vendor_selection' ? 'Vendor Selection Rejected' : 'Change Request Rejected'}
+                            {isStoreRejectedCR ? 'Store Request Rejected by PM' : purchase.rejection_type === 'vendor_selection' ? 'Vendor Selection Rejected' : 'Change Request Rejected'}
                           </div>
                           <div className="text-sm text-red-900 line-clamp-2">
                             {purchase.rejection_reason || purchase.vendor_rejection_reason}
@@ -2093,8 +2169,8 @@ const PurchaseOrders: React.FC = () => {
                         View Details
                       </Button>
 
-                      {/* Rejected Item Actions - Resend only for CR rejections (not vendor selection) */}
-                      {purchase.status === 'rejected' && purchase.rejection_type !== 'vendor_selection' && (
+                      {/* Rejected Item Actions - Resend only for CR rejections (not vendor selection or store rejection) */}
+                      {purchase.status === 'rejected' && purchase.rejection_type !== 'vendor_selection' && purchase.rejection_type !== 'store_rejection' && (
                         <Button
                           onClick={() => handleResend(purchase.cr_id)}
                           size="sm"
@@ -2114,6 +2190,18 @@ const PurchaseOrders: React.FC = () => {
                         >
                           <Store className="w-3 h-3 mr-1" />
                           Select New Vendor
+                        </Button>
+                      )}
+
+                      {/* Select Vendor for Store Rejection - buyer can try purchasing from vendor instead */}
+                      {isStoreRejectedCR && (
+                        <Button
+                          onClick={() => handleSelectVendor(purchase)}
+                          size="sm"
+                          className="w-full h-7 text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1"
+                        >
+                          <Store className="w-3 h-3 mr-1" />
+                          Select Vendor Instead
                         </Button>
                       )}
 

@@ -1821,6 +1821,11 @@ def get_approved_po_children():
             # Get parent CR to check buyer assignment
             parent_cr = ChangeRequest.query.get(po_child.parent_cr_id)
 
+            # Skip store POChildren whose parent CR has been store-rejected
+            # (handles legacy data where po_child_id wasn't linked on the IMR)
+            if po_child.routing_type == 'store' and parent_cr and parent_cr.store_request_status == 'store_rejected':
+                continue
+
             # For buyer, only show PO children for CRs assigned to them (unless admin viewing)
             if is_buyer and not is_admin_viewing:
                 if not parent_cr or parent_cr.assigned_to_buyer_user_id != user_id:

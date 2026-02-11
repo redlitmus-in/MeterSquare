@@ -65,7 +65,7 @@ export interface POChild {
   vendor_country?: string | null;
   vendor_pin_code?: string | null;
   vendor_gst_number?: string | null;
-  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
+  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | 'td_rejected' | 'store_rejected' | 'store_routed' | null;
   vendor_selected_by_buyer_id?: number | null;
   vendor_selected_by_buyer_name?: string | null;
   vendor_selection_date?: string | null;
@@ -76,7 +76,7 @@ export interface POChild {
   vendor_email_sent_date?: string | null;
   vendor_whatsapp_sent?: boolean;
   vendor_whatsapp_sent_at?: string | null;
-  status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'rejected' | 'routed_to_store';
+  status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'completed' | 'rejected' | 'td_rejected' | 'store_rejected' | 'routed_to_store';
   rejection_reason?: string | null;
   purchase_completed_by_user_id?: number | null;
   purchase_completed_by_name?: string | null;
@@ -135,7 +135,12 @@ export interface Purchase {
   approved_by: number;
   approved_at: string | null;
   created_at: string;
-  status: 'pending' | 'completed';
+  status: 'pending' | 'completed' | 'rejected';
+  rejection_type?: 'change_request' | 'vendor_selection' | 'store_rejection';
+  rejection_reason?: string;
+  rejected_by_name?: string;
+  rejected_at_stage?: string;
+  vendor_rejection_reason?: string;
   purchase_completed_by_user_id?: number;
   purchase_completed_by_name?: string;
   purchase_completion_date?: string;
@@ -153,7 +158,7 @@ export interface Purchase {
   vendor_country?: string | null;
   vendor_gst_number?: string | null;
   vendor_selection_pending_td_approval?: boolean;
-  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
+  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | 'td_rejected' | 'store_rejected' | 'store_routed' | null;
   vendor_selected_by_name?: string | null;
   vendor_selected_by_buyer_name?: string | null;
   vendor_approved_by_td_name?: string | null;
@@ -173,6 +178,8 @@ export interface Purchase {
   all_store_requests_approved?: boolean;
   any_store_request_rejected?: boolean;
   store_requests_pending?: boolean;
+  all_store_requests_rejected?: boolean;
+  store_request_status?: 'pending_vendor_delivery' | 'delivered_to_store' | 'dispatched_to_site' | 'delivered_to_site' | 'store_rejected' | null;
   overhead_analysis?: {
     original_allocated: number;
     overhead_percentage: number;
@@ -396,10 +403,13 @@ export interface TDRejectedPOChild {
   materials_count: number;
   total_cost: number;
   created_at: string;
+  updated_at?: string;
   status: string;
-  rejection_type: string;
+  routing_type?: string;
+  rejection_type: string;  // 'td_vendor_rejection' | 'store_rejection'
   rejection_reason: string;
   rejected_by_name: string;
+  vendor_name?: string;
   vendor_selection_status: string;
   can_reselect_vendor: boolean;
 }

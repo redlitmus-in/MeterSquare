@@ -2323,6 +2323,8 @@ def approve_internal_request(request_id):
 
 def reject_internal_request(request_id):
     """Reject an internal material request"""
+    import logging
+    log = logging.getLogger(__name__)
     try:
         internal_req = InternalMaterialRequest.query.get(request_id)
 
@@ -2344,7 +2346,80 @@ def reject_internal_request(request_id):
         internal_req.rejection_reason = rejection_reason
         internal_req.last_modified_by = current_user
 
+        # Propagate rejection to linked store POChild so buyer sees it in Rejected tab
+        buyer_user_id = None
+        try:
+            from models.po_child import POChild
+            from models.change_request import ChangeRequest
+
+            if internal_req.po_child_id:
+                po_child = POChild.query.get(internal_req.po_child_id)
+                if po_child and po_child.routing_type == 'store':
+                    po_child.status = 'store_rejected'
+                    po_child.vendor_selection_status = 'store_rejected'
+                    po_child.rejection_reason = rejection_reason
+                    po_child.vendor_approved_by_td_name = g.user.get('full_name', 'Production Manager')
+                    po_child.updated_at = datetime.utcnow()
+                    log.info(f"Store POChild {po_child.get_formatted_id()} marked as store_rejected (IMR #{request_id} rejected: {rejection_reason})")
+
+                    parent_cr = ChangeRequest.query.get(po_child.parent_cr_id)
+                    if parent_cr:
+                        parent_cr.store_request_status = 'store_rejected'
+                        parent_cr.updated_at = datetime.utcnow()
+                        buyer_user_id = parent_cr.assigned_to_buyer_user_id
+            elif internal_req.cr_id:
+                parent_cr = ChangeRequest.query.get(internal_req.cr_id)
+                if parent_cr:
+                    parent_cr.store_request_status = 'store_rejected'
+                    parent_cr.updated_at = datetime.utcnow()
+                    buyer_user_id = parent_cr.assigned_to_buyer_user_id
+
+                    # Fallback: Find the store POChild via parent CR when po_child_id is missing
+                    store_po_child = POChild.query.filter_by(
+                        parent_cr_id=parent_cr.cr_id,
+                        routing_type='store',
+                        is_deleted=False
+                    ).first()
+                    if store_po_child and store_po_child.status != 'store_rejected':
+                        store_po_child.status = 'store_rejected'
+                        store_po_child.vendor_selection_status = 'store_rejected'
+                        store_po_child.rejection_reason = rejection_reason
+                        store_po_child.vendor_approved_by_td_name = g.user.get('full_name', 'Production Manager')
+                        store_po_child.updated_at = datetime.utcnow()
+                        log.info(f"Fallback: Store POChild {store_po_child.get_formatted_id()} marked as store_rejected via CR lookup")
+        except Exception as po_error:
+            log.error(f"Failed to update store POChild/CR on IMR rejection: {po_error}")
+
         db.session.commit()
+
+        # Send notification to buyer about store rejection
+        if buyer_user_id:
+            try:
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user
+
+                pm_name = g.user.get('full_name', 'Production Manager')
+                notification = NotificationManager.create_notification(
+                    user_id=buyer_user_id,
+                    type='rejection',
+                    title='Store Material Request Rejected',
+                    message=f'{pm_name} rejected store request #{request_id} for {internal_req.item_name or "materials"}. Reason: {rejection_reason}',
+                    priority='high',
+                    category='purchase',
+                    action_url='/buyer/purchase-orders?tab=rejected',
+                    action_label='View Rejected Items',
+                    metadata={
+                        'imr_id': request_id,
+                        'rejection_reason': rejection_reason,
+                        'target_role': 'buyer'
+                    },
+                    sender_id=g.user.get('user_id'),
+                    sender_name=pm_name,
+                    target_role='buyer'
+                )
+                send_notification_to_user(buyer_user_id, notification.to_dict())
+            except Exception as notif_error:
+                log.error(f"Failed to send store rejection notification: {notif_error}")
 
         return jsonify({
             'message': 'Internal request rejected',

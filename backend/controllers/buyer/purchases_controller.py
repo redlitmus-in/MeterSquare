@@ -515,7 +515,19 @@ def get_buyer_pending_purchases():
                 "store_requested_materials": store_requested_material_names,  # List of material names sent to store
                 "all_store_requests_approved": all_store_requests_approved,
                 "any_store_request_rejected": any_store_request_rejected,
+                "all_store_requests_rejected": (
+                    any_store_request_rejected
+                    and not store_requests_pending
+                    and not all_store_requests_approved
+                    and has_store_requests
+                    # Don't mark as fully rejected if vendor-routed materials still need attention
+                    and not any(
+                        isinstance(info, dict) and info.get('routing') == 'vendor'
+                        for info in routed_materials.values()
+                    )
+                ),
                 "store_requests_pending": store_requests_pending,
+                "store_request_status": cr.store_request_status,  # CR-level store status field
                 # VAT data from LPO customization
                 "vat_percent": 5.0,  # Default, will be updated below
                 "vat_amount": cr_total * 0.05  # Default, will be updated below
@@ -995,6 +1007,7 @@ def get_buyer_rejected_purchases():
         # Get rejected change requests:
         # 1. status='rejected' (rejected by TD)
         # 2. vendor_selection_status='rejected' (vendor rejected by TD)
+        # 3. store_request_status='store_rejected' (store request rejected by PM)
         # EXCLUDE: CRs that have been split into POChildren (status='split_to_sub_crs')
         #          These are handled separately via td_rejected_po_children
         if is_admin_viewing:
@@ -1006,7 +1019,8 @@ def get_buyer_rejected_purchases():
             ).filter(
                 or_(
                     ChangeRequest.status == 'rejected',
-                    ChangeRequest.vendor_selection_status == 'rejected'
+                    ChangeRequest.vendor_selection_status == 'rejected',
+                    ChangeRequest.store_request_status == 'store_rejected'
                 ),
                 ChangeRequest.status != 'split_to_sub_crs',  # Exclude split CRs - POChildren are handled separately
                 ChangeRequest.is_deleted == False
@@ -1025,7 +1039,8 @@ def get_buyer_rejected_purchases():
             ).filter(
                 or_(
                     ChangeRequest.status == 'rejected',
-                    ChangeRequest.vendor_selection_status == 'rejected'
+                    ChangeRequest.vendor_selection_status == 'rejected',
+                    ChangeRequest.store_request_status == 'store_rejected'
                 ),
                 ChangeRequest.status != 'split_to_sub_crs',  # Exclude split CRs - POChildren are handled separately
                 or_(
@@ -1043,6 +1058,17 @@ def get_buyer_rejected_purchases():
         rejected_purchases = []
 
         for cr in change_requests:
+            # Skip parent CRs that have store POChildren — the POChild handles rejection display
+            # This prevents duplicates: parent CR + POChild both showing in Rejected tab
+            if cr.store_request_status == 'store_rejected':
+                store_po_child = POChild.query.filter_by(
+                    parent_cr_id=cr.cr_id,
+                    routing_type='store',
+                    is_deleted=False
+                ).first()
+                if store_po_child:
+                    continue  # POChild will show in td_rejected_po_children instead
+
             # ✅ PERFORMANCE: Use preloaded relationships
             # Get project details (already loaded via joinedload)
             project = cr.project
@@ -1148,7 +1174,10 @@ def get_buyer_rejected_purchases():
             rejection_type = "change_request"  # default
             rejection_reason = cr.rejection_reason or "No reason provided"
 
-            if cr.vendor_selection_status == 'rejected':
+            if cr.store_request_status == 'store_rejected':
+                rejection_type = "store_rejection"
+                rejection_reason = cr.rejection_reason or "Store material request rejected by Production Manager"
+            elif cr.vendor_selection_status == 'rejected':
                 rejection_type = "vendor_selection"
                 rejection_reason = cr.vendor_rejection_reason or "Vendor selection rejected by TD"
 
@@ -1191,19 +1220,29 @@ def get_buyer_rejected_purchases():
                 "vendor_country": vendor_country,
                 "vendor_gst_number": vendor_gst_number,
                 "vendor_selection_status": cr.vendor_selection_status,
-                "vendor_selected_by_name": vendor_selected_by_name
+                "vendor_selected_by_name": vendor_selected_by_name,
+                "store_request_status": cr.store_request_status
             })
 
-        # Also get TD rejected POChild items
+        # Also get rejected POChild items (TD vendor rejections + store rejections by PM)
         td_rejected_po_children = []
         try:
+            rejected_statuses = ['td_rejected', 'store_rejected']
             if is_admin_viewing:
                 po_children = POChild.query.options(
                     joinedload(POChild.parent_cr)
+                ).outerjoin(
+                    ChangeRequest, POChild.parent_cr_id == ChangeRequest.cr_id
                 ).filter(
                     or_(
-                        POChild.status == 'td_rejected',
-                        POChild.vendor_selection_status == 'td_rejected'
+                        POChild.status.in_(rejected_statuses),
+                        POChild.vendor_selection_status.in_(rejected_statuses),
+                        # Fallback: Store POChildren where parent CR is store-rejected
+                        # (handles legacy data where po_child_id wasn't linked on the IMR)
+                        and_(
+                            POChild.routing_type == 'store',
+                            ChangeRequest.store_request_status == 'store_rejected'
+                        )
                     ),
                     POChild.is_deleted == False
                 ).order_by(
@@ -1218,8 +1257,13 @@ def get_buyer_rejected_purchases():
                     ChangeRequest, POChild.parent_cr_id == ChangeRequest.cr_id
                 ).filter(
                     or_(
-                        POChild.status == 'td_rejected',
-                        POChild.vendor_selection_status == 'td_rejected'
+                        POChild.status.in_(rejected_statuses),
+                        POChild.vendor_selection_status.in_(rejected_statuses),
+                        # Fallback: Store POChildren where parent CR is store-rejected
+                        and_(
+                            POChild.routing_type == 'store',
+                            ChangeRequest.store_request_status == 'store_rejected'
+                        )
                     ),
                     POChild.is_deleted == False,
                     or_(
@@ -1237,6 +1281,11 @@ def get_buyer_rejected_purchases():
                 project = Project.query.get(poc.project_id) if poc.project_id else None
                 boq = BOQ.query.filter_by(boq_id=poc.boq_id).first() if poc.boq_id else None
 
+                is_store_rejection = (
+                    poc.status == 'store_rejected'
+                    or poc.vendor_selection_status == 'store_rejected'
+                    or (poc.routing_type == 'store' and parent_cr and parent_cr.store_request_status == 'store_rejected')
+                )
                 td_rejected_po_children.append({
                     "po_child_id": poc.id,
                     "formatted_id": poc.get_formatted_id(),
@@ -1252,12 +1301,15 @@ def get_buyer_rejected_purchases():
                     "materials_count": len(poc.materials_data or []),
                     "total_cost": poc.materials_total_cost or 0,
                     "created_at": poc.created_at.isoformat() if poc.created_at else None,
+                    "updated_at": poc.updated_at.isoformat() if poc.updated_at else None,
                     "status": poc.status,
-                    "rejection_type": "td_vendor_rejection",
-                    "rejection_reason": poc.rejection_reason or "Vendor selection rejected by TD",
-                    "rejected_by_name": poc.vendor_approved_by_td_name,
+                    "routing_type": poc.routing_type,
+                    "rejection_type": "store_rejection" if is_store_rejection else "td_vendor_rejection",
+                    "rejection_reason": poc.rejection_reason or ("Store request rejected by Production Manager" if is_store_rejection else "Vendor selection rejected by TD"),
+                    "rejected_by_name": poc.vendor_approved_by_td_name or ("Production Manager" if is_store_rejection else None),
+                    "vendor_name": poc.vendor_name,
                     "vendor_selection_status": poc.vendor_selection_status,
-                    "can_reselect_vendor": True  # Flag to indicate buyer can select new vendor
+                    "can_reselect_vendor": not is_store_rejection  # Only vendor rejections can reselect
                 })
         except Exception as poc_error:
             log.error(f"Error fetching TD rejected POChild items: {poc_error}")
