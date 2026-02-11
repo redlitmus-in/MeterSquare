@@ -36,12 +36,13 @@ export interface PurchaseMaterial {
   supplier_notes?: string | null;  // Per-material notes from vendor selection
 }
 
-// POChild type for tracking vendor-specific purchase order splits
+// POChild type for tracking purchase order splits (both store and vendor routing)
 export interface POChild {
   id: number;
   parent_cr_id: number;
   formatted_id: string;  // "PO-100.1", "PO-100.2", etc.
   suffix: string;  // ".1", ".2", etc.
+  routing_type: 'store' | 'vendor';  // 'store' = route via PM, 'vendor' = requires TD approval
   boq_id?: number | null;
   project_id?: number | null;
   item_id?: string | null;
@@ -75,7 +76,7 @@ export interface POChild {
   vendor_email_sent_date?: string | null;
   vendor_whatsapp_sent?: boolean;
   vendor_whatsapp_sent_at?: string | null;
-  status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'rejected';
+  status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'rejected' | 'routed_to_store';
   rejection_reason?: string | null;
   purchase_completed_by_user_id?: number | null;
   purchase_completed_by_name?: string | null;
@@ -185,6 +186,13 @@ export interface Purchase {
   };
   // POChild records for vendor splits
   po_children?: POChild[];
+  // Material routing tracking (prevents duplicates)
+  routed_materials?: Record<string, {
+    routing: 'store' | 'vendor';
+    po_child_id?: number;
+    routed_at: string;
+    routed_by: number;
+  }>;
 }
 
 export interface SelectVendorRequest {
@@ -1301,12 +1309,13 @@ class BuyerService {
     }
   }
 
-  // Create POChild records for each vendor group
+  // Create POChild records for each vendor group (supports both store and vendor routing)
   async createPOChildren(
     crId: number,
     vendorGroups: Array<{
-      vendor_id: number;
-      vendor_name: string;
+      routing_type: 'store' | 'vendor';  // NEW: Specify routing type
+      vendor_id?: number;  // Optional for store routing
+      vendor_name?: string;  // Optional for store routing
       materials: Array<{
         material_name: string;
         quantity: number;
@@ -1325,11 +1334,17 @@ class BuyerService {
     po_children: Array<{
       id: number;
       formatted_id: string;
-      vendor_id: number;
+      routing_type: 'store' | 'vendor';
+      vendor_id?: number;
       vendor_name: string;
       materials_count: number;
       total_cost: number;
     }>;
+    routing_summary?: {
+      vendor_routed: number;
+      store_routed: number;
+      total: number;
+    };
   }> {
     try {
 
@@ -1806,6 +1821,12 @@ export interface StoreAvailabilityResponse {
   can_complete_from_store: boolean;
   available_materials: StoreAvailabilityMaterial[];
   unavailable_materials: StoreAvailabilityMaterial[];
+  already_sent_materials?: Array<{
+    material_name: string;
+    required_quantity: number;
+    status: string;
+    already_sent: boolean;
+  }>;
   error?: string;
 }
 

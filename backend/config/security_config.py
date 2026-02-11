@@ -58,8 +58,8 @@ class SecurityConfig:
     # Login rate limits
     LOGIN_RATE_LIMIT = "5 per minute" if is_production() else "1000 per minute"
 
-    # API rate limits
-    API_RATE_LIMIT_DEFAULT = "200 per hour" if is_production() else "10000 per hour"
+    # API rate limits (increased to handle polling, auto-refresh, and multiple users)
+    API_RATE_LIMIT_DEFAULT = "1000 per hour" if is_production() else "10000 per hour"
 
     # Sensitive endpoint rate limits (exports, reports, bulk operations)
     SENSITIVE_RATE_LIMIT = "10 per minute" if is_production() else "1000 per minute"

@@ -640,6 +640,25 @@ def assign_items_to_se():
         if not (is_pm or is_mep or is_admin):
             return jsonify({"error": "You are not assigned to this project"}), 403
 
+        # Determine who should be recorded as the assigner
+        # If admin is assigning, use the project's PM so CRs route correctly
+        if is_admin:
+            # Get the project's actual PM
+            pm_ids = project.user_id if isinstance(project.user_id, list) else ([project.user_id] if project.user_id else [])
+            if not pm_ids:
+                return jsonify({"error": "No Project Manager assigned to this project"}), 400
+            actual_pm_id = pm_ids[0]
+            actual_pm_user = User.query.get(actual_pm_id)
+            if not actual_pm_user:
+                return jsonify({"error": "Project Manager user record not found"}), 400
+            assigner_id = actual_pm_id
+            assigner_name = actual_pm_user.full_name
+            log.info(f"Admin {pm_name} assigning items, using project PM {assigner_name} (ID: {assigner_id}) as assigner")
+        else:
+            # PM/MEP is assigning - use their ID
+            assigner_id = pm_user_id
+            assigner_name = pm_name
+
         # Validate SE exists
         se_user = User.query.get(se_user_id)
         if not se_user or not se_user.role or se_user.role.role != 'siteEngineer':
@@ -675,7 +694,7 @@ def assign_items_to_se():
 
             # Check if item is already assigned by another PM/MEP
             existing_pm_id = item.get('assigned_by_pm_user_id')
-            if existing_pm_id and existing_pm_id != pm_user_id:
+            if existing_pm_id and existing_pm_id != assigner_id:
                 skipped_items.append({
                     "index": item_index,
                     "item_code": item.get('item_code', 'N/A'),
@@ -685,8 +704,8 @@ def assign_items_to_se():
                 continue
 
             # Assign the item
-            item['assigned_by_pm_user_id'] = pm_user_id
-            item['assigned_by_pm_name'] = pm_name
+            item['assigned_by_pm_user_id'] = assigner_id
+            item['assigned_by_pm_name'] = assigner_name
             item['assigned_by_role'] = role_name  # Track if PM or MEP assigned this item
             item['assigned_to_se_user_id'] = se_user_id
             item['assigned_to_se_name'] = se_name
@@ -735,7 +754,7 @@ def assign_items_to_se():
         existing_assignment = PMAssignSS.query.filter_by(
             boq_id=boq_id,
             assigned_to_se_id=se_user_id,
-            assigned_by_pm_id=pm_user_id,
+            assigned_by_pm_id=assigner_id,
             is_deleted=False
         ).first()
 
@@ -759,15 +778,15 @@ def assign_items_to_se():
                 item_indices=[item['index'] for item in assigned_items],
                 item_details=item_details_for_db,
                 assignment_status='assigned',
-                assigned_by_pm_id=pm_user_id,
+                assigned_by_pm_id=assigner_id,
                 assigned_to_se_id=se_user_id,
                 assignment_date=datetime.utcnow(),
-                created_by=pm_name,
+                created_by=assigner_name,
                 created_at=datetime.utcnow(),
                 is_deleted=False
             )
             db.session.add(new_assignment)
-            log.info(f"Created new assignment record in pm_assign_ss for BOQ {boq_id}, SE {se_user_id}")
+            log.info(f"Created new assignment record in pm_assign_ss for BOQ {boq_id}, SE {se_user_id} (assigned by {assigner_name})")
 
         # Check if all items are now assigned
         all_items_assigned = True

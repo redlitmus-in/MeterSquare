@@ -1209,6 +1209,33 @@ const PurchaseOrders: React.FC = () => {
                         </div>
                       </div>
 
+                      {/* ✅ NEW: Routing Type Badge */}
+                      {poChild.routing_type && (
+                        <div className={`px-4 py-2 border-b ${
+                          poChild.routing_type === 'store' ? 'bg-blue-50 border-blue-200' : 'bg-purple-50 border-purple-200'
+                        }`}>
+                          <div className="flex items-center gap-2">
+                            {poChild.routing_type === 'store' ? (
+                              <>
+                                <Store className="w-4 h-4 text-blue-600" />
+                                <span className="text-xs font-semibold text-blue-900">Store Routing</span>
+                                <Badge className="bg-blue-100 text-blue-800 text-[10px]">
+                                  Via M2 Store → PM Dispatch
+                                </Badge>
+                              </>
+                            ) : (
+                              <>
+                                <ShoppingCart className="w-4 h-4 text-purple-600" />
+                                <span className="text-xs font-semibold text-purple-900">Vendor Routing</span>
+                                <Badge className="bg-purple-100 text-purple-800 text-[10px]">
+                                  Requires TD Approval
+                                </Badge>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Vendor Info Banner */}
                       <div className={`px-4 py-2 border-b ${
                         isPending ? 'bg-amber-50 border-amber-200' : isApproved ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
@@ -1217,10 +1244,10 @@ const PurchaseOrders: React.FC = () => {
                           <Store className={`w-4 h-4 ${isPending ? 'text-amber-600' : isApproved ? 'text-green-600' : 'text-red-600'}`} />
                           <div className="flex-1 min-w-0">
                             <div className={`text-xs font-medium ${isPending ? 'text-amber-600' : isApproved ? 'text-green-600' : 'text-red-600'}`}>
-                              Selected Vendor
+                              {poChild.routing_type === 'store' ? 'Destination' : 'Selected Vendor'}
                             </div>
                             <div className={`text-sm font-bold truncate ${isPending ? 'text-amber-900' : isApproved ? 'text-green-900' : 'text-red-900'}`}>
-                              {poChild.vendor_name || 'No Vendor'}
+                              {poChild.vendor_name || (poChild.routing_type === 'store' ? 'M2 Store Warehouse' : 'No Vendor')}
                             </div>
                           </div>
                           <Badge className={`text-[10px] ${
@@ -2071,298 +2098,6 @@ const PurchaseOrders: React.FC = () => {
 
               {/* OLD: Approved PO Children Cards - Now handled in merged array above for vendor_approved tab */}
               {/* Keeping this block commented for reference - it's now integrated in the main loop above */}
-              {false && activeTab === 'ongoing' && ongoingSubTab === 'vendor_approved' && approvedPOChildren
-                .filter(poChild =>
-                  (poChild.project_name || poChild.item_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  (poChild.vendor_name || '').toLowerCase().includes(searchTerm.toLowerCase())
-                )
-                .map((poChild) => (
-                <motion.div
-                  key={`po-child-${getPOChildId(poChild)}`}
-                  initial={false}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-white rounded-xl border shadow-sm hover:shadow-md transition-all flex flex-col border-green-300"
-                >
-                  {/* Card Header - Same layout as legacy cards */}
-                  <div className="px-4 py-3 border-b bg-gradient-to-r from-green-50 to-green-100 border-green-200">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <h3 className="text-base font-bold text-gray-900 line-clamp-1">{poChild.project_name || 'Unknown Project'}</h3>
-                      <Badge className="bg-green-100 text-green-800 text-xs whitespace-nowrap">
-                        {poChild.formatted_id}
-                      </Badge>
-                    </div>
-                    <div className="space-y-1 text-xs text-gray-600">
-                      {poChild.project_code && (
-                        <div className="flex items-center gap-1.5">
-                          <FileText className="w-3 h-3 flex-shrink-0 text-blue-600" />
-                          <span className="truncate font-semibold text-blue-900">Project Code: {poChild.project_code}</span>
-                        </div>
-                      )}
-                      {poChild.client && (
-                        <div className="flex items-center gap-1.5">
-                          <Building2 className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.client}</span>
-                        </div>
-                      )}
-                      {poChild.location && (
-                        <div className="flex items-center gap-1.5">
-                          <MapPin className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.location}</span>
-                        </div>
-                      )}
-                      {poChild.boq_name && (
-                        <div className="flex items-center gap-1.5">
-                          <FileText className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{poChild.boq_name}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Vendor Info Banner */}
-                  <div className="px-4 py-2 bg-green-50 border-b border-green-200">
-                    <div className="flex items-center gap-2">
-                      <Store className="w-4 h-4 text-green-600" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs text-green-600 font-medium">Selected Vendor</div>
-                        <div className="text-sm font-bold text-green-900 truncate">{poChild.vendor_name || 'No Vendor'}</div>
-                      </div>
-                      <Badge className="bg-green-100 text-green-800 text-[10px]">
-                        TD Approved
-                      </Badge>
-                    </div>
-                  </div>
-
-                  {/* Card Body - Same layout as legacy cards */}
-                  <div className="p-4 flex-1 flex flex-col">
-                    <div className="space-y-3 mb-4">
-                      {poChild.item_name && (
-                        <div>
-                          <div className="text-xs text-gray-500 mb-0.5">Item</div>
-                          <div className="font-medium text-gray-900 text-sm line-clamp-1">{poChild.item_name}</div>
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <div className="text-xs text-gray-500 mb-0.5">Created</div>
-                          <div className="text-xs flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            {poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-gray-500 mb-0.5">Materials</div>
-                          <div className="text-sm font-medium flex items-center gap-1">
-                            <Package className="w-3 h-3" />
-                            {poChild.materials_count || poChild.materials?.length || 0} items
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                        <span className="text-xs text-gray-500">Total Cost</span>
-                        <span className="text-sm font-bold text-green-700">{formatCurrency(poChild.materials_total_cost || 0)}</span>
-                      </div>
-
-                      {/* Supplier Notes */}
-                      {poChild.supplier_notes && (
-                        <div className="pt-2 border-t border-gray-100">
-                          <div className="text-xs text-gray-500 mb-1">Supplier Notes</div>
-                          <div className="text-xs text-gray-700 bg-blue-50 border border-blue-200 rounded p-2 italic line-clamp-2">
-                            "{poChild.supplier_notes}"
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* TD Approved Status */}
-                    <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-3">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 text-green-600" />
-                        <div>
-                          <div className="text-xs font-semibold text-green-900">TD Approved</div>
-                          <div className="text-xs text-green-700">Ready for purchase completion</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex flex-col gap-1.5 mt-auto">
-                      {/* Show Send Email/WhatsApp buttons if NEITHER email NOR WhatsApp sent yet */}
-                      {!(poChild.vendor_email_sent || poChild.vendor_whatsapp_sent) ? (
-                        <div className="flex gap-1.5 w-full">
-                          <Button
-                            onClick={() => {
-                              // Convert POChild to Purchase format for email modal
-                              const purchaseLike: Purchase = {
-                                cr_id: poChild.parent_cr_id,
-                                formatted_cr_id: poChild.formatted_id,
-                                project_id: poChild.project_id || 0,
-                                project_name: poChild.project_name || 'Unknown Project',
-                                project_code: poChild.project_code,
-                                client: poChild.client || '',
-                                location: poChild.location || '',
-                                boq_id: poChild.boq_id || 0,
-                                boq_name: poChild.boq_name || '',
-                                item_name: poChild.item_name || '',
-                                sub_item_name: '',
-                                request_type: '',
-                                reason: '',
-                                materials: poChild.materials || [],
-                                materials_count: poChild.materials_count || poChild.materials?.length || 0,
-                                total_cost: poChild.materials_total_cost || 0,
-                                approved_by: 0,
-                                approved_at: null,
-                                created_at: poChild.created_at || '',
-                                status: 'pending',
-                                vendor_id: poChild.vendor_id,
-                                vendor_name: poChild.vendor_name,
-                                vendor_phone: poChild.vendor_phone,
-                                vendor_email: poChild.vendor_email,
-                                supplier_notes: poChild.supplier_notes,
-                                vendor_selection_status: poChild.vendor_selection_status,
-                                po_child_id: getPOChildId(poChild),  // Pass POChild ID for email API
-                                child_notes: (poChild as any).child_notes || '',
-                              } as any;
-                              setSelectedPurchase(purchaseLike);
-                              setIsVendorEmailModalOpen(true);
-                            }}
-                            className="flex-1 bg-blue-900 hover:bg-blue-800 text-white text-xs"
-                            size="sm"
-                          >
-                            <Mail className="w-3.5 h-3.5 mr-1" />
-                            Email
-                          </Button>
-                          {poChild.vendor_phone ? (
-                            poChild.vendor_whatsapp_sent ? (
-                              <Button
-                                onClick={() => handleOpenPOChildWhatsAppPreview(poChild)}
-                                className="flex-1 bg-green-50 hover:bg-green-100 text-green-600 border border-green-300 text-xs"
-                                size="sm"
-                                title={`WhatsApp sent${poChild.vendor_whatsapp_sent_at ? ` on ${new Date(poChild.vendor_whatsapp_sent_at).toLocaleDateString()}` : ''} - Click to resend`}
-                              >
-                                <CheckCircle className="w-3.5 h-3.5 mr-1" />
-                                Sent
-                              </Button>
-                            ) : (
-                              <Button
-                                onClick={() => handleOpenPOChildWhatsAppPreview(poChild)}
-                                className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs"
-                                size="sm"
-                                title="Send via WhatsApp"
-                              >
-                                <MessageSquare className="w-3.5 h-3.5 mr-1" />
-                                WhatsApp
-                              </Button>
-                            )
-                          ) : (
-                            <div
-                              className="flex-1 flex items-center justify-center bg-gray-100 border border-gray-300 rounded text-gray-400 text-xs px-2 py-1.5 cursor-not-allowed"
-                              title="No phone number available for this vendor"
-                            >
-                              <MessageSquare className="w-3.5 h-3.5 mr-1 opacity-50" />
-                              No Phone
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <>
-                          {/* Sent to Vendor Status (Email or WhatsApp) */}
-                          <div className="w-full h-7 bg-green-50 border border-green-200 rounded flex items-center justify-center text-xs font-medium text-green-700 px-2 py-1">
-                            <CheckCircle className="w-3 h-3 mr-1" />
-                            Sent to Vendor
-                          </div>
-                          {/* Complete & Send to Store Button */}
-                          <Button
-                            onClick={async () => {
-                              // If project has a project_id, fetch site engineers first
-                              if (poChild.project_id) {
-                                try {
-                                  setSelectedPOChildForCompletion(poChild);
-                                  setLoadingSiteEngineers(true);
-                                  setIsSiteEngineerModalOpen(true);
-
-                                  const result = await buyerService.getProjectSiteEngineers(poChild.project_id);
-                                  setSiteEngineersForProject(result.site_engineers || []);
-
-                                  // Auto-select if only one site engineer
-                                  if (result.site_engineers?.length === 1) {
-                                    setSelectedSiteEngineer(result.site_engineers[0].full_name);
-                                  }
-                                } catch (error: any) {
-                                  showError(error.message || 'Failed to fetch site engineers');
-                                  setIsSiteEngineerModalOpen(false);
-                                } finally {
-                                  setLoadingSiteEngineers(false);
-                                }
-                              } else {
-                                // No project_id, complete directly with proper cache invalidation
-                                await handlePOChildComplete(getPOChildId(poChild));
-                              }
-                            }}
-                            disabled={completingPurchaseId === getPOChildId(poChild)}
-                            className="w-full bg-green-600 hover:bg-green-700 text-white text-xs"
-                            size="sm"
-                            title="Materials will go to M2 Store first, then Production Manager will dispatch to site"
-                          >
-                            {completingPurchaseId === getPOChildId(poChild) ? (
-                              <>
-                                <ModernLoadingSpinners size="xxs" className="mr-1.5" />
-                                Sending to Store...
-                              </>
-                            ) : (
-                              <>
-                                <Package className="w-3.5 h-3.5 mr-1.5" />
-                                Complete & Send to Store
-                              </>
-                            )}
-                          </Button>
-                        </>
-                      )}
-                      <Button
-                        onClick={() => {
-                          // View details - convert to Purchase format
-                          const purchaseLike: Purchase = {
-                            cr_id: poChild.parent_cr_id,
-                            formatted_cr_id: poChild.formatted_id,
-                            project_id: poChild.project_id || 0,
-                            project_name: poChild.project_name || 'Unknown Project',
-                            project_code: poChild.project_code,
-                            client: poChild.client || '',
-                            location: poChild.location || '',
-                            boq_id: poChild.boq_id || 0,
-                            boq_name: poChild.boq_name || '',
-                            item_name: poChild.item_name || '',
-                            sub_item_name: '',
-                            request_type: '',
-                            reason: '',
-                            materials: poChild.materials || [],
-                            materials_count: poChild.materials_count || poChild.materials?.length || 0,
-                            total_cost: poChild.materials_total_cost || 0,
-                            approved_by: 0,
-                            approved_at: null,
-                            created_at: poChild.created_at || '',
-                            status: 'pending',
-                            vendor_id: poChild.vendor_id,
-                            vendor_name: poChild.vendor_name,
-                            child_notes: (poChild as any).child_notes || '',
-                          } as any;
-                          setSelectedPurchase(purchaseLike);
-                          setIsDetailsModalOpen(true);
-                        }}
-                        variant="outline"
-                        className="w-full text-xs"
-                        size="sm"
-                      >
-                        <Eye className="w-3.5 h-3.5 mr-1.5" />
-                        View Details
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-              {/* NOTE: Pending POChildren are now rendered via paginatedItems above, no separate block needed */}
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">

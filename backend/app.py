@@ -106,10 +106,11 @@ def create_app():
     app.cache = cache  # Make cache accessible to routes
 
     # ✅ SECURITY: Rate Limiting (prevents brute force, DoS)
+    # Increased production limits to handle polling, auto-refresh, and multiple users
     limiter = Limiter(
         app=app,
         key_func=get_remote_address,
-        default_limits=["1000 per day", "200 per hour"] if environment == "production" else ["10000 per hour"],
+        default_limits=["10000 per day", "1000 per hour"] if environment == "production" else ["10000 per hour"],
         storage_uri=redis_url if redis_url else "memory://",
         strategy="fixed-window"
     )

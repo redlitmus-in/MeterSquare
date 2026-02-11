@@ -22,7 +22,7 @@ export interface ChangeRequestItem {
   request_type: string;
   justification: string;
   reason?: string; // Alias for justification (backward compatibility)
-  status: 'pending' | 'under_review' | 'approved_by_pm' | 'approved_by_td' | 'approved' | 'rejected' | 'assigned_to_buyer' | 'purchase_completed';
+  status: 'pending' | 'under_review' | 'approved_by_pm' | 'approved_by_td' | 'approved' | 'rejected' | 'assigned_to_buyer' | 'purchase_completed' | 'routed_to_store';
   current_approver_role?: string | null;
   materials_data: Array<{
     material_name: string;
@@ -174,6 +174,25 @@ export interface ChangeRequestItem {
     vendor_email_sent: boolean;
     purchase_completion_date: string | null;
   }>;
+
+  // Store Routing Status (M2 Store Material Flow)
+  delivery_routing?: 'via_production_manager' | 'direct_to_site' | null;
+  store_request_status?: 'pending_vendor_delivery' | 'delivered_to_store' | 'dispatched_to_site' | 'delivered_to_site' | null;
+  vendor_delivered_to_store?: boolean;
+  vendor_delivery_date?: string | null;
+
+  // Material Routing Tracking (prevents duplicates)
+  routed_materials?: Record<string, {
+    routing: 'store' | 'vendor';
+    po_child_id?: number;
+    routed_at: string;
+    routed_by: number;
+  }>;
+
+  // Store requested materials (list of material names sent to store)
+  store_requested_materials?: string[];
+  has_store_requests?: boolean;
+  store_request_count?: number;
 }
 
 export interface CreateChangeRequestData {
