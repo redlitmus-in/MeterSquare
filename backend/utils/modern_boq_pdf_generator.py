@@ -675,6 +675,17 @@ class ModernBOQPDFGenerator:
                     if sub_item.get('scope'):
                         desc += f' - {sub_item["scope"]}'
 
+                    # Add brand, size and spec details for client PDF
+                    client_details = []
+                    if sub_item.get('brand'):
+                        client_details.append(f'Brand: {sub_item["brand"]}')
+                    if sub_item.get('size'):
+                        client_details.append(f'Size: {sub_item["size"]}')
+                    if sub_item.get('description'):
+                        client_details.append(f'Spec: {sub_item["description"]}')
+                    if client_details:
+                        desc += f'<br/><font size="6">{" | ".join(client_details)}</font>'
+
                     # Get all images from sub_item_image JSONB array (from cache)
                     image_cell = ''
 

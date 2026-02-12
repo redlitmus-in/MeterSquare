@@ -147,7 +147,7 @@ def download_client_pdf():
         # Calculate all values (this populates selling_price, overhead_amount, etc.)
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
-        # Fetch sub_item images from database and add to items
+        # Fetch sub_item images and description from database and add to items
         for item in items:
             if item.get('has_sub_items'):
                 sub_items = item.get('sub_items', [])
@@ -156,8 +156,16 @@ def download_client_pdf():
                     if sub_item_id:
                         # Fetch from database
                         db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
-                        if db_sub_item and db_sub_item.sub_item_image:
-                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+                        if db_sub_item:
+                            if db_sub_item.sub_item_image:
+                                sub_item['sub_item_image'] = db_sub_item.sub_item_image
+                            # Populate fields from DB if not in JSON
+                            if not sub_item.get('description') and db_sub_item.description:
+                                sub_item['description'] = db_sub_item.description
+                            if not sub_item.get('brand') and db_sub_item.brand:
+                                sub_item['brand'] = db_sub_item.brand
+                            if not sub_item.get('size') and db_sub_item.size:
+                                sub_item['size'] = db_sub_item.size
 
         # Get project
         project = boq.project
@@ -252,7 +260,7 @@ def download_internal_excel():
         # Calculate all values
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
-        # Fetch sub_item images from database and add to items
+        # Fetch sub_item images and fields from database and add to items
         for item in items:
             if item.get('has_sub_items'):
                 sub_items = item.get('sub_items', [])
@@ -261,8 +269,15 @@ def download_internal_excel():
                     if sub_item_id:
                         # Fetch from database
                         db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
-                        if db_sub_item and db_sub_item.sub_item_image:
-                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+                        if db_sub_item:
+                            if db_sub_item.sub_item_image:
+                                sub_item['sub_item_image'] = db_sub_item.sub_item_image
+                            if not sub_item.get('description') and db_sub_item.description:
+                                sub_item['description'] = db_sub_item.description
+                            if not sub_item.get('brand') and db_sub_item.brand:
+                                sub_item['brand'] = db_sub_item.brand
+                            if not sub_item.get('size') and db_sub_item.size:
+                                sub_item['size'] = db_sub_item.size
 
         # Get project
         project = boq.project
@@ -340,7 +355,7 @@ def preview_client_pdf():
         # Calculate all values
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
-        # Fetch sub_item images from database and add to items
+        # Fetch sub_item images and description from database and add to items
         for item in items:
             if item.get('has_sub_items'):
                 sub_items = item.get('sub_items', [])
@@ -348,8 +363,16 @@ def preview_client_pdf():
                     sub_item_id = sub_item.get('sub_item_id')
                     if sub_item_id:
                         db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
-                        if db_sub_item and db_sub_item.sub_item_image:
-                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+                        if db_sub_item:
+                            if db_sub_item.sub_item_image:
+                                sub_item['sub_item_image'] = db_sub_item.sub_item_image
+                            # Populate fields from DB if not in JSON
+                            if not sub_item.get('description') and db_sub_item.description:
+                                sub_item['description'] = db_sub_item.description
+                            if not sub_item.get('brand') and db_sub_item.brand:
+                                sub_item['brand'] = db_sub_item.brand
+                            if not sub_item.get('size') and db_sub_item.size:
+                                sub_item['size'] = db_sub_item.size
 
         # Get project
         project = boq.project
@@ -443,7 +466,7 @@ def download_client_excel():
         # Calculate all values
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
-        # Fetch sub_item images from database and add to items
+        # Fetch sub_item images and fields from database and add to items
         for item in items:
             if item.get('has_sub_items'):
                 sub_items = item.get('sub_items', [])
@@ -452,8 +475,15 @@ def download_client_excel():
                     if sub_item_id:
                         # Fetch from database
                         db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
-                        if db_sub_item and db_sub_item.sub_item_image:
-                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+                        if db_sub_item:
+                            if db_sub_item.sub_item_image:
+                                sub_item['sub_item_image'] = db_sub_item.sub_item_image
+                            if not sub_item.get('description') and db_sub_item.description:
+                                sub_item['description'] = db_sub_item.description
+                            if not sub_item.get('brand') and db_sub_item.brand:
+                                sub_item['brand'] = db_sub_item.brand
+                            if not sub_item.get('size') and db_sub_item.size:
+                                sub_item['size'] = db_sub_item.size
 
         # Get project
         project = boq.project

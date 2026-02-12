@@ -115,15 +115,23 @@ def send_boq_to_client():
                 ).all()
 
                 # Fast lookup dictionary
-                sub_items_map = {item.sub_item_id: item.sub_item_image for item in db_sub_items if item.sub_item_image}
+                sub_items_map = {si.sub_item_id: si for si in db_sub_items}
 
-                # Assign images
+                # Assign images and fields from DB
                 for item in items:
                     if item.get('has_sub_items'):
                         for sub_item in item.get('sub_items', []):
                             sub_item_id = sub_item.get('sub_item_id')
                             if sub_item_id and sub_item_id in sub_items_map:
-                                sub_item['sub_item_image'] = sub_items_map[sub_item_id]
+                                db_si = sub_items_map[sub_item_id]
+                                if db_si.sub_item_image:
+                                    sub_item['sub_item_image'] = db_si.sub_item_image
+                                if not sub_item.get('description') and db_si.description:
+                                    sub_item['description'] = db_si.description
+                                if not sub_item.get('brand') and db_si.brand:
+                                    sub_item['brand'] = db_si.brand
+                                if not sub_item.get('size') and db_si.size:
+                                    sub_item['size'] = db_si.size
 
         except Exception as e:
             log.error(f"Error fetching BOQ images: {str(e)}")
@@ -481,17 +489,20 @@ def generate_client_excel(project, items, total_material_cost, total_labour_cost
                 size = sub_item.get('size', '')
                 location = sub_item.get('location', '')
                 brand = sub_item.get('brand', '')
+                spec = sub_item.get('description', '')
 
                 # Build scope/size display
                 scope_parts = []
                 if scope:
                     scope_parts.append(scope)
                 if size:
-                    scope_parts.append(size)
+                    scope_parts.append(f"Size: {size}")
                 if location:
                     scope_parts.append(f"Loc: {location}")
                 if brand:
                     scope_parts.append(f"Brand: {brand}")
+                if spec:
+                    scope_parts.append(f"Spec: {spec}")
                 scope_size = " | ".join(scope_parts) if scope_parts else '-'
 
                 # CLIENT VIEW: Simple qty × rate (same as PDF)

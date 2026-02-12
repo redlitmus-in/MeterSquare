@@ -212,7 +212,7 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
                 ws[f'G{row}'].number_format = '#,##0.00'
                 row += 1
 
-                # Sub-item details (scope, size, location, brand, qty, rate)
+                # Sub-item details (scope, size, location, brand, spec, qty, rate)
                 details = []
                 if sub_item.get('scope'):
                     details.append(f"Scope: {sub_item['scope']}")
@@ -222,6 +222,8 @@ def generate_internal_excel(project, items, total_material_cost, total_labour_co
                     details.append(f"Location: {sub_item['location']}")
                 if sub_item.get('brand'):
                     details.append(f"Brand: {sub_item['brand']}")
+                if sub_item.get('description'):
+                    details.append(f"Spec: {sub_item['description']}")
 
                 if details:
                     ws.merge_cells(f'A{row}:G{row}')
