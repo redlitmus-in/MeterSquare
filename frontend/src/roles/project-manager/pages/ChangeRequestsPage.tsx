@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -143,7 +143,7 @@ const PurchaseRequestModal: React.FC<PurchaseRequestModalProps> = ({ onClose }) 
 
 const ChangeRequestsPage: React.FC = () => {
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
   const isExtraMaterial = location.pathname.includes('extra-material');
 
@@ -180,6 +180,9 @@ const ChangeRequestsPage: React.FC = () => {
   const [processingCrId, setProcessingCrId] = useState<number | null>(null); // Prevents double-clicks
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [selectedBuyerId, setSelectedBuyerId] = useState<number | null>(null);
+
+  // Track if we've already auto-opened modal from URL (to prevent reopening on close)
+  const hasAutoOpenedRef = useRef<string | null>(null);
 
   // ✅ PERFORMANCE: Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -272,13 +275,20 @@ const ChangeRequestsPage: React.FC = () => {
 
   // Auto-open change request details when cr_id is in URL (from notification redirect)
   useEffect(() => {
-    if (urlCrId && changeRequests.length > 0 && !showDetailsModal) {
+    // Only auto-open if we haven't already opened for this specific urlCrId
+    if (urlCrId && changeRequests.length > 0 && !showDetailsModal && hasAutoOpenedRef.current !== urlCrId) {
       const crIdNum = parseInt(urlCrId, 10);
       const targetCr = changeRequests.find((cr: ChangeRequestItem) => cr.cr_id === crIdNum);
       if (targetCr) {
         setSelectedChangeRequest(targetCr);
         setShowDetailsModal(true);
+        // Mark this urlCrId as already opened
+        hasAutoOpenedRef.current = urlCrId;
       }
+    }
+    // Reset the ref when urlCrId is cleared
+    if (!urlCrId) {
+      hasAutoOpenedRef.current = null;
     }
   }, [urlCrId, changeRequests, showDetailsModal]);
 
@@ -449,6 +459,8 @@ const ChangeRequestsPage: React.FC = () => {
     await handleApprove(selectedChangeRequest.cr_id);
     setShowDetailsModal(false);
     setSelectedChangeRequest(null);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   const handleRejectFromModal = () => {
@@ -456,6 +468,8 @@ const ChangeRequestsPage: React.FC = () => {
     setRejectingCrId(selectedChangeRequest.cr_id);
     setShowDetailsModal(false);
     setShowRejectionModal(true);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   const formatCurrency = (value: number) => {
@@ -2249,6 +2263,8 @@ const ChangeRequestsPage: React.FC = () => {
         onClose={() => {
           setShowDetailsModal(false);
           setSelectedChangeRequest(null);
+          // Clear URL parameters to prevent auto-reopen
+          setSearchParams({});
         }}
         changeRequest={selectedChangeRequest}
         onApprove={handleApproveFromModal}
@@ -2263,6 +2279,8 @@ const ChangeRequestsPage: React.FC = () => {
           onClose={() => {
             setShowEditModal(false);
             setSelectedChangeRequest(null);
+            // Clear URL parameters to prevent auto-reopen
+            setSearchParams({});
           }}
           changeRequest={selectedChangeRequest}
           onSuccess={handleEditSuccess}

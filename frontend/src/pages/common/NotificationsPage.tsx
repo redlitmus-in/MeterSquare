@@ -40,6 +40,8 @@ import { NotificationData } from '@/services/notificationService';
 import { sanitizeNotification, sanitizeText } from '@/utils/sanitizer';
 import { cn } from '@/lib/utils';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { getNotificationRedirectPath, buildNotificationUrl } from '@/utils/notificationRedirects';
+import { useAuthStore } from '@/store/authStore';
 
 const NotificationsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -55,6 +57,8 @@ const NotificationsPage: React.FC = () => {
     clearAll,
     requestPermission
   } = useNotificationStore();
+
+  const { user } = useAuthStore();
 
   const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'archived'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -102,30 +106,57 @@ const NotificationsPage: React.FC = () => {
     }
   }, []);
 
-  // Handle notification action with navigation
+  // Handle notification action with navigation (using proper redirect rules)
   const handleNotificationAction = useCallback((notification: NotificationData) => {
-    if (notification.actionRequired && notification.metadata?.link) {
-      try {
-        if (notification.metadata.link.startsWith('/')) {
-          navigate(notification.metadata.link, {
-            replace: false,
-            state: { from: location.pathname }
-          });
-        } else if (notification.metadata.link.startsWith('http')) {
-          window.open(notification.metadata.link, '_blank', 'noopener,noreferrer');
-        } else {
-          navigate(`/${notification.metadata.link}`, {
-            replace: false,
-            state: { from: location.pathname }
-          });
-        }
+    try {
+      const userRole = user?.role || '';
+
+      // ── PRIORITY 1: Smart content-based redirect (handles all 50+ notification types) ──
+      const redirectConfig = getNotificationRedirectPath(notification, userRole);
+      if (redirectConfig) {
+        const redirectUrl = buildNotificationUrl(redirectConfig);
+        navigate(redirectUrl, {
+          replace: false,
+          state: { from: location.pathname }
+        });
         markAsRead(notification.id);
-      } catch (error) {
-        console.error('Navigation error:', error);
-        showError('Failed to navigate to the requested page');
+        return;
       }
+
+      // ── PRIORITY 2: Backend actionUrl (already has role-prefix from server) ──
+      const backendUrl = notification.actionUrl || notification.metadata?.actionUrl || notification.metadata?.action_url;
+      if (backendUrl && typeof backendUrl === 'string' && backendUrl.startsWith('/')) {
+        navigate(backendUrl, {
+          replace: false,
+          state: { from: location.pathname }
+        });
+        markAsRead(notification.id);
+        return;
+      }
+
+      // ── PRIORITY 3: metadata.link (legacy fallback) ──
+      if (notification.metadata?.link) {
+        const link = notification.metadata.link;
+        if (link.startsWith('http')) {
+          window.open(link, '_blank', 'noopener,noreferrer');
+          markAsRead(notification.id);
+        } else {
+          navigate(link.startsWith('/') ? link : `/${link}`, {
+            replace: false,
+            state: { from: location.pathname }
+          });
+          markAsRead(notification.id);
+        }
+        return;
+      }
+
+      // No redirect available – just mark as read
+      markAsRead(notification.id);
+    } catch (error) {
+      console.error('Navigation error:', error);
+      showError('Failed to navigate to the requested page');
     }
-  }, [markAsRead, navigate, location.pathname]);
+  }, [markAsRead, navigate, location.pathname, user]);
 
   // Refresh notifications
   const handleRefresh = async () => {

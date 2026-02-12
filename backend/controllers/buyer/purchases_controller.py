@@ -1172,9 +1172,9 @@ def get_buyer_rejected_purchases():
                     vendor_country = vendor.country
                     vendor_gst_number = vendor.gst_number
                 # Get who selected the vendor
-                if cr.vendor_selected_by_buyer_user_id:
+                if cr.vendor_selected_by_buyer_id:
                     from models.user import User
-                    selector = User.query.filter_by(user_id=cr.vendor_selected_by_buyer_user_id).first()
+                    selector = User.query.filter_by(user_id=cr.vendor_selected_by_buyer_id).first()
                     if selector:
                         vendor_selected_by_name = selector.full_name
 

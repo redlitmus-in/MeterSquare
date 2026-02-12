@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { PAGINATION } from '@/lib/constants';
 import {
@@ -130,7 +131,22 @@ const PaginationControls: React.FC<PaginationControlsProps> = ({
 
 const ExtraMaterialPage: React.FC = () => {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'pending' | 'request' | 'approved' | 'rejected' | 'complete'>('pending');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Get tab and cr_id from URL query parameters (for notification redirects)
+  const urlTab = searchParams.get('tab');
+  const urlCrId = searchParams.get('cr_id');
+
+  const [activeTab, setActiveTab] = useState<'pending' | 'request' | 'approved' | 'rejected' | 'complete'>(() => {
+    // Priority: URL tab param > default
+    if (urlTab) {
+      const validTabs = ['pending', 'request', 'approved', 'rejected', 'complete'];
+      if (validTabs.includes(urlTab)) {
+        return urlTab as 'pending' | 'request' | 'approved' | 'rejected' | 'complete';
+      }
+    }
+    return 'pending';
+  });
   const [viewMode, setViewMode] = useState<'table' | 'card'>('card');
   const [showForm, setShowForm] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
@@ -139,6 +155,9 @@ const ExtraMaterialPage: React.FC = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteRequestId, setDeleteRequestId] = useState<number | null>(null);
   const [sendingRequestId, setSendingRequestId] = useState<number | null>(null); // Prevents double-clicks
+
+  // Track if we've already auto-opened modal from URL (to prevent reopening on close)
+  const hasAutoOpenedRef = useRef<string | null>(null);
 
   // Pagination state for each tab
   const [pendingPage, setPendingPage] = useState(1);
@@ -400,6 +419,43 @@ const ExtraMaterialPage: React.FC = () => {
   useEffect(() => {
     setCompletePage(1);
   }, [completedMaterials.length]);
+
+  // Update active tab when URL parameter changes (for notification navigation)
+  useEffect(() => {
+    if (urlTab) {
+      const validTabs = ['pending', 'request', 'approved', 'rejected', 'complete'];
+      if (validTabs.includes(urlTab)) {
+        setActiveTab(urlTab as 'pending' | 'request' | 'approved' | 'rejected' | 'complete');
+      }
+    }
+  }, [urlTab]);
+
+  // Auto-open material request details when cr_id is in URL (from notification redirect)
+  useEffect(() => {
+    // Only auto-open if we haven't already opened for this specific urlCrId
+    if (urlCrId && !showViewModal && hasAutoOpenedRef.current !== urlCrId) {
+      const crIdNum = parseInt(urlCrId, 10);
+      // Check if the request exists in any of the arrays
+      const allMaterials = [
+        ...pendingMaterials,
+        ...underReviewMaterials,
+        ...approvedMaterials,
+        ...rejectedMaterials,
+        ...completedMaterials
+      ];
+      const targetRequest = allMaterials.find((req: ExtraMaterialRequest) => req.id === crIdNum);
+      if (targetRequest) {
+        // Use handleViewDetails to fetch complete data from API (same as clicking View button)
+        handleViewDetails(crIdNum);
+        // Mark this urlCrId as already opened
+        hasAutoOpenedRef.current = urlCrId;
+      }
+    }
+    // Reset the ref when urlCrId is cleared
+    if (!urlCrId) {
+      hasAutoOpenedRef.current = null;
+    }
+  }, [urlCrId, pendingMaterials, underReviewMaterials, approvedMaterials, rejectedMaterials, completedMaterials, showViewModal]);
 
   // REMOVED: Unnecessary refetch on tab change - data is already cached and fresh
   // The auto-sync hook handles refetching when needed
@@ -1790,6 +1846,8 @@ const ExtraMaterialPage: React.FC = () => {
           onClose={() => {
             setShowViewModal(false);
             setSelectedRequest(null);
+            // Clear URL parameters to prevent auto-reopen
+            setSearchParams({});
           }}
           changeRequest={selectedRequest}
           canApprove={false}
@@ -1802,6 +1860,8 @@ const ExtraMaterialPage: React.FC = () => {
             onClose={() => {
               setShowEditModal(false);
               setSelectedRequest(null);
+              // Clear URL parameters to prevent auto-reopen
+              setSearchParams({});
             }}
             changeRequest={selectedRequest}
             onSuccess={handleEditSuccess}

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -59,6 +60,7 @@ const getPOChildId = (item: POChild | TDRejectedPOChild): number => {
 };
 
 const PurchaseOrders: React.FC = () => {
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<'ongoing' | 'pending_approval' | 'completed' | 'rejected'>('ongoing');
   const [ongoingSubTab, setOngoingSubTab] = useState<'pending_purchase' | 'store_approved' | 'vendor_approved'>('pending_purchase');
   const [pendingApprovalSubTab, setPendingApprovalSubTab] = useState<'store_requests' | 'vendor_approval'>('store_requests');
@@ -578,6 +580,37 @@ const PurchaseOrders: React.FC = () => {
       rejected: rejectedTotal
     };
   }, [pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, vendorApprovedPOChildren, vendorPendingActualCount, storeRequestsActualCount, completedPurchases, completedPOChildren, rejectedPurchases, tdRejectedPOChildren, completedData, rejectedData]);
+
+  // Initialize tab from URL query parameter on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    const subtabParam = params.get('subtab');
+
+    if (tabParam) {
+      // Map URL tab parameter to valid tab values
+      if (tabParam === 'ongoing' || tabParam === 'pending_approval' || tabParam === 'completed' || tabParam === 'rejected') {
+        setActiveTab(tabParam);
+
+        // Handle sub-tab parameter
+        if (tabParam === 'ongoing' && subtabParam) {
+          if (subtabParam === 'pending_purchase' || subtabParam === 'store_approved' || subtabParam === 'vendor_approved') {
+            setOngoingSubTab(subtabParam);
+          }
+        } else if (tabParam === 'pending_approval' && subtabParam) {
+          if (subtabParam === 'store_requests' || subtabParam === 'vendor_approval') {
+            setPendingApprovalSubTab(subtabParam);
+          }
+        }
+      } else if (tabParam === 'approved') {
+        // Handle "approved" from old notifications - show completed tab
+        setActiveTab('completed');
+      } else if (tabParam === 'pending') {
+        // Handle "pending" from notifications - show pending_approval tab
+        setActiveTab('pending_approval');
+      }
+    }
+  }, [location.search]); // Run whenever URL parameters change
 
   // Reset ALL sub-tab pages when search term changes
   // This ensures search results start from page 1

@@ -1825,10 +1825,43 @@ def td_approve_vendor(cr_id):
         try:
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
+            from utils.role_route_mapper import build_notification_action_url
 
-            # Prefer vendor_selected_by_buyer_id, fall back to created_by
-            buyer_to_notify = cr.vendor_selected_by_buyer_id or cr.created_by
+            # ✅ Use priority chain: buyer who selected vendor > assigned buyer
+            buyer_to_notify = cr.vendor_selected_by_buyer_id or cr.assigned_to_buyer_user_id
+
+            # If still no buyer, find first active buyer/procurement user
+            if not buyer_to_notify:
+                log.warning(f"[TD Approve] No specific buyer assigned for CR {cr_id}, finding any active buyer/procurement user")
+                buyer_role = Role.query.filter(
+                    or_(
+                        Role.role.ilike('%buyer%'),
+                        Role.role.ilike('%procurement%')
+                    ),
+                    Role.is_deleted == False
+                ).first()
+
+                if buyer_role:
+                    buyer_user = User.query.filter_by(
+                        role_id=buyer_role.role_id,
+                        is_deleted=False,
+                        is_active=True
+                    ).first()
+                    if buyer_user:
+                        buyer_to_notify = buyer_user.user_id
+                        log.info(f"[TD Approve] Found buyer user {buyer_to_notify} from role: {buyer_role.role}")
+
+            log.info(f"[TD Approve] Will send approval notification for CR {cr_id} to user {buyer_to_notify}")
+
             if buyer_to_notify:
+                # ✅ Use dynamic URL builder with proper tab/subtab parameters
+                action_url = build_notification_action_url(
+                    user_id=buyer_to_notify,
+                    base_page='purchase-orders',
+                    query_params={'cr_id': cr_id, 'tab': 'ongoing', 'subtab': 'vendor_approved'},
+                    fallback_role_route='buyer'
+                )
+
                 notification = NotificationManager.create_notification(
                     user_id=buyer_to_notify,
                     type='approval',
@@ -1836,7 +1869,7 @@ def td_approve_vendor(cr_id):
                     message=f'TD approved vendor "{cr.selected_vendor_name}" for materials purchase: {cr.item_name or "Materials Request"}',
                     priority='high',
                     category='vendor',
-                    action_url=f'/buyer/purchase-orders?cr_id={cr_id}',
+                    action_url=action_url,
                     action_label='Proceed with Purchase',
                     metadata={
                         'cr_id': str(cr_id),
@@ -1898,6 +1931,10 @@ def td_reject_vendor(cr_id):
         if cr.vendor_selection_status != 'pending_td_approval':
             return jsonify({"error": f"Vendor selection not pending approval. Status: {cr.vendor_selection_status}"}), 400
 
+        # ✅ IMPORTANT: Save buyer ID BEFORE clearing it (needed for notification)
+        original_buyer_id = cr.vendor_selected_by_buyer_id
+        original_buyer_name = cr.vendor_selected_by_buyer_name
+
         # Reject the vendor selection - clear vendor and allow buyer to select again
         cr.vendor_selection_status = 'rejected'
         cr.vendor_approved_by_td_id = td_id
@@ -1921,10 +1958,43 @@ def td_reject_vendor(cr_id):
         try:
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
+            from utils.role_route_mapper import build_notification_action_url
 
-            # Prefer vendor_selected_by_buyer_id, fall back to created_by
-            buyer_to_notify = cr.vendor_selected_by_buyer_id or cr.created_by
+            # ✅ Use priority chain: buyer who selected vendor > assigned buyer
+            buyer_to_notify = original_buyer_id or cr.assigned_to_buyer_user_id
+
+            # If still no buyer, find first active buyer/procurement user
+            if not buyer_to_notify:
+                log.warning(f"[TD Reject] No specific buyer assigned for CR {cr_id}, finding any active buyer/procurement user")
+                buyer_role = Role.query.filter(
+                    or_(
+                        Role.role.ilike('%buyer%'),
+                        Role.role.ilike('%procurement%')
+                    ),
+                    Role.is_deleted == False
+                ).first()
+
+                if buyer_role:
+                    buyer_user = User.query.filter_by(
+                        role_id=buyer_role.role_id,
+                        is_deleted=False,
+                        is_active=True
+                    ).first()
+                    if buyer_user:
+                        buyer_to_notify = buyer_user.user_id
+                        log.info(f"[TD Reject] Found buyer user {buyer_to_notify} from role: {buyer_role.role}")
+
+            log.info(f"[TD Reject] Will send rejection notification for CR {cr_id} to user {buyer_to_notify}")
+
             if buyer_to_notify:
+                # ✅ Use dynamic URL builder with proper tab/subtab parameters for rejected items
+                action_url = build_notification_action_url(
+                    user_id=buyer_to_notify,
+                    base_page='purchase-orders',
+                    query_params={'cr_id': cr_id, 'tab': 'rejected'},
+                    fallback_role_route='buyer'
+                )
+
                 notification = NotificationManager.create_notification(
                     user_id=buyer_to_notify,
                     type='rejection',
@@ -1933,7 +2003,7 @@ def td_reject_vendor(cr_id):
                     priority='high',
                     category='vendor',
                     action_required=True,
-                    action_url=f'/buyer/purchase-orders?cr_id={cr_id}',
+                    action_url=action_url,
                     action_label='Select New Vendor',
                     metadata={
                         'cr_id': str(cr_id),
@@ -1945,8 +2015,13 @@ def td_reject_vendor(cr_id):
                     target_role='buyer'
                 )
                 send_notification_to_user(buyer_to_notify, notification.to_dict())
+                log.info(f"[TD Reject] Successfully sent rejection notification to buyer {buyer_to_notify} for CR {cr_id}")
+            else:
+                log.warning(f"[TD Reject] No buyer to notify for CR {cr_id} (original_buyer_id={original_buyer_id}, cr.created_by={cr.created_by})")
         except Exception as notif_error:
-            log.error(f"Failed to send vendor rejection notification: {notif_error}")
+            log.error(f"[TD Reject] Failed to send vendor rejection notification: {notif_error}")
+            import traceback
+            log.error(f"[TD Reject] Traceback: {traceback.format_exc()}")
 
         return jsonify({
             "success": True,

@@ -202,9 +202,46 @@ const REDIRECT_RULES: RedirectRule[] = [
         path: buildPath(role === 'technical-director' ? '/project-approvals' : (hasMy ? '/my-projects' : '/projects')),
         queryParams: {
           ...(role === 'technical-director' && { tab: 'assigned' }),
-          ...(metadata?.boq_id && { boq_id: String(metadata.boq_id) })
+          ...(metadata?.boq_id && { boq_id: String(metadata.boq_id) }),
+          ...(metadata?.view_extension && { view_extension: 'true' })
         }
       };
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // STORE MATERIAL REQUEST REJECTED (Buyer receives rejection from PM)
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'store_material_request_rejected',
+    match: ({ titleLower, messageLower }) =>
+      (has(titleLower, 'store') && has(titleLower, 'material') && has(titleLower, 'request') && has(titleLower, 'rejected')) ||
+      has(messageLower, 'store request', 'rejected store'),
+    resolve: ({ buildPath, metadata, role }) => {
+      const isBuyer = role === 'buyer' || role === 'procurement';
+
+      if (isBuyer) {
+        // Buyer goes to Pending Approval > Store Requests tab to handle rejection
+        return {
+          path: buildPath('/purchase-orders'),
+          queryParams: {
+            tab: 'pending_approval',
+            subtab: 'store_requests',
+            ...(metadata?.request_id && { request_id: String(metadata.request_id) }),
+            ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+          }
+        };
+      }
+
+      // Production Manager stays on store management
+      if (role === 'production-manager') {
+        return {
+          path: buildPath('/m2-store/materials-catalog'),
+          queryParams: { ...(metadata?.request_id && { request_id: String(metadata.request_id) }) }
+        };
+      }
+
+      return { path: buildPath('/projects') };
     }
   },
 
@@ -358,84 +395,38 @@ const REDIRECT_RULES: RedirectRule[] = [
   },
 
   // ═══════════════════════════════════════════════════════════
-  // CHANGE REQUEST / MATERIALS PURCHASE (must come before BOQ)
-  // ═══════════════════════════════════════════════════════════
-  {
-    id: 'cr_approved',
-    match: ({ titleLower, messageLower, category, metadata }) =>
-      (category === 'change_request' || has(titleLower, 'materials purchase', 'change request') || !!metadata?.cr_id) &&
-      has(titleLower, 'approved'),
-    resolve: ({ buildPath, metadata, role }) => {
-      const isEstimator = role === 'estimator';
-      const isExtraMaterial = metadata?.request_type === 'EXTRA_MATERIALS';
-      const basePath = isEstimator ? '/change-requests' : (isExtraMaterial ? '/extra-material' : '/change-requests');
-      return {
-        path: buildPath(basePath),
-        queryParams: {
-          tab: isExtraMaterial && !isEstimator ? 'accepted' : 'approved',
-          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
-        }
-      };
-    }
-  },
-  {
-    id: 'cr_rejected',
-    match: ({ titleLower, messageLower, category, metadata }) =>
-      (category === 'change_request' || has(titleLower, 'materials purchase', 'change request') || !!metadata?.cr_id) &&
-      has(titleLower, 'rejected'),
-    resolve: ({ buildPath, metadata, role }) => {
-      const isEstimator = role === 'estimator';
-      const isExtraMaterial = metadata?.request_type === 'EXTRA_MATERIALS';
-      const basePath = isEstimator ? '/change-requests' : (isExtraMaterial ? '/extra-material' : '/change-requests');
-      return {
-        path: buildPath(basePath),
-        queryParams: { tab: 'rejected', ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }) }
-      };
-    }
-  },
-  {
-    id: 'cr_purchase_completed',
-    match: ({ titleLower, messageLower, category, metadata }) =>
-      (category === 'change_request' || !!metadata?.cr_id) &&
-      has(titleLower, 'purchase completed', 'purchase complete'),
-    resolve: ({ buildPath, metadata, role }) => {
-      const noPO = role === 'site-engineer' || role === 'site-supervisor' || role === 'estimator' || role === 'production-manager';
-      return {
-        path: buildPath(noPO ? '/change-requests' : '/purchase-orders'),
-        queryParams: { tab: 'completed', ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }) }
-      };
-    }
-  },
-  {
-    id: 'cr_new',
-    match: ({ titleLower, messageLower, category, metadata }) =>
-      category === 'change_request' || has(titleLower, 'materials purchase', 'change request') ||
-      (!!metadata?.cr_id && !has(titleLower, 'vendor')),
-    resolve: ({ buildPath, metadata, role }) => {
-      const isEstimator = role === 'estimator';
-      const isExtraMaterial = metadata?.request_type === 'EXTRA_MATERIALS';
-      const basePath = isEstimator ? '/change-requests' : (isExtraMaterial ? '/extra-material' : '/change-requests');
-      return {
-        path: buildPath(basePath),
-        queryParams: {
-          tab: isExtraMaterial && !isEstimator ? 'requested' : 'pending',
-          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
-        }
-      };
-    }
-  },
-
-  // ═══════════════════════════════════════════════════════════
-  // VENDOR SELECTION FOR CR
+  // VENDOR SELECTION FOR CR (must come before generic CR rules)
   // ═══════════════════════════════════════════════════════════
   {
     id: 'vendor_selection_approved',
     match: ({ titleLower }) =>
       has(titleLower, 'vendor') && has(titleLower, 'selection') && has(titleLower, 'approved'),
     resolve: ({ buildPath, metadata, role }) => {
-      const noPO = role === 'site-engineer' || role === 'site-supervisor' || role === 'estimator' || role === 'production-manager';
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      const isEstimator = role === 'estimator';
+      const isProductionManager = role === 'production-manager';
+      const isProjectManager = role === 'project-manager';
+      const isBuyer = role === 'buyer' || role === 'procurement';
+
+      // Site Engineers use /extra-material, PM/Estimator/Production Manager use /change-requests, Buyer uses /purchase-orders
+      const basePath = isSiteEngineer ? '/extra-material' : (isEstimator || isProductionManager || isProjectManager ? '/change-requests' : '/purchase-orders');
+
+      // Buyer/Procurement should go to ongoing tab with vendor_approved subtab
+      if (isBuyer) {
+        return {
+          path: buildPath(basePath),
+          queryParams: {
+            tab: 'ongoing',
+            subtab: 'vendor_approved',
+            ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }),
+            ...(metadata?.po_child_id && { po_child_id: String(metadata.po_child_id) })
+          }
+        };
+      }
+
+      // For other roles, keep existing behavior
       return {
-        path: buildPath(noPO ? '/change-requests' : '/purchase-orders'),
+        path: buildPath(basePath),
         queryParams: {
           tab: 'approved',
           ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }),
@@ -449,9 +440,14 @@ const REDIRECT_RULES: RedirectRule[] = [
     match: ({ titleLower }) =>
       has(titleLower, 'vendor') && has(titleLower, 'selection') && has(titleLower, 'rejected'),
     resolve: ({ buildPath, metadata, role }) => {
-      const noPO = role === 'site-engineer' || role === 'site-supervisor' || role === 'estimator' || role === 'production-manager';
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      const isEstimator = role === 'estimator';
+      const isProductionManager = role === 'production-manager';
+      const isProjectManager = role === 'project-manager';
+      // Site Engineers use /extra-material, PM/Estimator/Production Manager use /change-requests, Buyer uses /purchase-orders
+      const basePath = isSiteEngineer ? '/extra-material' : (isEstimator || isProductionManager || isProjectManager ? '/change-requests' : '/purchase-orders');
       return {
-        path: buildPath(noPO ? '/change-requests' : '/purchase-orders'),
+        path: buildPath(basePath),
         queryParams: {
           tab: 'rejected',
           ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }),
@@ -468,20 +464,144 @@ const REDIRECT_RULES: RedirectRule[] = [
         has(messageLower, 'requires approval', 'need approval', 'needs approval') ||
         has(titleLower, 'selected', 'selections')
       ),
-    resolve: ({ buildPath, metadata }) => ({
-      path: buildPath('/change-requests'),
-      queryParams: {
-        ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }),
-        ...(metadata?.vendor_id && { vendor_id: String(metadata.vendor_id) })
+    resolve: ({ buildPath, metadata, role }) => {
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      // Site Engineers use /extra-material, others use /change-requests
+      const basePath = isSiteEngineer ? '/extra-material' : '/change-requests';
+      return {
+        path: buildPath(basePath),
+        queryParams: {
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }),
+          ...(metadata?.vendor_id && { vendor_id: String(metadata.vendor_id) })
+        }
+      };
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // CHANGE REQUEST / MATERIALS PURCHASE (must come before BOQ)
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'cr_approved',
+    match: ({ titleLower, messageLower, category, metadata }) =>
+      (category === 'change_request' || has(titleLower, 'materials purchase', 'change request') || !!metadata?.cr_id) &&
+      has(titleLower, 'approved'),
+    resolve: ({ buildPath, metadata, role }) => {
+      const isEstimator = role === 'estimator';
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      const isExtraMaterial = metadata?.request_type === 'EXTRA_MATERIALS';
+      // Site Engineers always use /extra-material, others check request_type
+      const basePath = isEstimator ? '/change-requests' : (isSiteEngineer || isExtraMaterial ? '/extra-material' : '/change-requests');
+      return {
+        path: buildPath(basePath),
+        queryParams: {
+          tab: 'approved',
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+        }
+      };
+    }
+  },
+  {
+    id: 'cr_rejected',
+    match: ({ titleLower, messageLower, category, metadata }) =>
+      (category === 'change_request' || has(titleLower, 'materials purchase', 'change request') || !!metadata?.cr_id) &&
+      has(titleLower, 'rejected'),
+    resolve: ({ buildPath, metadata, role }) => {
+      const isEstimator = role === 'estimator';
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      const isExtraMaterial = metadata?.request_type === 'EXTRA_MATERIALS';
+      // Site Engineers always use /extra-material, others check request_type
+      const basePath = isEstimator ? '/change-requests' : (isSiteEngineer || isExtraMaterial ? '/extra-material' : '/change-requests');
+      return {
+        path: buildPath(basePath),
+        queryParams: { tab: 'rejected', ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }) }
+      };
+    }
+  },
+  {
+    id: 'cr_purchase_completed',
+    match: ({ titleLower, messageLower, category, metadata }) =>
+      (category === 'change_request' || !!metadata?.cr_id) &&
+      has(titleLower, 'purchase completed', 'purchase complete'),
+    resolve: ({ buildPath, metadata, role }) => {
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      const isEstimator = role === 'estimator';
+      const isProductionManager = role === 'production-manager';
+      const isProjectManager = role === 'project-manager';
+      // Site Engineers use /extra-material, PM/Estimator/Production Manager use /change-requests, Buyer uses /purchase-orders
+      const basePath = isSiteEngineer ? '/extra-material' : (isEstimator || isProductionManager || isProjectManager ? '/change-requests' : '/purchase-orders');
+      return {
+        path: buildPath(basePath),
+        queryParams: { tab: isSiteEngineer ? 'complete' : 'completed', ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }) }
+      };
+    }
+  },
+  {
+    id: 'cr_new',
+    match: ({ titleLower, messageLower, category, metadata }) =>
+      // ✅ Exclude only "purchase request assigned" to let the more specific rule handle it
+      // Allow "materials purchase request" to match here
+      !has(titleLower, 'purchase request assigned') &&
+      (category === 'change_request' || has(titleLower, 'materials purchase', 'change request') ||
+      (!!metadata?.cr_id && !has(titleLower, 'vendor'))),
+    resolve: ({ buildPath, metadata, role, titleLower }) => {
+      const isEstimator = role === 'estimator';
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      const isProjectManager = role === 'project-manager';
+      const isProductionManager = role === 'production-manager';
+      const isExtraMaterial = metadata?.request_type === 'EXTRA_MATERIALS';
+
+      // Route based on request_type:
+      // - EXTRA_MATERIALS → /extra-material (for SE/PM/Production Manager)
+      // - Other types → /change-requests
+      // - Estimators always use /change-requests regardless of type
+      const basePath = isEstimator
+                       ? '/change-requests'
+                       : (isSiteEngineer || isExtraMaterial)
+                         ? '/extra-material'
+                         : '/change-requests';
+
+      // Tab logic:
+      // - Site Engineers: 'request' tab (their pending requests)
+      // - Project Manager on extra-material: 'requested' tab (SE requests needing approval)
+      // - Everyone else: 'pending' tab
+      let tab = 'pending';
+      if (isSiteEngineer && basePath === '/extra-material') {
+        tab = 'request';
+      } else if (isProjectManager && basePath === '/extra-material') {
+        tab = 'requested'; // SE Requested tab - shows requests from SEs awaiting PM approval
       }
-    })
+
+      return {
+        path: buildPath(basePath),
+        queryParams: {
+          tab,
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+        }
+      };
+    }
   },
   {
     id: 'vendor_approved',
     match: ({ titleLower, category }) =>
       (category === 'vendor' || has(titleLower, 'vendor')) && has(titleLower, 'approved'),
     resolve: ({ buildPath, metadata, role }) => {
+      const isBuyer = role === 'buyer' || role === 'procurement';
       const noVendors = role === 'site-engineer' || role === 'site-supervisor' || role === 'estimator' || role === 'production-manager';
+
+      // Buyer/Procurement goes to Purchase Orders page with vendor_approved subtab
+      if (isBuyer) {
+        return {
+          path: buildPath('/purchase-orders'),
+          queryParams: {
+            tab: 'ongoing',
+            subtab: 'vendor_approved',
+            ...(metadata?.vendor_id && { vendor_id: String(metadata.vendor_id) }),
+            ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+          }
+        };
+      }
+
       if (noVendors) {
         return { path: buildPath('/projects') };
       }
@@ -513,11 +633,39 @@ const REDIRECT_RULES: RedirectRule[] = [
   {
     id: 'purchase_request_assigned',
     match: ({ titleLower }) =>
-      has(titleLower, 'purchase request') || has(titleLower, 'new purchase request assigned'),
+      has(titleLower, 'purchase request assigned') || has(titleLower, 'new purchase request assigned'),
     resolve: ({ buildPath, metadata, role }) => {
-      const noPO = role === 'site-engineer' || role === 'site-supervisor' || role === 'estimator' || role === 'production-manager';
+      const isBuyer = role === 'buyer' || role === 'procurement';
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      const isEstimator = role === 'estimator';
+      const isProductionManager = role === 'production-manager';
+      const isProjectManager = role === 'project-manager';
+
+      // Determine base path based on role
+      let basePath = '/purchase-orders'; // Default for buyer/procurement
+      if (isSiteEngineer) {
+        basePath = '/extra-material';
+      } else if (isEstimator || isProductionManager || isProjectManager) {
+        basePath = '/change-requests';
+      } else if (isBuyer) {
+        basePath = '/purchase-orders';
+      }
+
+      // Buyer/Procurement should go to ongoing tab with pending_purchase subtab
+      if (isBuyer) {
+        return {
+          path: buildPath(basePath),
+          queryParams: {
+            tab: 'ongoing',
+            subtab: 'pending_purchase',
+            ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+          }
+        };
+      }
+
+      // For other roles, use pending tab
       return {
-        path: buildPath(noPO ? '/change-requests' : '/purchase-orders'),
+        path: buildPath(basePath),
         queryParams: { tab: 'pending', ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) }) }
       };
     }
@@ -532,9 +680,14 @@ const REDIRECT_RULES: RedirectRule[] = [
       (has(titleLower, 'purchase order') || category === 'purchase' || category === 'procurement') &&
       has(titleLower, 'approved'),
     resolve: ({ buildPath, metadata, role }) => {
-      const noPO = role === 'site-engineer' || role === 'site-supervisor' || role === 'estimator' || role === 'production-manager';
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      const isEstimator = role === 'estimator';
+      const isProductionManager = role === 'production-manager';
+      const isProjectManager = role === 'project-manager';
+      // Site Engineers use /extra-material, PM/Estimator/Production Manager use /change-requests, Buyer uses /purchase-orders
+      const basePath = isSiteEngineer ? '/extra-material' : (isEstimator || isProductionManager || isProjectManager ? '/change-requests' : '/purchase-orders');
       return {
-        path: buildPath(noPO ? '/change-requests' : '/purchase-orders'),
+        path: buildPath(basePath),
         queryParams: {
           tab: 'approved',
           ...(metadata?.po_id && { po_id: String(metadata.po_id) }),
@@ -549,9 +702,14 @@ const REDIRECT_RULES: RedirectRule[] = [
       (has(titleLower, 'purchase order') || category === 'purchase' || category === 'procurement') &&
       has(titleLower, 'rejected'),
     resolve: ({ buildPath, metadata, role }) => {
-      const noPO = role === 'site-engineer' || role === 'site-supervisor' || role === 'estimator' || role === 'production-manager';
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      const isEstimator = role === 'estimator';
+      const isProductionManager = role === 'production-manager';
+      const isProjectManager = role === 'project-manager';
+      // Site Engineers use /extra-material, PM/Estimator/Production Manager use /change-requests, Buyer uses /purchase-orders
+      const basePath = isSiteEngineer ? '/extra-material' : (isEstimator || isProductionManager || isProjectManager ? '/change-requests' : '/purchase-orders');
       return {
-        path: buildPath(noPO ? '/change-requests' : '/purchase-orders'),
+        path: buildPath(basePath),
         queryParams: {
           tab: 'rejected',
           ...(metadata?.po_id && { po_id: String(metadata.po_id) }),
@@ -565,9 +723,14 @@ const REDIRECT_RULES: RedirectRule[] = [
     match: ({ titleLower, category }) =>
       has(titleLower, 'purchase order') || category === 'purchase' || category === 'procurement',
     resolve: ({ buildPath, metadata, role }) => {
-      const noPO = role === 'site-engineer' || role === 'site-supervisor' || role === 'estimator' || role === 'production-manager';
+      const isSiteEngineer = role === 'site-engineer' || role === 'site-supervisor';
+      const isEstimator = role === 'estimator';
+      const isProductionManager = role === 'production-manager';
+      const isProjectManager = role === 'project-manager';
+      // Site Engineers use /extra-material, PM/Estimator/Production Manager use /change-requests, Buyer uses /purchase-orders
+      const basePath = isSiteEngineer ? '/extra-material' : (isEstimator || isProductionManager || isProjectManager ? '/change-requests' : '/purchase-orders');
       return {
-        path: buildPath(noPO ? '/change-requests' : '/purchase-orders'),
+        path: buildPath(basePath),
         queryParams: {
           tab: has(metadata?.documentType?.toLowerCase() || '', 'new', 'created') ? 'pending' : undefined,
           ...(metadata?.po_id && { po_id: String(metadata.po_id) }),
@@ -949,7 +1112,14 @@ export const getNotificationRedirectPath = (
   // Find first matching rule
   for (const rule of REDIRECT_RULES) {
     if (rule.match(ctx)) {
+      console.log(`[NotificationRedirect] Matched rule: ${rule.id}`, {
+        title: ctx.title,
+        category: ctx.category,
+        role: ctx.role,
+        metadata: ctx.metadata
+      });
       const config = rule.resolve(ctx);
+      console.log(`[NotificationRedirect] Resolved config:`, config);
       // Clean undefined values from queryParams
       if (config.queryParams) {
         const cleaned: Record<string, string> = {};
@@ -965,6 +1135,14 @@ export const getNotificationRedirectPath = (
   }
 
   // ─── Fallback: Use metadata.link ────────────────────────────
+  console.log('[NotificationRedirect] No rule matched, checking metadata.link', {
+    title: ctx.title,
+    category: ctx.category,
+    role: ctx.role,
+    metadata: ctx.metadata,
+    hasLink: !!metadata?.link
+  });
+
   if (metadata?.link) {
     if (metadata.link.includes('/boq/')) {
       const boqId = metadata.link.split('/boq/').pop()?.split('?')[0];
@@ -983,6 +1161,7 @@ export const getNotificationRedirectPath = (
     }
   }
 
+  console.log('[NotificationRedirect] No redirect config found, returning null');
   return null;
 };
 

@@ -365,9 +365,18 @@ def td_approve_vendor_for_se_boq(assignment_id):
         try:
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
+            from utils.role_route_mapper import build_notification_action_url
 
             # Notify buyer
             if assignment.assigned_to_buyer_id:
+                # ✅ Use dynamic URL builder with proper tab/subtab parameters
+                buyer_action_url = build_notification_action_url(
+                    user_id=assignment.assigned_to_buyer_id,
+                    base_page='purchase-orders',
+                    query_params={'assignment_id': assignment_id, 'tab': 'ongoing', 'subtab': 'vendor_approved'},
+                    fallback_role_route='buyer'
+                )
+
                 buyer_notification = NotificationManager.create_notification(
                     user_id=assignment.assigned_to_buyer_id,
                     type='approval',
@@ -375,7 +384,7 @@ def td_approve_vendor_for_se_boq(assignment_id):
                     message=f'TD approved vendor "{assignment.selected_vendor_name}" for SE BOQ materials',
                     priority='high',
                     category='vendor',
-                    action_url=f'/buyer/purchase-orders?assignment_id={assignment_id}',
+                    action_url=buyer_action_url,
                     action_label='Proceed with Purchase',
                     metadata={
                         'assignment_id': str(assignment_id),
@@ -390,6 +399,14 @@ def td_approve_vendor_for_se_boq(assignment_id):
 
             # Notify site engineer
             if assignment.site_engineer_id:
+                # ✅ Use dynamic URL builder for site engineer
+                se_action_url = build_notification_action_url(
+                    user_id=assignment.site_engineer_id,
+                    base_page=f'boq/{assignment.boq_id}',
+                    query_params=None,
+                    fallback_role_route='site-engineer'
+                )
+
                 se_notification = NotificationManager.create_notification(
                     user_id=assignment.site_engineer_id,
                     type='info',
@@ -397,7 +414,7 @@ def td_approve_vendor_for_se_boq(assignment_id):
                     message=f'TD approved vendor "{assignment.selected_vendor_name}" for your BOQ materials',
                     priority='medium',
                     category='vendor',
-                    action_url=f'/site-engineer/boq/{assignment.boq_id}',
+                    action_url=se_action_url,
                     action_label='View BOQ',
                     metadata={
                         'assignment_id': str(assignment_id),
@@ -528,9 +545,18 @@ def td_reject_vendor_for_se_boq(assignment_id):
         try:
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
+            from utils.role_route_mapper import build_notification_action_url
 
             # Notify buyer
             if assignment.assigned_to_buyer_id:
+                # ✅ Use dynamic URL builder with proper tab/subtab parameters for rejected items
+                buyer_action_url = build_notification_action_url(
+                    user_id=assignment.assigned_to_buyer_id,
+                    base_page='purchase-orders',
+                    query_params={'assignment_id': assignment_id, 'tab': 'rejected'},
+                    fallback_role_route='buyer'
+                )
+
                 buyer_notification = NotificationManager.create_notification(
                     user_id=assignment.assigned_to_buyer_id,
                     type='rejection',
@@ -539,7 +565,7 @@ def td_reject_vendor_for_se_boq(assignment_id):
                     priority='high',
                     category='vendor',
                     action_required=True,
-                    action_url=f'/buyer/purchase-orders?assignment_id={assignment_id}',
+                    action_url=buyer_action_url,
                     action_label='Select New Vendor',
                     metadata={
                         'assignment_id': str(assignment_id),
@@ -555,6 +581,14 @@ def td_reject_vendor_for_se_boq(assignment_id):
 
             # Notify site engineer
             if assignment.site_engineer_id:
+                # ✅ Use dynamic URL builder for site engineer
+                se_action_url = build_notification_action_url(
+                    user_id=assignment.site_engineer_id,
+                    base_page=f'boq/{assignment.boq_id}',
+                    query_params=None,
+                    fallback_role_route='site-engineer'
+                )
+
                 se_notification = NotificationManager.create_notification(
                     user_id=assignment.site_engineer_id,
                     type='info',
@@ -562,7 +596,7 @@ def td_reject_vendor_for_se_boq(assignment_id):
                     message=f'TD rejected vendor "{rejected_vendor_name}" for your BOQ materials. Buyer will select a new vendor.',
                     priority='medium',
                     category='vendor',
-                    action_url=f'/site-engineer/boq/{assignment.boq_id}',
+                    action_url=se_action_url,
                     action_label='View BOQ',
                     metadata={
                         'assignment_id': str(assignment_id),

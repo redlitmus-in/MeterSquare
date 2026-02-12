@@ -452,21 +452,45 @@ const ProjectApprovals: React.FC = () => {
     const boqIdParam = searchParams.get('boq_id');
     const projectIdParam = searchParams.get('projectId');
     const viewDetailsParam = searchParams.get('viewDetails');
+    const viewExtensionParam = searchParams.get('view_extension');
 
     // ── CASE 1: Navigate via boq_id (from notification click) ──
     // Always load directly by ID — avoids race condition with tab data
     if (boqIdParam) {
       // Skip if we already processed this exact boq_id
-      if (lastProcessedParamRef.current === `boq_${boqIdParam}`) return;
+      if (lastProcessedParamRef.current === `boq_${boqIdParam}_ext_${viewExtensionParam}`) return;
 
       const targetBoqId = parseInt(boqIdParam, 10);
       if (isNaN(targetBoqId)) {
-        lastProcessedParamRef.current = `boq_${boqIdParam}`;
+        lastProcessedParamRef.current = `boq_${boqIdParam}_ext_${viewExtensionParam}`;
         return;
       }
 
-      lastProcessedParamRef.current = `boq_${boqIdParam}`;
-      openBoqAndCleanUrl(targetBoqId, ['boq_id', 'tab']);
+      lastProcessedParamRef.current = `boq_${boqIdParam}_ext_${viewExtensionParam}`;
+
+      // Special case: Day Extension Request notification
+      if (viewExtensionParam === 'true') {
+        // Step 1: Switch to "assigned" tab first
+        if (filterStatus !== 'assigned') {
+          setFilterStatus('assigned');
+        }
+
+        // Step 2: Wait for tab to load, then open day extension modal
+        setTimeout(() => {
+          handleOpenDayExtensionModal(targetBoqId);
+
+          // Step 3: Clean URL params after opening modal
+          setTimeout(() => {
+            searchParams.delete('boq_id');
+            searchParams.delete('tab');
+            searchParams.delete('view_extension');
+            setSearchParams(searchParams, { replace: true });
+          }, 300);
+        }, 800); // Wait for tab switch + data load
+      } else {
+        // Normal BOQ details modal
+        openBoqAndCleanUrl(targetBoqId, ['boq_id', 'tab']);
+      }
       return;
     }
 

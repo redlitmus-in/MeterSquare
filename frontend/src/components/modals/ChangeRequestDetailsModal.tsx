@@ -791,23 +791,26 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <p className="text-xs text-gray-500 mt-0.5">Compare vendors who can supply these materials</p>
                         </div>
                       </div>
-                      <button
-                        onClick={handleCompareVendors}
-                        disabled={loadingCompetitors}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {loadingCompetitors ? (
-                          <>
-                            <ModernLoadingSpinners size="xs" />
-                            Loading...
-                          </>
-                        ) : (
-                          <>
-                            <GitCompare className="w-4 h-4" />
-                            Compare Vendors
-                          </>
-                        )}
-                      </button>
+                      {/* Show Compare Vendors button ONLY for TD role */}
+                      {(isTechnicalDirector(user) || user?.role_id === 7 || (user?.role || user?.role_name || '').toLowerCase().includes('technical')) && (
+                        <button
+                          onClick={handleCompareVendors}
+                          disabled={loadingCompetitors}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {loadingCompetitors ? (
+                            <>
+                              <ModernLoadingSpinners size="xs" />
+                              Loading...
+                            </>
+                          ) : (
+                            <>
+                              <GitCompare className="w-4 h-4" />
+                              Compare Vendors
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -828,24 +831,27 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             <p className="text-xs text-gray-500">Compare with other vendors who can supply these materials</p>
                           </div>
                         </div>
-                        <button
-                          onClick={handleCompareVendors}
-                          disabled={loadingCompetitors}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                          title="Compare with competitor vendors"
-                        >
-                          {loadingCompetitors ? (
-                            <>
-                              <ModernLoadingSpinners size="xxs" />
-                              Loading...
-                            </>
-                          ) : (
-                            <>
-                              <GitCompare className="w-3.5 h-3.5" />
-                              Compare Vendors
-                            </>
-                          )}
-                        </button>
+                        {/* Show Compare Vendors button ONLY for TD role */}
+                        {(isTechnicalDirector(user) || user?.role_id === 7 || (user?.role || user?.role_name || '').toLowerCase().includes('technical')) && (
+                          <button
+                            onClick={handleCompareVendors}
+                            disabled={loadingCompetitors}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                            title="Compare with competitor vendors"
+                          >
+                            {loadingCompetitors ? (
+                              <>
+                                <ModernLoadingSpinners size="xxs" />
+                                Loading...
+                              </>
+                            ) : (
+                              <>
+                                <GitCompare className="w-3.5 h-3.5" />
+                                Compare Vendors
+                              </>
+                            )}
+                          </button>
+                        )}
                       </div>
                     <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-200">
                       {/* Vendor Company Information */}

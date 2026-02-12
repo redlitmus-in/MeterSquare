@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
@@ -43,7 +44,22 @@ import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState('pending');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Get tab and cr_id from URL query parameters (for notification redirects)
+  const urlTab = searchParams.get('tab');
+  const urlCrId = searchParams.get('cr_id');
+
+  const [activeTab, setActiveTab] = useState(() => {
+    // Priority: URL tab param > default
+    if (urlTab) {
+      const validTabs = ['pending', 'approved', 'completed', 'rejected'];
+      if (validTabs.includes(urlTab)) {
+        return urlTab;
+      }
+    }
+    return 'pending';
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [changeRequests, setChangeRequests] = useState<ChangeRequestItem[]>([]);
@@ -66,6 +82,9 @@ const ChangeRequestsPage: React.FC = () => {
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+
+  // Track if we've already auto-opened modal from URL (to prevent reopening on close)
+  const hasAutoOpenedRef = useRef<string | null>(null);
 
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
@@ -94,6 +113,25 @@ const ChangeRequestsPage: React.FC = () => {
       loadChangeRequests(false);
     }
   }, [currentPage]);
+
+  // Auto-open change request details when cr_id is in URL (from notification redirect)
+  useEffect(() => {
+    // Only auto-open if we haven't already opened for this specific urlCrId
+    if (urlCrId && changeRequests.length > 0 && !showDetailsModal && hasAutoOpenedRef.current !== urlCrId) {
+      const crIdNum = parseInt(urlCrId, 10);
+      const targetCr = changeRequests.find((cr: ChangeRequestItem) => cr.cr_id === crIdNum);
+      if (targetCr) {
+        setSelectedChangeRequest(targetCr);
+        setShowDetailsModal(true);
+        // Mark this urlCrId as already opened
+        hasAutoOpenedRef.current = urlCrId;
+      }
+    }
+    // Reset the ref when urlCrId is cleared
+    if (!urlCrId) {
+      hasAutoOpenedRef.current = null;
+    }
+  }, [urlCrId, changeRequests, showDetailsModal]);
 
   const loadChangeRequests = async (showToasts = false) => {
     try {
@@ -190,6 +228,8 @@ const ChangeRequestsPage: React.FC = () => {
 
     setShowDetailsModal(false);
     handleApprove(selectedChangeRequest.cr_id);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   const handleRejectFromModal = () => {
@@ -197,6 +237,8 @@ const ChangeRequestsPage: React.FC = () => {
     setRejectingCrId(selectedChangeRequest.cr_id);
     setShowDetailsModal(false);
     setShowRejectionModal(true);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   const handleEdit = async (crId: number) => {
@@ -969,6 +1011,8 @@ const ChangeRequestsPage: React.FC = () => {
         onClose={() => {
           setShowDetailsModal(false);
           setSelectedChangeRequest(null);
+          // Clear URL parameters to prevent auto-reopen
+          setSearchParams({});
         }}
         changeRequest={selectedChangeRequest}
         onApprove={handleApproveFromModal}
@@ -1008,6 +1052,8 @@ const ChangeRequestsPage: React.FC = () => {
           onClose={() => {
             setShowEditModal(false);
             setSelectedChangeRequest(null);
+            // Clear URL parameters to prevent auto-reopen
+            setSearchParams({});
           }}
           changeRequest={selectedChangeRequest}
           onSuccess={() => {
@@ -1015,6 +1061,8 @@ const ChangeRequestsPage: React.FC = () => {
             setSelectedChangeRequest(null);
             loadChangeRequests(true);
             showSuccess('Purchase request updated successfully');
+            // Clear URL parameters to prevent auto-reopen
+            setSearchParams({});
           }}
         />
       )}

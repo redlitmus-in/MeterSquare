@@ -401,8 +401,17 @@ def td_approve_po_child(po_child_id):
         try:
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
+            from utils.role_route_mapper import build_notification_action_url
 
             if po_child.vendor_selected_by_buyer_id:
+                # ✅ Use dynamic URL builder with proper tab/subtab parameters
+                action_url = build_notification_action_url(
+                    user_id=po_child.vendor_selected_by_buyer_id,
+                    base_page='purchase-orders',
+                    query_params={'po_child_id': po_child_id, 'tab': 'ongoing', 'subtab': 'vendor_approved'},
+                    fallback_role_route='buyer'
+                )
+
                 notification = NotificationManager.create_notification(
                     user_id=po_child.vendor_selected_by_buyer_id,
                     type='approval',
@@ -410,7 +419,7 @@ def td_approve_po_child(po_child_id):
                     message=f'TD approved vendor "{po_child.vendor_name}" for {po_child.get_formatted_id()}',
                     priority='high',
                     category='vendor',
-                    action_url=f'/buyer/purchase-orders?po_child_id={po_child_id}',
+                    action_url=action_url,
                     action_label='Proceed with Purchase',
                     metadata={
                         'po_child_id': str(po_child_id),
@@ -495,8 +504,17 @@ def td_reject_po_child(po_child_id):
         try:
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
+            from utils.role_route_mapper import build_notification_action_url
 
             if original_buyer_id:
+                # ✅ Use dynamic URL builder with proper tab/subtab parameters for rejected items
+                action_url = build_notification_action_url(
+                    user_id=original_buyer_id,
+                    base_page='purchase-orders',
+                    query_params={'po_child_id': po_child_id, 'tab': 'rejected'},
+                    fallback_role_route='buyer'
+                )
+
                 notification = NotificationManager.create_notification(
                     user_id=original_buyer_id,
                     type='rejection',
@@ -505,7 +523,7 @@ def td_reject_po_child(po_child_id):
                     priority='high',
                     category='vendor',
                     action_required=True,
-                    action_url=f'/buyer/purchase-orders?po_child_id={po_child_id}',
+                    action_url=action_url,
                     action_label='Select New Vendor',
                     metadata={
                         'po_child_id': str(po_child_id),

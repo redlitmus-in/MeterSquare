@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -67,7 +68,22 @@ const calculatePOChildTotal = (poChild: POChild): number => {
 
 const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState('vendor_approvals');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Get tab and cr_id from URL query parameters (for notification redirects)
+  const urlTab = searchParams.get('tab');
+  const urlCrId = searchParams.get('cr_id');
+
+  const [activeTab, setActiveTab] = useState(() => {
+    // Priority: URL tab param > default
+    if (urlTab) {
+      const validTabs = ['vendor_approvals', 'completed'];
+      if (validTabs.includes(urlTab)) {
+        return urlTab;
+      }
+    }
+    return 'vendor_approvals';
+  });
   const [vendorApprovalsSubTab, setVendorApprovalsSubTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
@@ -120,6 +136,9 @@ const ChangeRequestsPage: React.FC = () => {
   const [selectedCrIdForLpo, setSelectedCrIdForLpo] = useState<number | null>(null);
   const [lpoEditorReadOnly, setLpoEditorReadOnly] = useState(false);
 
+  // Track if we've already auto-opened modal from URL (to prevent reopening on close)
+  const hasAutoOpenedRef = useRef<string | null>(null);
+
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
 
@@ -160,6 +179,25 @@ const ChangeRequestsPage: React.FC = () => {
   useEffect(() => {
     loadCompletedRequests(false);
   }, [completedPage]);
+
+  // Auto-open change request details when cr_id is in URL (from notification redirect)
+  useEffect(() => {
+    // Only auto-open if we haven't already opened for this specific urlCrId
+    if (urlCrId && changeRequests.length > 0 && !showDetailsModal && hasAutoOpenedRef.current !== urlCrId) {
+      const crIdNum = parseInt(urlCrId, 10);
+      const targetCr = changeRequests.find((cr: ChangeRequestItem) => cr.cr_id === crIdNum);
+      if (targetCr) {
+        setSelectedChangeRequest(targetCr);
+        setShowDetailsModal(true);
+        // Mark this urlCrId as already opened
+        hasAutoOpenedRef.current = urlCrId;
+      }
+    }
+    // Reset the ref when urlCrId is cleared
+    if (!urlCrId) {
+      hasAutoOpenedRef.current = null;
+    }
+  }, [urlCrId, changeRequests, showDetailsModal]);
 
   const loadChangeRequests = async (showLoadingSpinner = false) => {
     // Only show loading spinner on initial load, not on auto-refresh
@@ -683,6 +721,8 @@ const ChangeRequestsPage: React.FC = () => {
     if (!selectedChangeRequest) return;
     setShowDetailsModal(false);
     handleApprove(selectedChangeRequest.cr_id);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   const handleRejectFromModal = async () => {
@@ -690,6 +730,8 @@ const ChangeRequestsPage: React.FC = () => {
     setShowDetailsModal(false);
     setRejectingCrId(selectedChangeRequest.cr_id);
     setShowRejectionModal(true);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   // Handle vendor approval from modal (for PO children or legacy CRs with pending_td_approval)
@@ -705,6 +747,8 @@ const ChangeRequestsPage: React.FC = () => {
       // Legacy CR-based vendor approval
       await handleApproveVendor(selectedChangeRequest.cr_id);
     }
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   // Handle vendor rejection from modal (for PO children or legacy CRs with pending_td_approval)
@@ -720,6 +764,8 @@ const ChangeRequestsPage: React.FC = () => {
       // Legacy CR-based vendor rejection
       setRejectingCrId(selectedChangeRequest.cr_id);
     }
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
     // Set flag so handleRejectionSubmit knows this is a vendor rejection
     setIsVendorRejectionFromModal(true);
     setShowRejectionModal(true);
@@ -2754,6 +2800,8 @@ const ChangeRequestsPage: React.FC = () => {
         onClose={() => {
           setShowDetailsModal(false);
           setSelectedChangeRequest(null);
+          // Clear URL parameters to prevent auto-reopen
+          setSearchParams({});
         }}
         changeRequest={selectedChangeRequest}
         onApprove={
@@ -2784,6 +2832,8 @@ const ChangeRequestsPage: React.FC = () => {
           onClose={() => {
             setShowEditModal(false);
             setSelectedChangeRequest(null);
+            // Clear URL parameters to prevent auto-reopen
+            setSearchParams({});
           }}
           changeRequest={selectedChangeRequest}
           onSuccess={handleEditSuccess}

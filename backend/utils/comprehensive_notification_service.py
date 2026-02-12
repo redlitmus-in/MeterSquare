@@ -552,8 +552,14 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 elif recipient_role_lower == 'estimator':
                     # Estimator ALWAYS goes to change-requests (they don't have /extra-material route)
                     route = 'change-requests'
+                elif recipient_role_lower == 'project-manager':
+                    # Project Manager ALWAYS goes to extra-material for material purchases
+                    route = 'extra-material'
+                elif recipient_role_lower == 'technical-director':
+                    # Technical Director uses change-requests for approvals
+                    route = 'change-requests'
                 else:
-                    # Other roles (PM/TD) use extra-material or change-requests based on request_type
+                    # Fallback: use extra-material or change-requests based on request_type
                     route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
 
                 action_url = f'/{recipient_role_lower}/{route}?cr_id={cr_id}'
@@ -603,18 +609,28 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         """
         try:
             # Determine correct route based on next_role and request_type
-            # Buyer uses 'purchase-orders' page for all CR/PO work
+            # Buyer/Procurement uses 'purchase-orders' page for all CR/PO work
             # Estimator uses 'change-requests' page (they don't have /extra-material route)
+            # Site Engineer/Supervisor ALWAYS use 'extra-material' page (they don't have /change-requests route)
             next_role_lower = (next_role or '').lower().replace(' ', '-').replace('_', '-')
 
-            if next_role_lower == 'buyer':
-                # Buyer views purchase requests on purchase-orders page
+            if next_role_lower in ['buyer', 'procurement']:
+                # Buyer/Procurement views purchase requests on purchase-orders page
                 route = 'purchase-orders'
             elif next_role_lower == 'estimator':
                 # Estimator ALWAYS goes to change-requests (they don't have /extra-material route)
                 route = 'change-requests'
+            elif next_role_lower in ['site-engineer', 'site-supervisor']:
+                # Site Engineers ALWAYS use extra-material page (they don't have access to change-requests)
+                route = 'extra-material'
+            elif next_role_lower == 'project-manager':
+                # Project Manager ALWAYS goes to extra-material for material purchases
+                route = 'extra-material'
+            elif next_role_lower == 'technical-director':
+                # Technical Director uses change-requests for approvals
+                route = 'change-requests'
             else:
-                # Other roles (PM/TD) use extra-material or change-requests
+                # Fallback: use extra-material or change-requests based on request_type
                 route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
 
             for user_id in next_user_ids:
@@ -623,7 +639,22 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     log.info(f"Skipping duplicate CR approved notification for CR {cr_id}")
                     continue
 
-                action_url = f'/{next_role_lower}/{route}?cr_id={cr_id}'
+                # ✅ Set correct tab/subtab parameters based on role
+                # Buyer/Procurement → Ongoing tab with Pending Purchase subtab
+                # Others → Pending tab (default)
+                if next_role_lower in ['buyer', 'procurement']:
+                    query_params = {'cr_id': cr_id, 'tab': 'ongoing', 'subtab': 'pending_purchase'}
+                else:
+                    query_params = {'cr_id': cr_id, 'tab': 'pending'}
+
+                # Use build_notification_action_url to properly map role to route prefix
+                # (e.g., 'procurement' role maps to '/buyer' route)
+                action_url = build_notification_action_url(
+                    user_id=user_id,
+                    base_page=route,
+                    query_params=query_params,
+                    fallback_role_route=next_role_lower
+                )
                 log.info(f"[notify_cr_approved] Creating notification for user {user_id}, action_url: {action_url}")
 
                 notification = NotificationManager.create_notification(
@@ -666,13 +697,22 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 return
 
             # ✅ Generate dynamic URL based on recipient's actual role from database
-            route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
+            # Site Engineers ALWAYS use extra-material page (they don't have access to change-requests)
+            from utils.role_route_mapper import get_user_role_route
+            creator_role_route = get_user_role_route(creator_user_id)
+
+            if creator_role_route in ['site-engineer', 'site-supervisor']:
+                route = 'extra-material'
+            else:
+                route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
+
             action_url = build_notification_action_url(
                 user_id=creator_user_id,
                 base_page=route,
-                query_params={'cr_id': cr_id},
+                query_params={'cr_id': cr_id, 'tab': 'rejected'},
                 fallback_role_route='site-engineer'  # Fallback if user role not found
             )
+            log.info(f"[CR REJECT NOTIFICATION] Generated URL for user {creator_user_id}: {action_url}")
 
             notification = NotificationManager.create_notification(
                 user_id=creator_user_id,
@@ -746,11 +786,19 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 return
 
             # ✅ Generate dynamic URL based on recipient's actual role from database
-            route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
+            # Site Engineers ALWAYS use extra-material page (they don't have access to change-requests)
+            from utils.role_route_mapper import get_user_role_route
+            requester_role_route = get_user_role_route(requester_user_id)
+
+            if requester_role_route in ['site-engineer', 'site-supervisor']:
+                route = 'extra-material'
+            else:
+                route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
+
             action_url = build_notification_action_url(
                 user_id=requester_user_id,
                 base_page=route,
-                query_params={'cr_id': cr_id},
+                query_params={'cr_id': cr_id, 'tab': 'completed'},
                 fallback_role_route='site-engineer'  # Fallback if user role not found
             )
 
@@ -797,9 +845,9 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 priority='urgent',
                 category='extension',
                 action_required=True,
-                action_url=get_td_approval_url(td_user_id, boq_id, tab='assigned'),
+                action_url=get_td_approval_url(td_user_id, boq_id, tab='assigned', view_extension=True),
                 action_label='Review Request',
-                metadata={'boq_id': boq_id, 'days_requested': days_requested, 'reason': reason},
+                metadata={'boq_id': boq_id, 'days_requested': days_requested, 'reason': reason, 'view_extension': True},
                 sender_id=pm_id,
                 sender_name=pm_name
             )

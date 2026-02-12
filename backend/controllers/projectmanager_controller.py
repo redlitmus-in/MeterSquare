@@ -2214,7 +2214,7 @@ def get_pm_approved_boq():
             )
             .join(Project, BOQ.project_id == Project.project_id)
             .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
-            .filter(BOQ.is_deleted == False, Project.is_deleted == False)
+            .filter(BOQ.is_deleted == False, Project.is_deleted == False, ~BOQ.status.in_(['PM_Rejected', 'Pending_PM_Approval']))
         )
 
         # PERFORMANCE: Apply role filter early (reduces rows before sorting)
