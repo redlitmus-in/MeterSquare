@@ -94,51 +94,25 @@ const BOQSubItemDetailModal: React.FC<BOQSubItemDetailModalProps> = ({
   const [matchedSubItem, setMatchedSubItem] = useState<SubItemData | null>(null);
   const [boqData, setBoqData] = useState<any>(null);
 
-  // Handler to navigate to project details page
+  // Handler to navigate to project details page (role-aware)
   const handleViewInProject = async () => {
     if (projectId) {
-      // Use provided props if available, otherwise fetch BOQ data
-      let boqStatusToUse = propBoqStatus;
-      let pmAssignedToUse = propPmAssigned;
+      // Get current role prefix from URL (routes are /:role/...)
+      const currentRoleSlug = window.location.pathname.split('/')[1] || '';
+      const isTD = currentRoleSlug === 'technical-director';
+      const isAdmin = currentRoleSlug === 'admin';
+      const isPM = currentRoleSlug === 'project-manager';
 
-      // If props not provided, fetch BOQ data
-      if (boqStatusToUse === undefined || pmAssignedToUse === undefined) {
-        try {
-          const result = await estimatorService.getBOQById(boqId);
-          if (result.success && result.data) {
-            const boq = result.data;
-            boqStatusToUse = boq.status;
-            // Handle both snake_case (from API) and camelCase (frontend) property names
-            pmAssignedToUse = boq.pm_assigned ?? boq.pmAssigned;
-          }
-        } catch (err) {
-          console.error('Error fetching BOQ for navigation:', err);
-          // Fallback: navigate without tab parameter
-          navigate(`/technical-director/project-approvals?projectId=${projectId}&viewDetails=true`);
-          onClose();
-          return;
-        }
+      // TD and Admin have project-approvals page, PM uses my-projects, others use projects
+      if (isTD || isAdmin) {
+        // Navigate with boq_id so ProjectApprovals loads the BOQ directly by ID
+        navigate(`/${currentRoleSlug}/project-approvals?boq_id=${boqId}`);
+      } else if (isPM) {
+        navigate(`/${currentRoleSlug}/my-projects?project_id=${projectId}`);
+      } else {
+        navigate(`/${currentRoleSlug}/projects?project_id=${projectId}`);
       }
-
-      // Determine the correct tab based on status and pmAssigned - match ProjectApprovals logic
-      let tab = 'pending';
-      if (pmAssignedToUse === true && boqStatusToUse !== 'rejected' && boqStatusToUse !== 'completed' && boqStatusToUse !== 'cancelled') {
-        tab = 'assigned';
-      } else if (boqStatusToUse === 'rejected') {
-        tab = 'rejected';
-      } else if ((boqStatusToUse === 'client_confirmed' || boqStatusToUse === 'client_rejected') && !pmAssignedToUse) {
-        tab = 'sent';
-      } else if ((boqStatusToUse === 'approved' || boqStatusToUse === 'revision_approved' || boqStatusToUse === 'sent_for_confirmation') && !pmAssignedToUse) {
-        tab = 'approved';
-      } else if (boqStatusToUse && boqStatusToUse.includes('revision')) {
-        // Fallback for revision detection if revision_number not available
-        tab = 'revisions';
-      } else if (boqStatusToUse === 'pending' && !pmAssignedToUse) {
-        tab = 'pending';
-      }
-
-      navigate(`/technical-director/project-approvals?tab=${tab}&projectId=${projectId}&viewDetails=true`);
-      onClose(); // Close modal after navigation
+      onClose();
     }
   };
 
@@ -378,8 +352,11 @@ const BOQSubItemDetailModal: React.FC<BOQSubItemDetailModalProps> = ({
                   <span>This item is part of the approved BOQ scope</span>
                 </div>
 
-                {/* View BOQ in Project Button */}
-                {projectId && (
+                {/* View BOQ in Project Button - only for TD, Admin, and PM */}
+                {projectId && (() => {
+                  const roleSlug = window.location.pathname.split('/')[1] || '';
+                  return roleSlug === 'technical-director' || roleSlug === 'admin' || roleSlug === 'project-manager';
+                })() && (
                   <div className="mt-4 pt-4 border-t border-gray-200">
                     <button
                       onClick={handleViewInProject}
