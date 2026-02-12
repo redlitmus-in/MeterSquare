@@ -237,7 +237,7 @@ def update_user_profile():
             return jsonify({"error": "Not logged in"}), 401
 
         data = request.get_json()
-        allowed_fields = ["full_name", "phone", "department"]
+        allowed_fields = ["full_name", "email", "phone", "department"]
         update_data = {field: data[field] for field in allowed_fields if field in data}
 
         if not update_data:

@@ -201,7 +201,9 @@
       "Bash(xargs cat:*)",
       "Bash(npx vite build:*)",
       "Bash(python migrations/create_catalog_items_tables.py:*)",
-      "Bash(for f in controllers/buyer/*.py)"
+      "Bash(for f in controllers/buyer/*.py)",
+      "Bash(python migrations/add_routed_materials_tracking.py:*)",
+      "Bash(git fetch:*)"
     ],
     "deny": [],
     "ask": []

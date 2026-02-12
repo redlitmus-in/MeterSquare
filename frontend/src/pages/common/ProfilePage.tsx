@@ -235,7 +235,7 @@ const ProfilePage: React.FC = () => {
               <h1 className="text-3xl font-bold mb-1">{user?.full_name}</h1>
               <p className="text-white/80 mb-2 flex items-center gap-2">
                 <MailIcon className="w-4 h-4" />
-                {user?.email}
+                {user?.email || 'No email provided'}
               </p>
               <div className="flex items-center gap-2">
                 <Badge className="bg-white/20 text-white border-white/30 backdrop-blur-sm px-3 py-1">
@@ -416,7 +416,7 @@ const ProfilePage: React.FC = () => {
                         />
                       ) : (
                         <p className="text-gray-900 font-medium p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border border-gray-200">
-                          {user?.email}
+                          {user?.email || <span className="text-gray-400 italic">Not provided</span>}
                         </p>
                       )}
                     </div>

@@ -65,11 +65,15 @@ def run_migration():
                     )
                     FROM internal_inventory_material_requests imr
                     WHERE imr.cr_id = cr.cr_id
+                    AND imr.item_name IS NOT NULL
+                    AND imr.item_name != ''
                 )
                 WHERE cr.cr_id IN (
                     SELECT DISTINCT cr_id
                     FROM internal_inventory_material_requests
                     WHERE cr_id IS NOT NULL
+                    AND item_name IS NOT NULL
+                    AND item_name != ''
                 )
             """))
 
@@ -83,26 +87,27 @@ def run_migration():
             # Mark materials as routed for CRs that have PO children
             db.session.execute(text("""
                 UPDATE change_requests cr
-                SET routed_materials = COALESCE(cr.routed_materials, '{}'::jsonb) || (
+                SET routed_materials = COALESCE(cr.routed_materials, '{}'::jsonb) || COALESCE((
                     SELECT jsonb_object_agg(
                         mat->>'material_name',
                         jsonb_build_object(
                             'routing', 'vendor',
-                            'po_child_id', pc.po_child_id,
+                            'po_child_id', pc.id,
                             'routed_at', pc.created_at::text,
-                            'routed_by', pc.created_by_user_id
+                            'routed_by', pc.vendor_selected_by_buyer_id
                         )
                     )
-                    FROM po_children pc,
+                    FROM po_child pc,
                     LATERAL jsonb_array_elements(
-                        COALESCE(pc.sub_items_data, pc.materials_data, '[]'::jsonb)
+                        COALESCE(pc.materials_data, '[]'::jsonb)
                     ) AS mat
                     WHERE pc.parent_cr_id = cr.cr_id
                     AND mat->>'material_name' IS NOT NULL
-                )
+                    AND mat->>'material_name' != ''
+                ), '{}'::jsonb)
                 WHERE cr.cr_id IN (
                     SELECT DISTINCT parent_cr_id
-                    FROM po_children
+                    FROM po_child
                     WHERE parent_cr_id IS NOT NULL
                 )
             """))

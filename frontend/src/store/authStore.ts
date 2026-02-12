@@ -180,14 +180,19 @@ export const useAuthStore = create<AuthState>()(
       updateProfile: async (userData: any) => {
         try {
           set({ isLoading: true, error: null });
-          
-          const updatedUser = await apiWrapper.put<User>(
+
+          await apiWrapper.put(
             API_ENDPOINTS.AUTH.ME,
             userData
           );
 
+          // Re-fetch fresh user data since backend returns only a message
+          const response = await apiWrapper.get<any>(API_ENDPOINTS.AUTH.ME);
+          const freshUser = response.user || response;
+          localStorage.setItem('user', JSON.stringify(freshUser));
+
           set({
-            user: updatedUser,
+            user: freshUser,
             isLoading: false,
             error: null,
           });
