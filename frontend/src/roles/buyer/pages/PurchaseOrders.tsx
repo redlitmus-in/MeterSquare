@@ -116,7 +116,7 @@ const PurchaseOrders: React.FC = () => {
     queryKey: ['buyer-pending-purchases'],
     fetchFn: () => buyerService.getPendingPurchases(1, 1000), // Fetch all (up to 1000)
     realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL],
-    staleTime: 0, // Always fetch fresh data to ensure immediate updates after email sent
+    staleTime: STALE_TIMES.STANDARD, // 30s - real-time subscriptions handle instant updates
   });
 
   // ✅ OPTIMIZED: Fetch completed purchases - Real-time updates via Supabase (NO POLLING)
@@ -126,7 +126,7 @@ const PurchaseOrders: React.FC = () => {
     queryKey: ['buyer-completed-purchases'],
     fetchFn: () => buyerService.getCompletedPurchases(1, 1000), // Fetch all (up to 1000)
     realtimeTables: [...REALTIME_TABLES.PURCHASES],
-    staleTime: 0, // Always fetch fresh data to ensure immediate updates after email sent
+    staleTime: STALE_TIMES.STANDARD, // 30s - real-time subscriptions handle instant updates
   });
 
   // ✅ OPTIMIZED: Fetch rejected purchases - Real-time updates via Supabase
@@ -136,7 +136,7 @@ const PurchaseOrders: React.FC = () => {
     queryKey: ['buyer-rejected-purchases'],
     fetchFn: () => buyerService.getRejectedPurchases(1, 1000), // Fetch all (up to 1000)
     realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL],
-    staleTime: 0, // Always fetch fresh data to ensure immediate updates after email sent
+    staleTime: STALE_TIMES.STANDARD, // 30s - real-time subscriptions handle instant updates
   });
 
   // ✅ Fetch approved PO children (for Vendor Approved tab)
@@ -148,7 +148,7 @@ const PurchaseOrders: React.FC = () => {
     queryKey: ['buyer-approved-po-children'],
     fetchFn: () => buyerService.getApprovedPOChildren(),
     realtimeTables: ['po_child', ...REALTIME_TABLES.CHANGE_REQUESTS], // Real-time subscriptions
-    staleTime: 0, // Always fetch fresh data to ensure immediate updates after email sent
+    staleTime: STALE_TIMES.STANDARD, // 30s - real-time subscriptions handle instant updates
   });
 
   // Fetch POChildren pending TD approval (for Pending Approval tab)
@@ -160,7 +160,7 @@ const PurchaseOrders: React.FC = () => {
     queryKey: ['buyer-pending-po-children'],
     fetchFn: () => buyerService.getBuyerPendingPOChildren(),
     realtimeTables: ['po_child', ...REALTIME_TABLES.CHANGE_REQUESTS],
-    staleTime: 0, // Always fetch fresh data to ensure immediate updates after email sent
+    staleTime: STALE_TIMES.STANDARD, // 30s - real-time subscriptions handle instant updates
   });
 
   // Helper function for processing purchases (po_children are embedded in parent CR response)
@@ -405,9 +405,11 @@ const PurchaseOrders: React.FC = () => {
           item.cr_id?.toString().includes(searchTerm.trim());
       })
       .sort((a, b) => {
-        // Sort by created_at in descending order (newest first)
-        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        // Sort by updated_at (fallback to created_at) in descending order — recently updated POs show first
+        const updatedA = (a as any).updated_at;
+        const updatedB = (b as any).updated_at;
+        const dateA = updatedA ? new Date(updatedA).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
+        const dateB = updatedB ? new Date(updatedB).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
         return dateB - dateA;
       });
   }, [currentPurchases, searchTerm]);
@@ -450,11 +452,12 @@ const PurchaseOrders: React.FC = () => {
       }))
     });
 
-    // Sort by created_at in descending order (newest first) - this creates the mixed order
+    // Sort by updated_at (fallback to created_at) in descending order — recently updated POs show first
     const sorted = combined.sort((a, b) => {
-      // Handle undefined created_at by treating as 0 (oldest)
-      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      const updatedA = (a as any).updated_at;
+      const updatedB = (b as any).updated_at;
+      const dateA = updatedA ? new Date(updatedA).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
+      const dateB = updatedB ? new Date(updatedB).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
       return dateB - dateA;
     });
 
@@ -1214,15 +1217,18 @@ const PurchaseOrders: React.FC = () => {
                   // Determine colors based on status
                   const isPending = poChild.vendor_selection_status === 'pending_td_approval';
                   const isApproved = poChild.vendor_selection_status === 'approved';
-                  const isStoreRouted = poChild.routing_type === 'store' && poChild.status === 'routed_to_store';
-                  const isRejected = poChild.vendor_selection_status === 'rejected' || poChild.vendor_selection_status === 'td_rejected' || poChild.vendor_selection_status === 'store_rejected';
-                  const isStoreRejected = poChild.vendor_selection_status === 'store_rejected' || poChild.status === 'store_rejected';
+                  const isStoreRouted = poChild.routing_type === 'store' && (poChild.status === 'sent_to_store' || poChild.status === 'routed_to_store');
+                  // sent_to_store = still pending PM approval (NOT completed)
+                  // routed_to_store = buyer completed purchase, vendor delivering to store (completed)
                   const isCompleted = poChild.status === 'routed_to_store' || poChild.status === 'purchase_completed' || poChild.status === 'completed';
+                  // CRITICAL: Don't show as rejected if already completed (PM may have rejected then later approved)
+                  const isRejected = !isCompleted && (poChild.vendor_selection_status === 'rejected' || poChild.vendor_selection_status === 'td_rejected' || poChild.vendor_selection_status === 'store_rejected');
+                  const isStoreRejected = !isCompleted && (poChild.vendor_selection_status === 'store_rejected' || poChild.status === 'store_rejected');
 
                   // Store-routed items use purple styling, not the vendor-approval color logic
-                  const borderColor = isStoreRejected ? 'border-red-300' : isStoreRouted ? 'border-purple-300' : isPending ? 'border-amber-300' : isApproved ? 'border-green-300' : isRejected ? 'border-red-300' : 'border-blue-300';
-                  const headerBg = isStoreRejected ? 'from-red-50 to-red-100' : isStoreRouted ? 'from-purple-50 to-purple-100' : isPending ? 'from-amber-50 to-amber-100' : isApproved ? 'from-green-50 to-green-100' : isRejected ? 'from-red-50 to-red-100' : 'from-blue-50 to-blue-100';
-                  const headerBorder = isStoreRejected ? 'border-red-200' : isStoreRouted ? 'border-purple-200' : isPending ? 'border-amber-200' : isApproved ? 'border-green-200' : isRejected ? 'border-red-200' : 'border-blue-200';
+                  const borderColor = isCompleted ? 'border-green-300' : isStoreRejected ? 'border-red-300' : isStoreRouted ? 'border-purple-300' : isPending ? 'border-amber-300' : isApproved ? 'border-green-300' : isRejected ? 'border-red-300' : 'border-blue-300';
+                  const headerBg = isCompleted ? 'from-green-50 to-green-100' : isStoreRejected ? 'from-red-50 to-red-100' : isStoreRouted ? 'from-purple-50 to-purple-100' : isPending ? 'from-amber-50 to-amber-100' : isApproved ? 'from-green-50 to-green-100' : isRejected ? 'from-red-50 to-red-100' : 'from-blue-50 to-blue-100';
+                  const headerBorder = isCompleted ? 'border-green-200' : isStoreRejected ? 'border-red-200' : isStoreRouted ? 'border-purple-200' : isPending ? 'border-amber-200' : isApproved ? 'border-green-200' : isRejected ? 'border-red-200' : 'border-blue-200';
 
                   return (
                     <motion.div
@@ -1296,22 +1302,22 @@ const PurchaseOrders: React.FC = () => {
 
                       {/* Vendor Info Banner */}
                       <div className={`px-4 py-2 border-b ${
-                        isStoreRejected ? 'bg-red-50 border-red-200' : isStoreRouted ? 'bg-purple-50 border-purple-200' : isPending ? 'bg-amber-50 border-amber-200' : isApproved ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+                        isCompleted ? 'bg-green-50 border-green-200' : isStoreRejected ? 'bg-red-50 border-red-200' : isStoreRouted ? 'bg-purple-50 border-purple-200' : isPending ? 'bg-amber-50 border-amber-200' : isApproved ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
                       }`}>
                         <div className="flex items-center gap-2">
-                          <Store className={`w-4 h-4 ${isStoreRejected ? 'text-red-600' : isStoreRouted ? 'text-purple-600' : isPending ? 'text-amber-600' : isApproved ? 'text-green-600' : 'text-red-600'}`} />
+                          <Store className={`w-4 h-4 ${isCompleted ? 'text-green-600' : isStoreRejected ? 'text-red-600' : isStoreRouted ? 'text-purple-600' : isPending ? 'text-amber-600' : isApproved ? 'text-green-600' : 'text-red-600'}`} />
                           <div className="flex-1 min-w-0">
-                            <div className={`text-xs font-medium ${isStoreRejected ? 'text-red-600' : isStoreRouted ? 'text-purple-600' : isPending ? 'text-amber-600' : isApproved ? 'text-green-600' : 'text-red-600'}`}>
+                            <div className={`text-xs font-medium ${isCompleted ? 'text-green-600' : isStoreRejected ? 'text-red-600' : isStoreRouted ? 'text-purple-600' : isPending ? 'text-amber-600' : isApproved ? 'text-green-600' : 'text-red-600'}`}>
                               {poChild.routing_type === 'store' ? 'Destination' : 'Selected Vendor'}
                             </div>
-                            <div className={`text-sm font-bold truncate ${isStoreRejected ? 'text-red-900' : isStoreRouted ? 'text-purple-900' : isPending ? 'text-amber-900' : isApproved ? 'text-green-900' : 'text-red-900'}`}>
+                            <div className={`text-sm font-bold truncate ${isCompleted ? 'text-green-900' : isStoreRejected ? 'text-red-900' : isStoreRouted ? 'text-purple-900' : isPending ? 'text-amber-900' : isApproved ? 'text-green-900' : 'text-red-900'}`}>
                               {poChild.vendor_name || (poChild.routing_type === 'store' ? 'M2 Store' : 'No Vendor')}
                             </div>
                           </div>
                           <Badge className={`text-[10px] ${
-                            isStoreRejected ? 'bg-red-100 text-red-800' : isStoreRouted ? 'bg-purple-100 text-purple-800' : isPending ? 'bg-amber-100 text-amber-800' : isApproved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            isCompleted ? 'bg-green-100 text-green-800' : isStoreRejected ? 'bg-red-100 text-red-800' : isStoreRouted ? 'bg-purple-100 text-purple-800' : isPending ? 'bg-amber-100 text-amber-800' : isApproved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                           }`}>
-                            {isStoreRejected ? 'Rejected by PM' : isStoreRouted ? 'Sent to Store' : isPending ? 'Awaiting TD' : isApproved ? 'TD Approved' : 'Rejected'}
+                            {isCompleted ? 'Completed' : isStoreRejected ? 'Rejected by PM' : isStoreRouted ? 'Sent to Store' : isPending ? 'Awaiting TD' : isApproved ? 'TD Approved' : 'Rejected'}
                           </Badge>
                         </div>
                       </div>
@@ -1378,6 +1384,17 @@ const PurchaseOrders: React.FC = () => {
                               <div>
                                 <div className="text-xs font-semibold text-green-900">TD Approved</div>
                                 <div className="text-[10px] text-green-600">Ready for purchase completion</div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {isStoreRouted && !isCompleted && (
+                          <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 mb-3">
+                            <div className="flex items-center gap-2">
+                              <Store className="w-4 h-4 text-purple-600" />
+                              <div>
+                                <div className="text-xs font-semibold text-purple-900">Sent to Store</div>
+                                <div className="text-[10px] text-purple-600">Awaiting PM approval</div>
                               </div>
                             </div>
                           </div>
@@ -1748,8 +1765,10 @@ const PurchaseOrders: React.FC = () => {
 
                 // Render Purchase card
                 const purchase = item as Purchase;
-                const isStoreRejectedCR = purchase.rejection_type === 'store_rejection' || purchase.store_request_status === 'store_rejected';
-                const isRejectedCR = purchase.status === 'rejected' || isStoreRejectedCR;
+                const isCompletedCR = ['purchase_completed', 'routed_to_store', 'completed'].includes(purchase.status || '');
+                // Don't show as rejected if already completed (PM may have rejected then later approved)
+                const isStoreRejectedCR = !isCompletedCR && (purchase.rejection_type === 'store_rejection' || purchase.store_request_status === 'store_rejected');
+                const isRejectedCR = !isCompletedCR && (purchase.status === 'rejected' || isStoreRejectedCR);
                 return (
                 <motion.div
                   key={purchase.cr_id}
@@ -1981,7 +2000,7 @@ const PurchaseOrders: React.FC = () => {
                       )}
 
                       {/* Store Request Status - Pending Approval (only when ALL materials sent to store) */}
-                      {purchase.status === 'pending' && purchase.has_store_requests && !purchase.any_store_request_rejected && !purchase.vendor_id && purchase.store_requests_pending && (purchase.store_requested_materials?.length || 0) >= (purchase.materials_count || 0) && (
+                      {(purchase.status === 'pending' || purchase.status === 'sent_to_store') && purchase.has_store_requests && !purchase.any_store_request_rejected && !purchase.vendor_id && purchase.store_requests_pending && (purchase.store_requested_materials?.length || 0) >= (purchase.materials_count || 0) && (
                         <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 mb-1">
                           <div className="flex items-center gap-2">
                             <Store className="w-4 h-4 text-purple-600" />
@@ -1994,7 +2013,7 @@ const PurchaseOrders: React.FC = () => {
                       )}
 
                       {/* Store Request Status - All Approved */}
-                      {purchase.status === 'pending' && purchase.has_store_requests && purchase.all_store_requests_approved && !purchase.vendor_id && (
+                      {(purchase.status === 'pending' || purchase.status === 'sent_to_store') && purchase.has_store_requests && purchase.all_store_requests_approved && !purchase.vendor_id && (
                         <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-1">
                           <div className="flex items-center gap-2">
                             <CheckCircle className="w-4 h-4 text-green-600" />
@@ -2007,7 +2026,7 @@ const PurchaseOrders: React.FC = () => {
                       )}
 
                       {/* Store Request Status - Rejected (show warning) */}
-                      {purchase.status === 'pending' && purchase.has_store_requests && purchase.any_store_request_rejected && !purchase.vendor_id && (
+                      {(purchase.status === 'pending' || purchase.status === 'sent_to_store') && purchase.has_store_requests && purchase.any_store_request_rejected && !purchase.vendor_id && (
                         <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-1">
                           <div className="flex items-center gap-2">
                             <XCircleIcon className="w-4 h-4 text-red-600" />
@@ -2020,7 +2039,7 @@ const PurchaseOrders: React.FC = () => {
                       )}
 
                       {/* Partial Store Request - Some materials sent to store, others pending vendor selection */}
-                      {purchase.status === 'pending' && purchase.has_store_requests && purchase.store_requested_materials && purchase.store_requested_materials.length > 0 && purchase.store_requested_materials.length < (purchase.materials_count || 0) && (
+                      {(purchase.status === 'pending' || purchase.status === 'sent_to_store') && purchase.has_store_requests && purchase.store_requested_materials && purchase.store_requested_materials.length > 0 && purchase.store_requested_materials.length < (purchase.materials_count || 0) && (
                         <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 mb-1">
                           <div className="flex items-center gap-2">
                             <Store className="w-4 h-4 text-purple-600" />
@@ -2743,12 +2762,16 @@ const PurchaseOrders: React.FC = () => {
             removeQueries(['buyer-pending-purchases']);
             removeQueries(['buyer-pending-po-children']);
             removeQueries(['buyer-approved-po-children']);
+            removeQueries(['buyer-rejected-purchases']);
             removeQueries(['change-requests']);
             // Small delay to ensure backend has processed the change
             await new Promise(resolve => setTimeout(resolve, 500));
-            await refetchPending();
-            await refetchCompleted();
-            await refetchPendingPOChildren();
+            await Promise.all([
+              refetchPending(),
+              refetchCompleted(),
+              refetchPendingPOChildren(),
+              refetchRejected(),
+            ]);
             // Switch to pending approval tab to see the submitted vendor selection
             setActiveTab('pending_approval');
           }}
@@ -2771,14 +2794,18 @@ const PurchaseOrders: React.FC = () => {
             removeQueries(['buyer-pending-purchases']);
             removeQueries(['buyer-pending-po-children']);
             removeQueries(['buyer-approved-po-children']);
+            removeQueries(['buyer-rejected-purchases']);
             removeQueries(['change-requests']);
             // Small delay to ensure backend has processed the change
             await new Promise(resolve => setTimeout(resolve, 500));
 
-            // Refetch all data
+            // Refetch all data including rejected (item may have moved from rejected tab)
             const pendingResult = await refetchPending();
-            await refetchCompleted();
-            await refetchPendingPOChildren();
+            await Promise.all([
+              refetchCompleted(),
+              refetchPendingPOChildren(),
+              refetchRejected(),
+            ]);
 
             // Update selectedPurchase with fresh data so modal shows updated negotiated prices
             if (selectedPurchase && pendingResult.data?.pending_purchases) {

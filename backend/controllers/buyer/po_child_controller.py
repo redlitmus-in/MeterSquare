@@ -1082,9 +1082,10 @@ def complete_po_child_purchase(po_child_id):
             is_deleted=False
         ).all()
 
+        # Parent only completes when ALL children are done — sent_to_store needs PM approval first
         all_routed = all(pc.status in ['routed_to_store', 'purchase_completed'] for pc in all_po_children)
 
-        # If all routed to store, update parent CR status
+        # If all POChildren completed/routed, update parent CR status
         if all_routed and parent_cr:
             parent_cr.status = 'routed_to_store'
             parent_cr.delivery_routing = 'via_production_manager'
@@ -1792,7 +1793,7 @@ def get_approved_po_children():
             return jsonify({"error": "Access denied. Buyer, Estimator, TD, or Admin role required."}), 403
 
         # Get all POChild records that are ready for buyer action (not yet completed) with eager loading
-        # Include: vendor-approved POChildren AND store-routed POChildren
+        # Include: vendor-approved POChildren AND store-routed POChildren (pending PM approval)
         approved_po_children = POChild.query.options(
             joinedload(POChild.vendor)  # Eager load vendor relationship
         ).filter(
@@ -1800,12 +1801,12 @@ def get_approved_po_children():
                 # Vendor routing: TD approved, not yet completed or routed to store
                 db.and_(
                     POChild.vendor_selection_status == 'approved',
-                    ~POChild.status.in_(['purchase_completed', 'routed_to_store'])
+                    ~POChild.status.in_(['purchase_completed', 'routed_to_store', 'sent_to_store'])
                 ),
-                # Store routing: Routed to store, visible until buyer marks complete
+                # Store routing: sent_to_store, waiting for PM approval
                 db.and_(
                     POChild.routing_type == 'store',
-                    POChild.status == 'routed_to_store'
+                    POChild.status.in_(['sent_to_store'])
                 )
             ),
             POChild.is_deleted == False

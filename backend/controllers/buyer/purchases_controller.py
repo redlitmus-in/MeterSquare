@@ -181,6 +181,7 @@ def get_buyer_pending_purchases():
             ).filter(
                 ChangeRequest.assigned_to_buyer_user_id.isnot(None),
                 ChangeRequest.is_deleted == False,
+                # Exclude completed items — routed_to_store = buyer completed purchase, goes to Completed tab
                 ~func.trim(ChangeRequest.status).in_(['completed', 'purchase_completed', 'routed_to_store']),
                 or_(
                     ChangeRequest.vendor_selection_status.is_(None),
@@ -237,7 +238,7 @@ def get_buyer_pending_purchases():
                     )
                 ),
                 ChangeRequest.is_deleted == False,
-                # Exclude completed items - those should only show in completed tab
+                # Exclude completed items — routed_to_store = buyer completed purchase, goes to Completed tab
                 ~func.trim(ChangeRequest.status).in_(['completed', 'purchase_completed', 'routed_to_store']),
                 # Exclude rejected items - those should only show in rejected tab
                 or_(
@@ -483,6 +484,7 @@ def get_buyer_pending_purchases():
                 "approved_by": cr.approved_by_user_id,
                 "approved_at": cr.approval_date.isoformat() if cr.approval_date else None,
                 "created_at": cr.created_at.isoformat() if cr.created_at else None,
+                "updated_at": cr.updated_at.isoformat() if cr.updated_at else None,
                 "vendor_id": cr.selected_vendor_id,
                 "vendor_name": cr.selected_vendor_name,
                 "vendor_phone": vendor_details['phone'],
@@ -616,6 +618,7 @@ def get_buyer_completed_purchases():
         # If regular buyer, show only purchases assigned to them (not just completed by them)
         if is_admin_viewing:
             # ✅ PERFORMANCE: Add eager loading + pagination
+            # Include routed_to_store — buyer already completed the purchase (PM warehouse step is separate)
             paginated_result = ChangeRequest.query.options(
                 joinedload(ChangeRequest.project),
                 selectinload(ChangeRequest.boq).selectinload(BOQ.details),
@@ -633,6 +636,7 @@ def get_buyer_completed_purchases():
         else:
             # ✅ PERFORMANCE: Add eager loading + pagination
             # Show completed purchases where assigned_to_buyer_user_id OR purchase_completed_by_user_id matches current buyer
+            # Include routed_to_store — buyer already completed the purchase (PM warehouse step is separate)
             paginated_result = ChangeRequest.query.options(
                 joinedload(ChangeRequest.project),
                 selectinload(ChangeRequest.boq).selectinload(BOQ.details),
@@ -678,7 +682,7 @@ def get_buyer_completed_purchases():
             if po_children_for_cr:
                 # Parent has children - check if all are completed
                 all_children_completed = all(
-                    pc.status in ['purchase_completed', 'routed_to_store'] for pc in po_children_for_cr
+                    pc.status in ['purchase_completed', 'routed_to_store', 'sent_to_store'] for pc in po_children_for_cr
                 )
                 if all_children_completed:
                     # Skip this parent CR - children will be shown separately
@@ -828,6 +832,7 @@ def get_buyer_completed_purchases():
                 "approved_by": cr.approved_by_user_id,
                 "approved_at": cr.approval_date.isoformat() if cr.approval_date else None,
                 "created_at": cr.created_at.isoformat() if cr.created_at else None,
+                "updated_at": cr.updated_at.isoformat() if cr.updated_at else None,
                 "status": "completed",
                 "purchase_completed_by_user_id": cr.purchase_completed_by_user_id,
                 "purchase_completed_by_name": cr.purchase_completed_by_name,
@@ -875,6 +880,8 @@ def get_buyer_completed_purchases():
         # POChild already imported above
 
         if is_admin_viewing:
+            # Completed POChildren: purchase_completed + routed_to_store (buyer completed purchase)
+            # sent_to_store stays in Pending Approval until PM approves
             completed_po_children = POChild.query.options(
                 joinedload(POChild.parent_cr)
             ).filter(
@@ -886,6 +893,7 @@ def get_buyer_completed_purchases():
             ).all()
         else:
             # Get POChildren where parent CR is assigned to this buyer OR completed by this buyer
+            # sent_to_store stays in Pending Approval until PM approves
             completed_po_children = POChild.query.options(
                 joinedload(POChild.parent_cr)
             ).join(
@@ -1202,6 +1210,7 @@ def get_buyer_rejected_purchases():
                 "requested_by_name": cr.requested_by_name if cr.requested_by_name else None,
                 "requested_by_role": cr.requested_by_role if cr.requested_by_role else None,
                 "created_at": cr.created_at.isoformat() if cr.created_at else None,
+                "updated_at": cr.updated_at.isoformat() if cr.updated_at else None,
                 "status": cr.status,
                 "rejection_type": rejection_type,
                 "rejection_reason": rejection_reason,
@@ -1820,6 +1829,7 @@ def get_purchase_by_id(cr_id):
             "approved_by": cr.approved_by_user_id,
             "approved_at": cr.approval_date.isoformat() if cr.approval_date else None,
             "created_at": cr.created_at.isoformat() if cr.created_at else None,
+            "updated_at": cr.updated_at.isoformat() if cr.updated_at else None,
             "status": purchase_status,
             "purchase_completed_by_user_id": cr.purchase_completed_by_user_id,
             "purchase_completed_by_name": cr.purchase_completed_by_name,

@@ -429,7 +429,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       }
 
       setIsLoadingLpo(true);
-      const response = await buyerService.previewLPOPdf(purchase.cr_id, purchase.po_child_id, vendorId);
+      // When loading for a specific vendor (individual send), don't pass po_child_id
+      // so the backend uses vendor_id filtering instead of returning all POChild materials
+      const poChildIdToUse = vendorId ? undefined : purchase.po_child_id;
+      const response = await buyerService.previewLPOPdf(purchase.cr_id, poChildIdToUse, vendorId);
       let enrichedLpoData = response.lpo_data;
 
       // Try to load default template if no custom terms exist
@@ -1236,10 +1239,34 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     // For buyer mode: Check if full purchase to single vendor (no sub-PO needed)
     // or partial/multiple vendors (create sub-CRs)
     if (viewMode === 'buyer') {
-      // Group materials by vendor
+      // Separate store-routed from vendor-routed materials
+      const storeRoutedMaterials = selectedMaterials.filter(m => m.routing_type === 'store');
+      const vendorRoutedMaterials = selectedMaterials.filter(m => m.routing_type !== 'store' && m.selected_vendors.length > 0);
+      const allMaterialsSelected = selectedMaterials.length === materialsNotApproved.length;
+
+      // ALL MATERIALS TO STORE: Update parent CR directly (no POChild needed)
+      if (storeRoutedMaterials.length > 0 && vendorRoutedMaterials.length === 0 && allMaterialsSelected) {
+        try {
+          setIsSubmitting(true);
+          const materialNames = storeRoutedMaterials.map(m => m.material_name);
+          const response = await buyerService.routeAllToStore(purchase.cr_id, materialNames);
+          toast.success(response.message || 'All materials sent to M2 Store!');
+          await onVendorSelected?.();
+          onClose();
+          return;
+        } catch (error: any) {
+          console.error('Error routing all to store:', error);
+          toast.error(error.message || 'Failed to route materials to store');
+          return;
+        } finally {
+          setIsSubmitting(false);
+        }
+      }
+
+      // Group vendor-routed materials by vendor (skip store-routed to prevent crash)
       const vendorGroupsMap = new Map<number, Array<typeof selectedMaterials[0]>>();
 
-      selectedMaterials.forEach(material => {
+      vendorRoutedMaterials.forEach(material => {
         const vendorId = material.selected_vendors[0].vendor_id;
         if (!vendorGroupsMap.has(vendorId)) {
           vendorGroupsMap.set(vendorId, []);
@@ -1248,13 +1275,14 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       });
 
       const uniqueVendorCount = vendorGroupsMap.size;
-      // Compare against non-approved materials, not all materialVendors
-      const allMaterialsSelected = selectedMaterials.length === materialsNotApproved.length;
 
       // ✅ FIX: Check if any materials have been routed to store (mixed routing scenario)
       // When materials are split between store and vendor, ALWAYS create POChildren
       // even if all vendor materials go to the same vendor (prevents mixing in parent CR)
-      const hasMixedRouting = purchase.store_requested_materials && purchase.store_requested_materials.length > 0;
+      // CRITICAL: If ALL store requests were REJECTED, ignore store_requested_materials — buyer is switching to vendor
+      // Only use all_store_requests_rejected (not any_) to handle partial rejection correctly
+      const isAllStoreRejected = purchase.all_store_requests_rejected === true;
+      const hasMixedRouting = storeRoutedMaterials.length > 0 || (!isAllStoreRejected && purchase.store_requested_materials && purchase.store_requested_materials.length > 0);
 
       // FULL PURCHASE TO SINGLE VENDOR: Update parent PO directly (no sub-PO)
       // BUT: If there's mixed routing (some materials went to store), force POChild creation
@@ -1268,10 +1296,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       try {
         setIsSubmitting(true);
 
-        // ✅ NEW: Separate store-routed materials from vendor-routed materials
-        const storeRoutedMaterials = selectedMaterials.filter(m => m.routing_type === 'store');
-        const vendorRoutedMaterials = selectedMaterials.filter(m => m.routing_type !== 'store' && m.selected_vendors.length > 0);
-
+        // Use already-separated store/vendor materials from above
         // Prepare vendor groups data for sub-PO creation
         const vendorGroups: Array<{
           routing_type: 'store' | 'vendor';
@@ -2795,11 +2820,34 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                             return;
                                           }
 
-                                          // IMPORTANT: If lpoData exists (edited in main view), cache it for this vendor
-                                          // This preserves user's edits (like VAT %) when showing confirmation dialog
+                                          // IMPORTANT: If lpoData exists (edited in main view), cache a vendor-filtered copy
+                                          // This preserves user's edits (like VAT %) while only including this vendor's materials
                                           if (lpoData) {
+                                            // Filter items to only include materials assigned to this vendor
+                                            const vendorMaterialNames = new Set(
+                                              vendorMaterials.map((m: any) => m.material_name)
+                                            );
+                                            const filteredItems = lpoData.items.filter(
+                                              (item: any) => vendorMaterialNames.has(item.material_name || item.description)
+                                            );
+                                            // Recalculate totals for filtered items
+                                            const filteredSubtotal = filteredItems.reduce(
+                                              (sum: number, item: any) => sum + (item.amount || 0), 0
+                                            );
+                                            const vatPercent = lpoData.totals?.vat_percent || 0;
+                                            const vatAmount = (filteredSubtotal * vatPercent) / 100;
+                                            const filteredLpoData = {
+                                              ...lpoData,
+                                              items: filteredItems,
+                                              totals: {
+                                                ...lpoData.totals,
+                                                subtotal: filteredSubtotal,
+                                                vat_amount: vatAmount,
+                                                total: filteredSubtotal + vatAmount
+                                              }
+                                            };
                                             const newMap = new Map(lpoDataByVendor);
-                                            newMap.set(vendorGroup.vendor_id, lpoData);
+                                            newMap.set(vendorGroup.vendor_id, filteredLpoData);
                                             setLpoDataByVendor(newMap);
                                           }
 
@@ -4388,6 +4436,31 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             const newMap = new Map(lpoDataByVendor);
                             newMap.delete(sentVendorId);
                             setLpoDataByVendor(newMap);
+
+                            // Check if ALL materials are now in POChildren (all locked)
+                            // If so, auto-close the modal since there's nothing left for buyer to do
+                            const allMaterialNames = materialVendors.map(m => m.material_name.toLowerCase().trim());
+                            const materialsInPOChildren = new Set<string>();
+                            if (purchase.po_children) {
+                              for (const pc of purchase.po_children) {
+                                if (pc.materials && Array.isArray(pc.materials)) {
+                                  for (const m of pc.materials) {
+                                    if (m.material_name) {
+                                      materialsInPOChildren.add(m.material_name.toLowerCase().trim());
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                            const allMaterialsLocked = allMaterialNames.length > 0 &&
+                              allMaterialNames.every(name => materialsInPOChildren.has(name));
+
+                            if (allMaterialsLocked) {
+                              // All materials sent to TD — close modal and refresh
+                              onVendorSelected?.();
+                              onClose();
+                              return;
+                            }
 
                             // Lazy refresh data in background (doesn't block UI)
                             setTimeout(() => {

@@ -104,6 +104,28 @@ def select_vendor_for_purchase(cr_id):
         cr.selected_vendor_name = vendor.company_name
         cr.updated_at = datetime.utcnow()
 
+        # Clear store rejection flags and stale store routing data if buyer is switching from store to vendor
+        if cr.store_request_status == 'store_rejected':
+            cr.store_request_status = None
+            # Also clear store entries from routed_materials so system doesn't think it's mixed routing
+            routed_materials = cr.routed_materials or {}
+            store_keys = [
+                k for k, v in routed_materials.items()
+                if isinstance(v, dict) and v.get('routing') == 'store'
+            ]
+            if store_keys:
+                for k in store_keys:
+                    del routed_materials[k]
+                cr.routed_materials = routed_materials
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(cr, 'routed_materials')
+                log.info(f"CR-{cr_id}: Cleared store_request_status and {len(store_keys)} store entries from routed_materials (switching to vendor)")
+            else:
+                log.info(f"CR-{cr_id}: Cleared store_request_status (was store_rejected, now selecting vendor)")
+
+        # Update CR status to pending_td_approval so it shows in TD's view
+        cr.status = 'pending_td_approval'
+
         # Set status and fields based on user role
         # TD changing vendor does NOT auto-approve - TD must manually click "Approve Vendor"
         if is_td:
@@ -643,6 +665,21 @@ def select_vendor_for_material(cr_id):
         all_materials_have_vendors = True
         routed_materials = cr.routed_materials or {}
 
+        # CRITICAL FIX: If store request was rejected, clear store entries from routed_materials
+        # so the system treats this as a fresh vendor-only selection
+        if cr.store_request_status == 'store_rejected' and routed_materials:
+            store_keys = [
+                k for k, v in routed_materials.items()
+                if isinstance(v, dict) and v.get('routing') == 'store'
+            ]
+            if store_keys:
+                for k in store_keys:
+                    del routed_materials[k]
+                cr.routed_materials = routed_materials
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(cr, 'routed_materials')
+                log.info(f"CR-{cr_id}: Cleared {len(store_keys)} store entries from routed_materials (store_rejected, switching to vendor)")
+
         # Check if any materials are store-routed (mixed routing scenario)
         has_store_routing = any(
             isinstance(info, dict) and info.get('routing') == 'store'
@@ -668,6 +705,10 @@ def select_vendor_for_material(cr_id):
             cr.status = 'pending_td_approval'
             cr.vendor_selection_status = 'pending_td_approval'  # Also set vendor_selection_status for Pending Approval tab
             cr.approval_required_from = 'technical_director'  # Set approval_required_from to TD
+            # Clear store rejection flags if switching from store to vendor
+            if cr.store_request_status == 'store_rejected':
+                cr.store_request_status = None
+                log.info(f"CR-{cr_id}: Cleared store_request_status (store_rejected -> vendor selection)")
             # Set selected_vendor fields from the first material's vendor (for single vendor case)
             first_material = list(cr.material_vendor_selections.values())[0] if cr.material_vendor_selections else None
             if first_material:
@@ -871,6 +912,158 @@ def create_po_children(cr_id):
                 except (ValueError, AttributeError):
                     pass
         next_suffix_number = max_suffix + 1
+
+        # ========================================================================
+        # OPTIMIZATION: Single vendor with all materials → update parent CR directly
+        # Only for vendor routing (not store routing - store needs IMR creation).
+        # No need to create a POChild when there's only 1 vendor group covering
+        # all materials and no existing POChildren.
+        # ========================================================================
+        routed_materials_check = parent_cr.routed_materials or {}
+        has_store_routing = any(
+            isinstance(info, dict) and info.get('routing') == 'store'
+            for info in routed_materials_check.values()
+        )
+        # Filter to vendor groups that actually have materials
+        active_vendor_groups = [vg for vg in vendor_groups if vg.get('materials')]
+        # Check if single vendor group is vendor-routed (not store)
+        single_routing_type = active_vendor_groups[0].get('routing_type', 'vendor') if len(active_vendor_groups) == 1 else None
+
+        # CRITICAL: Check if the vendor group covers ALL materials in the parent CR
+        # If buyer sends only a subset (e.g., 3 out of 4 materials for one vendor),
+        # we must create a POChild instead of updating the parent CR directly
+        # Use name-based matching (not count) to handle duplicate material names correctly
+        materials_in_groups = set()
+        for vg in active_vendor_groups:
+            for mat in vg.get('materials', []):
+                mat_name = mat.get('material_name', '')
+                if mat_name:
+                    materials_in_groups.add(mat_name.lower().strip())
+
+        parent_materials = parent_cr.sub_items_data or parent_cr.materials_data or []
+        parent_material_names = set()
+        if isinstance(parent_materials, list):
+            for mat in parent_materials:
+                mat_name = mat.get('material_name', '')
+                if mat_name:
+                    parent_material_names.add(mat_name.lower().strip())
+
+        all_materials_covered = bool(parent_material_names) and parent_material_names.issubset(materials_in_groups)
+        total_materials_in_groups = len(materials_in_groups)
+        total_parent_materials = len(parent_material_names)
+
+        if (len(active_vendor_groups) == 1
+                and not existing_po_children
+                and not has_store_routing
+                and single_routing_type == 'vendor'
+                and all_materials_covered):
+            # Single vendor covering all materials - update parent CR directly
+            single_group = active_vendor_groups[0]
+            single_vendor_id = single_group.get('vendor_id')
+
+            if single_vendor_id:
+                vendor = Vendor.query.filter_by(vendor_id=single_vendor_id, is_deleted=False).first()
+                if vendor:
+                    parent_cr.selected_vendor_id = single_vendor_id
+                    parent_cr.selected_vendor_name = vendor.company_name
+                    parent_cr.vendor_selected_by_buyer_id = user_id
+                    parent_cr.vendor_selected_by_buyer_name = user_name
+                    parent_cr.status = 'pending_td_approval'
+                    parent_cr.vendor_selection_status = 'pending_td_approval'
+                    parent_cr.approval_required_from = 'technical_director'
+                    if send_notification:
+                        parent_cr.vendor_selection_date = datetime.utcnow()
+                    parent_cr.updated_at = datetime.utcnow()
+
+                    # Calculate and update materials_total_cost from vendor prices
+                    total_cost = 0.0
+                    for mat in single_group.get('materials', []):
+                        qty = mat.get('quantity', 0)
+                        price = mat.get('negotiated_price') or mat.get('unit_price', 0)
+                        total_cost += qty * price
+                    parent_cr.materials_total_cost = total_cost
+
+                    # Update material_vendor_selections on parent CR
+                    mvs = dict(parent_cr.material_vendor_selections or {})
+                    for mat in single_group.get('materials', []):
+                        mat_name = mat.get('material_name', '')
+                        if mat_name:
+                            mvs[mat_name] = {
+                                'vendor_id': single_vendor_id,
+                                'vendor_name': vendor.company_name,
+                                'unit_price': mat.get('unit_price', 0),
+                                'negotiated_price': mat.get('negotiated_price'),
+                                'supplier_notes': mat.get('supplier_notes', ''),
+                            }
+                    parent_cr.material_vendor_selections = mvs
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(parent_cr, 'material_vendor_selections')
+
+                    db.session.commit()
+
+                    log.info(f"Single vendor optimization: CR-{parent_cr.cr_id} sent directly to TD approval "
+                             f"for vendor {vendor.company_name} (ID: {single_vendor_id}) - no POChild needed")
+
+                    # Send TD notification if requested (skip if TD is the one making the selection)
+                    if send_notification and not is_td:
+                        try:
+                            from models.role import Role
+                            from utils.notification_utils import NotificationManager
+                            from socketio_server import send_notification_to_user
+
+                            td_role = Role.query.filter(Role.role.ilike('%technical%director%'), Role.is_deleted == False).first()
+                            if td_role:
+                                from models.user import User
+                                td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+                                for td_user in td_users:
+                                    try:
+                                        notification = NotificationManager.create_notification(
+                                            user_id=td_user.user_id,
+                                            type='action_required',
+                                            title='Purchase Order Needs Approval',
+                                            message=f'{user_name} selected vendor {vendor.company_name} for PO-{parent_cr.cr_id}. Needs your approval.',
+                                            priority='high',
+                                            category='purchase',
+                                            action_url='/technical-director/change-requests?tab=vendor_approvals&subtab=pending',
+                                            action_label='Review Purchase Order',
+                                            metadata={
+                                                'cr_id': str(cr_id),
+                                                'vendor_id': str(single_vendor_id),
+                                                'vendor_name': vendor.company_name,
+                                                'target_role': 'technical-director'
+                                            },
+                                            sender_id=user_id,
+                                            sender_name=user_name,
+                                            target_role='technical-director'
+                                        )
+                                        send_notification_to_user(td_user.user_id, notification.to_dict())
+                                    except Exception as inner_error:
+                                        log.error(f"Failed to send notification to TD user {td_user.user_id}: {inner_error}")
+                        except Exception as notif_error:
+                            log.error(f"Failed to send TD notifications: {notif_error}")
+
+                    return jsonify({
+                        "success": True,
+                        "message": f"Vendor {vendor.company_name} selected for PO-{parent_cr.cr_id}. Sent to TD for approval.",
+                        "parent_cr_updated": True,
+                        "parent_cr_id": parent_cr.cr_id,
+                        "po_children_created": 0,
+                        "po_children": [],
+                        "submission_group_id": submission_group_id
+                    }), 201
+                else:
+                    log.warning(f"Vendor {single_vendor_id} not found or deleted, falling through to standard POChild creation")
+
+        # Log when single-vendor optimization was skipped due to partial materials
+        if (len(active_vendor_groups) == 1 and not existing_po_children
+                and not has_store_routing and single_routing_type == 'vendor'
+                and not all_materials_covered):
+            log.info(f"CR-{cr_id}: Single vendor group has {total_materials_in_groups} materials "
+                     f"but CR has {total_parent_materials} total. Creating POChild instead of updating parent.")
+
+        # ========================================================================
+        # Multi-vendor / mixed routing / store routing: Create POChildren as before
+        # ========================================================================
 
         for vendor_group in vendor_groups:
             vendor_id = vendor_group.get('vendor_id')
@@ -1111,8 +1304,8 @@ def create_po_children(cr_id):
                     # Clear any previous rejection
                     existing_po_child.rejection_reason = None
                 else:
-                    # Store routing
-                    existing_po_child.status = 'routed_to_store'
+                    # Store routing — sent_to_store (not routed_to_store, which is for vendor→store completion)
+                    existing_po_child.status = 'sent_to_store'
 
                 # Update child_notes if provided
                 if child_notes_for_vendor:
@@ -1143,7 +1336,8 @@ def create_po_children(cr_id):
                 # Set status and fields based on routing_type
                 if routing_type == 'store':
                     # Store routing: No vendor approval needed - bypasses TD entirely
-                    po_child_status = 'routed_to_store'
+                    # sent_to_store (not routed_to_store, which is for vendor→store completion)
+                    po_child_status = 'sent_to_store'
                     vendor_sel_status = 'store_routed'  # Explicitly NOT 'pending_td_approval'
                     log_message = f"Created new POChild {next_suffix_number} for STORE routing"
                 else:
@@ -1255,7 +1449,7 @@ def create_po_children(cr_id):
                         vendor_id=None,
                         vendor_name='M2 Store',
                         vendor_selection_status='store_routed',  # Explicitly NOT 'pending_td_approval'
-                        status='routed_to_store',
+                        status='sent_to_store',  # sent_to_store (not routed_to_store)
                         created_at=datetime.utcnow(),
                         updated_at=datetime.utcnow()
                     )
@@ -1276,19 +1470,48 @@ def create_po_children(cr_id):
 
                     log.info(f"Auto-created store POChild {store_po_child.get_formatted_id()} for CR-{parent_cr.cr_id} with {len(store_po_materials)} store-routed materials")
 
-        # CLEAN ARCHITECTURE: Always hide parent CR when POChildren are created
-        # The parent CR becomes just a container - POChildren handle the actual workflow
-        # This prevents confusion where parent CR appears/disappears from buyer view
-        all_po_children = POChild.query.filter_by(
+        # Only hide parent CR when ALL its materials are covered by POChildren
+        # If some materials are still unassigned, keep the parent visible so buyer can manage them
+        all_po_children_list = POChild.query.filter_by(
             parent_cr_id=parent_cr.cr_id,
             is_deleted=False
-        ).count()
+        ).all()
 
-        if all_po_children > 0:
-            # Mark parent as split - it should not appear in buyer's active lists
-            parent_cr.status = 'split_to_sub_crs'  # Parent becomes container only
-            parent_cr.updated_at = datetime.utcnow()
-            log.info(f"Parent CR-{parent_cr.cr_id} marked as 'split_to_sub_crs' - {all_po_children} POChildren exist")
+        if all_po_children_list:
+            # Collect all material names covered by POChildren
+            materials_in_po_children = set()
+            for pc in all_po_children_list:
+                if pc.materials_data:
+                    for mat in pc.materials_data:
+                        mat_name = mat.get('material_name', '')
+                        if mat_name:
+                            materials_in_po_children.add(mat_name.lower().strip())
+
+            # Collect all material names from parent CR
+            parent_materials = parent_cr.sub_items_data or parent_cr.materials_data or []
+            # Also check store-routed materials
+            routed_mats = parent_cr.routed_materials or {}
+            store_routed = {
+                name.lower().strip() for name, info in routed_mats.items()
+                if isinstance(info, dict) and info.get('routing') == 'store'
+            }
+            all_parent_material_names = set()
+            for mat in parent_materials:
+                mat_name = mat.get('material_name', '')
+                if mat_name:
+                    all_parent_material_names.add(mat_name.lower().strip())
+
+            # Materials covered = in POChildren OR store-routed
+            covered_materials = materials_in_po_children | store_routed
+            uncovered_materials = all_parent_material_names - covered_materials
+
+            if not uncovered_materials:
+                # All materials accounted for - safe to hide parent
+                parent_cr.status = 'split_to_sub_crs'
+                parent_cr.updated_at = datetime.utcnow()
+                log.info(f"Parent CR-{parent_cr.cr_id} marked as 'split_to_sub_crs' - all {len(all_parent_material_names)} materials covered by {len(all_po_children_list)} POChildren")
+            else:
+                log.info(f"Parent CR-{parent_cr.cr_id} NOT hidden - {len(uncovered_materials)} materials still unassigned: {uncovered_materials}")
 
         db.session.commit()
 

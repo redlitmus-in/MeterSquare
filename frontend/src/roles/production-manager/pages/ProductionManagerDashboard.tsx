@@ -397,7 +397,6 @@ const ProductionManagerDashboard: React.FC = () => {
             subtitle="Active items in store"
             icon={<Layers className="w-5 h-5" />}
             color="blue"
-            onClick={() => navigate(ROUTES.STOCK)}
           />
           <StatCard
             title="Inventory Value"
@@ -412,7 +411,6 @@ const ProductionManagerDashboard: React.FC = () => {
             subtitle={`${data.criticalItems} critical`}
             icon={<AlertTriangle className="w-5 h-5" />}
             color={totalAlerts > 0 ? 'orange' : 'green'}
-            onClick={() => navigate(ROUTES.STOCK)}
             badge={data.criticalItems}
           />
           <StatCard
@@ -433,7 +431,6 @@ const ProductionManagerDashboard: React.FC = () => {
             subtitle={`${data.deliveryNotesStatus.in_transit} in transit`}
             icon={<Truck className="w-5 h-5" />}
             color="cyan"
-            onClick={() => navigate(ROUTES.DELIVERY_NOTES)}
             badge={data.deliveryNotesStatus.pending_action}
           />
           <StatCard
@@ -442,7 +439,6 @@ const ProductionManagerDashboard: React.FC = () => {
             subtitle={`${data.materialRequestsStatus.pending} pending`}
             icon={<FileText className="w-5 h-5" />}
             color="indigo"
-            onClick={() => navigate(ROUTES.REQUESTS)}
             badge={data.materialRequestsStatus.needs_action}
           />
           <StatCard
@@ -451,7 +447,6 @@ const ProductionManagerDashboard: React.FC = () => {
             subtitle={`${data.returnNotesStatus.total} total RDNs`}
             icon={<RotateCcw className="w-5 h-5" />}
             color="amber"
-            onClick={() => navigate(ROUTES.RETURNS)}
             badge={data.returnNotesStatus.incoming}
           />
           <StatCard

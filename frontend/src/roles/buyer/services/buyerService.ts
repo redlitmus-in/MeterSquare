@@ -135,6 +135,7 @@ export interface Purchase {
   approved_by: number;
   approved_at: string | null;
   created_at: string;
+  updated_at?: string | null;
   status: 'pending' | 'completed' | 'rejected';
   rejection_type?: 'change_request' | 'vendor_selection' | 'store_rejection';
   rejection_reason?: string;
@@ -1222,6 +1223,31 @@ class BuyerService {
         throw new Error(error.response?.data?.error || 'Some materials are not available in store');
       }
       throw new Error(error.response?.data?.error || 'Failed to complete from store');
+    }
+  }
+
+  // Route all materials to M2 Store directly (no POChild, updates parent CR)
+  // Used when buyer sends ALL materials to store via vendor selection modal
+  async routeAllToStore(crId: number, materialNames: string[]): Promise<{ success: boolean; message: string; cr_id: number }> {
+    try {
+      const response = await apiClient.post<{ success: boolean; message: string; cr_id: number }>(
+        `/buyer/purchase/${crId}/route-all-to-store`,
+        { material_names: materialNames }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.message || 'Failed to route materials to store');
+    } catch (error: any) {
+      console.error('Error routing all to store:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to route materials to store');
     }
   }
 

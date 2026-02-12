@@ -1963,6 +1963,9 @@ def approve_internal_request(request_id):
     - Create withdrawal transaction
     """
     try:
+        from config.logging import get_logger
+        log = get_logger()
+
         # Use row locking to prevent race conditions on concurrent approvals
         internal_req = InternalMaterialRequest.query.with_for_update().get(request_id)
 
@@ -2114,13 +2117,39 @@ def approve_internal_request(request_id):
             internal_req.vendor_delivery_confirmed = True
             internal_req.last_modified_by = current_user
 
+            # ✅ FIX: Update linked POChild status when PM approves vendor delivery
+            if internal_req.po_child_id:
+                from models.po_child import POChild
+                po_child = POChild.query.get(internal_req.po_child_id)
+                if po_child and po_child.status in ['sent_to_store', 'routed_to_store']:
+                    po_child.status = 'purchase_completed'
+                    po_child.store_request_status = 'completed'
+                    po_child.updated_at = datetime.utcnow()
+                    log.info(f"POChild {po_child.id}: {po_child.status} → purchase_completed (PM approved vendor delivery)")
+
             # ✅ FIX: Update CR status when PM approves vendor delivery
-            # This moves the CR to "Completed" tab in all roles
             if internal_req.cr_id:
                 cr = ChangeRequest.query.get(internal_req.cr_id)
-                if cr and cr.status != 'routed_to_store':
-                    cr.status = 'routed_to_store'
-                    cr.updated_at = datetime.utcnow()
+                if cr and cr.status in ['sent_to_store', 'routed_to_store']:
+                    # Check if CR has POChildren — only complete parent when ALL children are done
+                    from models.po_child import POChild as POChildModel
+                    po_children = POChildModel.query.filter_by(
+                        parent_cr_id=cr.cr_id, is_deleted=False
+                    ).all()
+                    if po_children:
+                        all_done = all(
+                            pc.status in ['routed_to_store', 'purchase_completed']
+                            for pc in po_children
+                        )
+                        if all_done:
+                            cr.status = 'purchase_completed'
+                            cr.store_request_status = 'completed'
+                            cr.updated_at = datetime.utcnow()
+                            log.info(f"CR-{cr.cr_id}: All POChildren done, parent → purchase_completed")
+                    else:
+                        cr.status = 'purchase_completed'
+                        cr.store_request_status = 'completed'
+                        cr.updated_at = datetime.utcnow()
 
             db.session.commit()
 
@@ -2230,13 +2259,41 @@ def approve_internal_request(request_id):
             internal_req.approved_at = datetime.utcnow()
             internal_req.last_modified_by = current_user
 
+            # ✅ FIX: Update linked POChild status when PM approves store request
+            if internal_req.po_child_id:
+                from models.po_child import POChild
+                po_child = POChild.query.get(internal_req.po_child_id)
+                if po_child and po_child.status == 'sent_to_store':
+                    po_child.status = 'purchase_completed'
+                    po_child.store_request_status = 'completed'
+                    po_child.updated_at = datetime.utcnow()
+                    log.info(f"POChild {po_child.id}: sent_to_store → purchase_completed (PM approved)")
+
             # ✅ FIX: Update CR status when PM approves store request (grouped materials)
-            # This moves the CR to "Completed" tab in all roles
+            # Only transition from expected intermediate statuses to 'purchase_completed'
             if internal_req.cr_id:
                 cr = ChangeRequest.query.get(internal_req.cr_id)
-                if cr and cr.status == 'sent_to_store':
-                    cr.status = 'routed_to_store'
-                    cr.updated_at = datetime.utcnow()
+                if cr and cr.status in ['sent_to_store', 'routed_to_store']:
+                    # Check if CR has POChildren — only complete parent when ALL children are done
+                    from models.po_child import POChild as POChildModel
+                    po_children = POChildModel.query.filter_by(
+                        parent_cr_id=cr.cr_id, is_deleted=False
+                    ).all()
+                    if po_children:
+                        all_done = all(
+                            pc.status in ['routed_to_store', 'purchase_completed']
+                            for pc in po_children
+                        )
+                        if all_done:
+                            cr.status = 'purchase_completed'
+                            cr.store_request_status = 'completed'
+                            cr.updated_at = datetime.utcnow()
+                            log.info(f"CR-{cr.cr_id}: All POChildren done, parent → purchase_completed")
+                    else:
+                        # No POChildren — update parent directly
+                        cr.status = 'purchase_completed'
+                        cr.store_request_status = 'completed'
+                        cr.updated_at = datetime.utcnow()
 
             db.session.commit()
 
@@ -2290,13 +2347,37 @@ def approve_internal_request(request_id):
         internal_req.inventory_transaction_id = new_transaction.inventory_transaction_id
         internal_req.last_modified_by = current_user
 
+        # ✅ FIX: Update linked POChild status when PM approves (single material)
+        if internal_req.po_child_id:
+            from models.po_child import POChild
+            po_child = POChild.query.get(internal_req.po_child_id)
+            if po_child and po_child.status in ['sent_to_store', 'routed_to_store']:
+                po_child.status = 'purchase_completed'
+                po_child.store_request_status = 'completed'
+                po_child.updated_at = datetime.utcnow()
+                log.info(f"POChild {po_child.id}: → purchase_completed (PM approved single material)")
+
         # ✅ FIX: Update CR status when PM approves store request (single material)
-        # This moves the CR to "Completed" tab in all roles
         if internal_req.cr_id:
             cr = ChangeRequest.query.get(internal_req.cr_id)
-            if cr and cr.status == 'sent_to_store':
-                cr.status = 'routed_to_store'
-                cr.updated_at = datetime.utcnow()
+            if cr and cr.status in ['sent_to_store', 'routed_to_store']:
+                from models.po_child import POChild as POChildModel
+                po_children = POChildModel.query.filter_by(
+                    parent_cr_id=cr.cr_id, is_deleted=False
+                ).all()
+                if po_children:
+                    all_done = all(
+                        pc.status in ['routed_to_store', 'purchase_completed']
+                        for pc in po_children
+                    )
+                    if all_done:
+                        cr.status = 'purchase_completed'
+                        cr.store_request_status = 'completed'
+                        cr.updated_at = datetime.utcnow()
+                else:
+                    cr.status = 'purchase_completed'
+                    cr.store_request_status = 'completed'
+                    cr.updated_at = datetime.utcnow()
 
         db.session.add(new_transaction)
         db.session.commit()

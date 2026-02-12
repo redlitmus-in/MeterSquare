@@ -486,6 +486,7 @@ def get_buyer_dashboard_analytics():
         # ========== PERFORMANCE METRICS ==========
         # Calculate completion rate using SIMPLIFIED logic that matches frontend client-side calculations
         # Frontend uses: completed / (ongoing + pending_approval + completed) * 100
+        # routed_to_store = buyer completed purchase, counts as completed (PM warehouse step is separate)
         total_ongoing = pending_purchase + store_approved + vendor_approved + po_children_approved
         total_pending_approval = store_requests_pending_count + vendor_pending_td_count + po_children_pending_td
         total_completed_all = completed + routed_to_store + po_children_completed
@@ -869,7 +870,7 @@ def get_buyer_dashboard_analytics():
         # Response structure matches Purchase Orders page tab counts EXACTLY:
         # - Ongoing = pending_purchase + store_approved + vendor_approved + po_children.vendor_approved
         # - Pending Approval = store_requests_pending + vendor_pending_td + po_children.pending_td_approval
-        # - Completed = completed + routed_to_store + po_children.completed
+        # - Completed = completed + routed_to_store + po_children.completed (buyer completed purchase)
         # - Rejected = rejected + po_children.rejected
 
         return jsonify({
@@ -888,7 +889,7 @@ def get_buyer_dashboard_analytics():
                 "store_requests_pending": store_requests_pending_count,  # Store Pending
 
                 # Completed & Rejected
-                "completed": completed,
+                "completed": completed + routed_to_store,
                 "routed_to_store": routed_to_store,
                 "rejected": rejected_count,
 

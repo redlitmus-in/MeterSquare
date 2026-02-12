@@ -141,39 +141,38 @@ export const DEBOUNCE_TIMES = {
  * Pre-configured cache strategies for different data types
  * Use these in useApiQuery's cacheStrategy option
  *
- * NOTE: All staleTime values set to 0 to ensure fresh data is always fetched.
- * This prevents stale data issues after actions like sending BOQ to PM/TD.
- * The gcTime (cache time) is kept to avoid refetching during the same session
- * when navigating between pages, but data is always revalidated on mount.
+ * staleTime values match STALE_TIMES to prevent excessive refetching.
+ * Real-time subscriptions handle instant updates; staleTime prevents
+ * duplicate requests when multiple components/hooks invalidate simultaneously.
  */
 export const CACHE_TIMES = {
-  /** Real-time data - always fetch fresh */
+  /** Real-time data - very fresh but not zero */
   REALTIME: {
-    staleTime: 0,
+    staleTime: STALE_TIMES.REALTIME,
     cacheTime: CACHE_GC_TIMES.SHORT,
   },
 
-  /** Critical workflow data - always fetch fresh */
+  /** Critical workflow data - short stale window */
   CRITICAL: {
-    staleTime: 0,
+    staleTime: STALE_TIMES.CRITICAL,
     cacheTime: CACHE_GC_TIMES.STANDARD,
   },
 
-  /** Dashboard and aggregated metrics - always fetch fresh */
+  /** Dashboard and aggregated metrics */
   DASHBOARD: {
-    staleTime: 0,
+    staleTime: STALE_TIMES.DASHBOARD,
     cacheTime: CACHE_GC_TIMES.EXTENDED,
   },
 
-  /** Dynamic data - always fetch fresh */
+  /** Dynamic data */
   DYNAMIC: {
-    staleTime: 0,
+    staleTime: STALE_TIMES.DYNAMIC,
     cacheTime: CACHE_GC_TIMES.STANDARD,
   },
 
-  /** Static data - rarely changes but still fetch fresh */
+  /** Static data - rarely changes */
   STATIC: {
-    staleTime: 0,
+    staleTime: STALE_TIMES.STATIC,
     cacheTime: CACHE_GC_TIMES.LONG,
   },
 } as const;
@@ -398,7 +397,8 @@ export const MATERIAL_CONSUMING_STATUSES = [
   'approved',            // Final approval
   'assigned_to_buyer',   // Assigned to buyer for purchase
   'purchase_completed',  // Purchased and completed (old direct-to-site flow)
-  'routed_to_store',     // Purchased and routed to M2 Store (new flow)
+  'routed_to_store',     // Purchased and routed to M2 Store via vendor (buyer completed purchase)
+  'sent_to_store',       // Buyer sent directly to M2 Store (no vendor involved)
   'vendor_approved',     // Vendor approved by TD
   'split_to_po_children', // Split into multiple vendor POs
   // Note: 'rejected' is NOT included - rejected materials don't consume BOQ allocation
@@ -413,6 +413,7 @@ export const APPROVED_WORKFLOW_STATUSES = [
   'assigned_to_buyer',
   'purchase_completed',
   'routed_to_store',
+  'sent_to_store',
   'rejected',
   'under_review',
   'send_to_est',
@@ -429,6 +430,7 @@ export const MEP_APPROVED_STATUSES = [
   'assigned_to_buyer',
   'purchase_completed',
   'routed_to_store',
+  'sent_to_store',
   'rejected',
   'under_review',
   'send_to_est',

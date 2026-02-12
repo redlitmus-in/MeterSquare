@@ -59,7 +59,8 @@ from controllers.buyer.store_controller import (
     get_projects_by_material,
     check_store_availability,
     complete_from_store,
-    get_store_request_status
+    get_store_request_status,
+    route_all_to_store
 )
 from controllers.buyer.se_boq_controller import (
     get_se_boq_assignments,
@@ -621,6 +622,16 @@ def complete_from_store_route(cr_id):
     if access_check:
         return access_check
     return complete_from_store(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/route-all-to-store', methods=['POST'])
+@jwt_required
+def route_all_to_store_route(cr_id):
+    """Route all materials to M2 Store directly on parent CR (no POChild)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return route_all_to_store(cr_id)
 
 
 @buyer_routes.route('/purchase/<int:cr_id>/store-request-status', methods=['GET'])

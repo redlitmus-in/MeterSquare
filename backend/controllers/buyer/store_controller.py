@@ -12,8 +12,27 @@ log = get_logger()
 __all__ = [
     'get_store_items', 'get_store_item_details', 'get_store_categories',
     'get_projects_by_material', 'check_store_availability',
-    'complete_from_store', 'get_store_request_status',
+    'complete_from_store', 'get_store_request_status', 'route_all_to_store',
 ]
+
+
+def _get_materials_in_active_po_children(cr_id):
+    """Get set of material names already assigned to active (non-rejected) POChildren.
+    Used to filter materials from store availability and store routing."""
+    materials = set()
+    active_po_children = POChild.query.filter_by(
+        parent_cr_id=cr_id,
+        is_deleted=False
+    ).filter(
+        ~POChild.status.in_(['rejected'])
+    ).all()
+    for pc in active_po_children:
+        if pc.materials_data and isinstance(pc.materials_data, list):
+            for mat in pc.materials_data:
+                mat_name = mat.get('material_name', '')
+                if mat_name:
+                    materials.add(mat_name)
+    return materials
 
 
 # Store Management Functions
@@ -215,6 +234,9 @@ def check_store_availability(cr_id):
             if isinstance(info, dict) and info.get('routing') == 'store'
         }
 
+        # Exclude materials already in active POChildren (sent to vendor / pending TD)
+        materials_in_po_children = _get_materials_in_active_po_children(cr_id)
+
         # Get store request status for display
         existing_store_requests = InternalMaterialRequest.query.filter_by(cr_id=cr_id).all()
         store_request_status = 'pending'
@@ -234,6 +256,10 @@ def check_store_availability(cr_id):
         for mat in materials:
             mat_name = mat.get('material_name') or mat.get('name') or ''
             mat_qty = mat.get('quantity', 0)
+
+            # Skip materials already in active POChildren (sent to vendor / pending TD approval)
+            if mat_name in materials_in_po_children:
+                continue
 
             # Skip materials that have already been routed to store
             if mat_name in already_routed_store:
@@ -315,6 +341,16 @@ def complete_from_store(cr_id):
 
         if not materials:
             return jsonify({"error": "All materials from this CR have already been routed"}), 400
+
+        # Also filter out materials already in active POChildren (sent to vendor / pending TD)
+        materials_in_po_children = _get_materials_in_active_po_children(cr_id)
+        if materials_in_po_children:
+            materials = [
+                mat for mat in materials
+                if (mat.get('material_name') or mat.get('name') or '') not in materials_in_po_children
+            ]
+            if not materials:
+                return jsonify({"error": "All remaining materials are already assigned to vendors"}), 400
 
         # Filter to selected materials if provided
         if selected_materials and isinstance(selected_materials, list):
@@ -405,16 +441,29 @@ def complete_from_store(cr_id):
         cr.routed_materials = current_routed
         flag_modified(cr, 'routed_materials')
 
-        # Create a store POChild so this split is visible in buyer views
+        # Check if ALL materials in CR are now routed to store
+        all_cr_materials = cr.materials_data or cr.sub_items_data or []
+        all_material_names = {
+            mat.get('material_name') or mat.get('name') or ''
+            for mat in all_cr_materials if isinstance(mat, dict)
+        }
+        all_routed_names = set(cr.routed_materials.keys()) if cr.routed_materials else set()
+        all_materials_routed = all_material_names and all_material_names.issubset(all_routed_names)
+
+        # Check if existing vendor POChildren exist (split scenario)
+        existing_po_children = POChild.query.filter_by(
+            parent_cr_id=cr_id,
+            is_deleted=False
+        ).all()
+        has_vendor_po_children = any(pc.routing_type == 'vendor' for pc in existing_po_children)
+
+        # Only create store POChild when this is a SPLIT scenario (some materials to vendor, some to store)
+        # When ALL materials go to store, update parent CR directly — no POChild needed
         store_po_child_id = None
         store_po_child_suffix = None
-        if grouped_materials:
-            # Determine next suffix number from existing POChildren
-            existing_po_children = POChild.query.filter_by(
-                parent_cr_id=cr_id,
-                is_deleted=False
-            ).all()
 
+        if has_vendor_po_children and grouped_materials:
+            # SPLIT scenario: vendor POChildren exist, need a store POChild too
             max_suffix = 0
             for existing_po in existing_po_children:
                 if existing_po.suffix:
@@ -425,7 +474,6 @@ def complete_from_store(cr_id):
                     except (ValueError, AttributeError):
                         pass
 
-            # Only create if no store POChild already exists for this CR
             existing_store_po = next(
                 (po for po in existing_po_children if po.routing_type == 'store'),
                 None
@@ -449,37 +497,34 @@ def complete_from_store(cr_id):
                     vendor_selected_by_buyer_id=current_user.get('user_id'),
                     vendor_selected_by_buyer_name=current_user.get('full_name', current_user.get('email')),
                     vendor_selection_date=datetime.utcnow(),
-                    vendor_selection_status='store_routed',  # Explicitly NOT 'pending_td_approval' - store bypasses TD
-                    status='routed_to_store',
+                    vendor_selection_status='store_routed',
+                    status='sent_to_store',
                     is_deleted=False
                 )
                 db.session.add(store_po_child)
                 db.session.flush()
                 store_po_child_id = store_po_child.id
                 store_po_child_suffix = f".{next_suffix}"
-                log.info(f"Created store POChild PO-{cr_id}{store_po_child_suffix} with {len(grouped_materials)} materials")
+                log.info(f"Created store POChild PO-{cr_id}{store_po_child_suffix} with {len(grouped_materials)} materials (split scenario)")
 
-                # Link the IMR to this POChild so PM rejection can propagate correctly
                 if new_request and store_po_child_id:
                     new_request.po_child_id = store_po_child_id
                     log.info(f"Linked IMR to store POChild {store_po_child_id}")
 
-        # Check if ALL materials in CR are now routed (store + vendor)
-        all_cr_materials = cr.materials_data or cr.sub_items_data or []
-        all_material_names = {
-            mat.get('material_name') or mat.get('name') or ''
-            for mat in all_cr_materials if isinstance(mat, dict)
-        }
-        all_routed_names = set(cr.routed_materials.keys()) if cr.routed_materials else set()
-        all_materials_routed = all_material_names and all_material_names.issubset(all_routed_names)
-
-        if all_materials_routed:
-            # All materials routed — set parent to split_to_sub_crs so POChildren take over
-            cr.status = 'split_to_sub_crs'
-            log.info(f"All materials routed for CR-{cr_id}, set status to split_to_sub_crs")
-        elif cr.status in ('pending', 'assigned_to_buyer', 'send_to_buyer', 'approved_by_pm'):
-            # Some materials still unrouted — mark as sent_to_store so buyer can still select vendor for remaining
-            cr.status = 'sent_to_store'
+            # Split scenario: all materials covered by POChildren
+            if all_materials_routed:
+                cr.status = 'split_to_sub_crs'
+                log.info(f"All materials routed for CR-{cr_id} (split), set status to split_to_sub_crs")
+            else:
+                cr.status = 'sent_to_store'
+        else:
+            # ALL materials to store (no vendor POChildren) — update parent CR directly, no POChild
+            if all_materials_routed:
+                cr.status = 'sent_to_store'
+                cr.store_request_status = 'pending_store_approval'
+                log.info(f"All materials sent to store for CR-{cr_id}, set parent status to sent_to_store (no POChild)")
+            elif cr.status in ('pending', 'assigned_to_buyer', 'send_to_buyer', 'approved_by_pm'):
+                cr.status = 'sent_to_store'
 
         cr.purchase_notes = f"Requested from M2 Store by {current_user.get('full_name', current_user.get('email'))} on {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
         cr.updated_at = datetime.utcnow()
@@ -534,3 +579,160 @@ def get_store_request_status(cr_id):
     except Exception as e:
         log.error(f"Error getting store request status: {str(e)}")
         return jsonify({"error": f"Failed to get store request status: {str(e)}"}), 500
+
+
+def route_all_to_store(cr_id):
+    """Route ALL materials to M2 Store directly on parent CR (no POChild created).
+
+    Used when buyer sends all materials to store via vendor selection modal.
+    This is a routing decision — does NOT check stock availability.
+    Status: sent_to_store (not routed_to_store, which is for vendor→store completion).
+    """
+    try:
+        current_user = g.user
+        data = request.get_json() or {}
+        material_names = data.get('material_names', [])
+
+        cr = ChangeRequest.query.get(cr_id)
+        if not cr:
+            return jsonify({"error": "Change request not found"}), 404
+
+        # Validate CR is assigned to this buyer
+        buyer_id = current_user.get('user_id')
+        if cr.assigned_to_buyer_user_id and cr.assigned_to_buyer_user_id != buyer_id:
+            return jsonify({"error": "This purchase is not assigned to you"}), 403
+
+        # Validate CR status
+        allowed_statuses = ['assigned_to_buyer', 'send_to_buyer', 'approved_by_pm']
+        if cr.status and cr.status.strip() not in allowed_statuses:
+            return jsonify({"error": f"Cannot route to store. Current status: {cr.status}"}), 400
+
+        # Get all materials from CR
+        all_materials = cr.sub_items_data or cr.materials_data or []
+        if not isinstance(all_materials, list) or not all_materials:
+            return jsonify({"error": "No materials found in this CR"}), 400
+
+        # If specific material names provided, validate they match CR materials
+        cr_material_names = {
+            (mat.get('material_name') or mat.get('name') or '')
+            for mat in all_materials if isinstance(mat, dict)
+        }
+
+        # Filter out materials already in active POChildren (sent to vendor / pending TD)
+        materials_in_po_children = _get_materials_in_active_po_children(cr_id)
+        if materials_in_po_children:
+            cr_material_names -= materials_in_po_children
+
+        if material_names:
+            invalid = set(material_names) - cr_material_names
+            if invalid:
+                return jsonify({"error": f"Materials not found in CR: {', '.join(invalid)}"}), 400
+            materials_to_route = material_names
+        else:
+            materials_to_route = list(cr_material_names)
+
+        if not materials_to_route:
+            return jsonify({"error": "All materials are already assigned to vendors"}), 400
+
+        # Build routed_materials tracking
+        from sqlalchemy.orm.attributes import flag_modified
+        routed_materials = cr.routed_materials or {}
+        for mat_name in materials_to_route:
+            routed_materials[mat_name] = {
+                'routing': 'store',
+                'routed_at': datetime.utcnow().isoformat(),
+                'routed_by': buyer_id
+            }
+        cr.routed_materials = routed_materials
+        flag_modified(cr, 'routed_materials')
+
+        # Build grouped materials for IMR
+        grouped_materials = []
+        for mat in all_materials:
+            mat_name = mat.get('material_name') or mat.get('name') or ''
+            if mat_name in materials_to_route:
+                grouped_materials.append({
+                    'material_name': mat_name,
+                    'quantity': mat.get('quantity', 0),
+                    'brand': mat.get('brand'),
+                    'size': mat.get('size'),
+                    'unit': mat.get('unit', 'pcs'),
+                    'unit_price': mat.get('unit_price', 0),
+                    'total_price': mat.get('total_price', 0),
+                })
+
+        # Create ONE grouped Internal Material Request for PM
+        project = Project.query.get(cr.project_id)
+        final_destination = project.project_name if project else f"Project {cr.project_id}"
+        buyer_name = current_user.get('full_name', current_user.get('email', 'Buyer'))
+
+        new_request = InternalMaterialRequest(
+            project_id=cr.project_id,
+            cr_id=cr_id,
+            item_name=cr.item_name,
+            quantity=len(grouped_materials),
+            notes=f"Sent to M2 Store by {buyer_name} for CR-{cr_id} - {len(grouped_materials)} material(s)",
+            request_send=True,
+            status='send_request',
+            created_by=current_user.get('email', 'system'),
+            request_buyer_id=buyer_id,
+            last_modified_by=current_user.get('email', 'system'),
+            materials_data=grouped_materials,
+            materials_count=len(grouped_materials),
+            source_type='buyer_store_routing',
+            final_destination_site=final_destination
+        )
+        db.session.add(new_request)
+
+        # Update parent CR status directly — no POChild
+        cr.status = 'sent_to_store'
+        cr.store_request_status = 'pending_store_approval'
+        cr.purchase_notes = f"All materials sent to M2 Store by {buyer_name} on {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+        cr.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        # Notify Production Manager
+        try:
+            from utils.comprehensive_notification_service import notification_service
+            from models.role import Role
+            from models.user import User
+
+            pm_role = Role.query.filter(Role.role_name.ilike('%production%manager%')).first()
+            if pm_role:
+                pms = User.query.filter_by(
+                    role_id=pm_role.role_id,
+                    is_deleted=False,
+                    is_active=True
+                ).all()
+
+                project_name = project.project_name if project else 'Unknown Project'
+                for pm in pms:
+                    notification_service.create_notification(
+                        user_id=pm.user_id,
+                        title=f"📦 Store Request - {project_name}",
+                        message=f"{buyer_name} has sent {len(grouped_materials)} material(s) to M2 Store for project '{project_name}'. Please review and process.",
+                        type='store_request_incoming',
+                        reference_type='change_request',
+                        reference_id=cr_id,
+                        action_url='/store/incoming-deliveries'
+                    )
+                    log.info(f"Notified PM {pm.full_name} about store request for CR-{cr_id}")
+
+        except Exception as notif_error:
+            log.error(f"Failed to send PM notification for store routing: {notif_error}")
+
+        log.info(f"CR-{cr_id}: All {len(grouped_materials)} materials sent to store directly (no POChild). Status: sent_to_store")
+
+        return jsonify({
+            "success": True,
+            "message": f"All {len(grouped_materials)} material(s) sent to M2 Store successfully!",
+            "cr_id": cr_id,
+            "materials_count": len(grouped_materials),
+            "status": "sent_to_store"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error routing all to store for CR-{cr_id}: {str(e)}")
+        return jsonify({"error": f"Failed to route to store: {str(e)}"}), 500

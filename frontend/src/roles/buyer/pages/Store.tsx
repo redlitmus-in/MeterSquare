@@ -7,7 +7,7 @@ import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { formatCurrency } from '@/utils/formatters';
 import { useAutoSync } from '@/hooks/useAutoSync';
 import { storeService, StoreItem } from '../services/storeService';
-import { PAGINATION } from '@/lib/constants';
+import { PAGINATION, STALE_TIMES } from '@/lib/constants';
 
 const Store: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -20,7 +20,7 @@ const Store: React.FC = () => {
     queryKey: ['buyer-store-items'],
     fetchFn: () => storeService.getStoreItems(),
     realtimeTables: ['inventory_materials'],
-    staleTime: 0, // Always fetch fresh data
+    staleTime: STALE_TIMES.STANDARD,
   });
 
   // Reset store page when search/category changes
