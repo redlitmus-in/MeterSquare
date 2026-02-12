@@ -506,14 +506,13 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   const token = localStorage.getItem('access_token');
 
   useEffect(() => {
-    // Check token validity when component mounts - but don't block rendering
-    if (token && !isAuthenticated && !user) {
-      // Try to get current user but don't await - it will update state when ready
+    // Refresh user data when component mounts to ensure state is fresh
+    if (token && !user) {
       getCurrentUser().catch(() => {
         // Token is invalid, getCurrentUser will handle cleanup
       });
     }
-  }, [token, isAuthenticated, user, getCurrentUser]);
+  }, [token, user, getCurrentUser]);
 
   // Quick check - if no token, redirect immediately
   if (!token) {
@@ -882,10 +881,10 @@ function App() {
         setIsEnvironmentValid(success);
 
         if (success) {
-          // Check for existing session on app load - don't wait for it
+          // Check for existing session on app load
           const token = localStorage.getItem('access_token');
-          if (token && !isAuthenticated) {
-            // Fire and forget - don't await
+          if (token) {
+            // Always refresh user data in background to ensure fresh state
             getCurrentUser().catch(() => {
               if (import.meta.env.DEV) {
                 console.log('Token validation failed, cleaning up...');

@@ -35,11 +35,16 @@ import { useAuthStore } from '@/store/authStore';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 
 const ProfilePage: React.FC = () => {
-  const { user, logout, updateProfile, isLoading } = useAuthStore();
+  const { user, logout, updateProfile, isLoading, getCurrentUser } = useAuthStore();
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState('profile');
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch fresh user data on mount to ensure email and other fields are current
+  React.useEffect(() => {
+    getCurrentUser().catch(() => {});
+  }, [getCurrentUser]);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -51,6 +56,21 @@ const ProfilePage: React.FC = () => {
     bio: user?.bio || '',
     avatar_url: user?.avatar_url || ''
   });
+
+  // Sync form data when user data updates (e.g., after background refresh)
+  React.useEffect(() => {
+    if (user && !isEditing) {
+      setFormData({
+        full_name: user.full_name || '',
+        email: user.email || '',
+        phone: user.phone || '',
+        department: user.department || '',
+        address: user.address || '',
+        bio: user.bio || '',
+        avatar_url: user.avatar_url || ''
+      });
+    }
+  }, [user, isEditing]);
 
   const handleSave = async () => {
     try {

@@ -121,25 +121,31 @@ export const useAuthStore = create<AuthState>()(
           if (cachedUser) {
             try {
               const user = JSON.parse(cachedUser);
-              set({
-                user,
-                isAuthenticated: true,
-                isLoading: false,
-                error: null,
-              });
+              // Only use cache if it has essential fields (user_id and email)
+              if (user && user.user_id && user.email) {
+                set({
+                  user,
+                  isAuthenticated: true,
+                  isLoading: false,
+                  error: null,
+                });
 
-              // Fetch fresh data in background (don't await)
-              apiWrapper.get<any>(API_ENDPOINTS.AUTH.ME).then(response => {
-                const freshUser = response.user || response;
-                localStorage.setItem('user', JSON.stringify(freshUser));
-                set({ user: freshUser });
-              }).catch(() => {
-                // Ignore errors for background refresh
-              });
+                // Fetch fresh data in background (don't await)
+                apiWrapper.get<any>(API_ENDPOINTS.AUTH.ME).then(response => {
+                  const freshUser = response.user || response;
+                  localStorage.setItem('user', JSON.stringify(freshUser));
+                  set({ user: freshUser });
+                }).catch(() => {
+                  // Ignore errors for background refresh
+                });
 
-              return;
+                return;
+              }
+              // Cache is incomplete/corrupted, fall through to API call
+              localStorage.removeItem('user');
             } catch (e) {
               // Invalid cached data, continue with API call
+              localStorage.removeItem('user');
             }
           }
 
