@@ -1454,7 +1454,12 @@ def get_all_change_requests():
 
         # Apply status filter if provided
         if status_filter:
-            query = query.filter(ChangeRequest.status == status_filter)
+            # 'purchase_completed' filter should also include 'routed_to_store' and 'completed'
+            # because buyer sets status to 'routed_to_store' when completing purchase via M2 Store
+            if status_filter == 'purchase_completed':
+                query = query.filter(ChangeRequest.status.in_(['purchase_completed', 'routed_to_store', 'completed']))
+            else:
+                query = query.filter(ChangeRequest.status == status_filter)
             log.info(f"📋 Filtering by status: {status_filter}")
 
         # Execute query with optional pagination
@@ -1665,7 +1670,7 @@ def get_all_change_requests():
         status_counts_summary = {
             "pending": sum(status_counts.get(s, 0) for s in pending_statuses),
             "approved": status_counts.get('assigned_to_buyer', 0),
-            "completed": status_counts.get('purchase_completed', 0),
+            "completed": status_counts.get('purchase_completed', 0) + status_counts.get('routed_to_store', 0) + status_counts.get('completed', 0),
             "rejected": status_counts.get('rejected', 0),
             "total": sum(status_counts.values())
         }

@@ -811,8 +811,8 @@ const ChangeRequestsPage: React.FC = () => {
       // Approved tab: CRs approved by TD, buyer selecting vendor or sent to store
       matchesTab = (status === 'assigned_to_buyer' && !req.vendor_selection_status) || status === 'sent_to_store';
     } else if (activeTab === 'completed') {
-      // Completed purchases (purchase_completed or routed_to_store)
-      matchesTab = status === 'purchase_completed' || status === 'routed_to_store';
+      // Completed purchases (purchase_completed, routed_to_store, or completed)
+      matchesTab = status === 'purchase_completed' || status === 'routed_to_store' || status === 'completed';
     }
     // vendor_approvals tab uses vendorApprovals data, not changeRequests
 
@@ -1183,7 +1183,10 @@ const ChangeRequestsPage: React.FC = () => {
     poChildrenPending: pendingPOChildren.filter(p => p.vendor_selection_status === 'pending_td_approval').length,
     poChildrenApproved: approvedPOChildren.length,
     poChildrenRejected: rejectedPOChildren.length,
-    completed: completedPagination?.total_count ?? statusCounts?.completed ?? changeRequests.filter(r => r.status?.trim() === 'purchase_completed').length
+    completed: completedPagination?.total_count ?? statusCounts?.completed ?? changeRequests.filter(r => {
+      const s = r.status?.trim();
+      return s === 'purchase_completed' || s === 'routed_to_store' || s === 'completed';
+    }).length
   };
 
   if (loading) {

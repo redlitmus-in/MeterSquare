@@ -1303,6 +1303,8 @@ def get_td_purchase_orders():
                 'pending_td_approval',
                 'vendor_approved',
                 'purchase_completed',
+                'routed_to_store',
+                'completed',
                 'rejected'
             ])
         )
@@ -1313,7 +1315,7 @@ def get_td_purchase_orders():
         elif status_filter == 'approved':
             base_query = base_query.filter(ChangeRequest.status == 'vendor_approved')
         elif status_filter == 'completed':
-            base_query = base_query.filter(ChangeRequest.status == 'purchase_completed')
+            base_query = base_query.filter(ChangeRequest.status.in_(['purchase_completed', 'routed_to_store', 'completed']))
         elif status_filter == 'rejected':
             base_query = base_query.filter(ChangeRequest.status == 'rejected')
 
@@ -1374,7 +1376,7 @@ def get_td_purchase_orders():
 
         completed_count = db.session.query(ChangeRequest).filter(
             ChangeRequest.is_deleted == False,
-            ChangeRequest.status == 'purchase_completed'
+            ChangeRequest.status.in_(['purchase_completed', 'routed_to_store', 'completed'])
         ).count()
 
         rejected_count = db.session.query(ChangeRequest).filter(
