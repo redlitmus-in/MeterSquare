@@ -359,10 +359,9 @@ const ProjectApprovals: React.FC = () => {
     // Skip initial mount (timestamp is set on mount)
     if (boqUpdateTimestamp === 0) return;
 
-    // Reload base data
+    // Reload base data (PMs/MEPs excluded - they rarely change and are loaded on mount)
     loadBOQs(false); // Silent reload without loading spinner
-    loadPMs(); // Also reload PMs
-    loadTabCounts(); // Also reload tab counts
+    loadTabCounts(); // Reload tab counts
 
     // Reload tab-specific data based on active tab
     if (filterStatus === 'revisions') {
@@ -585,8 +584,7 @@ const ProjectApprovals: React.FC = () => {
           prevBOQsRef.current = newDataString;
           setBOQs(response.data);
         }
-        // Refresh tab counts after loading BOQs
-        loadTabCounts();
+        // Tab counts are refreshed by the real-time useEffect and on mount - no need to duplicate here
       } else {
         console.error('Failed to load BOQs:', response.message);
         // Only show error toast on initial load, not during auto-refresh
@@ -1544,13 +1542,16 @@ const ProjectApprovals: React.FC = () => {
 
   const loadPMs = async () => {
     try {
-      const response = await tdService.getPMsWithWorkload();
+      // Load PMs and MEPs in parallel (independent requests)
+      const [response, mepResponse] = await Promise.all([
+        tdService.getPMsWithWorkload(),
+        tdService.getAllMEPs()
+      ]);
+
       if (response.success && response.data) {
         setAllPMs(response.data);
       }
 
-      // Load MEP Supervisors and auto-select all by default
-      const mepResponse = await tdService.getAllMEPs();
       if (mepResponse.success && mepResponse.data) {
         setAllMEPs(mepResponse.data);
         // Auto-select all MEPs by default (user can unselect if not needed)

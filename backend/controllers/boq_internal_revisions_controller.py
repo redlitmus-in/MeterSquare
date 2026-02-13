@@ -28,6 +28,9 @@ def get_all_internal_revision():
     GET /api/boqs/all-internal-revisions
     """
     try:
+        from sqlalchemy.orm import selectinload, joinedload
+        from models.boq import MasterSubItem, MasterItem
+
         # Get current logged-in user
         current_user = getattr(g, 'user', None)
         user_id = current_user.get('user_id') if current_user else None
@@ -43,153 +46,200 @@ def get_all_internal_revision():
 
         boq_ids = [row[0] for row in boq_ids_with_revisions]
 
-        # Get all BOQs that either have the flag set OR have internal revision records
-        # For TD: EXCLUDE Internal_Revision_Pending status (estimator still editing)
+        if not boq_ids:
+            return jsonify({"success": True, "count": 0, "message": "No BOQs with internal revisions", "user_role": user_role, "data": []}), 200
+
+        # PERFORMANCE: Eager load project relationship to prevent N+1
+        base_filter = [
+            BOQ.is_deleted == False,
+            db.or_(
+                BOQ.has_internal_revisions == True,
+                BOQ.boq_id.in_(boq_ids)
+            )
+        ]
+
         if user_role == 'technical_director':
-            # TD sees BOQs with internal revisions EXCEPT those still being edited
-            boqs_query = BOQ.query.filter(
-                BOQ.is_deleted == False,
-                db.or_(
-                    BOQ.has_internal_revisions == True,
-                    BOQ.boq_id.in_(boq_ids)
-                ),
-                # CRITICAL: Exclude Internal_Revision_Pending for TD (case-insensitive)
-                db.func.lower(BOQ.status) != 'internal_revision_pending'
-            )
-            log.info(f"Technical Director {user_id} - showing all internal revision BOQs (excluding Internal_Revision_Pending)")
+            base_filter.append(db.func.lower(BOQ.status) != 'internal_revision_pending')
+            boqs_query = BOQ.query.options(
+                joinedload(BOQ.project)
+            ).filter(*base_filter)
         elif user_role == 'admin':
-            # Admin: Show ALL BOQs with internal revisions (all estimators)
-            boqs_query = BOQ.query.filter(
-                BOQ.is_deleted == False,
-                db.or_(
-                    BOQ.has_internal_revisions == True,
-                    BOQ.boq_id.in_(boq_ids)
-                )
-            )
-            log.info(f"Admin {user_id} - showing ALL internal revision BOQs (all estimators)")
+            boqs_query = BOQ.query.options(
+                joinedload(BOQ.project)
+            ).filter(*base_filter)
         elif user_role == 'estimator':
-            # Estimator: Only show BOQs where the project's estimator_id matches current user
-            # Join with Project table to filter by estimator_id
-            boqs_query = BOQ.query.join(
+            boqs_query = BOQ.query.options(
+                joinedload(BOQ.project)
+            ).join(
                 Project, BOQ.project_id == Project.project_id
             ).filter(
-                BOQ.is_deleted == False,
+                *base_filter,
                 Project.is_deleted == False,
-                Project.estimator_id == user_id,  # Filter by estimator_id
-                db.or_(
-                    BOQ.has_internal_revisions == True,
-                    BOQ.boq_id.in_(boq_ids)
-                )
+                Project.estimator_id == user_id
             )
-            log.info(f"Estimator {user_id} - showing internal revision BOQs for projects assigned to this estimator")
         else:
-            # For other roles: Show all BOQs with internal revisions
-            # EXCLUDE Internal_Revision_Pending (still editing, not sent to TD yet)
-            boqs_query = BOQ.query.filter(
-                BOQ.is_deleted == False,
-                db.or_(
-                    BOQ.has_internal_revisions == True,
-                    BOQ.boq_id.in_(boq_ids)
-                ),
-                # Exclude Internal_Revision_Pending for other users
-                db.func.lower(BOQ.status) != 'internal_revision_pending'
-            )
-            log.info(f"User role '{user_role}' - showing all internal revision BOQs")
+            base_filter.append(db.func.lower(BOQ.status) != 'internal_revision_pending')
+            boqs_query = BOQ.query.options(
+                joinedload(BOQ.project)
+            ).filter(*base_filter)
 
         boqs = boqs_query.all()
-        log.info(f"📋 Internal Revisions Query: Found {len(boqs)} BOQs for user {user_id} (role: {user_role})")
+        log.info(f"Internal Revisions: Found {len(boqs)} BOQs for user {user_id} (role: {user_role})")
 
+        if not boqs:
+            return jsonify({"success": True, "count": 0, "message": "No BOQs with internal revisions", "user_role": user_role, "data": []}), 200
+
+        all_boq_ids = [boq.boq_id for boq in boqs]
+
+        # PERFORMANCE: Batch load all BOQDetails for all BOQs (1 query instead of N)
+        all_boq_details = BOQDetails.query.filter(
+            BOQDetails.boq_id.in_(all_boq_ids),
+            BOQDetails.is_deleted == False
+        ).all()
+        boq_details_map = {bd.boq_id: bd for bd in all_boq_details}
+
+        # PERFORMANCE: Batch load all internal revisions for all BOQs (1 query instead of N)
+        all_revisions = BOQInternalRevision.query.filter(
+            BOQInternalRevision.boq_id.in_(all_boq_ids),
+            db.or_(
+                BOQInternalRevision.is_deleted == False,
+                BOQInternalRevision.is_deleted.is_(None)
+            )
+        ).order_by(BOQInternalRevision.boq_id, BOQInternalRevision.internal_revision_number.desc()).all()
+
+        # Group revisions by boq_id
+        revisions_by_boq = {}
+        for rev in all_revisions:
+            if rev.boq_id not in revisions_by_boq:
+                revisions_by_boq[rev.boq_id] = []
+            revisions_by_boq[rev.boq_id].append(rev)
+
+        # PERFORMANCE: Batch load all sub-item images (1 query instead of N per sub-item)
+        # Collect all sub_item_ids from all BOQ details
+        all_sub_item_ids = set()
+        all_item_sub_item_names = []  # For fallback name-based lookup
+
+        for boq in boqs:
+            boq_details = boq_details_map.get(boq.boq_id)
+            if boq_details and boq_details.boq_details:
+                for item in boq_details.boq_details.get('items', []):
+                    for sub_item in item.get('sub_items', []):
+                        sid = sub_item.get('sub_item_id') or sub_item.get('master_sub_item_id')
+                        if sid:
+                            all_sub_item_ids.add(sid)
+                        else:
+                            item_name = item.get('item_name')
+                            sub_item_name = sub_item.get('sub_item_name')
+                            if item_name and sub_item_name:
+                                all_item_sub_item_names.append((item_name, sub_item_name))
+
+        # Batch fetch sub-item images by ID (1 query)
+        sub_item_image_map = {}
+        if all_sub_item_ids:
+            sub_items_with_images = MasterSubItem.query.filter(
+                MasterSubItem.sub_item_id.in_(list(all_sub_item_ids)),
+                MasterSubItem.sub_item_image.isnot(None)
+            ).all()
+            for msi in sub_items_with_images:
+                sub_item_image_map[msi.sub_item_id] = msi.sub_item_image
+
+        # Batch fetch by name for fallback (only if needed)
+        name_to_image_map = {}
+        item_name_to_id = {}
+        if all_item_sub_item_names:
+            unique_item_names = set(name for name, _ in all_item_sub_item_names)
+            master_items = MasterItem.query.filter(
+                MasterItem.item_name.in_(list(unique_item_names))
+            ).all()
+            item_name_to_id = {mi.item_name: mi.item_id for mi in master_items}
+
+            # Get all sub-items for these master items
+            if item_name_to_id:
+                fallback_sub_items = MasterSubItem.query.filter(
+                    MasterSubItem.item_id.in_(list(item_name_to_id.values()))
+                ).all()
+                for msi in fallback_sub_items:
+                    name_to_image_map[(msi.item_id, msi.sub_item_name)] = {
+                        'sub_item_id': msi.sub_item_id,
+                        'sub_item_image': msi.sub_item_image
+                    }
+
+        # PERFORMANCE: Batch load terms - fetch master terms once and per-BOQ selections in batch
+        # Get all active terms (shared across all BOQs)
+        all_terms_query = text("""
+            SELECT term_id, terms_text, display_order
+            FROM boq_terms
+            WHERE is_active = TRUE AND is_deleted = FALSE
+            ORDER BY display_order, term_id
+        """)
+        all_terms_rows = db.session.execute(all_terms_query).fetchall()
+        master_terms = [{'term_id': row[0], 'terms_text': row[1], 'display_order': row[2]} for row in all_terms_rows]
+
+        # Batch fetch term selections for all BOQs (1 query instead of N)
+        term_selections_query = text("""
+            SELECT boq_id, term_ids FROM boq_terms_selections WHERE boq_id = ANY(:boq_ids)
+        """)
+        term_selections_result = db.session.execute(term_selections_query, {'boq_ids': all_boq_ids}).fetchall()
+        term_selections_map = {row[0]: (row[1] if row[1] else []) for row in term_selections_result}
+
+        # Helper to calculate total cost from revision snapshot
+        def _calc_revision_cost(snapshot):
+            items = snapshot.get('items', [])
+            if not items:
+                return snapshot.get('total_cost', 0)
+
+            subtotal = 0
+            for item in items:
+                item_amount = (item.get('quantity', 0) or 0) * (item.get('rate', 0) or 0)
+                if item_amount == 0 and item.get('sub_items'):
+                    for si in item.get('sub_items', []):
+                        item_amount += (si.get('quantity', 0) or 0) * (si.get('rate', 0) or 0)
+                subtotal += item_amount
+
+            preliminary_amount = snapshot.get('preliminaries', {}).get('cost_details', {}).get('amount', 0) or 0
+            combined_subtotal = subtotal + preliminary_amount
+
+            disc_amount = snapshot.get('discount_amount', 0) or 0
+            disc_pct = snapshot.get('discount_percentage', 0) or 0
+            if disc_pct > 0 and disc_amount == 0:
+                disc_amount = (combined_subtotal * disc_pct) / 100
+
+            return combined_subtotal - disc_amount
+
+        # Build result using pre-loaded data (no per-BOQ queries)
         result = []
 
         for boq in boqs:
-            # Get BOQ details
-            boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
-
-            # Get project details
-            project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first() if boq.project_id else None
-
-            # Get all internal revisions for this BOQ (handle NULL is_deleted as not deleted)
-            internal_revisions = BOQInternalRevision.query.filter(
-                BOQInternalRevision.boq_id == boq.boq_id,
-                db.or_(
-                    BOQInternalRevision.is_deleted == False,
-                    BOQInternalRevision.is_deleted.is_(None)
-                )
-            ).order_by(BOQInternalRevision.internal_revision_number.desc()).all()
-
-            # Format internal revisions
-            revisions_list = []
-            for revision in internal_revisions:
-                revisions_list.append({
-                    "id": revision.id,
-                    "internal_revision_number": revision.internal_revision_number,
-                    "created_at": revision.created_at.isoformat() if revision.created_at else None
-                })
-
-            # Skip BOQs with no actual internal revision records
-            if len(revisions_list) == 0:
+            internal_revisions = revisions_by_boq.get(boq.boq_id, [])
+            if not internal_revisions:
                 continue
 
-            # 🔥 Get the latest internal revision's total_cost for display
-            # Internal revisions are already sorted by internal_revision_number desc
+            revisions_list = [{
+                "id": rev.id,
+                "internal_revision_number": rev.internal_revision_number,
+                "created_at": rev.created_at.isoformat() if rev.created_at else None
+            } for rev in internal_revisions]
+
+            # Calculate latest revision total cost
             latest_revision_total_cost = 0
-            latest_revision_snapshot = None
+            boq_details = boq_details_map.get(boq.boq_id)
 
-            if internal_revisions and len(internal_revisions) > 0:
-                # Get the first revision (highest internal_revision_number, excluding ORIGINAL_BOQ)
-                for revision in internal_revisions:
-                    if revision.action_type != 'ORIGINAL_BOQ' and revision.changes_summary:
-                        latest_revision_snapshot = revision.changes_summary
+            for revision in internal_revisions:
+                if revision.action_type != 'ORIGINAL_BOQ' and revision.changes_summary:
+                    latest_revision_total_cost = _calc_revision_cost(revision.changes_summary)
+                    break
 
-                        # 🔥 ALWAYS recalculate from items to ensure accuracy (don't trust stored total_cost)
-                        items = latest_revision_snapshot.get('items', [])
-                        if items and len(items) > 0:
-                            log.info(f"📊 BOQ {boq.boq_id}: Recalculating total from items")
-                            subtotal = 0
-                            for item in items:
-                                item_amount = (item.get('quantity', 0) or 0) * (item.get('rate', 0) or 0)
-                                # If item rate is 0, calculate from sub_items
-                                if item_amount == 0 and item.get('sub_items'):
-                                    for sub_item in item.get('sub_items', []):
-                                        item_amount += (sub_item.get('quantity', 0) or 0) * (sub_item.get('rate', 0) or 0)
-                                subtotal += item_amount
+            if latest_revision_total_cost == 0 and boq_details:
+                latest_revision_total_cost = boq_details.total_cost or 0
+                if boq_details.boq_details:
+                    d_amt = boq_details.boq_details.get('discount_amount', 0) or 0
+                    d_pct = boq_details.boq_details.get('discount_percentage', 0) or 0
+                    if d_pct > 0 and d_amt == 0:
+                        d_amt = (latest_revision_total_cost * d_pct) / 100
+                    if d_amt > 0:
+                        latest_revision_total_cost -= d_amt
 
-                            # Add preliminaries amount to subtotal
-                            preliminary_amount = latest_revision_snapshot.get('preliminaries', {}).get('cost_details', {}).get('amount', 0) or 0
-                            combined_subtotal = subtotal + preliminary_amount
-
-                            # Apply discount
-                            discount_amount = latest_revision_snapshot.get('discount_amount', 0) or 0
-                            discount_percentage = latest_revision_snapshot.get('discount_percentage', 0) or 0
-
-                            if discount_percentage > 0 and discount_amount == 0:
-                                discount_amount = (combined_subtotal * discount_percentage) / 100
-
-                            latest_revision_total_cost = combined_subtotal - discount_amount
-                            log.info(f"📊 BOQ {boq.boq_id}: Calculated - subtotal={subtotal}, preliminary={preliminary_amount}, combined_subtotal={combined_subtotal}, discount={discount_amount}, total={latest_revision_total_cost}")
-                        else:
-                            # No items, use stored total_cost
-                            latest_revision_total_cost = revision.changes_summary.get('total_cost', 0)
-                            log.info(f"📊 BOQ {boq.boq_id}: No items, using stored total_cost = {latest_revision_total_cost}")
-
-                        break
-
-                # If no non-original revision found, use boq_details.total_cost
-                if latest_revision_total_cost == 0:
-                    latest_revision_total_cost = boq_details.total_cost if boq_details else 0
-                    # 🔥 Check if boq_details has discount that needs to be applied
-                    if boq_details and boq_details.boq_details:
-                        details_discount_amount = boq_details.boq_details.get('discount_amount', 0) or 0
-                        details_discount_percentage = boq_details.boq_details.get('discount_percentage', 0) or 0
-                        if details_discount_percentage > 0 and details_discount_amount == 0:
-                            details_discount_amount = (latest_revision_total_cost * details_discount_percentage) / 100
-                        if details_discount_amount > 0:
-                            latest_revision_total_cost = latest_revision_total_cost - details_discount_amount
-                            log.info(f"📊 BOQ {boq.boq_id}: Applied discount from boq_details: {details_discount_amount}, new total = {latest_revision_total_cost}")
-                    log.info(f"📊 BOQ {boq.boq_id}: Using boq_details.total_cost = {latest_revision_total_cost}")
-
-            # 🔥 Get full BOQ details including items, terms, images
-            # Parse boq_details JSON to get items
+            # Get items with images from pre-loaded data
             items = []
             preliminaries = None
             discount_percentage = 0
@@ -202,79 +252,38 @@ def get_all_internal_revision():
                 discount_percentage = details_json.get('discount_percentage', 0) or 0
                 discount_amount = details_json.get('discount_amount', 0) or 0
 
-                # 🔥 Fetch sub_item_image from database for all items
-                from models.boq import MasterSubItem, MasterItem
+                # Enrich sub-items with images from pre-loaded maps (no queries)
                 for item in items:
-                    sub_items = item.get("sub_items", [])
-                    for sub_item in sub_items:
-                        sub_item_id = sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")
+                    for sub_item in item.get('sub_items', []):
+                        sid = sub_item.get('sub_item_id') or sub_item.get('master_sub_item_id')
+                        if sid and sid in sub_item_image_map:
+                            sub_item['sub_item_image'] = sub_item_image_map[sid]
+                        elif not sid:
+                            item_name = item.get('item_name')
+                            sub_item_name = sub_item.get('sub_item_name')
+                            if item_name and sub_item_name and item_name_to_id:
+                                item_id = item_name_to_id.get(item_name)
+                                if item_id:
+                                    lookup = name_to_image_map.get((item_id, sub_item_name))
+                                    if lookup:
+                                        sub_item['sub_item_id'] = lookup['sub_item_id']
+                                        if lookup['sub_item_image']:
+                                            sub_item['sub_item_image'] = lookup['sub_item_image']
 
-                        if sub_item_id:
-                            # Query database for sub_item_image using ID
-                            master_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id).first()
-                            if master_sub_item and master_sub_item.sub_item_image:
-                                sub_item["sub_item_image"] = master_sub_item.sub_item_image
-                                log.info(f"Added image for sub-item {sub_item_id}: {master_sub_item.sub_item_image}")
-                        else:
-                            # Fallback: Try to find by item_name and sub_item_name
-                            item_name = item.get("item_name")
-                            sub_item_name = sub_item.get("sub_item_name")
+            # Build terms from pre-loaded data (no queries)
+            selected_term_ids = term_selections_map.get(boq.boq_id, [])
+            terms_conditions = {'items': [{
+                'id': f'term-{t["term_id"]}',
+                'term_id': t['term_id'],
+                'terms_text': t['terms_text'],
+                'display_order': t['display_order'],
+                'checked': t['term_id'] in selected_term_ids,
+                'isCustom': False
+            } for t in master_terms]}
 
-                            if item_name and sub_item_name:
-                                # First find the master item
-                                master_item = MasterItem.query.filter_by(item_name=item_name).first()
-                                if master_item:
-                                    # Then find the sub-item by item_id and sub_item_name
-                                    master_sub_item = MasterSubItem.query.filter_by(
-                                        item_id=master_item.item_id,
-                                        sub_item_name=sub_item_name
-                                    ).first()
+            # Use eagerly-loaded project (no query)
+            project = boq.project
 
-                                    if master_sub_item:
-                                        # Add the ID back for future use
-                                        sub_item["sub_item_id"] = master_sub_item.sub_item_id
-                                        # Add image if available
-                                        if master_sub_item.sub_item_image:
-                                            sub_item["sub_item_image"] = master_sub_item.sub_item_image
-                                            log.info(f"Added image (by name match) for sub-item {sub_item_name}: {master_sub_item.sub_item_image}")
-
-            # Get terms & conditions from boq_terms_selections (single row with term_ids array)
-            try:
-                # First get selected term_ids for this BOQ
-                term_ids_query = text("""
-                    SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
-                """)
-                term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq.boq_id}).fetchone()
-                selected_term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
-
-                # Get all active terms from master
-                all_terms_query = text("""
-                    SELECT term_id, terms_text, display_order
-                    FROM boq_terms
-                    WHERE is_active = TRUE AND is_deleted = FALSE
-                    ORDER BY display_order, term_id
-                """)
-                all_terms_result = db.session.execute(all_terms_query)
-                terms_items = []
-
-                for row in all_terms_result:
-                    term_id = row[0]
-                    terms_items.append({
-                        'id': f'term-{term_id}',
-                        'term_id': term_id,
-                        'terms_text': row[1],
-                        'display_order': row[2],
-                        'checked': term_id in selected_term_ids,
-                        'isCustom': False
-                    })
-
-                terms_conditions = {'items': terms_items}
-                log.info(f"Retrieved {len(terms_items)} terms for BOQ {boq.boq_id} in internal revisions")
-            except Exception as e:
-                log.error(f"Error fetching terms for BOQ {boq.boq_id}: {str(e)}")
-                terms_conditions = {'items': []}
-
-            # Build BOQ data with complete information
             boq_data = {
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
@@ -284,8 +293,8 @@ def get_all_internal_revision():
                 "status": boq.status,
                 "revision_number": boq.revision_number,
                 "internal_revision_number": boq.internal_revision_number,
-                "total_cost": latest_revision_total_cost,  # 🔥 Use latest internal revision's total_cost
-                "selling_price": latest_revision_total_cost,  # 🔥 Use latest internal revision's total_cost
+                "total_cost": latest_revision_total_cost,
+                "selling_price": latest_revision_total_cost,
                 "created_at": boq.created_at.isoformat() if boq.created_at else None,
                 "internal_revisions": revisions_list,
                 "revision_count": len(revisions_list),
@@ -299,12 +308,11 @@ def get_all_internal_revision():
                     "client": project.client if project else "Unknown",
                     "location": project.location if project else "Unknown"
                 } if project else None,
-                # 🔥 Include full BOQ details
                 "details": {
                     "items": items,
                     "total_items": len(items)
                 },
-                "items": items,  # For backwards compatibility
+                "items": items,
                 "total_items": len(items),
                 "preliminaries": preliminaries,
                 "terms_conditions": terms_conditions,
@@ -322,18 +330,13 @@ def get_all_internal_revision():
         else:
             message = f"Found {len(result)} BOQ(s) with internal revisions"
 
-        response = jsonify({
+        return jsonify({
             "success": True,
             "count": len(result),
             "message": message,
             "user_role": user_role,
             "data": result
-        })
-        # Prevent caching
-        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Expires'] = '0'
-        return response, 200
+        }), 200
 
     except Exception as e:
         log.error(f"Error fetching internal revisions: {str(e)}")

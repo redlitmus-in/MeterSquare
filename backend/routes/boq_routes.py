@@ -3,6 +3,7 @@ BOQ Routes - API endpoints for Bill of Quantities management
 """
 from flask import Blueprint, g, jsonify, current_app
 from utils.authentication import jwt_required
+from utils.response_cache import cached_response
 
 # Rate limit decorator helper for heavy endpoints
 def rate_limit(limit_string):
@@ -236,6 +237,7 @@ def update_internal_revision_boq_route(boq_id):
 
 @boq_routes.route('/boqs/internal_revisions', methods=['GET'])
 @jwt_required
+@cached_response(timeout=10, key_prefix='all_internal_revisions')
 def get_all_internal_revision_route():
     """Get all internal revisions (Estimator, PM, SE, TD, or Admin)"""
     access_check = check_boq_access()

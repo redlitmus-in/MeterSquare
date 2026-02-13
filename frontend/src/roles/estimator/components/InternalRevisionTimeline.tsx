@@ -5,8 +5,7 @@ import { estimatorService } from '../services/estimatorService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import BOQCreationForm from '@/components/forms/BOQCreationForm';
-import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
-import { API_BASE_URL } from '@/api/config';
+import { apiClient } from '@/api/config';
 
 interface InternalRevision {
   id: number;
@@ -61,8 +60,6 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   onReject,
   refreshTrigger
 }) => {
-  const API_URL = API_BASE_URL;
-
   const [boqs, setBOQs] = useState<BOQWithInternalRevisions[]>([]);
   const [selectedBoq, setSelectedBoq] = useState<BOQWithInternalRevisions | null>(null);
   const [internalRevisions, setInternalRevisions] = useState<InternalRevision[]>([]);
@@ -93,9 +90,6 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   // Use ref to track ongoing API calls and prevent duplicates
   const loadingRevisionsRef = useRef<number | null>(null);
   const isInitialMount = useRef(true);
-
-  // ✅ LISTEN TO REAL-TIME UPDATES - Internal revisions update automatically via Supabase
-  const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
 
   useEffect(() => {
     loadBOQsWithInternalRevisions();
@@ -130,7 +124,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     }
   }, [selectedBoq]);
 
-  // Reload data when refreshTrigger changes (after TD approval/rejection)
+  // Reload data when refreshTrigger changes (parent handles real-time updates via this prop)
   useEffect(() => {
     if (refreshTrigger !== undefined && refreshTrigger > 0) {
       loadBOQsWithInternalRevisions();
@@ -138,33 +132,15 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     }
   }, [refreshTrigger]);
 
-  // ✅ RELOAD internal revisions when real-time update is received from Supabase
-  // Supabase listens to PostgreSQL changes and triggers this automatically (no polling needed!)
-  useEffect(() => {
-    if (boqUpdateTimestamp === 0) return;
-
-    // Reload BOQ list when Supabase detects database changes
-    loadBOQsWithInternalRevisions();
-
-    // Reload internal revisions for selected BOQ
-    if (selectedBoq) {
-      loadInternalRevisions(selectedBoq.boq_id);
-    }
-  }, [boqUpdateTimestamp]);
-
   const loadBOQsWithInternalRevisions = async () => {
     setIsLoadingBOQs(true);
     try {
-      const response = await fetch(`${API_URL}/boqs/internal_revisions`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        }
-      });
-      const data = await response.json();
+      const response = await apiClient.get('/boqs/internal_revisions');
+      const data = response.data;
 
       if (data.success) {
         // Sort by most recent first (created_at or updated_at descending)
-        const sortedBOQs = [...data.data].sort((a, b) => {
+        const sortedBOQs = [...data.data].sort((a: any, b: any) => {
           const dateA = new Date(a.created_at || a.updated_at || 0).getTime();
           const dateB = new Date(b.created_at || b.updated_at || 0).getTime();
           return dateB - dateA; // Most recent first
@@ -173,10 +149,13 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
         if (sortedBOQs.length > 0 && !selectedBoq) {
           setSelectedBoq(sortedBOQs[0]);
         }
+        return sortedBOQs; // Return for use in action handlers
       }
+      return [];
     } catch (error) {
       console.error('Error loading BOQs:', error);
       showError('Failed to load BOQs with internal revisions');
+      return [];
     } finally {
       setIsLoadingBOQs(false);
     }
@@ -191,12 +170,8 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
     loadingRevisionsRef.current = boqId;
     setIsLoadingRevisions(true);
     try {
-      const response = await fetch(`${API_URL}/boq/${boqId}/internal_revisions`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        }
-      });
-      const data = await response.json();
+      const response = await apiClient.get(`/boq/${boqId}/internal_revisions`);
+      const data = response.data;
 
       if (data.success) {
         // Filter out ORIGINAL_BOQ type revisions from the regular list
@@ -232,17 +207,8 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   const handleEditBOQ = async (boq: BOQWithInternalRevisions) => {
     try {
       // Fetch the latest BOQ data with full details
-      const response = await fetch(`${API_URL}/boq/${boq.boq_id}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const response = await apiClient.get(`/boq/${boq.boq_id}`);
+      const data = response.data;
 
       // The /boq/{boq_id} endpoint returns BOQ data directly (not wrapped in success/data)
       // Check if response has error field (error response) or boq_id (success response)
@@ -273,26 +239,16 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       if (result.success) {
         showSuccess('BOQ sent to Technical Director successfully');
 
-        // Reload internal revisions first with the current boq_id
-        await loadInternalRevisions(boq.boq_id);
+        // Reload both in parallel - revisions and BOQ list
+        const [, updatedBOQs] = await Promise.all([
+          loadInternalRevisions(boq.boq_id),
+          loadBOQsWithInternalRevisions()
+        ]);
 
-        // Reload BOQs list
-        await loadBOQsWithInternalRevisions();
-
-        // Fetch fresh BOQ data to update selectedBoq with new status
-        const response = await fetch(`${API_URL}/boqs/internal_revisions`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-          }
-        });
-        const data = await response.json();
-
-        if (data.success) {
-          // Find and update the selected BOQ with fresh data
-          const updatedBoq = data.data.find((b: BOQWithInternalRevisions) => b.boq_id === boq.boq_id);
-          if (updatedBoq) {
-            setSelectedBoq(updatedBoq);
-          }
+        // Update selectedBoq from the already-loaded list (no duplicate fetch needed)
+        const updatedBoq = updatedBOQs.find((b: BOQWithInternalRevisions) => b.boq_id === boq.boq_id);
+        if (updatedBoq) {
+          setSelectedBoq(updatedBoq);
         }
       } else {
         showError(result.message || 'Failed to send BOQ to TD');
@@ -310,46 +266,30 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
     setIsProcessing(true);
     try {
-      const response = await fetch(`${API_URL}/td_approval`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        },
-        body: JSON.stringify({
-          boq_id: selectedBoq.boq_id,
-          technical_director_status: 'approved',
-          rejection_reason: '',
-          comments: approvalNotes || 'BOQ approved from internal revision review'
-        })
+      const response = await apiClient.post('/td_approval', {
+        boq_id: selectedBoq.boq_id,
+        technical_director_status: 'approved',
+        rejection_reason: '',
+        comments: approvalNotes || 'BOQ approved from internal revision review'
       });
 
-      const data = await response.json();
+      const data = response.data;
 
-      if (response.ok && data.success) {
+      if (data.success) {
         showSuccess('BOQ approved successfully');
         setShowApprovalModal(false);
         setApprovalNotes('');
 
-        // Reload data and update selectedBoq with fresh status
-        await loadBOQsWithInternalRevisions();
-        if (selectedBoq) {
-          await loadInternalRevisions(selectedBoq.boq_id);
+        // Reload both in parallel - no duplicate fetch needed
+        const [updatedBOQs] = await Promise.all([
+          loadBOQsWithInternalRevisions(),
+          loadInternalRevisions(selectedBoq.boq_id)
+        ]);
 
-          // Fetch fresh BOQ data to update selectedBoq with new status
-          const response = await fetch(`${API_URL}/boqs/internal_revisions`, {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-            }
-          });
-          const freshData = await response.json();
-
-          if (freshData.success) {
-            const updatedBoq = freshData.data.find((b: BOQWithInternalRevisions) => b.boq_id === selectedBoq.boq_id);
-            if (updatedBoq) {
-              setSelectedBoq(updatedBoq);
-            }
-          }
+        // Update selectedBoq from the already-loaded list
+        const updatedBoq = updatedBOQs.find((b: BOQWithInternalRevisions) => b.boq_id === selectedBoq.boq_id);
+        if (updatedBoq) {
+          setSelectedBoq(updatedBoq);
         }
       } else {
         showError(data.message || 'Failed to approve BOQ');
@@ -372,46 +312,30 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
     setIsProcessing(true);
     try {
-      const response = await fetch(`${API_URL}/td_approval`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        },
-        body: JSON.stringify({
-          boq_id: selectedBoq.boq_id,
-          technical_director_status: 'rejected',
-          rejection_reason: rejectionReason,
-          comments: rejectionReason
-        })
+      const response = await apiClient.post('/td_approval', {
+        boq_id: selectedBoq.boq_id,
+        technical_director_status: 'rejected',
+        rejection_reason: rejectionReason,
+        comments: rejectionReason
       });
 
-      const data = await response.json();
+      const data = response.data;
 
-      if (response.ok && data.success) {
+      if (data.success) {
         showSuccess('BOQ rejected successfully');
         setShowRejectionModal(false);
         setRejectionReason('');
 
-        // Reload data and update selectedBoq with fresh status
-        await loadBOQsWithInternalRevisions();
-        if (selectedBoq) {
-          await loadInternalRevisions(selectedBoq.boq_id);
+        // Reload both in parallel - no duplicate fetch needed
+        const [updatedBOQs] = await Promise.all([
+          loadBOQsWithInternalRevisions(),
+          loadInternalRevisions(selectedBoq.boq_id)
+        ]);
 
-          // Fetch fresh BOQ data to update selectedBoq with new status
-          const response = await fetch(`${API_URL}/boqs/internal_revisions`, {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-            }
-          });
-          const freshData = await response.json();
-
-          if (freshData.success) {
-            const updatedBoq = freshData.data.find((b: BOQWithInternalRevisions) => b.boq_id === selectedBoq.boq_id);
-            if (updatedBoq) {
-              setSelectedBoq(updatedBoq);
-            }
-          }
+        // Update selectedBoq from the already-loaded list
+        const updatedBoq = updatedBOQs.find((b: BOQWithInternalRevisions) => b.boq_id === selectedBoq.boq_id);
+        if (updatedBoq) {
+          setSelectedBoq(updatedBoq);
         }
       } else {
         showError(data.message || 'Failed to reject BOQ');
@@ -2595,19 +2519,16 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
             // Reload the internal revisions to show the new changes
             if (selectedBoq) {
-              await loadInternalRevisions(selectedBoq.boq_id);
-              await loadBOQsWithInternalRevisions();
+              // Reload both in parallel - no duplicate fetch needed
+              const [, updatedBOQs] = await Promise.all([
+                loadInternalRevisions(selectedBoq.boq_id),
+                loadBOQsWithInternalRevisions()
+              ]);
 
-              // Refresh selectedBoq to get latest status
-              const response = await fetch(`${API_URL}/boqs/internal_revisions`, {
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
-              });
-              const data = await response.json();
-              if (data.success) {
-                const updatedBoq = data.data.find((b: BOQWithInternalRevisions) => b.boq_id === selectedBoq.boq_id);
-                if (updatedBoq) {
-                  setSelectedBoq(updatedBoq);
-                }
+              // Update selectedBoq from the already-loaded list
+              const updatedBoq = updatedBOQs.find((b: BOQWithInternalRevisions) => b.boq_id === selectedBoq.boq_id);
+              if (updatedBoq) {
+                setSelectedBoq(updatedBoq);
               }
             }
 
