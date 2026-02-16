@@ -297,14 +297,20 @@ def client_revision_td_mail_send():
 
         # Find Estimator from project.estimator_id
         estimator = None
+        estimator_user_id = None
+
+        # Method 1: Try project.estimator_id
         if project.estimator_id:
             estimator = User.query.filter_by(
                 user_id=project.estimator_id,
                 is_active=True,
                 is_deleted=False
             ).first()
+            if estimator:
+                estimator_user_id = estimator.user_id
+                log.info(f"BOQ {boq_id} - Found estimator via project.estimator_id: {estimator_user_id}")
 
-        # Fallback: try to find by created_by if estimator_id not set
+        # Method 2: Try to find by created_by if estimator_id not set
         if not estimator:
             estimator_role = Role.query.filter(
                 Role.role.in_(['estimator', 'Estimator']),
@@ -319,12 +325,42 @@ def client_revision_td_mail_send():
                 ).filter(
                     db.or_(
                         User.full_name == boq.created_by,
-                        User.email == boq.created_by
+                        User.email == boq.created_by,
+                        User.username == boq.created_by
                     )
                 ).first()
- 
+
+                if estimator:
+                    estimator_user_id = estimator.user_id
+                    log.info(f"BOQ {boq_id} - Found estimator via created_by: {estimator_user_id}")
+
+        # Method 3: If still not found, get ANY active estimator as last resort
+        if not estimator:
+            log.warning(f"BOQ {boq_id} - Estimator not found via project or created_by, trying to find any active estimator")
+            estimator_role = Role.query.filter(
+                Role.role.in_(['estimator', 'Estimator']),
+                Role.is_deleted == False
+            ).first()
+
+            if estimator_role:
+                estimator = User.query.filter_by(
+                    role_id=estimator_role.role_id,
+                    is_active=True,
+                    is_deleted=False
+                ).first()
+
+                if estimator:
+                    estimator_user_id = estimator.user_id
+                    log.warning(f"BOQ {boq_id} - Using fallback estimator: {estimator_user_id}")
+
         estimator_email = estimator.email if estimator and estimator.email else boq.created_by
         estimator_name = estimator.full_name if estimator else boq.created_by
+
+        # Log final result
+        if not estimator or not estimator_user_id:
+            log.error(f"BOQ {boq_id} - CRITICAL: Could not find estimator. project.estimator_id={project.estimator_id}, boq.created_by={boq.created_by}")
+        else:
+            log.info(f"BOQ {boq_id} - Estimator resolved: user_id={estimator_user_id}, name={estimator_name}, email={estimator_email}")
 
         # Get existing BOQ history
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -554,68 +590,76 @@ def client_revision_td_mail_send():
             from utils.notification_utils import NotificationManager
             from socketio_server import send_notification_to_user
 
-            estimator_user_id = estimator.user_id if estimator else None
             decision = 'approved' if technical_director_status.lower() == 'approved' else 'rejected'
-            log.info(f"BOQ {boq_id} - Client revision {decision}: estimator_user_id={estimator_user_id}, estimator_name={estimator_name}")
+            log.info(f"BOQ {boq_id} - Client revision {decision}: estimator_user_id={estimator_user_id}, estimator_name={estimator_name}, estimator={estimator}")
 
-            if estimator_user_id:
-                try:
-                    if technical_director_status.lower() == 'approved':
-                        ComprehensiveNotificationService.notify_client_revision_approved(
-                            boq_id=boq_id,
-                            project_name=project_data.get('project_name', boq.boq_name),
-                            td_id=td_user_id,
-                            td_name=td_name,
-                            estimator_user_id=estimator_user_id,
-                            estimator_name=estimator_name,
-                            revision_number=boq.revision_number
-                        )
-                    else:
-                        ComprehensiveNotificationService.notify_client_revision_rejected(
-                            boq_id=boq_id,
-                            project_name=project_data.get('project_name', boq.boq_name),
-                            td_id=td_user_id,
-                            td_name=td_name,
-                            estimator_user_id=estimator_user_id,
-                            estimator_name=estimator_name,
-                            rejection_reason=rejection_reason or comments or "No reason provided",
-                            revision_number=boq.revision_number
-                        )
-                    notification_sent = True
-                    log.info(f"BOQ {boq_id} - Client revision {decision} notification sent to estimator {estimator_user_id}")
-                except Exception as svc_err:
-                    log.error(f"BOQ {boq_id} - Client revision notification service failed: {svc_err}")
-                    # Fallback: create notification directly in DB
+            # CRITICAL: Always attempt to send notification, even if estimator_user_id is None
+            # The notification service will handle fallback mechanisms
+            if estimator_user_id or estimator:
+                # Use estimator_user_id if available, otherwise use estimator object to find user_id
+                final_estimator_id = estimator_user_id if estimator_user_id else (estimator.user_id if estimator else None)
+
+                if final_estimator_id:
                     try:
-                        from utils.role_route_mapper import get_boq_view_url
-                        rev_info = f' R{boq.revision_number}' if boq.revision_number and boq.revision_number > 0 else ''
-                        fallback_title = f'Client Revision {"Approved" if decision == "approved" else "Rejected"}'
-                        fallback_msg = (
-                            f'Client revision{rev_info} for {project_data.get("project_name", boq.boq_name)} '
-                            f'was {decision} by {td_name}'
-                        )
-                        if decision == 'rejected':
-                            fallback_msg += f'. Reason: {rejection_reason or comments or "No reason provided"}'
-                        fallback_notif = NotificationManager.create_notification(
-                            user_id=estimator_user_id,
-                            type='success' if decision == 'approved' else 'rejection',
-                            title=fallback_title,
-                            message=fallback_msg,
-                            priority='high',
-                            category='boq',
-                            action_url=get_boq_view_url(estimator_user_id, boq_id, tab='revisions'),
-                            action_label='View BOQ',
-                            metadata={'boq_id': boq_id, 'decision': decision, 'revision_number': boq.revision_number},
-                            sender_id=td_user_id,
-                            sender_name=td_name,
-                            target_role='estimator'
-                        )
-                        send_notification_to_user(estimator_user_id, fallback_notif.to_dict())
+                        if technical_director_status.lower() == 'approved':
+                            ComprehensiveNotificationService.notify_client_revision_approved(
+                                boq_id=boq_id,
+                                project_name=project_data.get('project_name', boq.boq_name),
+                                td_id=td_user_id,
+                                td_name=td_name,
+                                estimator_user_id=final_estimator_id,
+                                estimator_name=estimator_name,
+                                revision_number=boq.revision_number
+                            )
+                        else:
+                            ComprehensiveNotificationService.notify_client_revision_rejected(
+                                boq_id=boq_id,
+                                project_name=project_data.get('project_name', boq.boq_name),
+                                td_id=td_user_id,
+                                td_name=td_name,
+                                estimator_user_id=final_estimator_id,
+                                estimator_name=estimator_name,
+                                rejection_reason=rejection_reason or comments or "No reason provided",
+                                revision_number=boq.revision_number
+                            )
                         notification_sent = True
-                        log.info(f"BOQ {boq_id} - Fallback client revision notification sent to estimator {estimator_user_id}")
-                    except Exception as fallback_err:
-                        log.error(f"BOQ {boq_id} - Fallback client revision notification also failed: {fallback_err}")
-                        notification_error_msg = str(fallback_err)
+                        log.info(f"BOQ {boq_id} - Client revision {decision} notification sent to estimator {final_estimator_id}")
+                    except Exception as svc_err:
+                        log.error(f"BOQ {boq_id} - Client revision notification service failed: {svc_err}")
+                        # Fallback: create notification directly in DB
+                        try:
+                            from utils.role_route_mapper import get_boq_view_url
+                            rev_info = f' R{boq.revision_number}' if boq.revision_number and boq.revision_number > 0 else ''
+                            fallback_title = f'Client Revision {"Approved" if decision == "approved" else "Rejected"}'
+                            fallback_msg = (
+                                f'Client revision{rev_info} for {project_data.get("project_name", boq.boq_name)} '
+                                f'was {decision} by {td_name}'
+                            )
+                            if decision == 'rejected':
+                                fallback_msg += f'. Reason: {rejection_reason or comments or "No reason provided"}'
+                            fallback_notif = NotificationManager.create_notification(
+                                user_id=final_estimator_id,
+                                type='success' if decision == 'approved' else 'rejection',
+                                title=fallback_title,
+                                message=fallback_msg,
+                                priority='high',
+                                category='boq',
+                                action_url=get_boq_view_url(final_estimator_id, boq_id, tab='revisions'),
+                                action_label='View BOQ',
+                                metadata={'boq_id': boq_id, 'decision': decision, 'revision_number': boq.revision_number},
+                                sender_id=td_user_id,
+                                sender_name=td_name,
+                                target_role='estimator'
+                            )
+                            send_notification_to_user(final_estimator_id, fallback_notif.to_dict())
+                            notification_sent = True
+                            log.info(f"BOQ {boq_id} - Fallback client revision notification sent to estimator {final_estimator_id}")
+                        except Exception as fallback_err:
+                            log.error(f"BOQ {boq_id} - Fallback client revision notification also failed: {fallback_err}")
+                            notification_error_msg = str(fallback_err)
+                else:
+                    log.error(f"BOQ {boq_id} - CRITICAL: Cannot send notification - final_estimator_id is None")
+                    notification_error_msg = "Estimator user_id not found - checked project.estimator_id, boq.created_by, and fallback estimator"
 
                 # Also notify PM/forwarder if exists
                 try:
@@ -652,8 +696,8 @@ def client_revision_td_mail_send():
                 except Exception as pm_err:
                     log.error(f"BOQ {boq_id} - PM/forwarder notification failed (non-critical): {pm_err}")
             else:
-                log.warning(f"BOQ {boq_id} - No estimator user_id found for client revision notification. estimator={estimator}")
-                notification_error_msg = "Estimator user_id not found"
+                log.error(f"BOQ {boq_id} - CRITICAL: No estimator found for client revision notification. estimator={estimator}, estimator_user_id={estimator_user_id}, project.estimator_id={project.estimator_id}, boq.created_by={boq.created_by}")
+                notification_error_msg = "Estimator not found - notification cannot be sent"
         except Exception as notif_error:
             log.error(f"BOQ {boq_id} - Critical: Failed to send client revision notification: {notif_error}")
             import traceback
@@ -870,17 +914,20 @@ def send_td_client_boq_email(boq_id):
                 td_user = UserModel.query.filter_by(email=td_email).first()
                 if td_user:
                     cached_td_user_id = td_user.user_id
-                    log.info(f"[send_client_revision] Sending notification to TD {cached_td_user_id}")
+                    # Get revision number for notification
+                    revision_num = boq.revision_number if boq and boq.revision_number else 0
+                    log.info(f"[send_client_revision] Sending client revision R{revision_num} notification to TD {cached_td_user_id}")
                     try:
-                        notification_service.notify_boq_sent_to_td(
+                        notification_service.notify_client_revision_created(
                             boq_id=boq_id,
                             project_name=cached_project_name,
-                            estimator_id=user_id,
-                            estimator_name=user_name,
-                            td_user_id=cached_td_user_id
+                            revision_number=revision_num,
+                            actor_id=user_id,
+                            actor_name=user_name,
+                            actor_role=user_role
                         )
                         notification_sent = True
-                        log.info(f"[send_client_revision] Notification sent successfully")
+                        log.info(f"[send_client_revision] Client revision R{revision_num} notification sent successfully")
                     except Exception as svc_err:
                         log.error(f"[send_client_revision] Service notification failed: {svc_err}")
                         import traceback
@@ -890,18 +937,18 @@ def send_td_client_boq_email(boq_id):
                     if not notification_sent:
                         try:
                             from utils.role_route_mapper import get_td_approval_url
-                            action_url = get_td_approval_url(cached_td_user_id, boq_id, tab='pending')
+                            action_url = get_td_approval_url(cached_td_user_id, boq_id, tab='revisions', subtab='client')
                             fallback_notif = NotificationManager.create_notification(
                                 user_id=cached_td_user_id,
                                 type='approval',
-                                title='New BOQ for Approval',
-                                message=f'BOQ for {cached_project_name} requires your approval. Submitted by {user_name}',
-                                priority='urgent',
+                                title='Client Revision BOQ for Approval',
+                                message=f'Client Revision BOQ for {cached_project_name} (Revision R{revision_num}) requires your review. Submitted by {user_name}',
+                                priority='high',
                                 category='boq',
                                 action_required=True,
                                 action_url=action_url,
-                                action_label='Review BOQ',
-                                metadata={'boq_id': boq_id},
+                                action_label='Review Revision',
+                                metadata={'boq_id': boq_id, 'client_revision_number': revision_num, 'target_role': 'technical_director'},
                                 sender_id=user_id,
                                 sender_name=user_name,
                                 target_role='technical_director'
@@ -909,7 +956,7 @@ def send_td_client_boq_email(boq_id):
                             send_notification_to_user(cached_td_user_id, fallback_notif.to_dict())
                             send_notification_to_role('technicalDirector', fallback_notif.to_dict())
                             notification_sent = True
-                            log.info(f"[send_client_revision] Fallback notification sent to TD {cached_td_user_id}")
+                            log.info(f"[send_client_revision] Fallback client revision R{revision_num} notification sent to TD {cached_td_user_id}")
                         except Exception as fallback_err:
                             log.error(f"[send_client_revision] Fallback also failed: {fallback_err}")
                 else:
@@ -1082,19 +1129,25 @@ def send_td_client_boq_email(boq_id):
                 from utils.notification_utils import NotificationManager
                 from socketio_server import send_notification_to_user, send_notification_to_role
                 log.info(f"[send_client_revision] Sending notification to {len(cached_td_list)} Technical Director(s)")
+                # Get revision number from boq object (already loaded above)
+                boq_for_notification = BOQ.query.get(boq_id)
+                revision_num = boq_for_notification.revision_number if boq_for_notification else 0
+
                 for td_user_id, td_full_name, td_email_addr in cached_td_list:
                     td_notif_sent = False
                     try:
-                        notification_service.notify_boq_sent_to_td(
+                        # Call notify_client_revision_created for client revisions
+                        notification_service.notify_client_revision_created(
                             boq_id=boq_id,
                             project_name=cached_project_name,
-                            estimator_id=user_id,
-                            estimator_name=user_name,
-                            td_user_id=td_user_id
+                            revision_number=revision_num,
+                            actor_id=user_id,
+                            actor_name=user_name,
+                            actor_role=user_role
                         )
                         td_notif_sent = True
                         notification_sent = True
-                        log.info(f"[send_client_revision] Notification sent successfully to TD {td_user_id} ({td_full_name})")
+                        log.info(f"[send_client_revision] Client revision R{revision_num} notification sent successfully to TD {td_user_id} ({td_full_name})")
                     except Exception as td_notif_err:
                         log.error(f"[send_client_revision] Failed to send notification to TD {td_user_id}: {td_notif_err}")
                         import traceback
@@ -1104,18 +1157,18 @@ def send_td_client_boq_email(boq_id):
                     if not td_notif_sent:
                         try:
                             from utils.role_route_mapper import get_td_approval_url
-                            action_url = get_td_approval_url(td_user_id, boq_id, tab='pending')
+                            action_url = get_td_approval_url(td_user_id, boq_id, tab='revisions', subtab='client')
                             fallback_notif = NotificationManager.create_notification(
                                 user_id=td_user_id,
                                 type='approval',
-                                title='New BOQ for Approval',
-                                message=f'BOQ for {cached_project_name} requires your approval. Submitted by {user_name}',
-                                priority='urgent',
+                                title='Client Revision BOQ for Approval',
+                                message=f'Client Revision BOQ for {cached_project_name} (Revision R{revision_num}) requires your review. Submitted by {user_name}',
+                                priority='high',
                                 category='boq',
                                 action_required=True,
                                 action_url=action_url,
-                                action_label='Review BOQ',
-                                metadata={'boq_id': boq_id},
+                                action_label='Review Revision',
+                                metadata={'boq_id': boq_id, 'client_revision_number': revision_num, 'target_role': 'technical_director'},
                                 sender_id=user_id,
                                 sender_name=user_name,
                                 target_role='technical_director'
@@ -1123,7 +1176,7 @@ def send_td_client_boq_email(boq_id):
                             send_notification_to_user(td_user_id, fallback_notif.to_dict())
                             send_notification_to_role('technicalDirector', fallback_notif.to_dict())
                             notification_sent = True
-                            log.info(f"[send_client_revision] Fallback notification sent to TD {td_user_id}")
+                            log.info(f"[send_client_revision] Fallback client revision R{revision_num} notification sent to TD {td_user_id}")
                         except Exception as fallback_err:
                             log.error(f"[send_client_revision] Fallback also failed for TD {td_user_id}: {fallback_err}")
             except Exception as notif_err:

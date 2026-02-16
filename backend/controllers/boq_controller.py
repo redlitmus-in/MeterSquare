@@ -4034,12 +4034,47 @@ def send_boq_email(boq_id):
 
             # if email_sent:
                 # Update BOQ status and mark email as sent to TD
-            # This API is ONLY for Internal Revisions - status is always Pending_Revision
-            is_internal_revision = boq.status == "Internal_Revision_Pending" or boq.has_internal_revisions
+            # Check revision type based on CURRENT STATUS and revision numbers:
+            # - Internal Revision: Has internal revisions but NOT sent to client yet (revision_number == 0)
+            # - Client Revision: Has been sent to client (revision_number > 0)
+            # - New BOQ: Neither internal nor client revision
+            #
+            # CRITICAL FIX: Check if BOQ has internal revisions AND revision_number == 0
+            # This ensures we correctly identify internal revisions regardless of status string
 
-            # Internal Revisions sent to TD get status "Pending_Revision"
-            # New BOQ (without internal revisions) get status "Pending"
-            new_status = "Pending_Revision" if is_internal_revision else "Pending"
+            # DEBUG: Log the values being checked
+            log.info(f"[DEBUG send_boq_email] BOQ {boq_id} - status={boq.status}, has_internal_revisions={boq.has_internal_revisions}, revision_number={boq.revision_number}, internal_revision_number={boq.internal_revision_number}")
+
+            # Internal revision detection (FIXED LOGIC):
+            # 1. Has internal_revision_number > 0 AND revision_number == 0 (internal rev, not sent to client yet), OR
+            # 2. has_internal_revisions flag is True AND revision_number == 0, OR
+            # 3. Status explicitly indicates internal revision
+            is_internal_revision = (
+                (boq.internal_revision_number and boq.internal_revision_number > 0 and (boq.revision_number == 0 or boq.revision_number is None)) or
+                (boq.has_internal_revisions and (boq.revision_number == 0 or boq.revision_number is None)) or
+                boq.status == "Internal_Revision_Pending"
+            )
+
+            # Client revision: has revision_number > 0 (has been sent to client at least once)
+            # This takes precedence over internal revisions
+            is_client_revision = (
+                boq.revision_number and
+                boq.revision_number > 0
+            )
+
+            # DEBUG: Log the results
+            log.info(f"[DEBUG send_boq_email] BOQ {boq_id} - is_internal_revision={is_internal_revision}, is_client_revision={is_client_revision}")
+
+            # Set appropriate status based on revision type:
+            # - Internal Revisions → "Pending_Revision"
+            # - Client Revisions → "client_pending_revision"
+            # - New BOQ → "Pending"
+            if is_internal_revision:
+                new_status = "Pending_Revision"
+            elif is_client_revision:
+                new_status = "client_pending_revision"
+            else:
+                new_status = "Pending"
             boq.email_sent = True
             boq.status = new_status
             boq.last_modified_by = user_name
@@ -4147,38 +4182,91 @@ def send_boq_email(boq_id):
                 if td_user:
                     log.info(f"[send_boq_email] Sending notification to TD {td_user.user_id}")
                     try:
-                        notification_service.notify_boq_sent_to_td(
-                            boq_id=boq_id,
-                            project_name=project.project_name,
-                            estimator_id=user_id,
-                            estimator_name=user_name,
-                            td_user_id=td_user.user_id
-                        )
-                        log.info(f"[send_boq_email] Notification sent successfully")
+                        # Send appropriate notification based on revision type
+                        if is_internal_revision:
+                            # DEBUG: Log which branch we're taking
+                            log.info(f"[DEBUG send_boq_email] CALLING notify_internal_revision_created() for BOQ {boq_id}, internal revision #{boq.internal_revision_number or 1}")
+                            # Send internal revision notification
+                            notification_service.notify_internal_revision_created(
+                                boq_id=boq_id,
+                                project_name=project.project_name,
+                                revision_number=boq.internal_revision_number or 1,
+                                actor_id=user_id,
+                                actor_name=user_name,
+                                actor_role=user_role
+                            )
+                            log.info(f"[send_boq_email] Internal revision notification sent successfully")
+                        elif is_client_revision:
+                            # DEBUG: Log which branch we're taking
+                            log.info(f"[DEBUG send_boq_email] CALLING notify_client_revision_created() for BOQ {boq_id}, client revision R{boq.revision_number}")
+                            # Send client revision notification
+                            notification_service.notify_client_revision_created(
+                                boq_id=boq_id,
+                                project_name=project.project_name,
+                                revision_number=boq.revision_number,
+                                actor_id=user_id,
+                                actor_name=user_name,
+                                actor_role=user_role
+                            )
+                            log.info(f"[send_boq_email] Client revision notification sent successfully")
+                        else:
+                            # DEBUG: Log which branch we're taking
+                            log.info(f"[DEBUG send_boq_email] CALLING notify_boq_sent_to_td() for BOQ {boq_id} (new BOQ)")
+                            # Send regular BOQ notification
+                            notification_service.notify_boq_sent_to_td(
+                                boq_id=boq_id,
+                                project_name=project.project_name,
+                                estimator_id=user_id,
+                                estimator_name=user_name,
+                                td_user_id=td_user.user_id
+                            )
+                            log.info(f"[send_boq_email] BOQ notification sent successfully")
                     except Exception as svc_err:
                         log.error(f"[send_boq_email] Service notification failed: {svc_err}")
+                        log.error(f"[DEBUG] FALLBACK NOTIFICATION BEING USED - Service failed, is_internal_revision={is_internal_revision}")
                         # Fallback: create notification directly
                         try:
                             from utils.role_route_mapper import get_td_approval_url
-                            action_url = get_td_approval_url(td_user.user_id, boq_id, tab='pending')
+
+                            # Use appropriate title and message based on revision type
+                            if is_internal_revision:
+                                title = 'Internal Revision BOQ for Approval'
+                                message = f'Internal Revision BOQ for {project.project_name} (Revision #{boq.internal_revision_number or 1}) requires your review. Submitted by {user_name}'
+                                action_url = get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='internal')
+                                action_label = 'Review Revision'
+                                metadata = {'boq_id': boq_id, 'internal_revision_number': boq.internal_revision_number, 'target_role': 'technical_director'}
+                            elif is_client_revision:
+                                title = 'Client Revision BOQ for Approval'
+                                message = f'Client Revision BOQ for {project.project_name} (Revision R{boq.revision_number}) requires your review. Submitted by {user_name}'
+                                action_url = get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='client')
+                                action_label = 'Review Revision'
+                                metadata = {'boq_id': boq_id, 'client_revision_number': boq.revision_number, 'target_role': 'technical_director'}
+                            else:
+                                title = 'New BOQ for Approval'
+                                message = f'BOQ for {project.project_name} requires your approval. Submitted by {user_name}'
+                                action_url = get_td_approval_url(td_user.user_id, boq_id, tab='pending')
+                                action_label = 'Review BOQ'
+                                metadata = {'boq_id': boq_id}
+
                             fallback_notif = NotificationManager.create_notification(
                                 user_id=td_user.user_id,
                                 type='approval',
-                                title='New BOQ for Approval',
-                                message=f'BOQ for {project.project_name} requires your approval. Submitted by {user_name}',
+                                title=title,
+                                message=message,
                                 priority='urgent',
                                 category='boq',
                                 action_required=True,
                                 action_url=action_url,
-                                action_label='Review BOQ',
-                                metadata={'boq_id': boq_id},
+                                action_label=action_label,
+                                metadata=metadata,
                                 sender_id=user_id,
                                 sender_name=user_name,
                                 target_role='technical_director'
                             )
                             send_notification_to_user(td_user.user_id, fallback_notif.to_dict())
                             send_notification_to_role('technicalDirector', fallback_notif.to_dict())
-                            log.info(f"[send_boq_email] Fallback notification sent to TD {td_user.user_id}")
+                            notification_type = 'Internal Revision' if is_internal_revision else ('Client Revision' if is_client_revision else 'New BOQ')
+                            log.info(f"[send_boq_email] Fallback notification sent to TD {td_user.user_id} - Type: {notification_type}")
                         except Exception as fallback_err:
                             log.error(f"[send_boq_email] Fallback notification also failed: {fallback_err}")
                 else:
@@ -4238,12 +4326,47 @@ def send_boq_email(boq_id):
 
             # if email_sent:
                 # Update BOQ status and mark email as sent to TD
-            # This API is ONLY for Internal Revisions - status is always Pending_Revision
-            is_internal_revision = boq.status == "Internal_Revision_Pending" or boq.has_internal_revisions
+            # Check revision type based on CURRENT STATUS and revision numbers:
+            # - Internal Revision: Has internal revisions but NOT sent to client yet (revision_number == 0)
+            # - Client Revision: Has been sent to client (revision_number > 0)
+            # - New BOQ: Neither internal nor client revision
+            #
+            # CRITICAL FIX: Check if BOQ has internal revisions AND revision_number == 0
+            # This ensures we correctly identify internal revisions regardless of status string
 
-            # Internal Revisions sent to TD get status "Pending_Revision"
-            # New BOQ (without internal revisions) get status "Pending"
-            new_status = "Pending_Revision" if is_internal_revision else "Pending"
+            # DEBUG: Log the values being checked
+            log.info(f"[DEBUG send_boq_email] BOQ {boq_id} - status={boq.status}, has_internal_revisions={boq.has_internal_revisions}, revision_number={boq.revision_number}, internal_revision_number={boq.internal_revision_number}")
+
+            # Internal revision detection (FIXED LOGIC):
+            # 1. Has internal_revision_number > 0 AND revision_number == 0 (internal rev, not sent to client yet), OR
+            # 2. has_internal_revisions flag is True AND revision_number == 0, OR
+            # 3. Status explicitly indicates internal revision
+            is_internal_revision = (
+                (boq.internal_revision_number and boq.internal_revision_number > 0 and (boq.revision_number == 0 or boq.revision_number is None)) or
+                (boq.has_internal_revisions and (boq.revision_number == 0 or boq.revision_number is None)) or
+                boq.status == "Internal_Revision_Pending"
+            )
+
+            # Client revision: has revision_number > 0 (has been sent to client at least once)
+            # This takes precedence over internal revisions
+            is_client_revision = (
+                boq.revision_number and
+                boq.revision_number > 0
+            )
+
+            # DEBUG: Log the results
+            log.info(f"[DEBUG send_boq_email] BOQ {boq_id} - is_internal_revision={is_internal_revision}, is_client_revision={is_client_revision}")
+
+            # Set appropriate status based on revision type:
+            # - Internal Revisions → "Pending_Revision"
+            # - Client Revisions → "client_pending_revision"
+            # - New BOQ → "Pending"
+            if is_internal_revision:
+                new_status = "Pending_Revision"
+            elif is_client_revision:
+                new_status = "client_pending_revision"
+            else:
+                new_status = "Pending"
 
             boq.email_sent = True
             boq.status = new_status
@@ -4349,38 +4472,88 @@ def send_boq_email(boq_id):
                 log.info(f"[send_boq_email] Sending notification to {len(technical_directors)} Technical Director(s)")
                 for td in technical_directors:
                     try:
-                        notification_service.notify_boq_sent_to_td(
-                            boq_id=boq_id,
-                            project_name=project.project_name,
-                            estimator_id=user_id,
-                            estimator_name=user_name,
-                            td_user_id=td.user_id
-                        )
+                        # Send appropriate notification based on revision type
+                        if is_internal_revision:
+                            # DEBUG: Log which branch we're taking
+                            log.info(f"[DEBUG send_boq_email] CALLING notify_internal_revision_created() for BOQ {boq_id}, internal revision #{boq.internal_revision_number or 1}, TD {td.user_id}")
+                            # Send internal revision notification
+                            notification_service.notify_internal_revision_created(
+                                boq_id=boq_id,
+                                project_name=project.project_name,
+                                revision_number=boq.internal_revision_number or 1,
+                                actor_id=user_id,
+                                actor_name=user_name,
+                                actor_role=user_role
+                            )
+                        elif is_client_revision:
+                            # DEBUG: Log which branch we're taking
+                            log.info(f"[DEBUG send_boq_email] CALLING notify_client_revision_created() for BOQ {boq_id}, client revision R{boq.revision_number}, TD {td.user_id}")
+                            # Send client revision notification
+                            notification_service.notify_client_revision_created(
+                                boq_id=boq_id,
+                                project_name=project.project_name,
+                                revision_number=boq.revision_number,
+                                actor_id=user_id,
+                                actor_name=user_name,
+                                actor_role=user_role
+                            )
+                        else:
+                            # DEBUG: Log which branch we're taking
+                            log.info(f"[DEBUG send_boq_email] CALLING notify_boq_sent_to_td() for BOQ {boq_id}, TD {td.user_id} (new BOQ)")
+                            notification_service.notify_boq_sent_to_td(
+                                boq_id=boq_id,
+                                project_name=project.project_name,
+                                estimator_id=user_id,
+                                estimator_name=user_name,
+                                td_user_id=td.user_id
+                            )
                         log.info(f"[send_boq_email] Notification sent successfully to TD {td.user_id} ({td.full_name})")
                     except Exception as td_notif_err:
                         log.error(f"[send_boq_email] Failed to send notification to TD {td.user_id}: {td_notif_err}")
+                        log.error(f"[DEBUG] FALLBACK NOTIFICATION BEING USED (multiple TDs) - Service failed, is_internal_revision={is_internal_revision}, is_client_revision={is_client_revision}")
                         # Fallback: create notification directly in DB
                         try:
                             from utils.role_route_mapper import get_td_approval_url
-                            action_url = get_td_approval_url(td.user_id, boq_id, tab='pending')
+
+                            # Use appropriate title and message based on revision type
+                            if is_internal_revision:
+                                title = 'Internal Revision BOQ for Approval'
+                                message = f'Internal Revision BOQ for {project.project_name} (Revision #{boq.internal_revision_number or 1}) requires your review. Submitted by {user_name}'
+                                action_url = get_td_approval_url(td.user_id, boq_id, tab='revisions', subtab='internal')
+                                action_label = 'Review Revision'
+                                metadata = {'boq_id': boq_id, 'internal_revision_number': boq.internal_revision_number, 'target_role': 'technical_director'}
+                            elif is_client_revision:
+                                title = 'Client Revision BOQ for Approval'
+                                message = f'Client Revision BOQ for {project.project_name} (Revision R{boq.revision_number}) requires your review. Submitted by {user_name}'
+                                action_url = get_td_approval_url(td.user_id, boq_id, tab='revisions', subtab='client')
+                                action_label = 'Review Revision'
+                                metadata = {'boq_id': boq_id, 'client_revision_number': boq.revision_number, 'target_role': 'technical_director'}
+                            else:
+                                title = 'New BOQ for Approval'
+                                message = f'BOQ for {project.project_name} requires your approval. Submitted by {user_name}'
+                                action_url = get_td_approval_url(td.user_id, boq_id, tab='pending')
+                                action_label = 'Review BOQ'
+                                metadata = {'boq_id': boq_id}
+
                             fallback_notif = NotificationManager.create_notification(
                                 user_id=td.user_id,
                                 type='approval',
-                                title='New BOQ for Approval',
-                                message=f'BOQ for {project.project_name} requires your approval. Submitted by {user_name}',
+                                title=title,
+                                message=message,
                                 priority='urgent',
                                 category='boq',
                                 action_required=True,
                                 action_url=action_url,
-                                action_label='Review BOQ',
-                                metadata={'boq_id': boq_id},
+                                action_label=action_label,
+                                metadata=metadata,
                                 sender_id=user_id,
                                 sender_name=user_name,
                                 target_role='technical_director'
                             )
                             send_notification_to_user(td.user_id, fallback_notif.to_dict())
                             send_notification_to_role('technicalDirector', fallback_notif.to_dict())
-                            log.info(f"[send_boq_email] Fallback notification sent to TD {td.user_id}")
+                            notification_type = 'Internal Revision' if is_internal_revision else ('Client Revision' if is_client_revision else 'New BOQ')
+                            log.info(f"[send_boq_email] Fallback notification sent to TD {td.user_id} - Type: {notification_type}")
                         except Exception as fallback_err:
                             log.error(f"[send_boq_email] Fallback notification also failed for TD {td.user_id}: {fallback_err}")
             except Exception as notif_err:

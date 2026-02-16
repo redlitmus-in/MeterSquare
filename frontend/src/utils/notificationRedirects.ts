@@ -810,15 +810,6 @@ const REDIRECT_RULES: RedirectRule[] = [
       queryParams: { tab: 'approved', ...(metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {}) }
     })
   },
-  {
-    id: 'boq_rejected',
-    match: ({ titleLower, messageLower }) =>
-      (has(titleLower, 'boq') || has(messageLower, 'boq')) && has(titleLower, 'rejected'),
-    resolve: ({ buildPath, metadata, role }) => ({
-      path: buildPath(projectsPath(role)),
-      queryParams: { tab: 'rejected', ...(metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {}) }
-    })
-  },
   // ── Approved revisions must come BEFORE generic revision rules ──
   {
     id: 'boq_internal_revision_approved',
@@ -838,13 +829,39 @@ const REDIRECT_RULES: RedirectRule[] = [
       queryParams: { tab: 'approved', ...(metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {}) }
     })
   },
+  // ── Rejected revisions (MUST come BEFORE generic rejected rule) ──
   {
-    id: 'boq_revision',
+    id: 'boq_internal_revision_rejected',
+    match: ({ titleLower }) =>
+      has(titleLower, 'internal revision') && has(titleLower, 'rejected'),
+    resolve: ({ buildPath, metadata, role }) => {
+      const boqParam = metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {};
+      return {
+        path: buildPath(role === 'technical-director' ? '/project-approvals' : projectsPath(role)),
+        queryParams: { tab: 'revisions', subtab: 'internal', ...boqParam }
+      };
+    }
+  },
+  {
+    id: 'boq_client_revision_rejected',
+    match: ({ titleLower }) =>
+      has(titleLower, 'client revision') && has(titleLower, 'rejected'),
+    resolve: ({ buildPath, metadata, role }) => {
+      const boqParam = metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {};
+      return {
+        path: buildPath(role === 'technical-director' ? '/project-approvals' : projectsPath(role)),
+        queryParams: { tab: 'revisions', subtab: 'client', ...boqParam }
+      };
+    }
+  },
+  // ── Generic rejected rule (comes AFTER specific revision rejected rules) ──
+  {
+    id: 'boq_rejected',
     match: ({ titleLower, messageLower }) =>
-      (has(titleLower, 'boq') || has(messageLower, 'boq')) && has(titleLower, 'revision'),
+      (has(titleLower, 'boq') || has(messageLower, 'boq')) && has(titleLower, 'rejected'),
     resolve: ({ buildPath, metadata, role }) => ({
       path: buildPath(projectsPath(role)),
-      queryParams: { tab: 'revisions', ...(metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {}) }
+      queryParams: { tab: 'rejected', ...(metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {}) }
     })
   },
   {
@@ -861,9 +878,36 @@ const REDIRECT_RULES: RedirectRule[] = [
       }
       return {
         path: buildPath(projectsPath(role)),
-        queryParams: { tab: 'revisions', ...boqParam }
+        queryParams: { tab: 'revisions', subtab: 'internal', ...boqParam }
       };
     }
+  },
+  {
+    id: 'boq_client_revision',
+    match: ({ titleLower }) =>
+      has(titleLower, 'client revision'),
+    resolve: ({ buildPath, metadata, role }) => {
+      const boqParam = metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {};
+      if (role === 'technical-director') {
+        return {
+          path: buildPath('/project-approvals'),
+          queryParams: { tab: 'revisions', subtab: 'client', ...boqParam }
+        };
+      }
+      return {
+        path: buildPath(projectsPath(role)),
+        queryParams: { tab: 'revisions', subtab: 'client', ...boqParam }
+      };
+    }
+  },
+  {
+    id: 'boq_revision',
+    match: ({ titleLower, messageLower }) =>
+      (has(titleLower, 'boq') || has(messageLower, 'boq')) && has(titleLower, 'revision'),
+    resolve: ({ buildPath, metadata, role }) => ({
+      path: buildPath(projectsPath(role)),
+      queryParams: { tab: 'revisions', ...(metadata?.boq_id || metadata?.documentId ? { boq_id: String(metadata?.boq_id || metadata?.documentId) } : {}) }
+    })
   },
   {
     id: 'boq_pending',

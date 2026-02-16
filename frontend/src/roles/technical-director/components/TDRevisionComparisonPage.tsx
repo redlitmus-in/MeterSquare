@@ -451,7 +451,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="client" className="w-full" onValueChange={(value) => setActiveTab(value as 'client' | 'internal')}>
+      <Tabs value={activeTab} className="w-full" onValueChange={(value) => setActiveTab(value as 'client' | 'internal')}>
         {/* Sub-navigation Tabs */}
         <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
           <TabsTrigger value="client">Client Revisions</TabsTrigger>

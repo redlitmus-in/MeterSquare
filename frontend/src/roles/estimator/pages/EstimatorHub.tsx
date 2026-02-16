@@ -851,6 +851,9 @@ const EstimatorHub: React.FC = () => {
   // Auto-open BOQ details when navigating from notification (boq_id in URL)
   useEffect(() => {
     const boqIdParam = searchParams.get('boq_id');
+    const tabParam = searchParams.get('tab');
+    const subtabParam = searchParams.get('subtab');
+
     if (!boqIdParam) return;
 
     // Skip if we already processed this exact boq_id
@@ -864,7 +867,17 @@ const EstimatorHub: React.FC = () => {
 
     lastProcessedBoqIdRef.current = boqIdParam;
 
-    // Load BOQ by ID and open in fullscreen view
+    // ✅ NEW: If navigating to Revisions tab (from Internal/Client Revision notification)
+    if (tabParam === 'revisions') {
+      // Switch to revisions tab (will trigger RevisionComparisonPage to auto-select)
+      setActiveTab('revisions');
+
+      // Keep URL params for RevisionComparisonPage to read
+      // Don't delete them yet - let RevisionComparisonPage handle it
+      return;
+    }
+
+    // ✅ ORIGINAL: For other tabs, load BOQ by ID and open in fullscreen view
     estimatorService.getBOQById(targetBoqId).then((result) => {
       if (result.success && result.data) {
         setSelectedBoqForDetails(result.data as any);

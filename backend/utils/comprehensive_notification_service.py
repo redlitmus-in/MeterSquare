@@ -984,28 +984,40 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 return
 
             for td_user in td_users:
-                # Check for duplicate notification
-                if check_duplicate_notification(td_user.user_id, 'Internal Revision', 'boq_id', boq_id, minutes=5):
-                    continue
+                try:
+                    # CRITICAL FIX: Check duplicate by revision_number instead of boq_id
+                    # This allows multiple revisions of the same BOQ to send notifications
+                    # Only prevents accidental double-clicks (same revision sent twice)
+                    if check_duplicate_notification(td_user.user_id, 'Internal Revision BOQ for Approval', 'internal_revision_number', revision_number, minutes=1):
+                        log.warning(f"[notify_internal_revision_created] Duplicate notification detected for TD {td_user.user_id}, BOQ {boq_id}, Revision #{revision_number} - skipping to prevent spam")
+                        continue
 
-                notification = NotificationManager.create_notification(
-                    user_id=td_user.user_id,
-                    type='approval',
-                    title='Internal Revision Pending Review',
-                    message=f'BOQ for {project_name} has internal revision #{revision_number} by {actor_name} ({actor_role})',
-                    priority='high',
-                    category='boq',
-                    action_required=True,
-                    action_url=get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='internal'),
-                    action_label='Review Revision',
-                    metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'target_role': 'technical_director'},
-                    sender_id=actor_id,
-                    sender_name=actor_name,
-                    target_role='technical_director'
-                )
+                    notification = NotificationManager.create_notification(
+                        user_id=td_user.user_id,
+                        type='approval',
+                        title='Internal Revision BOQ for Approval',
+                        message=f'Internal Revision BOQ for {project_name} (Revision #{revision_number}) requires your review. Submitted by {actor_name}',
+                        priority='high',
+                        category='boq',
+                        action_required=True,
+                        action_url=get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='internal'),
+                        action_label='Review Revision',
+                        metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'target_role': 'technical_director'},
+                        sender_id=actor_id,
+                        sender_name=actor_name,
+                        target_role='technical_director'
+                    )
 
-                send_notification_to_user(td_user.user_id, notification.to_dict())
-                log.info(f"Sent internal revision notification to TD {td_user.user_id} for BOQ {boq_id}")
+                    log.info(f"[notify_internal_revision_created] Created notification with title: 'Internal Revision BOQ for Approval' for BOQ {boq_id}")
+
+                    send_notification_to_user(td_user.user_id, notification.to_dict())
+                    log.info(f"[notify_internal_revision_created] ✅ Successfully sent notification to TD {td_user.user_id} for BOQ {boq_id}, Internal Revision #{revision_number}")
+
+                except Exception as e:
+                    log.error(f"[notify_internal_revision_created] ❌ Failed to send notification to TD {td_user.user_id} for BOQ {boq_id}: {e}")
+                    import traceback
+                    log.error(traceback.format_exc())
+                    # Continue to next TD even if this one fails
 
         except Exception as e:
             log.error(f"Error sending internal revision notification: {e}")
@@ -1028,6 +1040,15 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 log.info(f"[notify_internal_revision_approved] Skipping duplicate for BOQ {boq_id}, user {actor_user_id}")
                 return
 
+            # Build URL to navigate to Internal Revisions tab
+            from utils.role_route_mapper import build_notification_action_url
+            action_url = build_notification_action_url(
+                user_id=actor_user_id,
+                base_page='projects',
+                query_params={'boq_id': boq_id, 'tab': 'revisions', 'subtab': 'internal'},
+                fallback_role_route='estimator'
+            )
+
             notification = NotificationManager.create_notification(
                 user_id=actor_user_id,
                 type='success',
@@ -1035,7 +1056,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 message=f'Your internal revision #{revision_number} for {project_name} was approved by {td_name}',
                 priority='high',
                 category='boq',
-                action_url=get_boq_view_url(actor_user_id, boq_id, tab='revisions'),
+                action_url=action_url,
                 action_label='View BOQ',
                 metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'approved', 'target_role': 'estimator'},
                 sender_id=td_id,
@@ -1068,6 +1089,15 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 log.info(f"[notify_internal_revision_rejected] Skipping duplicate for BOQ {boq_id}, user {actor_user_id} (recent notification exists)")
                 return  # Recent notification exists, caller should count as sent
 
+            # Build URL to navigate to Internal Revisions tab
+            from utils.role_route_mapper import build_notification_action_url
+            action_url = build_notification_action_url(
+                user_id=actor_user_id,
+                base_page='projects',
+                query_params={'boq_id': boq_id, 'tab': 'revisions', 'subtab': 'internal'},
+                fallback_role_route='estimator'
+            )
+
             notification = NotificationManager.create_notification(
                 user_id=actor_user_id,
                 type='rejection',
@@ -1076,7 +1106,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 priority='high',
                 category='boq',
                 action_required=True,
-                action_url=get_boq_view_url(actor_user_id, boq_id, tab='rejected'),
+                action_url=action_url,
                 action_label='View Details',
                 metadata={'boq_id': boq_id, 'internal_revision_number': revision_number, 'decision': 'rejected', 'reason': rejection_reason, 'target_role': 'estimator'},
                 sender_id=td_id,
@@ -1089,6 +1119,72 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             log.info(f"[notify_internal_revision_rejected] Successfully sent for BOQ {boq_id} to user {actor_user_id}")
         except Exception as e:
             log.error(f"[notify_internal_revision_rejected] Error for BOQ {boq_id}, user {actor_user_id}: {e}")
+            import traceback
+            log.error(traceback.format_exc())
+            raise  # Re-raise so caller can use fallback
+
+    @staticmethod
+    def notify_client_revision_created(boq_id, project_name, revision_number, actor_id, actor_name, actor_role):
+        """
+        Notify TD when estimator sends client revision BOQ for approval
+        Trigger: Estimator sends client revision to TD after client rejection
+        Recipients: All Technical Directors
+        Priority: HIGH
+        """
+        try:
+            log.info(f"[notify_client_revision_created] Creating notification for BOQ {boq_id}, revision R{revision_number}")
+
+            # Find all Technical Directors
+            from models.role import Role
+            from models.user import User
+            td_role = Role.query.filter_by(role='technicalDirector').first()
+            if not td_role:
+                log.warning("No Technical Director role found in database")
+                return
+
+            td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+            if not td_users:
+                log.warning("No active Technical Director users found")
+                return
+
+            for td_user in td_users:
+                try:
+                    # CRITICAL FIX: Check duplicate by client_revision_number instead of boq_id
+                    # This allows multiple revisions of the same BOQ to send notifications
+                    # Only prevents accidental double-clicks (same revision sent twice)
+                    if check_duplicate_notification(td_user.user_id, 'Client Revision BOQ for Approval', 'client_revision_number', revision_number, minutes=1):
+                        log.warning(f"[notify_client_revision_created] Duplicate notification detected for TD {td_user.user_id}, BOQ {boq_id}, Revision R{revision_number} - skipping to prevent spam")
+                        continue
+
+                    notification = NotificationManager.create_notification(
+                        user_id=td_user.user_id,
+                        type='approval',
+                        title='Client Revision BOQ for Approval',
+                        message=f'Client Revision BOQ for {project_name} (Revision R{revision_number}) requires your review. Submitted by {actor_name}',
+                        priority='high',
+                        category='boq',
+                        action_required=True,
+                        action_url=get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='client'),
+                        action_label='Review Revision',
+                        metadata={'boq_id': boq_id, 'client_revision_number': revision_number, 'target_role': 'technical_director'},
+                        sender_id=actor_id,
+                        sender_name=actor_name,
+                        target_role='technical_director'
+                    )
+
+                    log.info(f"[notify_client_revision_created] Created notification with title: 'Client Revision BOQ for Approval' for BOQ {boq_id}")
+
+                    send_notification_to_user(td_user.user_id, notification.to_dict())
+                    log.info(f"[notify_client_revision_created] ✅ Successfully sent notification to TD {td_user.user_id} for BOQ {boq_id}, Client Revision R{revision_number}")
+
+                except Exception as e:
+                    log.error(f"[notify_client_revision_created] ❌ Failed to send notification to TD {td_user.user_id} for BOQ {boq_id}: {e}")
+                    import traceback
+                    log.error(traceback.format_exc())
+                    # Continue to next TD even if this one fails
+
+        except Exception as e:
+            log.error(f"Error sending client revision notification: {e}")
             import traceback
             log.error(traceback.format_exc())
             raise  # Re-raise so caller can use fallback

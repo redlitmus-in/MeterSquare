@@ -42,6 +42,7 @@ import { cn } from '@/lib/utils';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { getNotificationRedirectPath, buildNotificationUrl } from '@/utils/notificationRedirects';
 import { useAuthStore } from '@/store/authStore';
+import { notificationPollingService } from '@/services/notificationPollingService';
 
 const NotificationsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -67,6 +68,34 @@ const NotificationsPage: React.FC = () => {
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'priority'>('newest');
   const [selectedNotifications, setSelectedNotifications] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Fetch all notifications on mount and ensure polling is started
+  useEffect(() => {
+    const fetchInitialNotifications = async () => {
+      setIsRefreshing(true);
+      try {
+        // Ensure polling service is started
+        notificationPollingService.startPolling();
+
+        // Wait a bit for initialization
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        // Fetch notifications
+        await notificationPollingService.fetchNow();
+
+        if (import.meta.env.DEV) {
+          console.log('[NotificationsPage] Initial fetch completed');
+        }
+      } catch (error) {
+        console.error('[NotificationsPage] Failed to fetch initial notifications:', error);
+        showError('Failed to load notifications. Please refresh the page.');
+      } finally {
+        setIsRefreshing(false);
+      }
+    };
+
+    fetchInitialNotifications();
+  }, []);
 
   const getNotificationIcon = useCallback((type: NotificationData['type']) => {
     switch (type) {
@@ -162,7 +191,8 @@ const NotificationsPage: React.FC = () => {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      // Trigger notification sync/refresh logic here
+      // Force fetch all notifications from server
+      await notificationPollingService.fetchNow();
       showSuccess('Notifications refreshed');
     } catch (error) {
       showError('Failed to refresh notifications');

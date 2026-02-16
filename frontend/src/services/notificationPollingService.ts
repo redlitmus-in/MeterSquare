@@ -111,15 +111,18 @@ class NotificationPollingService {
       const baseUrl = import.meta.env.VITE_API_BASE_URL;
 
       if (!token || !baseUrl) {
+        if (import.meta.env.DEV) {
+          console.warn('[Polling] Missing credentials:', { hasToken: !!token, hasBaseUrl: !!baseUrl });
+        }
         return;
       }
 
       const currentTime = Date.now();
 
-      // Fetch only notifications created after last fetch
+      // Fetch ALL notifications (not just unread) to ensure persistence across reloads
       const params = new URLSearchParams({
-        unread_only: 'true',
-        limit: '20'
+        unread_only: 'false',  // Changed from 'true' to fetch all notifications
+        limit: '100'  // Increased from 20 to get more notifications
       });
 
       const response = await fetch(`${baseUrl}/notifications?${params}`, {
@@ -132,25 +135,97 @@ class NotificationPollingService {
 
       if (!response.ok) {
         if (import.meta.env.DEV) {
-          console.error('[Polling] Failed to fetch notifications:', response.status);
+          console.error('[Polling] Failed to fetch notifications:', response.status, response.statusText);
+        }
+        // If unauthorized, clear token and notify user
+        if (response.status === 401) {
+          localStorage.removeItem('access_token');
+          console.error('[Polling] Unauthorized - token may be expired');
         }
         return;
       }
 
       const data = await response.json();
 
+      if (import.meta.env.DEV) {
+        console.log('[Polling] Fetched notifications:', {
+          success: data.success,
+          count: data.notifications?.length,
+          total: data.total,
+          unreadCount: data.unread_count
+        });
+      }
+
       if (data.success && data.notifications && Array.isArray(data.notifications)) {
-        // SYNC: Remove local notifications that no longer exist in DB
         const store = useNotificationStore.getState();
+
+        // On first fetch or when notifications are empty, load all notifications from server
+        if (this.lastFetchTime === 0 || store.notifications.length === 0) {
+          if (import.meta.env.DEV) {
+            console.log('[Polling] Initial load - adding all notifications from server');
+          }
+
+          // Add all notifications from server (will handle duplicates internally)
+          const allNotifications = data.notifications.map((notif: any) => ({
+            id: String(notif.id),
+            type: notif.type || 'info',
+            title: notif.title,
+            message: notif.message,
+            priority: notif.priority || 'medium',
+            timestamp: new Date(notif.timestamp || notif.createdAt),
+            read: notif.read || false,
+            category: notif.category || 'system',
+            metadata: notif.metadata,
+            actionUrl: notif.actionUrl,
+            actionLabel: notif.actionLabel,
+            actionRequired: notif.actionRequired,
+            senderName: notif.senderName
+          }));
+
+          if (import.meta.env.DEV) {
+            console.log('[Polling] Adding notifications to store:', allNotifications.length, 'notifications');
+          }
+
+          store.addNotifications(allNotifications);
+          this.lastFetchTime = currentTime;
+
+          if (import.meta.env.DEV) {
+            console.log('[Polling] Store updated. Current store state:', {
+              totalNotifications: store.notifications.length,
+              unreadCount: store.unreadCount
+            });
+          }
+
+          return;
+        }
+
+        // SYNC: Remove local notifications that no longer exist in DB
         const serverIds = new Set(data.notifications.map((n: any) => String(n.id)));
         const localNotifications = store.notifications;
         const orphanedNotifications = localNotifications.filter(n => !serverIds.has(String(n.id)));
 
         if (orphanedNotifications.length > 0) {
+          if (import.meta.env.DEV) {
+            console.log('[Polling] Removing orphaned notifications:', orphanedNotifications.length);
+          }
           orphanedNotifications.forEach(n => {
             store.deleteNotification(String(n.id));
           });
         }
+
+        // Update existing notifications' read status from server
+        const localNotifMap = new Map(store.notifications.map(n => [String(n.id), n]));
+        data.notifications.forEach((serverNotif: any) => {
+          const notifIdStr = String(serverNotif.id);
+          const localNotif = localNotifMap.get(notifIdStr);
+
+          // If local notification exists and read status changed, update it
+          if (localNotif && localNotif.read !== serverNotif.read) {
+            if (serverNotif.read) {
+              store.markAsRead(notifIdStr);
+            }
+          }
+        });
 
         const newNotifications = data.notifications.filter((notif: any) => {
           // Skip if already processed (normalize to string for consistent comparison)
