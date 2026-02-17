@@ -157,7 +157,6 @@ def get_all_pm():
             # Check online status based on user_status field
             # Only "online" is considered online, everything else (offline/NULL) is offline
             is_online = pm.user_status == 'online'
-            log.info(f"PM {pm.full_name}: user_status={pm.user_status}, is_online={is_online}")
 
             # ✅ Get projects from pre-loaded map (NO QUERY - uses pre-loaded dict)
             projects = pm_projects_map.get(pm.user_id, [])
@@ -486,7 +485,6 @@ def assign_projects():
 
                     # Append new action
                     current_actions.append(new_action)
-                    log.info(f"Appending PM assignment action to BOQ {boq.boq_id} history. Total actions: {len(current_actions)}")
 
                     if existing_history:
                         # Update existing history
@@ -505,7 +503,6 @@ def assign_projects():
                         existing_history.last_modified_by = td_name
                         existing_history.last_modified_at = datetime.utcnow()
 
-                        log.info(f"Updated existing history for BOQ {boq.boq_id} with {len(current_actions)} actions")
                     else:
                         # Create new history entry
                         boq_history = BOQHistory(
@@ -522,12 +519,10 @@ def assign_projects():
                             created_by=td_name
                         )
                         db.session.add(boq_history)
-                        log.info(f"Created new history for BOQ {boq.boq_id} with {len(current_actions)} actions")
 
                     boq_histories_updated += 1
 
         db.session.commit()
-        log.info(f"Successfully assigned PM to {len(assigned_projects)} projects and updated {boq_histories_updated} BOQ histories")
 
         # Send notification to assigned PM(s) about project assignments
         try:
@@ -542,27 +537,25 @@ def assign_projects():
         except Exception as notif_error:
             log.error(f"Failed to send PM assignment notifications: {notif_error}")
 
-        # Send email notification to Project Manager
+        # Send email to offline PMs only
         email_sent = False
-        # if user.email and projects_data_for_email:
-            # try:
-            #     email_service = BOQEmailService()
-            #     email_sent = email_service.send_pm_assignment_notification(
-            #         pm_email=user.email,
-            #         pm_name=user.full_name,
-            #         td_name=td_name,
-            #         projects_data=projects_data_for_email
-            #     )
-
-            #     if email_sent:
-            #         log.info(f"Assignment notification email sent successfully to {user.email}")
-            #     else:
-            #         log.warning(f"Failed to send assignment notification email to {user.email}")
-            # except Exception as email_error:
-            #     log.error(f"Error sending assignment notification email: {email_error}")
-            #     # Don't fail the entire request if email fails
-            #     import traceback
-            #     log.error(f"Email error traceback: {traceback.format_exc()}")
+        try:
+            email_service = BOQEmailService()
+            for pm in pm_users:
+                pm_status = str(pm.user_status).lower().strip() if pm.user_status else "unknown"
+                if pm_status == "offline":
+                    sent = email_service.send_pm_assignment_notification(
+                        pm_email=pm.email,
+                        pm_name=pm.full_name,
+                        td_name=td_name,
+                        projects_data=projects_data_for_email
+                    )
+                    if sent:
+                        email_sent = True
+                else:
+                    log.info(f"[assign_projects] PM {pm.user_id} is ONLINE - Email skipped")
+        except Exception as email_error:
+            log.error(f"[assign_projects] Failed to send email to PM: {email_error}")
 
         # Prepare response with all assigned PMs
         assigned_pms_data = [
@@ -653,7 +646,6 @@ def assign_items_to_se():
                 return jsonify({"error": "Project Manager user record not found"}), 400
             assigner_id = actual_pm_id
             assigner_name = actual_pm_user.full_name
-            log.info(f"Admin {pm_name} assigning items, using project PM {assigner_name} (ID: {assigner_id}) as assigner")
         else:
             # PM/MEP is assigning - use their ID
             assigner_id = pm_user_id
@@ -769,7 +761,6 @@ def assign_items_to_se():
             existing_assignment.assignment_status = 'assigned'
             existing_assignment.last_modified_at = datetime.utcnow()
             existing_assignment.last_modified_by = pm_name
-            log.info(f"Updated existing assignment {existing_assignment.pm_assign_id} with new items")
         else:
             # Create new assignment record
             new_assignment = PMAssignSS(
@@ -786,7 +777,6 @@ def assign_items_to_se():
                 is_deleted=False
             )
             db.session.add(new_assignment)
-            log.info(f"Created new assignment record in pm_assign_ss for BOQ {boq_id}, SE {se_user_id} (assigned by {assigner_name})")
 
         # Check if all items are now assigned
         all_items_assigned = True
@@ -807,8 +797,6 @@ def assign_items_to_se():
                     assigned_count += 1
                 else:
                     all_items_assigned = False
-
-        log.info(f"BOQ {boq_id}: {assigned_count}/{total_items} non-extra items assigned. All assigned: {all_items_assigned}")
 
         # Update BOQ status based on item assignments
         if assigned_count > 0 and total_items > 0:
@@ -861,8 +849,6 @@ def assign_items_to_se():
 
         db.session.commit()
 
-        log.info(f"{role_name} {pm_name} assigned {len(assigned_items)} items to SE {se_name} for BOQ {boq_id}")
-
         # Send notification to SE about item assignment
         try:
             notification_service.notify_se_items_assigned(
@@ -875,6 +861,25 @@ def assign_items_to_se():
             )
         except Exception as notif_error:
             log.error(f"Failed to send item assignment notification: {notif_error}")
+
+        # Send email to SE only if offline
+        try:
+            se_status = str(se_user.user_status).lower().strip() if se_user.user_status else "unknown"
+            if se_status == "offline":
+                boq_email_service = BOQEmailService()
+                email_sent = boq_email_service.send_se_items_assigned_notification(
+                    boq_name=boq.boq_name,
+                    project_name=project.project_name,
+                    pm_name=pm_name,
+                    se_email=se_user.email,
+                    se_name=se_name,
+                    items_count=len(assigned_items),
+                    assigned_items=assigned_items
+                )
+            else:
+                log.info(f"[assign_items_to_se] SE {se_user_id} is ONLINE - Email skipped")
+        except Exception as email_err:
+            log.error(f"[assign_items_to_se] Failed to send email to SE: {email_err}")
 
         return jsonify({
             "success": True,
@@ -1143,8 +1148,6 @@ def unassign_items_from_se():
 
         db.session.commit()
 
-        log.info(f"{role_name} {pm_name} unassigned {len(unassigned_items)} items from SE for BOQ {boq_id}")
-
         return jsonify({
             "success": True,
             "message": f"Successfully unassigned {len(unassigned_items)} item(s)",
@@ -1269,35 +1272,41 @@ def send_boq_to_estimator():
         # Get BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq:
-            log.error(f"BOQ {boq_id} not found or deleted")
             return jsonify({"error": f"BOQ {boq_id} not found"}), 404
-
-        log.info(f"Found BOQ {boq_id} with project_id: {boq.project_id}")
 
         # Get BOQ details
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
         if not boq_details:
-            log.error(f"BOQ details not found for BOQ {boq_id}")
             return jsonify({"error": f"BOQ details not found for BOQ {boq_id}"}), 404
 
         # Get project (allow soft-deleted projects for BOQ approval flow)
         project = Project.query.filter_by(project_id=boq.project_id).first()
         if not project:
-            log.error(f"Project {boq.project_id} not found for BOQ {boq_id}")
             return jsonify({"error": f"Project not found (ID: {boq.project_id}) for BOQ {boq_id}"}), 404
 
-        log.info(f"Found project {project.project_id}: {project.project_name}")
+        # Get the SPECIFIC Estimator assigned to this project (NOT just any estimator!)
+        if not project.estimator_id:
+            return jsonify({
+                "error": f"No estimator assigned to project '{project.project_name}'",
+                "project_id": project.project_id,
+                "solution": "Please assign an estimator to this project first"
+            }), 400
 
-        # Get Estimator user
-        estimator_role = Role.query.filter_by(role='estimator').first()
-        if not estimator_role:
-            return jsonify({"error": "Estimator role not found"}), 404
-
-        estimator = User.query.filter_by(role_id=estimator_role.role_id, is_deleted=False).first()
+        # Fetch the specific estimator by user_id (from project.estimator_id)
+        estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
         if not estimator:
-            return jsonify({"error": "Estimator not found"}), 404
+            return jsonify({
+                "error": f"Estimator (ID: {project.estimator_id}) not found or deleted",
+                "project_id": project.project_id
+            }), 404
+
+        # Verify this user is actually an estimator role (extra validation)
+        estimator_role = Role.query.filter_by(role='estimator').first()
+        if estimator_role and estimator.role_id != estimator_role.role_id:
+            log.warning(f"⚠️  User role_id: {estimator.role_id}, Expected estimator role_id: {estimator_role.role_id}")
 
         if not estimator.email:
+            log.error(f"❌ Estimator {estimator.full_name} has no email address")
             return jsonify({"error": f"Estimator {estimator.full_name} has no email address"}), 400
 
         # Prepare email service and data
@@ -1309,22 +1318,56 @@ def send_boq_to_estimator():
         projects_data = [{
             'project_id': project.project_id,
             'project_name': project.project_name,
+            'project_code': getattr(project, 'project_code', 'N/A'),
             'boq_id': boq.boq_id,
             'boq_name': boq.boq_name,
             'client': getattr(project, 'client', 'N/A'),
             'location': getattr(project, 'location', 'N/A'),
             'total_cost': items_summary.get('total_cost', 0),
-            'status': boq_status
+            'status': getattr(project, 'status', 'Active')
         }]
 
-        # Fallback: use existing email function (assuming it's general-purpose)
-        # email_sent = boq_email_service.send_pm_assignment_notification(
-        #     estimator.email, estimator.full_name, current_user_name, projects_data
-        # )
+        # Send email to Estimator ONLY if they are OFFLINE
+        # If online, they will receive in-app notification only
+        email_sent = False
 
-        # if email_sent:
-            # If PM approves, set to PM_Approved so estimator can send to TD
-            # If PM rejects, set to rejected
+        # Normalize status to lowercase for comparison
+        estimator_status = str(estimator.user_status).lower().strip() if estimator.user_status else "unknown"
+        if estimator_status == "offline":
+            # Prepare BOQ and Project data for email
+            boq_data = {
+                'boq_id': boq.boq_id,
+                'boq_name': boq.boq_name,
+                'status': boq.status
+            }
+
+            project_data = {
+                'project_id': project.project_id,
+                'project_name': project.project_name,
+                'project_code': getattr(project, 'project_code', 'N/A'),
+                'client': getattr(project, 'client', 'N/A'),
+                'location': getattr(project, 'location', 'N/A')
+            }
+
+            # Use CORRECT email template based on approval/rejection
+            if boq_status == 'rejected':
+                email_sent = boq_email_service.send_boq_rejection_to_estimator(
+                    boq_data, project_data, items_summary, estimator.email, rejection_reason,
+                    estimator_name=estimator.full_name, pm_name=current_user_name
+                )
+            else:  # approved
+                email_sent = boq_email_service.send_boq_approval_confirmation_to_estimator(
+                    boq_data, project_data, items_summary, estimator.email, comments,
+                    estimator_name=estimator.full_name, pm_name=current_user_name
+                )
+
+            if email_sent:
+                log.info(f"📧 ✅ SUCCESS: {boq_status.upper()} email sent to {estimator.email}")
+            else:
+                log.error(f"📧 ❌ FAILED: Could not send {boq_status} email to {estimator.email}")
+        else:
+            log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped, in-app notification will be sent")
+
         if boq_status == 'approved':
             boq.status = 'PM_Approved'
             boq.client_rejection_reason = None  # Clear any previous rejection reason
@@ -1333,7 +1376,7 @@ def send_boq_to_estimator():
             boq.client_rejection_reason = rejection_reason  # Save PM rejection reason
         boq.last_modified_by = current_user_name
         boq.last_modified_at = datetime.utcnow()
-        boq.email_sent = True
+        boq.email_sent = email_sent 
 
         # Add to BOQ history
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -1667,8 +1710,6 @@ def confirm_se_completion():
         se_user = User.query.get(se_user_id)
         se_name = se_user.full_name if se_user else "Site Engineer"
 
-        log.info(f"PM {pm_user_id} confirmed SE {se_user_id} completion for project {project_id}. Status: {confirmed_pairs}/{total_pairs}")
-
         # Send notification to SE about completion confirmation
         try:
             boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
@@ -1761,10 +1802,6 @@ def get_project_completion_details(project_id):
             # Get PM and SE user details
             pm_user = User.query.get(pair.assigned_by_pm_id)
             se_user = User.query.get(pair.assigned_to_se_id)
-
-            # Log pair details for debugging
-            log.info(f"PM-SE pair: PM {pair.assigned_by_pm_id} -> SE {pair.assigned_to_se_id}, "
-                    f"completion_requested: {pair.completion_requested}, pm_confirmed: {pair.pm_confirmed}")
 
             # Flatten and deduplicate item indices
             all_items = []

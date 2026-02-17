@@ -1753,6 +1753,8 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                   const isPendingTDApproval = status === 'pendingtdapproval';
                   const isPendingRevision = status === 'pendingrevision';
                   const isClientConfirmed = status === 'clientconfirmed';
+                  // CRITICAL FIX: Match the normalized status format (lowercase, no underscores)
+                  // Backend sends "Internal_Revision_Pending" which is normalized to "internalrevisionpending"
                   const isInternalRevisionPending = status === 'internalrevisionpending';
                   const isClientPendingRevision = status === 'clientpendingrevision';
                   // Get the latest revision's action (first in the array since it's sorted by most recent)
@@ -1816,30 +1818,8 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                       );
                     }
 
-                    // For Internal_Revision_Pending - show buttons only if there's a revision edit
-                    if (isInternalRevisionPending && tdCanApprove && !alreadyApproved) {
-                      return (
-                        <div className="mt-4 flex gap-2">
-                          <button
-                            className="flex-1 text-white text-sm h-10 rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-2 px-4 font-semibold shadow-md bg-green-600"
-                            onClick={() => setShowApprovalModal(true)}
-                          >
-                            <CheckCircle className="h-4 w-4" />
-                            <span>Approve</span>
-                          </button>
-                          <button
-                            className="flex-1 text-white text-sm h-10 rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-2 px-4 font-semibold shadow-md bg-red-600"
-                            onClick={() => setShowRejectionModal(true)}
-                          >
-                            <XCircle className="h-4 w-4" />
-                            <span>Reject</span>
-                          </button>
-                        </div>
-                      );
-                    }
-
-                    // If Internal_Revision_Pending but no revision edit yet - waiting for estimator
-                    if (isInternalRevisionPending && !tdCanApprove) {
+                    // For Internal_Revision_Pending - no buttons for TD, waiting for estimator to revise and send
+                    if (isInternalRevisionPending) {
                       return (
                         <div className="mt-4 text-center py-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                           <p className="text-sm font-medium text-yellow-800">📝 Pending Estimator Submission</p>
@@ -1966,9 +1946,9 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
 
                     // If sent to TD (actually sent, not just saved), hide buttons and show waiting message
                     // isPendingRevision means estimator sent revision to TD and TD hasn't responded yet
-                    // Note: Internal_Revision_Pending is NOT included - it means saved but not yet sent
+                    // Note: Internal_Revision_Pending overrides isSentToTD - status is authoritative
                     // Note: Client_Pending_Revision means client revision sent to TD - hide buttons
-                    if (isSentToTD || isPendingApproval || isPendingRevision || isClientPendingRevision) {
+                    if ((isSentToTD || isPendingApproval || isPendingRevision || isClientPendingRevision) && !isInternalRevisionPending) {
                       return (
                         <div className="mt-4 text-center py-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                           <p className="text-sm font-medium text-yellow-800">⏳ Sent to TD - Waiting for approval</p>
@@ -1976,10 +1956,12 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                       );
                     }
 
-                    // Show buttons for: Rejected, Internal_Revision_Pending, or other editable states
-                    // Internal_Revision_Pending means BOQ was edited and saved but NOT yet sent to TD
-                    // Exclude isPendingRevision and isClientPendingRevision - already sent to TD, waiting for approval (no buttons)
-                    if (isRejected || isInternalRevisionPending || (!isSentToTD && !isPendingApproval && !isPendingRevision && !isClientPendingRevision && !isInFinalOrProcessingState)) {
+                    // CRITICAL FIX: Only show Edit/Send buttons for specific editable statuses
+                    // Show buttons ONLY when:
+                    // 1. Status is explicitly "Internal_Revision_Pending" (estimator saved but not sent to TD)
+                    // 2. Status is "Rejected" or similar (TD rejected, needs revision)
+                    // DO NOT use catch-all logic - be explicit about which statuses allow editing
+                    if (isRejected || isInternalRevisionPending) {
                       return (
                         <div className="space-y-2 mt-4">
                           <div className="flex gap-2">

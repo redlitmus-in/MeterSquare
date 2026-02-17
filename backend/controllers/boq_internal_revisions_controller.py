@@ -58,8 +58,7 @@ def get_all_internal_revision():
             )
         ]
 
-        if user_role == 'technical_director':
-            base_filter.append(db.func.lower(BOQ.status) != 'internal_revision_pending')
+        if user_role in ('technical_director', 'technicaldirector'):
             boqs_query = BOQ.query.options(
                 joinedload(BOQ.project)
             ).filter(*base_filter)
@@ -84,7 +83,6 @@ def get_all_internal_revision():
             ).filter(*base_filter)
 
         boqs = boqs_query.all()
-        log.info(f"Internal Revisions: Found {len(boqs)} BOQs for user {user_id} (role: {user_role})")
 
         if not boqs:
             return jsonify({"success": True, "count": 0, "message": "No BOQs with internal revisions", "user_role": user_role, "data": []}), 200
@@ -426,10 +424,6 @@ def get_internal_revisions(boq_id):
         total_revisions_all = BOQInternalRevision.query.filter(
             BOQInternalRevision.boq_id == boq_id
         ).count()
-        log.info(f"📋 BOQ {boq_id}: Total internal revision records (including deleted): {total_revisions_all}")
-
-        # Debug: Check if BOQ has has_internal_revisions flag set
-        log.info(f"📋 BOQ {boq_id}: has_internal_revisions flag = {boq.has_internal_revisions}, internal_revision_number = {boq.internal_revision_number}")
 
         # Query internal revisions - handle NULL is_deleted as FALSE (not deleted)
         revisions = BOQInternalRevision.query.filter(
@@ -439,8 +433,6 @@ def get_internal_revisions(boq_id):
                 BOQInternalRevision.is_deleted.is_(None)  # Handle NULL as not deleted
             )
         ).order_by(BOQInternalRevision.internal_revision_number.asc()).all()
-
-        log.info(f"📋 BOQ {boq_id}: Found {len(revisions)} non-deleted internal revision records")
 
         internal_revisions = []
         original_boq = None
@@ -456,7 +448,6 @@ def get_internal_revisions(boq_id):
                 items = changes_summary.get('items', [])
                 if items and len(items) > 0:
                     # Calculate subtotal from items
-                    log.info(f"📊 Revision {rev.id}: Recalculating total from items")
                     subtotal = 0
                     for item in items:
                         item_amount = (item.get('quantity', 0) or 0) * (item.get('rate', 0) or 0)
@@ -480,7 +471,6 @@ def get_internal_revisions(boq_id):
                     # Store corrected values
                     changes_summary['total_cost_before_discount'] = combined_subtotal
                     changes_summary['total_cost'] = combined_subtotal - discount_amount
-                    log.info(f"📊 Revision {rev.id}: Calculated - subtotal={subtotal}, preliminary={preliminary_amount}, combined_subtotal={combined_subtotal}, discount={discount_amount}, total={changes_summary['total_cost']}")
                 else:
                     # No items, use existing total_cost
                     log.info(f"📊 Revision {rev.id}: No items, using stored total_cost")
@@ -597,7 +587,6 @@ def update_internal_revision_boq(boq_id):
 
         # 🔥 If this is the FIRST internal revision, store the "before" state as "Original BOQ" (revision 0)
         if existing_internal_revisions_count == 0:
-            log.info(f"📝 Creating Original BOQ snapshot (before first edit) for BOQ {boq_id}")
             # Capture the current BOQ state BEFORE any edits
             # 🔥 Get discount from current BOQ state
             original_discount_percentage = boq_details.boq_details.get("discount_percentage", 0) if boq_details and boq_details.boq_details else 0
@@ -637,7 +626,6 @@ def update_internal_revision_boq(boq_id):
                 changes_summary=before_changes_snapshot  # Store the "before" state
             )
             db.session.add(original_boq_revision)
-            log.info(f"✅ Original BOQ revision stored with {len(before_changes_snapshot.get('items', []))} items")
 
         # Set internal revision number based on existing count (add 1 for the new edit)
         new_internal_rev = existing_internal_revisions_count + 1
@@ -792,7 +780,6 @@ def update_internal_revision_boq(boq_id):
                             is_checked=is_checked
                         )
                         db.session.add(boq_prelim)
-                log.info(f"✅ Updated preliminary selections in boq_preliminaries for BOQ {boq_id} during internal revision")
 
         # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
         terms_conditions = data.get("terms_conditions", [])
@@ -813,7 +800,6 @@ def update_internal_revision_boq(boq_id):
                 'boq_id': boq_id,
                 'term_ids': selected_term_ids
             })
-            log.info(f"✅ Updated {len(selected_term_ids)} terms selections in boq_terms_selections for BOQ {boq_id} during internal revision")
 
         # Create internal revision record using SQLAlchemy ORM
         internal_revision = BOQInternalRevision(
@@ -885,11 +871,6 @@ def update_internal_revision_boq(boq_id):
                 created_by=user_name
             )
             db.session.add(boq_history)
-
-        log.info(f"✅ Internal revision {new_internal_rev} stored in BOQInternalRevision table for BOQ {boq_id}")
-        log.info(f"✅ BOQDetails table also updated with the new data")
-        log.info(f"✅ BOQHistory table updated with action by {user_name}")
-        log.info(f"📊 Total cost: {total_boq_cost}, Items: {total_items}, Materials: {total_materials}, Labour: {total_labour}")
 
         db.session.commit()
 

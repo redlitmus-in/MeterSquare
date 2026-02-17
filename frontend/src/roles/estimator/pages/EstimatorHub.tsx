@@ -63,6 +63,7 @@ import {
   CheckCircle as CheckCircleIcon,
   ArrowRight,
   User as UserIcon,
+  Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Label } from '@/components/ui/label';
@@ -2579,14 +2580,25 @@ const EstimatorHub: React.FC = () => {
                 <span className="sm:hidden">Edit</span>
               </button>
               <button
-                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1"
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: 'rgb(36, 61, 138)' }}
                 onClick={() => handleSendToPM(boq.project)}
+                disabled={isSendingToPM}
                 title={boq.last_pm_user_id ? `Resend to ${boq.last_pm_name || 'Project Manager'}` : "Send to Project Manager for re-approval"}
               >
-                <Users className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                <span className="hidden sm:inline">Resend PM</span>
-                <span className="sm:hidden">PM</span>
+                {isSendingToPM ? (
+                  <>
+                    <Loader2 className="h-3 w-3 sm:h-3.5 sm:w-3.5 animate-spin" />
+                    <span className="hidden sm:inline">Sending...</span>
+                    <span className="sm:hidden">...</span>
+                  </>
+                ) : (
+                  <>
+                    <Users className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                    <span className="hidden sm:inline">Resend PM</span>
+                    <span className="sm:hidden">PM</span>
+                  </>
+                )}
               </button>
             </>
           ) : isApprovedByTD || isRevisionApproved ? (

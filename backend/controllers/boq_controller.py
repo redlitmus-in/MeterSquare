@@ -265,7 +265,6 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             )
             db.session.add(master_sub_item)
             db.session.flush()
-            log.info(f"Created new master sub-item: '{sub_item_name}'")
         else:
             # Sub-item already exists - just log it, don't update (to preserve existing data)
             log.info(f"Sub-item '{sub_item_name}' already exists in master table (ID: {master_sub_item.sub_item_id})")
@@ -320,7 +319,6 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     )
                     db.session.add(master_material)
                     db.session.flush()
-                    log.info(f"Created new master material: '{material_name}'")
                 else:
                     # Material already exists globally - just log it, don't create duplicate
                     log.info(f"Material '{material_name}' already exists in master table (ID: {master_material.material_id})")
@@ -366,7 +364,6 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     )
                     db.session.add(master_labour)
                     db.session.flush()
-                    log.info(f"Created new master labour: '{labour_role}'")
                 else:
                     # Labour already exists globally - just log it, don't create duplicate
                     log.info(f"Labour '{labour_role}' already exists in master table (ID: {master_labour.labour_id})")
@@ -993,14 +990,11 @@ def create_boq():
         preliminary_selections_to_save = []
         if preliminaries and preliminaries.get('items'):
             preliminary_items = preliminaries.get('items', [])
-            log.info(f"Processing {len(preliminary_items)} preliminary items from request")
 
             for item in preliminary_items:
                 prelim_id = item.get('prelim_id')
                 is_checked = item.get('checked', False) or item.get('selected', False)
                 is_custom = item.get('isCustom', False)
-
-                log.info(f"Preliminary item: prelim_id={prelim_id}, checked={is_checked}, isCustom={is_custom}, item={item}")
 
                 # Handle edited master preliminaries - update the master record
                 if prelim_id and not is_custom:
@@ -1013,7 +1007,6 @@ def create_boq():
                             # Update the master preliminary description
                             master_prelim.description = description
                             master_prelim.updated_by = 'Estimator'
-                            log.info(f"[CREATE_BOQ] Updated master preliminary: prelim_id={prelim_id}, new description={description}")
 
                 # Handle custom preliminaries - create new row in preliminaries_master
                 if is_custom and not prelim_id:
@@ -1030,7 +1023,6 @@ def create_boq():
 
                         if existing_custom:
                             prelim_id = existing_custom.prelim_id
-                            log.info(f"[CREATE_BOQ] Found existing custom preliminary: prelim_id={prelim_id}")
                         else:
                             # Create new custom preliminary in master table
                             new_custom_prelim = PreliminaryMaster(
@@ -1046,15 +1038,12 @@ def create_boq():
                             db.session.add(new_custom_prelim)
                             db.session.flush()  # Get the prelim_id
                             prelim_id = new_custom_prelim.prelim_id
-                            log.info(f"[CREATE_BOQ] Created new custom preliminary: prelim_id={prelim_id}, description={description}")
 
                 if prelim_id:
                     preliminary_selections_to_save.append({
                         'prelim_id': prelim_id,
                         'is_checked': is_checked
                     })
-
-            log.info(f"Prepared {len(preliminary_selections_to_save)} preliminary selections for saving: {preliminary_selections_to_save}")
 
         # Apply BOQ-level discount to total
         boq_discount_percentage = data.get("discount_percentage", 0) or 0
@@ -1074,8 +1063,6 @@ def create_boq():
         # Apply BOQ-level discount to get final total
         final_boq_cost = combined_subtotal - boq_discount_amount if boq_discount_amount > 0 else combined_subtotal
 
-        log.info(f"BOQ {boq.boq_id} create totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
-
         # Calculate total negotiable margin from all sub-items
         total_negotiable_margin = 0.0
         total_planned_profit = 0.0
@@ -1091,8 +1078,6 @@ def create_boq():
                     total_misc_amount += sub_item.get("misc_amount", 0.0)
                     total_overhead_profit_amount += sub_item.get("overhead_profit_amount", 0.0)
                     total_transport_amount += sub_item.get("transport_amount", 0.0)
-
-        log.info(f"BOQ {boq.boq_id} profit breakdown - Negotiable Margin: {total_negotiable_margin}, Planned Profit (O&P): {total_planned_profit}, Misc: {total_misc_amount}, Transport: {total_transport_amount}")
 
         # Create BOQ details JSON (without terms - stored in junction table)
         boq_details_json = {
@@ -1143,12 +1128,8 @@ def create_boq():
                 )
                 db.session.add(boq_prelim)
 
-            log.info(f"Saved {len(preliminary_selections_to_save)} preliminary selections to boq_preliminaries for BOQ {boq.boq_id}")
-
         # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
         terms_conditions = data.get("terms_conditions", [])
-        log.info(f"Received terms_conditions payload: {len(terms_conditions) if terms_conditions else 0} terms")
-
         if terms_conditions and isinstance(terms_conditions, list):
             from sqlalchemy import text
             # Extract only checked term IDs
@@ -1168,13 +1149,10 @@ def create_boq():
                 'term_ids': selected_term_ids
             })
 
-            log.info(f"✅ Saved {len(selected_term_ids)} terms selections to boq_terms_selections for BOQ {boq.boq_id}")
         else:
             log.warning(f"No terms_conditions in payload for BOQ {boq.boq_id}")
 
         db.session.commit()
-
-        log.info(f"BOQ {boq.boq_id} created successfully with {len(boq_items)} items and {len(preliminary_selections_to_save)} preliminary selections")
 
         return jsonify({
             "message": "BOQ created successfully",
@@ -1233,7 +1211,6 @@ def get_boq(boq_id):
             # Use effective role for access control (handles admin viewing as PM)
             user_role = effective_role.lower().replace(' ', '').replace('_', '') if isinstance(effective_role, str) else ''
 
-            log.info(f"BOQ {boq_id} - User access: actual_role='{actual_role}', effective_role='{user_role}', is_admin_viewing={context.get('is_admin_viewing', False)}")
         # Fetch project details
         project = Project.query.filter_by(project_id=boq.project_id).first()
         # Get BOQ history to track which items were added via new_purchase
@@ -1375,7 +1352,6 @@ def get_boq(boq_id):
         # Admin has full access
         if actual_role == 'admin':
             can_view_new_purchase = True
-            log.info(f"BOQ {boq_id} - Admin access GRANTED for status '{boq_status}'")
         elif boq_status in ['new_purchase_create', 'sent_for_review']:
             # Only Project Manager can view when purchase is created or sent for review
             if user_role in ['projectmanager', 'project_manager']:
@@ -1536,7 +1512,6 @@ def get_boq(boq_id):
                                 sub_item["sub_item_id"] = master_sub_item.sub_item_id
                                 sub_item["master_sub_item_id"] = master_sub_item.sub_item_id
                                 ids_were_recovered = True
-                                log.info(f"Recovered sub_item_id {master_sub_item.sub_item_id} for '{sub_item_name}' in item '{item_name}'")
 
                 # Add images if found
                 if master_sub_item and master_sub_item.sub_item_image:
@@ -1545,12 +1520,10 @@ def get_boq(boq_id):
         # If we recovered any IDs, persist them back to the database
         if ids_were_recovered:
             try:
-                log.info(f"Persisting recovered sub_item_ids back to BOQDetails for BOQ {boq_id}")
                 # Update the existing_purchase items in boq_details with recovered IDs
                 boq_details.boq_details["items"] = existing_purchase_items + new_add_purchase_items
                 db.session.add(boq_details)
                 db.session.commit()
-                log.info(f"Successfully persisted recovered sub_item_ids for BOQ {boq_id}")
             except Exception as e:
                 log.error(f"Failed to persist recovered sub_item_ids for BOQ {boq_id}: {str(e)}")
                 db.session.rollback()
@@ -1625,7 +1598,6 @@ def get_boq(boq_id):
 
             custom_count = len([i for i in items if i.get('isCustom')])
             master_count = len(items) - custom_count
-            log.info(f"Retrieved {len(items)} preliminaries ({master_count} master + {custom_count} custom) for BOQ {boq.boq_id}")
         except Exception as e:
             log.error(f"Error fetching preliminaries for BOQ {boq.boq_id}: {str(e)}")
             # Fallback to empty
@@ -1667,7 +1639,6 @@ def get_boq(boq_id):
                 })
 
             terms_conditions = {'items': terms_items}
-            log.info(f"Retrieved {len(terms_items)} terms from boq_terms_selections for BOQ {boq.boq_id}")
         except Exception as e:
             log.error(f"Error fetching terms for BOQ {boq.boq_id}: {str(e)}")
             terms_conditions = {'items': []}
@@ -2547,7 +2518,6 @@ def update_boq(boq_id):
                 'boq_id': boq_id,
                 'term_ids': selected_term_ids
             })
-            log.info(f"✅ Updated {len(selected_term_ids)} terms selections in boq_terms_selections for BOQ {boq_id}")
 
         db.session.commit()
 
@@ -2652,8 +2622,6 @@ def revision_boq(boq_id):
 
         if existing_history_count == 0 and old_boq_details_json:
             # This is the first edit - save the ORIGINAL/CURRENT BOQ data to history
-            log.info(f"📝 First edit detected for BOQ {boq_id} - storing original BOQ to history")
-
             # Calculate totals from original BOQ data
             original_items = old_boq_details_json.get("items", [])
             original_total_items = len(original_items)
@@ -2683,7 +2651,6 @@ def revision_boq(boq_id):
                 created_by=f"System (Original by {boq.created_by})"
             )
             db.session.add(original_boq_history)
-            log.info(f"✅ Stored original BOQ data to history for BOQ {boq_id} (version 0)")
 
         # Store the payload directly in BOQDetailsHistory without recalculation
         if data.get("is_revision", False) and "items" in data:
@@ -2722,8 +2689,6 @@ def revision_boq(boq_id):
             else:
                 # This shouldn't happen since we just added version 0, but fallback to next_version
                 edited_version = next_version if next_version > 0 else 1
-
-            log.info(f"📝 Storing edited BOQ to history for BOQ {boq_id} (version {edited_version})")
 
             # Create BOQDetailsHistory entry with the raw payload
             boq_detail_history = BOQDetailsHistory(
@@ -2844,8 +2809,6 @@ def revision_boq(boq_id):
                                 is_checked=is_checked
                             )
                             db.session.add(boq_prelim)
-                    log.info(f"✅ Updated preliminary selections in boq_preliminaries for BOQ {boq_id} during revision")
-
             # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
             terms_conditions = data.get("terms_conditions", [])
             if terms_conditions and isinstance(terms_conditions, list):
@@ -2866,8 +2829,6 @@ def revision_boq(boq_id):
                     'boq_id': boq_id,
                     'term_ids': selected_term_ids
                 })
-                log.info(f"✅ Updated {len(selected_term_ids)} terms selections in boq_terms_selections for BOQ {boq_id} during revision")
-
         # If items are provided, update the JSON structure (for non-revision updates)
         elif "items" in data:
             # Use the same current user logic for BOQ details
@@ -3269,8 +3230,6 @@ def revision_boq(boq_id):
 
             # Apply BOQ-level discount to get final total
             final_boq_cost = combined_subtotal - boq_discount_amount if boq_discount_amount > 0 else combined_subtotal
-
-            log.info(f"BOQ {boq.boq_id} revision update totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
 
             # Store new items, sub-items, and materials to master tables
             for item_data in boq_items:
@@ -4012,7 +3971,7 @@ def send_boq_email(boq_id):
         items_summary['items'] = boq_details.boq_details.get('items', [])
 
         # Initialize email service
-        # boq_email_service = BOQEmailService()
+        boq_email_service = BOQEmailService()
 
         # Get TD email from request - support both JSON body and query params (GET request)
         try:
@@ -4026,267 +3985,287 @@ def send_boq_email(boq_id):
         td_name = data.get('full_name') or request.args.get('full_name')
         comments = data.get('comments') or request.args.get('comments')
 
+        # If no TD email provided, find TD automatically
+        if not td_email:
+            td_role = Role.query.filter(
+                Role.role.in_(['technicalDirector', 'TechnicalDirector', 'technical_director']),
+                Role.is_deleted == False
+            ).first()
+
+            if td_role:
+                td_user_auto = User.query.filter_by(
+                    role_id=td_role.role_id,
+                    is_active=True,
+                    is_deleted=False
+                ).first()
+
+                if td_user_auto:
+                    td_email = td_user_auto.email
+                    td_name = td_user_auto.full_name
+                else:
+                    return jsonify({
+                        "error": "No Technical Director found",
+                        "message": "No active Technical Director found in system"
+                    }), 404
+            else:
+                return jsonify({
+                    "error": "Technical Director role not found",
+                    "message": "Technical Director role not configured in system"
+                }), 404
+
         if td_email:
-            # Send to specific TD
-            # email_sent = boq_email_service.send_boq_to_technical_director(
-            #     boq_data, project_data, items_summary, td_email
-            # )
+            # Find TD user to check offline/online status
+            td_user = User.query.filter_by(email=td_email, is_deleted=False, is_active=True).first()
 
-            # if email_sent:
-                # Update BOQ status and mark email as sent to TD
-            # Check revision type based on CURRENT STATUS and revision numbers:
-            # - Internal Revision: Has internal revisions but NOT sent to client yet (revision_number == 0)
-            # - Client Revision: Has been sent to client (revision_number > 0)
-            # - New BOQ: Neither internal nor client revision
-            #
-            # CRITICAL FIX: Check if BOQ has internal revisions AND revision_number == 0
-            # This ensures we correctly identify internal revisions regardless of status string
+            email_sent = False
+            if td_user:
+                # Check TD online/offline status
+                td_status = str(td_user.user_status).lower().strip() if td_user.user_status else "unknown"
 
-            # DEBUG: Log the values being checked
-            log.info(f"[DEBUG send_boq_email] BOQ {boq_id} - status={boq.status}, has_internal_revisions={boq.has_internal_revisions}, revision_number={boq.revision_number}, internal_revision_number={boq.internal_revision_number}")
+                if td_status == "offline":
+                    # Add project_code to project_data
+                    project_data['project_code'] = project.project_code if hasattr(project, 'project_code') else 'N/A'
 
-            # Internal revision detection (FIXED LOGIC):
-            # 1. Has internal_revision_number > 0 AND revision_number == 0 (internal rev, not sent to client yet), OR
-            # 2. has_internal_revisions flag is True AND revision_number == 0, OR
-            # 3. Status explicitly indicates internal revision
-            is_internal_revision = (
-                (boq.internal_revision_number and boq.internal_revision_number > 0 and (boq.revision_number == 0 or boq.revision_number is None)) or
-                (boq.has_internal_revisions and (boq.revision_number == 0 or boq.revision_number is None)) or
-                boq.status == "Internal_Revision_Pending"
-            )
+                    # Send BOQ to TD (BLUE header, submission email)
+                    email_sent = boq_email_service.send_boq_approval_to_pm(
+                        boq_data=boq_data,
+                        project_data=project_data,
+                        items_summary=items_summary,
+                        pm_email=td_email,
+                        comments=comments,
+                        estimator_name=user_name,
+                        pm_name=td_name if td_name else td_user.full_name
+                    )
 
-            # Client revision: has revision_number > 0 (has been sent to client at least once)
-            # This takes precedence over internal revisions
-            is_client_revision = (
-                boq.revision_number and
-                boq.revision_number > 0
-            )
-
-            # DEBUG: Log the results
-            log.info(f"[DEBUG send_boq_email] BOQ {boq_id} - is_internal_revision={is_internal_revision}, is_client_revision={is_client_revision}")
-
-            # Set appropriate status based on revision type:
-            # - Internal Revisions → "Pending_Revision"
-            # - Client Revisions → "client_pending_revision"
-            # - New BOQ → "Pending"
-            if is_internal_revision:
-                new_status = "Pending_Revision"
-            elif is_client_revision:
-                new_status = "client_pending_revision"
-            else:
-                new_status = "Pending"
-            boq.email_sent = True
-            boq.status = new_status
-            boq.last_modified_by = user_name
-            boq.last_modified_at = datetime.utcnow()
-
-            # Check if history entry already exists for this BOQ
-            existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
-
-            # Prepare action data in the new format
-            action_type = "internal_revision_sent" if is_internal_revision else "email_sent"
-            default_comment = "Internal revision sent to TD for review" if is_internal_revision else "BOQ sent for review and approval"
-
-            new_action = {
-                "role": user_role,
-                "type": action_type,
-                "sender": user_role,
-                "receiver": "technicalDirector",
-                "status": new_status.lower(),
-                "comments": comments if comments else default_comment,
-                "timestamp": datetime.utcnow().isoformat(),
-                "decided_by": user_name,
-                "decided_by_user_id": user_id,
-                "recipient_email": td_email,
-                "recipient_name": td_name if td_name else None,
-                "boq_name": boq.boq_name,
-                "project_name": project_data.get("project_name"),
-                "total_cost": items_summary.get("total_cost"),
-                "is_internal_revision": is_internal_revision
-            }
-
-            if existing_history:
-                # Append to existing action array (avoid duplicates)
-                # Handle existing actions - ensure it's always a list
-                if existing_history.action is None:
-                    current_actions = []
-                elif isinstance(existing_history.action, list):
-                    current_actions = existing_history.action
-                elif isinstance(existing_history.action, dict):
-                    current_actions = [existing_history.action]
+                    if email_sent:
+                        log.info(f"📧 ✅ Email sent successfully to TD: {td_email}")
+                    else:
+                        log.error(f"📧 ❌ Failed to send email to TD: {td_email}")
                 else:
-                    current_actions = []
-
-                # Check if similar action already exists (same type, sender, receiver, timestamp within 1 minute)
-                action_exists = False
-                for existing_action in current_actions:
-                    if (existing_action.get('type') == new_action['type'] and
-                        existing_action.get('sender') == new_action['sender'] and
-                        existing_action.get('receiver') == new_action['receiver']):
-                        # Check if timestamps are within 1 minute (to avoid duplicate on retry)
-                        existing_ts = existing_action.get('timestamp', '')
-                        new_ts = new_action['timestamp']
-                        if existing_ts and new_ts:
-                            try:
-                                existing_dt = datetime.fromisoformat(existing_ts)
-                                new_dt = datetime.fromisoformat(new_ts)
-                                if abs((new_dt - existing_dt).total_seconds()) < 60:
-                                    action_exists = True
-                                    break
-                            except:
-                                pass
-
-                if not action_exists:
-                    current_actions.append(new_action)
-                    existing_history.action = current_actions
-                    # Mark JSONB field as modified for SQLAlchemy
-                    flag_modified(existing_history, "action")
-
-                existing_history.action_by = user_name
-                existing_history.boq_status = "Pending"
-                existing_history.sender = user_name
-                existing_history.receiver = td_name if td_name else td_email
-                existing_history.comments = comments if comments else "BOQ sent for review and approval"
-                existing_history.sender_role = user_role
-                existing_history.receiver_role = 'technicalDirector'
-                existing_history.action_date = datetime.utcnow()
-                existing_history.last_modified_by = user_name
-                existing_history.last_modified_at = datetime.utcnow()
+                    email_sent = True  # Proceed without email (in-app notification)
             else:
-                # Create new history entry with action as array
-                boq_history = BOQHistory(
-                    boq_id=boq_id,
-                    action=[new_action],  # Store as array
-                    action_by=user_name,
-                    boq_status="Pending",
-                    sender=user_name,
-                    receiver=td_name if td_name else td_email,
-                    comments=comments if comments else "BOQ sent for review and approval",
-                    sender_role=user_role,
-                    receiver_role='technicalDirector',
-                    action_date=datetime.utcnow(),
-                    created_by=user_name
+                email_sent = True  # Proceed without email
+
+            if email_sent:
+                is_internal_revision = (
+                    (boq.internal_revision_number and boq.internal_revision_number > 0 and (boq.revision_number == 0 or boq.revision_number is None)) or
+                    (boq.has_internal_revisions and (boq.revision_number == 0 or boq.revision_number is None)) or
+                    boq.status == "Internal_Revision_Pending"
                 )
-                db.session.add(boq_history)
 
-            db.session.commit()
-
-            # Send notification to TD
-            try:
-                from utils.comprehensive_notification_service import notification_service
-                from utils.notification_utils import NotificationManager
-                from socketio_server import send_notification_to_user, send_notification_to_role
-                from models.user import User as UserModel
-                # Find TD user by email
-                td_user = UserModel.query.filter_by(email=td_email).first()
-                if td_user:
-                    log.info(f"[send_boq_email] Sending notification to TD {td_user.user_id}")
-                    try:
-                        # Send appropriate notification based on revision type
-                        if is_internal_revision:
-                            # DEBUG: Log which branch we're taking
-                            log.info(f"[DEBUG send_boq_email] CALLING notify_internal_revision_created() for BOQ {boq_id}, internal revision #{boq.internal_revision_number or 1}")
-                            # Send internal revision notification
-                            notification_service.notify_internal_revision_created(
-                                boq_id=boq_id,
-                                project_name=project.project_name,
-                                revision_number=boq.internal_revision_number or 1,
-                                actor_id=user_id,
-                                actor_name=user_name,
-                                actor_role=user_role
-                            )
-                            log.info(f"[send_boq_email] Internal revision notification sent successfully")
-                        elif is_client_revision:
-                            # DEBUG: Log which branch we're taking
-                            log.info(f"[DEBUG send_boq_email] CALLING notify_client_revision_created() for BOQ {boq_id}, client revision R{boq.revision_number}")
-                            # Send client revision notification
-                            notification_service.notify_client_revision_created(
-                                boq_id=boq_id,
-                                project_name=project.project_name,
-                                revision_number=boq.revision_number,
-                                actor_id=user_id,
-                                actor_name=user_name,
-                                actor_role=user_role
-                            )
-                            log.info(f"[send_boq_email] Client revision notification sent successfully")
-                        else:
-                            # DEBUG: Log which branch we're taking
-                            log.info(f"[DEBUG send_boq_email] CALLING notify_boq_sent_to_td() for BOQ {boq_id} (new BOQ)")
-                            # Send regular BOQ notification
-                            notification_service.notify_boq_sent_to_td(
-                                boq_id=boq_id,
-                                project_name=project.project_name,
-                                estimator_id=user_id,
-                                estimator_name=user_name,
-                                td_user_id=td_user.user_id
-                            )
-                            log.info(f"[send_boq_email] BOQ notification sent successfully")
-                    except Exception as svc_err:
-                        log.error(f"[send_boq_email] Service notification failed: {svc_err}")
-                        log.error(f"[DEBUG] FALLBACK NOTIFICATION BEING USED - Service failed, is_internal_revision={is_internal_revision}")
-                        # Fallback: create notification directly
-                        try:
-                            from utils.role_route_mapper import get_td_approval_url
-
-                            # Use appropriate title and message based on revision type
-                            if is_internal_revision:
-                                title = 'Internal Revision BOQ for Approval'
-                                message = f'Internal Revision BOQ for {project.project_name} (Revision #{boq.internal_revision_number or 1}) requires your review. Submitted by {user_name}'
-                                action_url = get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='internal')
-                                action_label = 'Review Revision'
-                                metadata = {'boq_id': boq_id, 'internal_revision_number': boq.internal_revision_number, 'target_role': 'technical_director'}
-                            elif is_client_revision:
-                                title = 'Client Revision BOQ for Approval'
-                                message = f'Client Revision BOQ for {project.project_name} (Revision R{boq.revision_number}) requires your review. Submitted by {user_name}'
-                                action_url = get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='client')
-                                action_label = 'Review Revision'
-                                metadata = {'boq_id': boq_id, 'client_revision_number': boq.revision_number, 'target_role': 'technical_director'}
-                            else:
-                                title = 'New BOQ for Approval'
-                                message = f'BOQ for {project.project_name} requires your approval. Submitted by {user_name}'
-                                action_url = get_td_approval_url(td_user.user_id, boq_id, tab='pending')
-                                action_label = 'Review BOQ'
-                                metadata = {'boq_id': boq_id}
-
-                            fallback_notif = NotificationManager.create_notification(
-                                user_id=td_user.user_id,
-                                type='approval',
-                                title=title,
-                                message=message,
-                                priority='urgent',
-                                category='boq',
-                                action_required=True,
-                                action_url=action_url,
-                                action_label=action_label,
-                                metadata=metadata,
-                                sender_id=user_id,
-                                sender_name=user_name,
-                                target_role='technical_director'
-                            )
-                            send_notification_to_user(td_user.user_id, fallback_notif.to_dict())
-                            send_notification_to_role('technicalDirector', fallback_notif.to_dict())
-                            notification_type = 'Internal Revision' if is_internal_revision else ('Client Revision' if is_client_revision else 'New BOQ')
-                            log.info(f"[send_boq_email] Fallback notification sent to TD {td_user.user_id} - Type: {notification_type}")
-                        except Exception as fallback_err:
-                            log.error(f"[send_boq_email] Fallback notification also failed: {fallback_err}")
+                # This takes precedence over internal revisions
+                is_client_revision = (
+                    boq.revision_number and
+                    boq.revision_number > 0
+                )
+                # - New BOQ → "Pending"
+                if is_internal_revision:
+                    new_status = "Pending_Revision"
+                elif is_client_revision:
+                    new_status = "client_pending_revision"
                 else:
-                    log.warning(f"[send_boq_email] TD user not found by email: {td_email}")
-            except Exception as notif_err:
-                log.error(f"[send_boq_email] Failed to send notification: {notif_err}")
+                    new_status = "Pending"
+                boq.email_sent = True
+                boq.status = new_status
+                boq.last_modified_by = user_name
+                boq.last_modified_at = datetime.utcnow()
 
-            return jsonify({
-                "success": True,
-                "message": "BOQ review email sent successfully to Technical Director",
-                "boq_id": boq_id,
-                "recipient": td_email
-            }), 200
-            # else:
-            #     return jsonify({
-            #         "success": False,
-            #         "message": "Failed to send BOQ review email",
-            #         "boq_id": boq_id,
-            #         "error": "Email service failed"
-            #     }), 500
+                # Check if history entry already exists for this BOQ
+                existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+                # Prepare action data in the new format
+                action_type = "internal_revision_sent" if is_internal_revision else "email_sent"
+                default_comment = "Internal revision sent to TD for review" if is_internal_revision else "BOQ sent for review and approval"
+
+                new_action = {
+                    "role": user_role,
+                    "type": action_type,
+                    "sender": user_role,
+                    "receiver": "technicalDirector",
+                    "status": new_status.lower(),
+                    "comments": comments if comments else default_comment,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "decided_by": user_name,
+                    "decided_by_user_id": user_id,
+                    "recipient_email": td_email,
+                    "recipient_name": td_name if td_name else None,
+                    "boq_name": boq.boq_name,
+                    "project_name": project_data.get("project_name"),
+                    "total_cost": items_summary.get("total_cost"),
+                    "is_internal_revision": is_internal_revision
+                }
+
+                if existing_history:
+                    # Append to existing action array (avoid duplicates)
+                    # Handle existing actions - ensure it's always a list
+                    if existing_history.action is None:
+                        current_actions = []
+                    elif isinstance(existing_history.action, list):
+                        current_actions = existing_history.action
+                    elif isinstance(existing_history.action, dict):
+                        current_actions = [existing_history.action]
+                    else:
+                        current_actions = []
+
+                    # Check if similar action already exists (same type, sender, receiver, timestamp within 1 minute)
+                    action_exists = False
+                    for existing_action in current_actions:
+                        if (existing_action.get('type') == new_action['type'] and
+                            existing_action.get('sender') == new_action['sender'] and
+                            existing_action.get('receiver') == new_action['receiver']):
+                            # Check if timestamps are within 1 minute (to avoid duplicate on retry)
+                            existing_ts = existing_action.get('timestamp', '')
+                            new_ts = new_action['timestamp']
+                            if existing_ts and new_ts:
+                                try:
+                                    existing_dt = datetime.fromisoformat(existing_ts)
+                                    new_dt = datetime.fromisoformat(new_ts)
+                                    if abs((new_dt - existing_dt).total_seconds()) < 60:
+                                        action_exists = True
+                                        break
+                                except:
+                                    pass
+
+                    if not action_exists:
+                        current_actions.append(new_action)
+                        existing_history.action = current_actions
+                        # Mark JSONB field as modified for SQLAlchemy
+                        flag_modified(existing_history, "action")
+
+                    existing_history.action_by = user_name
+                    existing_history.boq_status = "Pending"
+                    existing_history.sender = user_name
+                    existing_history.receiver = td_name if td_name else td_email
+                    existing_history.comments = comments if comments else "BOQ sent for review and approval"
+                    existing_history.sender_role = user_role
+                    existing_history.receiver_role = 'technicalDirector'
+                    existing_history.action_date = datetime.utcnow()
+                    existing_history.last_modified_by = user_name
+                    existing_history.last_modified_at = datetime.utcnow()
+                else:
+                    # Create new history entry with action as array
+                    boq_history = BOQHistory(
+                        boq_id=boq_id,
+                        action=[new_action],  # Store as array
+                        action_by=user_name,
+                        boq_status="Pending",
+                        sender=user_name,
+                        receiver=td_name if td_name else td_email,
+                        comments=comments if comments else "BOQ sent for review and approval",
+                        sender_role=user_role,
+                        receiver_role='technicalDirector',
+                        action_date=datetime.utcnow(),
+                        created_by=user_name
+                    )
+                    db.session.add(boq_history)
+
+                db.session.commit()
+
+                # Send notification to TD
+                try:
+                    from utils.comprehensive_notification_service import notification_service
+                    from utils.notification_utils import NotificationManager
+                    from socketio_server import send_notification_to_user, send_notification_to_role
+                    from models.user import User as UserModel
+                    # Find TD user by email
+                    td_user = UserModel.query.filter_by(email=td_email).first()
+                    if td_user:
+                        log.info(f"[send_boq_email] Sending notification to TD {td_user.user_id}")
+                        try:
+                            # Send appropriate notification based on revision type
+                            if is_internal_revision:
+                                notification_service.notify_internal_revision_created(
+                                    boq_id=boq_id,
+                                    project_name=project.project_name,
+                                    revision_number=boq.internal_revision_number or 1,
+                                    actor_id=user_id,
+                                    actor_name=user_name,
+                                    actor_role=user_role
+                                )
+                            elif is_client_revision:
+                                # Send client revision notification
+                                notification_service.notify_client_revision_created(
+                                    boq_id=boq_id,
+                                    project_name=project.project_name,
+                                    revision_number=boq.revision_number,
+                                    actor_id=user_id,
+                                    actor_name=user_name,
+                                    actor_role=user_role
+                                )
+                            else:
+                                # Send regular BOQ notification
+                                notification_service.notify_boq_sent_to_td(
+                                    boq_id=boq_id,
+                                    project_name=project.project_name,
+                                    estimator_id=user_id,
+                                    estimator_name=user_name,
+                                    td_user_id=td_user.user_id
+                                )
+                        except Exception as svc_err:
+                            log.error(f"[send_boq_email] Service notification failed: {svc_err}")
+                            log.error(f"[DEBUG] FALLBACK NOTIFICATION BEING USED - Service failed, is_internal_revision={is_internal_revision}")
+                            # Fallback: create notification directly
+                            try:
+                                from utils.role_route_mapper import get_td_approval_url
+
+                                # Use appropriate title and message based on revision type
+                                if is_internal_revision:
+                                    title = 'Internal Revision BOQ for Approval'
+                                    message = f'Internal Revision BOQ for {project.project_name} (Revision #{boq.internal_revision_number or 1}) requires your review. Submitted by {user_name}'
+                                    action_url = get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='internal')
+                                    action_label = 'Review Revision'
+                                    metadata = {'boq_id': boq_id, 'internal_revision_number': boq.internal_revision_number, 'target_role': 'technical_director'}
+                                elif is_client_revision:
+                                    title = 'Client Revision BOQ for Approval'
+                                    message = f'Client Revision BOQ for {project.project_name} (Revision R{boq.revision_number}) requires your review. Submitted by {user_name}'
+                                    action_url = get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='client')
+                                    action_label = 'Review Revision'
+                                    metadata = {'boq_id': boq_id, 'client_revision_number': boq.revision_number, 'target_role': 'technical_director'}
+                                else:
+                                    title = 'New BOQ for Approval'
+                                    message = f'BOQ for {project.project_name} requires your approval. Submitted by {user_name}'
+                                    action_url = get_td_approval_url(td_user.user_id, boq_id, tab='pending')
+                                    action_label = 'Review BOQ'
+                                    metadata = {'boq_id': boq_id}
+
+                                fallback_notif = NotificationManager.create_notification(
+                                    user_id=td_user.user_id,
+                                    type='approval',
+                                    title=title,
+                                    message=message,
+                                    priority='urgent',
+                                    category='boq',
+                                    action_required=True,
+                                    action_url=action_url,
+                                    action_label=action_label,
+                                    metadata=metadata,
+                                    sender_id=user_id,
+                                    sender_name=user_name,
+                                    target_role='technical_director'
+                                )
+                                send_notification_to_user(td_user.user_id, fallback_notif.to_dict())
+                                send_notification_to_role('technicalDirector', fallback_notif.to_dict())
+                                notification_type = 'Internal Revision' if is_internal_revision else ('Client Revision' if is_client_revision else 'New BOQ')
+                            except Exception as fallback_err:
+                                log.error(f"[send_boq_email] Fallback notification also failed: {fallback_err}")
+                    else:
+                        log.warning(f"[send_boq_email] TD user not found by email: {td_email}")
+                except Exception as notif_err:
+                    log.error(f"[send_boq_email] Failed to send notification: {notif_err}")
+
+                return jsonify({
+                    "success": True,
+                    "message": "BOQ review email sent successfully to Technical Director",
+                    "boq_id": boq_id,
+                    "recipient": td_email
+                }), 200
+                # else:
+                #     return jsonify({
+                #         "success": False,
+                #         "message": "Failed to send BOQ review email",
+                #         "boq_id": boq_id,
+                #         "error": "Email service failed"
+                #     }), 500
         else:
             # Send to ALL Technical Directors (support multiple TDs)
             td_role = Role.query.filter_by(role='technicalDirector').first()
@@ -4319,28 +4298,7 @@ def send_boq_email(boq_id):
                     "message": f"Technical Director {technical_director.full_name} does not have an email address"
                 }), 400
 
-            # Send email to the Technical Director
-            # email_sent = boq_email_service.send_boq_to_technical_director(
-            #     boq_data, project_data, items_summary, technical_director.email
-            # )
-
-            # if email_sent:
-                # Update BOQ status and mark email as sent to TD
-            # Check revision type based on CURRENT STATUS and revision numbers:
-            # - Internal Revision: Has internal revisions but NOT sent to client yet (revision_number == 0)
-            # - Client Revision: Has been sent to client (revision_number > 0)
-            # - New BOQ: Neither internal nor client revision
-            #
-            # CRITICAL FIX: Check if BOQ has internal revisions AND revision_number == 0
-            # This ensures we correctly identify internal revisions regardless of status string
-
-            # DEBUG: Log the values being checked
-            log.info(f"[DEBUG send_boq_email] BOQ {boq_id} - status={boq.status}, has_internal_revisions={boq.has_internal_revisions}, revision_number={boq.revision_number}, internal_revision_number={boq.internal_revision_number}")
-
-            # Internal revision detection (FIXED LOGIC):
-            # 1. Has internal_revision_number > 0 AND revision_number == 0 (internal rev, not sent to client yet), OR
-            # 2. has_internal_revisions flag is True AND revision_number == 0, OR
-            # 3. Status explicitly indicates internal revision
+           
             is_internal_revision = (
                 (boq.internal_revision_number and boq.internal_revision_number > 0 and (boq.revision_number == 0 or boq.revision_number is None)) or
                 (boq.has_internal_revisions and (boq.revision_number == 0 or boq.revision_number is None)) or
@@ -4353,13 +4311,6 @@ def send_boq_email(boq_id):
                 boq.revision_number and
                 boq.revision_number > 0
             )
-
-            # DEBUG: Log the results
-            log.info(f"[DEBUG send_boq_email] BOQ {boq_id} - is_internal_revision={is_internal_revision}, is_client_revision={is_client_revision}")
-
-            # Set appropriate status based on revision type:
-            # - Internal Revisions → "Pending_Revision"
-            # - Client Revisions → "client_pending_revision"
             # - New BOQ → "Pending"
             if is_internal_revision:
                 new_status = "Pending_Revision"
@@ -4469,14 +4420,10 @@ def send_boq_email(boq_id):
                 from utils.comprehensive_notification_service import notification_service
                 from utils.notification_utils import NotificationManager
                 from socketio_server import send_notification_to_user, send_notification_to_role
-                log.info(f"[send_boq_email] Sending notification to {len(technical_directors)} Technical Director(s)")
                 for td in technical_directors:
                     try:
                         # Send appropriate notification based on revision type
                         if is_internal_revision:
-                            # DEBUG: Log which branch we're taking
-                            log.info(f"[DEBUG send_boq_email] CALLING notify_internal_revision_created() for BOQ {boq_id}, internal revision #{boq.internal_revision_number or 1}, TD {td.user_id}")
-                            # Send internal revision notification
                             notification_service.notify_internal_revision_created(
                                 boq_id=boq_id,
                                 project_name=project.project_name,
@@ -4486,8 +4433,6 @@ def send_boq_email(boq_id):
                                 actor_role=user_role
                             )
                         elif is_client_revision:
-                            # DEBUG: Log which branch we're taking
-                            log.info(f"[DEBUG send_boq_email] CALLING notify_client_revision_created() for BOQ {boq_id}, client revision R{boq.revision_number}, TD {td.user_id}")
                             # Send client revision notification
                             notification_service.notify_client_revision_created(
                                 boq_id=boq_id,
@@ -4498,8 +4443,6 @@ def send_boq_email(boq_id):
                                 actor_role=user_role
                             )
                         else:
-                            # DEBUG: Log which branch we're taking
-                            log.info(f"[DEBUG send_boq_email] CALLING notify_boq_sent_to_td() for BOQ {boq_id}, TD {td.user_id} (new BOQ)")
                             notification_service.notify_boq_sent_to_td(
                                 boq_id=boq_id,
                                 project_name=project.project_name,
@@ -4507,7 +4450,6 @@ def send_boq_email(boq_id):
                                 estimator_name=user_name,
                                 td_user_id=td.user_id
                             )
-                        log.info(f"[send_boq_email] Notification sent successfully to TD {td.user_id} ({td.full_name})")
                     except Exception as td_notif_err:
                         log.error(f"[send_boq_email] Failed to send notification to TD {td.user_id}: {td_notif_err}")
                         log.error(f"[DEBUG] FALLBACK NOTIFICATION BEING USED (multiple TDs) - Service failed, is_internal_revision={is_internal_revision}, is_client_revision={is_client_revision}")
@@ -4553,7 +4495,6 @@ def send_boq_email(boq_id):
                             send_notification_to_user(td.user_id, fallback_notif.to_dict())
                             send_notification_to_role('technicalDirector', fallback_notif.to_dict())
                             notification_type = 'Internal Revision' if is_internal_revision else ('Client Revision' if is_client_revision else 'New BOQ')
-                            log.info(f"[send_boq_email] Fallback notification sent to TD {td.user_id} - Type: {notification_type}")
                         except Exception as fallback_err:
                             log.error(f"[send_boq_email] Fallback notification also failed for TD {td.user_id}: {fallback_err}")
             except Exception as notif_err:
@@ -4701,10 +4642,6 @@ def get_estimator_dashboard():
         )
 
         total_boqs = sum(status_counts.values())
-
-        # Debug: Log all status counts for troubleshooting
-        log.info(f"[EstimatorDashboard] Status counts: {status_counts}")
-        log.info(f"[EstimatorDashboard] Calculated: pending={pending_boqs}, approved={approved_boqs_count}, rejected={rejected_boqs}, sent={sent_for_confirmation_boqs}, draft={draft_boqs}")
 
         # OPTIMIZATION 2: Calculate average approval time using SQL
         if is_admin:
@@ -5206,7 +5143,6 @@ def get_custom_units():
                 "created_by": unit.created_by
             })
 
-        log.info(f"Retrieved {len(units_data)} custom units")
         return jsonify({
             "message": "Custom units retrieved successfully",
             "custom_units": units_data
@@ -5257,8 +5193,6 @@ def create_custom_unit():
 
         db.session.add(new_unit)
         db.session.commit()
-
-        log.info(f"Created custom unit: {unit_label} ({unit_value}) by {current_user.get('email')}")
 
         return jsonify({
             "message": "Custom unit created successfully",

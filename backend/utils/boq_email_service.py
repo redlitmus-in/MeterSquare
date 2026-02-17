@@ -23,6 +23,13 @@ EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "465"))
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
 
+# Frontend URL (environment-specific)
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+if ENVIRONMENT == "production":
+    FRONTEND_URL = os.getenv("PROD_FRONTEND_URL", "https://msq.kol.tel")
+else:
+    FRONTEND_URL = os.getenv("DEV_FRONTEND_URL", "http://localhost:5173")
+
 
 class BOQEmailService:
     """Service for sending BOQ-related emails to Technical Directors"""
@@ -107,7 +114,6 @@ class BOQEmailService:
                             logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
                             message.attach(logo_image)
                             logo_attached = True
-                            log.info(f"Logo attached as CID from: {logo_path}")
                             break
 
                 if not logo_attached:
@@ -143,7 +149,6 @@ class BOQEmailService:
                         server.sendmail(self.sender_email, all_recipients, message.as_string())
 
                 cc_info = f" + {len(cc_list)} CC" if cc_list else ""
-                log.info(f"Email sent successfully to {len(recipient_list)} recipient(s){cc_info}: {', '.join(recipient_list)}")
                 if cc_list:
                     log.info(f"CC recipients: {', '.join(cc_list)}")
                 return True
@@ -214,7 +219,6 @@ class BOQEmailService:
             thread = threading.Thread(target=send_in_background, daemon=True)
             thread.start()
 
-            log.info(f"Email queued for async sending to {recipient_email}")
             return True
 
         except Exception as e:
@@ -242,137 +246,131 @@ class BOQEmailService:
         project_name = project_data.get('project_name', 'N/A')
         client = project_data.get('client', 'N/A')
         location = project_data.get('location', 'N/A')
+        project_code = project_data.get('project_code', 'N/A')
 
-        total_items = items_summary.get('total_items', 0)
-        total_materials = items_summary.get('total_materials', 0)
-        total_labour = items_summary.get('total_labour', 0)
-        total_material_cost = items_summary.get('total_material_cost', 0)
-        total_labour_cost = items_summary.get('total_labour_cost', 0)
-        total_cost = items_summary.get('total_cost', 0)
         estimated_selling_price = items_summary.get('estimatedSellingPrice', 0)
-
-        # Generate items table
-        items = items_summary.get('items', [])
-        items_table_rows = ""
-        for idx, item in enumerate(items, 1):
-            item_name = item.get('item_name', 'N/A')
-            base_cost = item.get('base_cost', 0)
-            overhead_percentage = item.get('overhead_percentage', 0)
-            overhead_amount = item.get('overhead_amount', 0)
-            profit_margin_percentage = item.get('profit_margin_percentage', 0)
-            profit_margin_amount = item.get('profit_margin_amount', 0)
-            selling_price = item.get('selling_price', 0)
-
-            items_table_rows += f"""
-                <tr>
-                    <td>{idx}</td>
-                    <td>{item_name}</td>
-                    <td>AED {base_cost:,.2f}</td>
-                    <td>{overhead_percentage}%</td>
-                    <td>AED {overhead_amount:,.2f}</td>
-                    <td>{profit_margin_percentage}%</td>
-                    <td>AED {profit_margin_amount:,.2f}</td>
-                    <td><strong>AED {selling_price:,.2f}</strong></td>
-                </tr>
-            """
 
         # Build email HTML
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header">
-                <h1>BILL OF QUANTITIES (BOQ)</h1>
-                <h2>Review Request</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Blue (Review) -->
+            <div style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Review Required</h1>
+                <p style="color: #bfdbfe; font-size: 14px; margin: 0;">Action Required: Please Review and Approve</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear Technical Director,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    A new Bill of Quantities (BOQ) has been prepared and is ready for your review and approval.
-                    Please find the detailed cost estimation and breakdown below.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">Technical Director</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    A Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been submitted by <strong style="color: #1e293b;">{created_by}</strong> and is awaiting your review and approval.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Information</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Status:</span> <span class="status-badge status-pending">{status}</span></p>
-                    <p><span class="label">Created By:</span> <span class="value">{created_by}</span></p>
-                    <p><span class="label">Created Date:</span> <span class="value">{created_at}</span></p>
+                <!-- Review Badge -->
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-left: 4px solid #3b82f6; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <div style="display: flex; align-items: center;">
+                        <span style="background: #3b82f6; color: white; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                            📋 Pending Review
+                        </span>
+                        <span style="margin-left: 12px; color: #1e40af; font-size: 13px; font-weight: 500;">
+                            Your approval is required to proceed
+                        </span>
+                    </div>
                 </div>
 
-                <!-- Project Information -->
-                <h2>Project Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
-                </div>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
 
-                <!-- Cost Summary -->
-                <h2>Cost Summary</h2>
-                <div class="info-box">
-                    <p><span class="label">Total Items:</span> <span class="value">{total_items}</span></p>
-                    <p><span class="label">Total Materials:</span> <span class="value">{total_materials}</span></p>
-                    <p><span class="label">Total Labour:</span> <span class="value">{total_labour}</span></p>
-                    <p><span class="label">Material Cost:</span> <span class="value">AED {total_material_cost:,.2f}</span></p>
-                    <p><span class="label">Labour Cost:</span> <span class="value">AED {total_labour_cost:,.2f}</span></p>
-                    <p><span class="label">Base Cost:</span> <span class="value">AED {(total_material_cost + total_labour_cost):,.2f}</span></p>
-                </div>
-
-                <div class="total-cost">
-                    <span class="label">Estimated Selling Price:</span>
-                    <span class="amount">AED {estimated_selling_price:,.2f}</span>
-                </div>
-
-                <!-- Items Breakdown -->
-                <h2>Items Breakdown</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Item Name</th>
-                                <th>Base Cost</th>
-                                <th>Overhead %</th>
-                                <th>Overhead Amt</th>
-                                <th>Profit %</th>
-                                <th>Profit Amt</th>
-                                <th>Selling Price</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {items_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #3b82f6; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Estimated Value:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">AED {estimated_selling_price:,.2f}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Submitted By:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{created_by}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Submitted On:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{created_at}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <div class="divider"></div>
-
                 <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong> Please review the BOQ details and approve or provide feedback
-                    for necessary revisions. Your timely review will help us proceed with the project planning.
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #93c5fd; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #1e40af; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Action Required
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #1e40af; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Review the BOQ details and cost estimations</li>
+                        <li style="margin-bottom: 6px;">Approve the BOQ to proceed to the client</li>
+                        <li style="margin-bottom: 6px;">Or provide feedback for necessary revisions</li>
+                    </ul>
+                </div>
+
+                <!-- CTA Button -->
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{FRONTEND_URL}" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.2);">
+                        Review BOQ →
+                    </a>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Warm Regards,</strong></p>
-                    <p>{created_by}</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{created_by}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Estimator</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -408,15 +406,215 @@ class BOQEmailService:
             log.error(f"Error sending BOQ to Technical Director: {e}")
             return False
 
-    def generate_boq_approval_email(self, boq_data, project_data, items_summary, comments):
+    def send_client_confirmed_to_td(self, boq_id, boq_name, project_name, estimator_name, client_name, td_email, td_name=None):
+        """Send a simple notification email to TD when client confirms BOQ approval"""
+        try:
+            td_display = td_name if td_name else "Technical Director"
+            client_display = client_name if client_name else "Client"
+            subject = f"✅ Client Approved BOQ - {boq_name} ({project_name})"
+
+            email_body = f"""
+        <div style="max-width: 600px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 35px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 16px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 220px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 24px; margin: 12px 0 4px 0; font-weight: 600;">Client Approved the BOQ</h1>
+            </div>
+
+            <!-- Content -->
+            <div style="background: #ffffff; padding: 30px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 18px 0;">
+                    Dear <strong style="color: #1e293b;">{td_display}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 22px 0;">
+                    This is to inform you that <strong style="color: #1e293b;">{client_display}</strong> has approved the BOQ for project <strong style="color: #1e293b;">{project_name}</strong>. The confirmation was recorded by <strong style="color: #1e293b;">{estimator_name}</strong>.
+                </p>
+
+                <!-- Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px; margin-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 7px 0; color: #64748b; font-size: 13px; width: 40%;">BOQ Name:</td>
+                            <td style="padding: 7px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 7px 0; color: #64748b; font-size: 13px;">Project:</td>
+                            <td style="padding: 7px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 7px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 7px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client_display}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 7px 0; color: #64748b; font-size: 13px;">Confirmed By:</td>
+                            <td style="padding: 7px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{estimator_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 7px 0; color: #64748b; font-size: 13px;">Status:</td>
+                            <td style="padding: 7px 0; font-size: 13px;">
+                                <span style="background: #d1fae5; color: #065f46; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700;">✓ Client Confirmed</span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0 0 2px 0;">{estimator_name}</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 20px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+            """
+
+            return self.send_email(td_email, subject, wrap_email_content(email_body))
+
+        except Exception as e:
+            log.error(f"Error sending client confirmed notification to TD: {e}")
+            return False
+
+    def send_se_items_assigned_notification(self, boq_name, project_name, pm_name, se_email, se_name, items_count, assigned_items):
+        """Send notification email to SE when BOQ items are assigned to them"""
+        try:
+            subject = f"📋 BOQ Items Assigned to You - {project_name}"
+
+            # Build items rows
+            items_rows = ""
+            for idx, item in enumerate(assigned_items[:10], 1):  # show max 10 items
+                item_name = item.get('description', item.get('item_code', f'Item-{idx}'))
+                row_bg = '#f9fafb' if idx % 2 == 0 else '#ffffff'
+                items_rows += f"""
+                <tr style="background: {row_bg};">
+                    <td style="padding: 9px 12px; color: #64748b; font-size: 13px; border-bottom: 1px solid #e2e8f0;">{idx}</td>
+                    <td style="padding: 9px 12px; color: #1e293b; font-size: 13px; font-weight: 500; border-bottom: 1px solid #e2e8f0;">{item_name}</td>
+                </tr>
+                """
+            more_note = f'<p style="color:#64748b;font-size:12px;margin:8px 0 0 12px;">...and {items_count - 10} more item(s)</p>' if items_count > 10 else ''
+
+            email_body = f"""
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 5px 0; font-weight: 600;">BOQ Items Assigned</h1>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{se_name}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 22px 0;">
+                    <strong style="color: #1e293b;">{pm_name}</strong> has assigned <strong style="color: #1e293b;">{items_count} item(s)</strong> from the BOQ for project <strong style="color: #1e293b;">{project_name}</strong> to you for execution.
+                </p>
+
+                <!-- Assignment Badge -->
+                <div style="background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%); border-left: 4px solid #8b5cf6; padding: 14px 18px; border-radius: 8px; margin-bottom: 25px;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px; width: 40%;">BOQ Name:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Assigned By:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{pm_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Total Items:</td>
+                            <td style="padding: 5px 0; font-size: 13px;">
+                                <span style="background: #8b5cf6; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">{items_count} Items</span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Assigned Items Table -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin-bottom: 20px;">
+                    <div style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; background: #f1f5f9;">
+                        <h3 style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0;">📦 Assigned Items</h3>
+                    </div>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: #f8fafc;">
+                                <th style="padding: 9px 12px; color: #64748b; font-size: 12px; font-weight: 600; text-align: left; border-bottom: 1px solid #e2e8f0;">#</th>
+                                <th style="padding: 9px 12px; color: #64748b; font-size: 12px; font-weight: 600; text-align: left; border-bottom: 1px solid #e2e8f0;">Item Name</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {items_rows}
+                        </tbody>
+                    </table>
+                    {more_note}
+                </div>
+
+                <!-- Action Required -->
+                <div style="background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%); border: 1px solid #c4b5fd; border-radius: 10px; padding: 16px 20px; margin-bottom: 25px;">
+                    <h3 style="color: #5b21b6; font-size: 14px; font-weight: 700; margin: 0 0 8px 0;">📝 Action Required</h3>
+                    <p style="color: #5b21b6; font-size: 13px; margin: 0; line-height: 1.6;">Please log in to MeterSquare ERP to view the full item details and begin execution planning.</p>
+                </div>
+
+                <!-- CTA -->
+                <div style="text-align: center; margin: 25px 0;">
+                    <a href="{FRONTEND_URL}" style="background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%); color: white; padding: 13px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+                        Open MeterSquare ERP →
+                    </a>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0 0 2px 0;">{pm_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 20px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+            """
+
+            return self.send_email(se_email, subject, wrap_email_content(email_body))
+
+        except Exception as e:
+            log.error(f"Error sending SE items assigned notification: {e}")
+            return False
+
+    def generate_boq_approval_email(self, boq_data, project_data, items_summary, comments, estimator_name=None, pm_name=None):
         """
-        Generate BOQ approval email for Project Manager
+        Generate PROFESSIONAL BOQ approval email for Project Manager
 
         Args:
             boq_data: Dictionary containing BOQ information
             project_data: Dictionary containing project information
             items_summary: Dictionary containing items summary
-            comments: Approval comments from TD
+            comments: Approval comments from Estimator
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager's full name (optional)
 
         Returns:
             str: HTML formatted email content
@@ -428,102 +626,156 @@ class BOQEmailService:
         project_name = project_data.get('project_name', 'N/A')
         client = project_data.get('client', 'N/A')
         location = project_data.get('location', 'N/A')
+        project_code = project_data.get('project_code', 'N/A')
 
         total_cost = items_summary.get('total_cost', 0)
-        estimated_selling_price = items_summary.get('estimatedSellingPrice', 0)
+        formatted_cost = f"₹{total_cost:,.2f}" if total_cost else "₹0.00"
+
+        # Use actual names or fallback
+        estimator_display = estimator_name if estimator_name else "Estimator"
+        pm_display = pm_name if pm_name else "Project Manager"
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
-                <h1>BOQ APPROVED ✓</h1>
-                <h2>Ready for Project Execution</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Light Blue -->
+            <div style="background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Submitted for Approval</h1>
+                <p style="color: #dbeafe; font-size: 14px; margin: 0;">Please Review and Approve</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear Project Manager,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    Great news! The Bill of Quantities (BOQ) for <strong>{project_name}</strong> has been
-                    <span style="color: #10b981; font-weight: bold;">APPROVED</span> by the Technical Director.
-                    You can now proceed with project planning and execution.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{pm_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    A Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been submitted for your review and approval.
+                    Please review the details below and take appropriate action.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Information</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #d1fae5; color: #065f46; border: 1px solid #10b981;">APPROVED</span></p>
-                    <p><span class="label">Prepared By:</span> <span class="value">{created_by}</span></p>
+                <!-- Status Badge -->
+                <div style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-left: 4px solid #22c55e; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <div style="display: flex; align-items: center;">
+                        <span style="background: #22c55e; color: white; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                            Pending Review
+                        </span>
+                        <span style="margin-left: 12px; color: #166534; font-size: 13px; font-weight: 500;">
+                            Awaiting your approval
+                        </span>
+                    </div>
                 </div>
 
-                <!-- Project Information -->
-                <h2>Project Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
+                <!-- Project Details Card (Combined BOQ + Project Info) -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #3b82f6; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
+                    </table>
                 </div>
 
-                <!-- Cost Summary -->
-                <div class="total-cost" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
-                    <span class="label">Approved Budget:</span>
-                    <span class="amount" style="color: #065f46;">AED {estimated_selling_price:,.2f}</span>
-                </div>
-
-                <!-- TD Comments -->
+                <!-- Comments Section (if provided) -->
                 {f'''
-                <h2>Technical Director's Comments</h2>
-                <div class="alert" style="background-color: #d1fae5; border-left: 4px solid #10b981;">
-                    <p style="color: #065f46; margin: 0;">{comments}</p>
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-left: 4px solid #3b82f6; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #1e40af; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        💬 Comments from Estimator
+                    </h3>
+                    <p style="color: #1e40af; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {comments}
+                    </p>
                 </div>
-                ''' if comments else ''}
+                ''' if comments and comments.strip() else ''}
 
-                <div class="divider"></div>
-
-                <!-- Next Steps -->
-                <div class="alert alert-info">
-                    <strong>Next Steps:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review the approved BOQ in the system</li>
-                        <li>Assign Site Engineers to the project</li>
-                        <li>Begin procurement planning</li>
-                        <li>Set up project timeline and milestones</li>
+                <!-- Action Required -->
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #93c5fd; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #1e40af; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #1e40af; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Review the BOQ details and cost estimates</li>
+                        <li style="margin-bottom: 6px;">Verify all line items and calculations</li>
+                        <li style="margin-bottom: 6px;">Approve or request revisions as needed</li>
+                        <li style="margin-bottom: 6px;">Log in to MeterSquare ERP to take action</li>
                     </ul>
                 </div>
 
+                <!-- CTA Button -->
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{FRONTEND_URL}/boq-management" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);">
+                        Open MeterSquare ERP →
+                    </a>
+                </div>
+
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Warm Regards,</strong></p>
-                    <p>Technical Director</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{estimator_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Estimator</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
 
         return wrap_email_content(email_body)
 
-    def generate_boq_rejection_email(self, boq_data, project_data, items_summary, rejection_reason):
+    def generate_boq_rejection_email(self, boq_data, project_data, items_summary, rejection_reason, estimator_name=None, pm_name=None, approver_role=None):
         """
-        Generate BOQ rejection email for Estimator
+        Generate PROFESSIONAL BOQ rejection email for Estimator
 
         Args:
             boq_data: Dictionary containing BOQ information
             project_data: Dictionary containing project information
             items_summary: Dictionary containing items summary
-            rejection_reason: Reason for rejection from TD
+            rejection_reason: Reason for rejection from PM/TD
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager/Technical Director's full name (optional)
+            approver_role: Role of approver - "Project Manager" or "Technical Director" (default: "Project Manager")
 
         Returns:
             str: HTML formatted email content
@@ -535,84 +787,131 @@ class BOQEmailService:
         project_name = project_data.get('project_name', 'N/A')
         client = project_data.get('client', 'N/A')
         location = project_data.get('location', 'N/A')
+        project_code = project_data.get('project_code', 'N/A')
 
         total_cost = items_summary.get('total_cost', 0)
+        formatted_cost = f"₹{total_cost:,.2f}" if total_cost else "₹0.00"
+
+        # Use actual names or fallback
+        estimator_display = estimator_name if estimator_name else "Estimator"
+        pm_display = pm_name if pm_name else "Project Manager"
+        role_display = approver_role if approver_role else "Project Manager"
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
-                <h1>BOQ REVISION REQUIRED</h1>
-                <h2>Review & Resubmit</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by {role_display}</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear Estimator,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    The Bill of Quantities (BOQ) for <strong>{project_name}</strong> requires revision.
-                    The Technical Director has reviewed the BOQ and has requested changes before approval.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the {role_display}.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Information</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #fee2e2; color: #991b1b; border: 1px solid #ef4444;">REJECTED</span></p>
-                    <p><span class="label">Prepared By:</span> <span class="value">{created_by}</span></p>
-                </div>
+                <!-- Project Details Card (Combined BOQ + Project Info) -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
 
-                <!-- Project Information -->
-                <h2>Project Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
+                    </table>
                 </div>
 
                 <!-- Rejection Reason -->
-                <h2>Reason for Revision</h2>
-                <div class="alert" style="background-color: #fee2e2; border-left: 4px solid #ef4444;">
-                    <p style="color: #991b1b; margin: 0; font-weight: 500;">{rejection_reason if rejection_reason else 'Please review and revise the BOQ as per Technical Director feedback.'}</p>
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
                 </div>
 
-                <div class="divider"></div>
-
                 <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review the feedback provided above</li>
-                        <li>Make necessary revisions to the BOQ</li>
-                        <li>Update cost estimates and calculations</li>
-                        <li>Resubmit the BOQ for approval</li>
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
                     </ul>
                 </div>
 
+                <!-- CTA Button -->
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{FRONTEND_URL}/boq-management" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px rgba(220, 38, 38, 0.2);">
+                        Open MeterSquare ERP →
+                    </a>
+                </div>
+
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Warm Regards,</strong></p>
-                    <p>Technical Director</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
 
         return wrap_email_content(email_body)
 
-    def send_boq_approval_to_pm(self, boq_data, project_data, items_summary, pm_email, comments=None):
+    def send_boq_approval_to_pm(self, boq_data, project_data, items_summary, pm_email, comments=None, estimator_name=None, pm_name=None):
         """
         Send BOQ approval email to Project Manager
 
@@ -622,18 +921,20 @@ class BOQEmailService:
             items_summary: Dictionary containing items summary
             pm_email: Project Manager's email address
             comments: Optional approval comments
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager's full name (optional)
 
         Returns:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content
-            email_html = self.generate_boq_approval_email(boq_data, project_data, items_summary, comments)
+            # Generate email content with names
+            email_html = self.generate_boq_approval_email(boq_data, project_data, items_summary, comments, estimator_name, pm_name)
 
             # Create subject
             boq_name = boq_data.get('boq_name', 'BOQ')
             project_name = project_data.get('project_name', 'Project')
-            subject = f"✓ BOQ Approved - {boq_name} ({project_name})"
+            subject = f"📋 BOQ Submitted for Approval - {boq_name} ({project_name})"
 
             # Send email
             return self.send_email(pm_email, subject, email_html)
@@ -642,7 +943,7 @@ class BOQEmailService:
             log.error(f"Error sending BOQ approval to PM: {e}")
             return False
 
-    def send_boq_rejection_to_estimator(self, boq_data, project_data, items_summary, estimator_email, rejection_reason=None):
+    def send_boq_rejection_to_estimator(self, boq_data, project_data, items_summary, estimator_email, rejection_reason=None, estimator_name=None, pm_name=None, approver_role=None):
         """
         Send BOQ rejection email to Estimator
 
@@ -652,24 +953,217 @@ class BOQEmailService:
             items_summary: Dictionary containing items summary
             estimator_email: Estimator's email address
             rejection_reason: Reason for rejection
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager/Technical Director's full name (optional)
+            approver_role: Role of approver - "Project Manager" or "Technical Director" (default: "Project Manager")
 
         Returns:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content
-            email_html = self.generate_boq_rejection_email(boq_data, project_data, items_summary, rejection_reason)
+            # Generate email content with names and role
+            email_html = self.generate_boq_rejection_email(boq_data, project_data, items_summary, rejection_reason, estimator_name, pm_name, approver_role)
 
             # Create subject
             boq_name = boq_data.get('boq_name', 'BOQ')
             project_name = project_data.get('project_name', 'Project')
-            subject = f"⚠ BOQ Revision Required - {boq_name} ({project_name})"
+            role_label = "TD" if approver_role == "Technical Director" else "PM"
+            subject = f"⚠️ BOQ Rejected by {role_label} - {boq_name} ({project_name})"
 
             # Send email
             return self.send_email(estimator_email, subject, email_html)
 
         except Exception as e:
             log.error(f"Error sending BOQ rejection to Estimator: {e}")
+            return False
+
+    def generate_boq_approval_confirmation_to_estimator(self, boq_data, project_data, items_summary, comments, estimator_name=None, pm_name=None, approver_role=None):
+        """
+        Generate BOQ APPROVAL CONFIRMATION email for Estimator (PM/TD approved the BOQ)
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            items_summary: Dictionary containing items summary
+            comments: Optional comments from PM/TD
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager/Technical Director's full name (optional)
+            approver_role: Role of approver - "Project Manager" or "Technical Director" (default: "Project Manager")
+
+        Returns:
+            str: HTML formatted email content
+        """
+        boq_id = boq_data.get('boq_id', 'N/A')
+        boq_name = boq_data.get('boq_name', 'N/A')
+
+        project_name = project_data.get('project_name', 'N/A')
+        client = project_data.get('client', 'N/A')
+        location = project_data.get('location', 'N/A')
+        project_code = project_data.get('project_code', 'N/A')
+
+        # Use actual names or fallback
+        estimator_display = estimator_name if estimator_name else "Estimator"
+        pm_display = pm_name if pm_name else "Project Manager"
+        role_display = approver_role if approver_role else "Project Manager"
+
+        email_body = f"""
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Green (Success) -->
+            <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Approved by {role_display}</h1>
+                <p style="color: #d1fae5; font-size: 14px; margin: 0;">Your BOQ has been approved!</p>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Great news! Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed and <strong style="color: #059669;">approved</strong> by the {role_display}.
+                </p>
+
+                <!-- Success Badge -->
+                <div style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-left: 4px solid #10b981; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <div style="display: flex; align-items: center;">
+                        <span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                            ✓ Approved
+                        </span>
+                        <span style="margin-left: 12px; color: #065f46; font-size: 13px; font-weight: 500;">
+                            Ready to proceed to next phase
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Project Details Card (Combined BOQ + Project Info) -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #10b981; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                {f'''
+                <!-- PM Comments Section (if provided) -->
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-left: 4px solid #3b82f6; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #1e40af; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        💬 Comments
+                    </h3>
+                    <p style="color: #1e40af; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {comments}
+                    </p>
+                </div>
+                ''' if comments and comments.strip() else ''}
+
+                <!-- Next Steps -->
+                <div style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 1px solid #86efac; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #065f46; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 What's Next
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #065f46; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Your BOQ has been approved and is moving forward</li>
+                        <li style="margin-bottom: 6px;">No further action required from your end</li>
+                        <li style="margin-bottom: 6px;">You'll be notified of any updates</li>
+                    </ul>
+                </div>
+
+                <!-- CTA Button -->
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{FRONTEND_URL}/boq-management" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2);">
+                        Open MeterSquare ERP →
+                    </a>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_boq_approval_confirmation_to_estimator(self, boq_data, project_data, items_summary, estimator_email, comments=None, estimator_name=None, pm_name=None, approver_role=None):
+        """
+        Send BOQ approval confirmation email to Estimator
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            items_summary: Dictionary containing items summary
+            estimator_email: Estimator's email address
+            comments: Optional comments from PM/TD
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager/Technical Director's full name (optional)
+            approver_role: Role of approver - "Project Manager" or "Technical Director" (default: "Project Manager")
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            # Generate email content with names and role
+            email_html = self.generate_boq_approval_confirmation_to_estimator(boq_data, project_data, items_summary, comments, estimator_name, pm_name, approver_role)
+
+            # Create subject
+            boq_name = boq_data.get('boq_name', 'BOQ')
+            project_name = project_data.get('project_name', 'Project')
+            subject = f"✅ BOQ Approved by PM - {boq_name} ({project_name})"
+
+            # Send email
+            return self.send_email(estimator_email, subject, email_html)
+
+        except Exception as e:
+            log.error(f"Error sending BOQ approval confirmation to Estimator: {e}")
             return False
 
     def generate_boq_client_email(self, boq_data, project_data, message, total_value, item_count):
@@ -841,75 +1335,83 @@ class BOQEmailService:
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    def generate_pm_assignment_email(self, pm_name, td_name, projects_data):
+    def generate_pm_assignment_email(self, pm_name, td_name, projects_data, sender_role=None):
         """
         Generate email for Project Manager assignment notification
 
         Args:
             pm_name: Project Manager name
-            td_name: Technical Director name
+            td_name: Sender's name (Technical Director or Estimator)
             projects_data: List of dictionaries containing project information
+            sender_role: Sender's actual role (e.g., "Technical Director", "Estimator")
 
         Returns:
             str: HTML formatted email content
         """
-        # Build projects table
+        # Format sender role for display
+        if not sender_role:
+            sender_role = "Technical Director"  # Default for backward compatibility
+
+        # Convert role to title case for display (e.g., "estimator" -> "Estimator")
+        sender_role_display = sender_role.replace('_', ' ').title()
+        # Build projects table with clean styling
         projects_table_rows = ""
         for idx, project in enumerate(projects_data, 1):
             project_name = project.get('project_name', 'N/A')
             client = project.get('client', 'N/A')
             location = project.get('location', 'N/A')
-            status = project.get('status', 'Active')
-
+            row_bg = '#f9fafb' if idx % 2 == 0 else '#ffffff'
             projects_table_rows += f"""
-                <tr>
-                    <td>{idx}</td>
-                    <td><strong>{project_name}</strong></td>
-                    <td>{client}</td>
-                    <td>{location}</td>
-                    <td><span class="status-badge status-approved">{status}</span></td>
+                <tr style="background: {row_bg};">
+                    <td style="padding: 10px 12px; color: #64748b; font-size: 13px; border-bottom: 1px solid #e2e8f0;">{idx}</td>
+                    <td style="padding: 10px 12px; color: #1e293b; font-size: 13px; font-weight: 600; border-bottom: 1px solid #e2e8f0;">{project_name}</td>
+                    <td style="padding: 10px 12px; color: #475569; font-size: 13px; border-bottom: 1px solid #e2e8f0;">{client}</td>
+                    <td style="padding: 10px 12px; color: #475569; font-size: 13px; border-bottom: 1px solid #e2e8f0;">{location}</td>
                 </tr>
             """
 
         email_body = f"""
-        <div class="email-container">
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
             <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
-                <h1>PROJECT ASSIGNMENT</h1>
-                <h2>You Have Been Assigned as Project Manager</h2>
+            <div style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 5px 0; font-weight: 600;">Project Assignment</h1>
+                <p style="color: #bfdbfe; font-size: 14px; margin: 0;">You have been assigned as Project Manager</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{pm_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    You have been assigned as the <strong>Project Manager</strong> for the following project(s) by
-                    <strong>{td_name}</strong>. Please review the project details and begin planning for execution.
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{pm_name}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    You have been assigned as <strong style="color: #1e293b;">Project Manager</strong> for the following project(s) by <strong style="color: #1e293b;">{td_name}</strong> ({sender_role_display}). Please review the project details and begin planning for execution.
+                </p>
 
-                <!-- Assignment Details -->
-                <h2>Assignment Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Assigned By:</span> <span class="value">{td_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Technical Director</span></p>
-                    <p><span class="label">Total Projects:</span> <span class="value">{len(projects_data)}</span></p>
-                    <p><span class="label">Assignment Status:</span> <span class="status-badge status-approved">ACTIVE</span></p>
+                <!-- Assignment Badge -->
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-left: 4px solid #3b82f6; padding: 14px 18px; border-radius: 8px; margin-bottom: 25px;">
+                    <span style="background: #3b82f6; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ✓ Assigned — {len(projects_data)} Project(s)
+                    </span>
                 </div>
 
-                <!-- Projects Table -->
-                <h2>Assigned Projects</h2>
-                <div class="table-container">
-                    <table>
+                <!-- Assigned Projects Table -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin-bottom: 20px;">
+                    <div style="padding: 14px 16px; border-bottom: 1px solid #e2e8f0;">
+                        <h3 style="color: #1e293b; font-size: 15px; font-weight: 600; margin: 0;">🏗️ Assigned Projects</h3>
+                    </div>
+                    <table style="width: 100%; border-collapse: collapse;">
                         <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Project Name</th>
-                                <th>Client</th>
-                                <th>Location</th>
-                                <th>Status</th>
+                            <tr style="background: #f1f5f9;">
+                                <th style="padding: 10px 12px; color: #64748b; font-size: 12px; font-weight: 600; text-align: left; border-bottom: 1px solid #e2e8f0;">#</th>
+                                <th style="padding: 10px 12px; color: #64748b; font-size: 12px; font-weight: 600; text-align: left; border-bottom: 1px solid #e2e8f0;">Project Name</th>
+                                <th style="padding: 10px 12px; color: #64748b; font-size: 12px; font-weight: 600; text-align: left; border-bottom: 1px solid #e2e8f0;">Client</th>
+                                <th style="padding: 10px 12px; color: #64748b; font-size: 12px; font-weight: 600; text-align: left; border-bottom: 1px solid #e2e8f0;">Location</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -918,63 +1420,61 @@ class BOQEmailService:
                     </table>
                 </div>
 
-                <div class="divider"></div>
-
-                <!-- Next Steps -->
-                <div class="alert alert-success">
-                    <strong>Your Responsibilities:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
+                <!-- Responsibilities -->
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #93c5fd; border-radius: 10px; padding: 18px 20px; margin-bottom: 25px;">
+                    <h3 style="color: #1e40af; font-size: 14px; font-weight: 700; margin: 0 0 10px 0;">📋 Your Responsibilities</h3>
+                    <ul style="margin: 0; padding-left: 18px; color: #1e40af; font-size: 13px; line-height: 1.9;">
                         <li>Review the BOQ and project requirements</li>
                         <li>Assign Site Engineers to the project(s)</li>
                         <li>Create project timeline and milestones</li>
                         <li>Coordinate with procurement team for materials</li>
                         <li>Monitor project progress and update reports</li>
-                        <li>Ensure quality standards and compliance</li>
                     </ul>
                 </div>
 
-                <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong> Please log in to the MeterSquare ERP system to access
-                    detailed project information, BOQ documents, and begin your project planning activities.
+                <!-- CTA Button -->
+                <div style="text-align: center; margin: 28px 0;">
+                    <a href="{FRONTEND_URL}" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); color: white; padding: 13px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.2);">
+                        Open MeterSquare ERP →
+                    </a>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{td_name}</p>
-                    <p>Technical Director</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 700; margin: 0 0 2px 0;">{td_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">{sender_role_display}</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 22px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated email notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2025 MeterSquare. All rights reserved.</p>
             </div>
         </div>
         """
 
         return wrap_email_content(email_body)
 
-    def send_pm_assignment_notification(self, pm_email, pm_name, td_name, projects_data):
+    def send_pm_assignment_notification(self, pm_email, pm_name, td_name, projects_data, sender_role=None):
         """
         Send Project Manager assignment notification email
 
         Args:
             pm_email: Project Manager's email address
             pm_name: Project Manager's name
-            td_name: Technical Director's name
+            td_name: Sender's name (Technical Director or Estimator)
             projects_data: List of project dictionaries with details
+            sender_role: Sender's actual role (e.g., "Technical Director", "Estimator")
 
         Returns:
             bool: True if email sent successfully, False otherwise
         """
         try:
             # Generate email content
-            email_html = self.generate_pm_assignment_email(pm_name, td_name, projects_data)
+            email_html = self.generate_pm_assignment_email(pm_name, td_name, projects_data, sender_role)
 
             # Create subject
             project_count = len(projects_data)
@@ -1000,7 +1500,7 @@ class BOQEmailService:
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    def send_pm_assignment_notification_async(self, pm_email, pm_name, td_name, projects_data):
+    def send_pm_assignment_notification_async(self, pm_email, pm_name, td_name, projects_data, sender_role=None):
         """
         Send Project Manager assignment notification email asynchronously (non-blocking)
         ✅ PERFORMANCE FIX: Non-blocking email sending (15s → 0.1s response time)
@@ -1008,15 +1508,16 @@ class BOQEmailService:
         Args:
             pm_email: Project Manager's email address
             pm_name: Project Manager's name
-            td_name: Technical Director's name
+            td_name: Sender's name (Technical Director or Estimator)
             projects_data: List of project dictionaries with details
+            sender_role: Sender's actual role (e.g., "Technical Director", "Estimator")
 
         Returns:
             bool: True if email queued successfully (doesn't wait for send)
         """
         try:
             # Generate email content
-            email_html = self.generate_pm_assignment_email(pm_name, td_name, projects_data)
+            email_html = self.generate_pm_assignment_email(pm_name, td_name, projects_data, sender_role)
 
             # Create subject
             project_count = len(projects_data)
@@ -1073,88 +1574,120 @@ class BOQEmailService:
             """
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
-                <h1>SITE ASSIGNMENT</h1>
-                <h2>You Have Been Assigned as Site Engineer</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{se_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    You have been assigned as the <strong>Site Engineer</strong> for the following project(s) by
-                    <strong>{pm_name}</strong>. Please review the project details and prepare for on-site execution.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- Assignment Details -->
-                <h2>Assignment Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Assigned By:</span> <span class="value">{pm_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Project Manager</span></p>
-                    <p><span class="label">Total Projects:</span> <span class="value">{len(projects_data)}</span></p>
-                    <p><span class="label">Assignment Status:</span> <span class="status-badge" style="background-color: #d1fae5; color: #065f46;">ACTIVE</span></p>
-                </div>
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
 
-                <!-- Projects Table -->
-                <h2>Assigned Projects</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Project Name</th>
-                                <th>Client</th>
-                                <th>Location</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {projects_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
 
-                <!-- Next Steps -->
-                <div class="alert" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
-                    <strong>Your Responsibilities:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review project BOQ and technical specifications</li>
-                        <li>Coordinate with Project Manager for site requirements</li>
-                        <li>Ensure on-site safety protocols are followed</li>
-                        <li>Monitor daily progress and workforce management</li>
-                        <li>Submit daily progress reports and updates</li>
-                        <li>Manage material inventory and quality checks</li>
-                        <li>Report any issues or delays immediately</li>
-                    </ul>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
                 </div>
 
                 <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong> Please log in to the MeterSquare ERP system to access
-                    detailed project information, BOQ documents, and begin your site preparation activities.
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
+                    </ul>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{pm_name}</p>
-                    <p>Project Manager</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -1244,102 +1777,120 @@ class BOQEmailService:
             """
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
-                <h1>NEW PURCHASE ADDED</h1>
-                <h2>Additional Items Required for Project</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{estimator_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    The Project Manager <strong>{pm_name}</strong> has added new purchase items to the BOQ.
-                    These additional items are required for the project execution. Please review the details below.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Details</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
-                </div>
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
 
-                <!-- Purchase Details -->
-                <h2>New Purchase Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Added By:</span> <span class="value">{pm_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Project Manager</span></p>
-                    <p><span class="label">Total New Items:</span> <span class="value">{len(new_items_data)}</span></p>
-                </div>
-
-                <!-- Items Table -->
-                <h2>New Items Added</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Item Name</th>
-                                <th>Materials</th>
-                                <th>Labour</th>
-                                <th>Selling Price</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {items_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <!-- Total Value -->
-                <div class="total-cost">
-                    <span class="label">Total Value Added:</span>
-                    <span class="amount">AED {total_value_added:,.2f}</span>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
+                </div>
 
                 <!-- Action Required -->
-                <div class="alert" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-left: 4px solid #f59e0b;">
-                    <strong>Action Required:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review the newly added items and their costs</li>
-                        <li>Verify material specifications and quantities</li>
-                        <li>Confirm labour requirements are accurate</li>
-                        <li>Update project budget calculations if needed</li>
-                        <li>Coordinate with procurement for material availability</li>
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
                     </ul>
                 </div>
 
-                <!-- Info Note -->
-                <div class="alert alert-info">
-                    <strong>Note:</strong> These items have been added to meet additional project requirements
-                    identified during execution. Please log in to the MeterSquare ERP system to view complete
-                    details including material specifications and labour breakdowns.
-                </div>
-
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{pm_name}</p>
-                    <p>Project Manager</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -1430,95 +1981,120 @@ class BOQEmailService:
             """
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
-                <h1>NEW PURCHASE APPROVED ✓</h1>
-                <h2>Ready for Procurement</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{recipient_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    Great news! The new purchase items you requested have been <span style="color: #10b981; font-weight: bold;">APPROVED</span>
-                    by <strong>{estimator_name}</strong> (Estimator). You can now proceed with procurement and project execution.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Details</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #d1fae5; color: #065f46; border: 1px solid #10b981;">APPROVED</span></p>
-                </div>
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
 
-                <!-- Approval Details -->
-                <h2>Approval Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Approved By:</span> <span class="value">{estimator_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Estimator</span></p>
-                    <p><span class="label">Total Items Approved:</span> <span class="value">{len(new_items_data)}</span></p>
-                </div>
-
-                <!-- Items Table -->
-                <h2>Approved Items</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Item Name</th>
-                                <th>Materials</th>
-                                <th>Labour</th>
-                                <th>Selling Price</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {items_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <!-- Total Amount -->
-                <div class="total-cost" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
-                    <span class="label">Total Approved Amount:</span>
-                    <span class="amount" style="color: #065f46;">AED {total_amount:,.2f}</span>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
+                </div>
 
-                <!-- Next Steps -->
-                <div class="alert" style="background-color: #d1fae5; border-left: 4px solid #10b981;">
-                    <strong>Next Steps:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review the approved items in the system</li>
-                        <li>Initiate procurement process for materials</li>
-                        <li>Coordinate with procurement team</li>
-                        <li>Update project timeline if needed</li>
-                        <li>Monitor budget allocation</li>
+                <!-- Action Required -->
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
                     </ul>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{estimator_name}</p>
-                    <p>Estimator</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -1568,100 +2144,120 @@ class BOQEmailService:
             """
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
-                <h1>NEW PURCHASE REJECTED</h1>
-                <h2>Revision Required</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{recipient_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    The new purchase items you requested have been <span style="color: #ef4444; font-weight: bold;">REJECTED</span>
-                    by <strong>{estimator_name}</strong> (Estimator). Please review the feedback and make necessary revisions.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Details</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #fee2e2; color: #991b1b; border: 1px solid #ef4444;">REJECTED</span></p>
-                </div>
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
 
-                <!-- Rejection Details -->
-                <h2>Rejection Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Rejected By:</span> <span class="value">{estimator_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Estimator</span></p>
-                    <p><span class="label">Total Items Rejected:</span> <span class="value">{len(new_items_data)}</span></p>
-                </div>
-
-                <!-- Rejection Reason -->
-                <h2>Reason for Rejection</h2>
-                <div class="alert" style="background-color: #fee2e2; border-left: 4px solid #ef4444;">
-                    <p style="color: #991b1b; margin: 0; font-weight: 500;">{rejection_reason if rejection_reason else 'Please review and revise the purchase items as per Estimator feedback.'}</p>
-                </div>
-
-                <!-- Items Table -->
-                <h2>Rejected Items</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Item Name</th>
-                                <th>Materials</th>
-                                <th>Labour</th>
-                                <th>Selling Price</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {items_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <!-- Total Amount -->
-                <div class="total-cost" style="background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-left: 4px solid #ef4444;">
-                    <span class="label">Total Rejected Amount:</span>
-                    <span class="amount" style="color: #991b1b;">AED {total_amount:,.2f}</span>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
+                </div>
 
                 <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review the rejection feedback carefully</li>
-                        <li>Revise item specifications and costs</li>
-                        <li>Consult with Estimator if needed</li>
-                        <li>Resubmit the purchase request after revision</li>
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
                     </ul>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{estimator_name}</p>
-                    <p>Estimator</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -1788,88 +2384,120 @@ class BOQEmailService:
             """
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);">
-                <h1>PROCUREMENT ASSIGNMENT</h1>
-                <h2>You Have Been Assigned as Buyer</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{buyer_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    You have been assigned as the <strong>Buyer</strong> for the following project(s) by
-                    <strong>{pm_name}</strong>. You are responsible for procuring all materials for these projects.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- Assignment Details -->
-                <h2>Assignment Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Assigned By:</span> <span class="value">{pm_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Project Manager</span></p>
-                    <p><span class="label">Total Projects:</span> <span class="value">{len(projects_data)}</span></p>
-                    <p><span class="label">Assignment Status:</span> <span class="status-badge" style="background-color: #fed7aa; color: #9a3412;">ACTIVE</span></p>
-                </div>
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
 
-                <!-- Projects Table -->
-                <h2>Assigned Projects</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Project Name</th>
-                                <th>Client</th>
-                                <th>Location</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {projects_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
 
-                <!-- Next Steps -->
-                <div class="alert" style="background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%); border-left: 4px solid #f97316;">
-                    <strong>Your Responsibilities:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review project BOQ and material specifications</li>
-                        <li>Procure all materials from approved vendors</li>
-                        <li>Track material deliveries and quality</li>
-                        <li>Manage purchase orders and vendor relations</li>
-                        <li>Ensure timely availability of materials on site</li>
-                        <li>Coordinate with Project Manager for material needs</li>
-                        <li>Process approved change requests for additional materials</li>
-                    </ul>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
                 </div>
 
                 <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong> Please log in to the MeterSquare ERP system to access
-                    project BOQ materials, approved vendors list, and begin material procurement activities.
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
+                    </ul>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{pm_name}</p>
-                    <p>Project Manager</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -1999,104 +2627,122 @@ class BOQEmailService:
                 """
 
         email_body = f"""
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f0f9ff; padding: 20px; font-family: Arial, Helvetica, sans-serif;">
-            <tr>
-                <td align="center">
-                    <table width="650" cellpadding="0" cellspacing="0" border="0" style="background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 5px 15px rgba(59, 130, 246, 0.2); border: 2px solid #3b82f6;">
-                        <!-- Header with Logo -->
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
+
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
                         <tr>
-                            <td style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); padding: 30px 25px; text-align: center;">
-                                <img src="{logo_src}" alt="MeterSquare Logo" style="max-width: 180px; height: auto; margin: 0 auto 20px; display: block;">
-                                <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px;">PURCHASE ORDER</h1>
-                                <h2 style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; font-weight: normal;">Material Request for Project</h2>
-                            </td>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
                         </tr>
-
-                        <!-- Content -->
                         <tr>
-                            <td style="padding: 30px; background: #ffffff;">
-                                <p style="color: #000000; font-size: 14px; line-height: 1.8; margin: 0 0 20px 0;">
-                                    Dear <strong>{vendor_contact if vendor_contact else vendor_name}</strong>,
-                                </p>
-
-                                <p style="color: #000000; font-size: 14px; line-height: 1.8; margin: 0 0 20px 0;">
-                                    We are pleased to place a purchase order with <strong>{vendor_name}</strong> for the materials
-                                    listed below. This order is for our ongoing project and requires your prompt attention.
-                                </p>
-
-                                <div style="height: 2px; background: linear-gradient(90deg, transparent, #3b82f6, transparent); margin: 25px 0;"></div>
-
-                                <!-- Buyer Contact Information -->
-                                <h2 style="color: #000000; font-size: 20px; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Contact Person</h2>
-                                <table width="100%" cellpadding="10" cellspacing="0" border="0" style="background: #f0f9ff; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold; width: 30%;">Procurement Name:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{buyer_name}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Email:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{buyer_email}</td>
-                                    </tr>
-                                    {f'<tr><td style="color: #000000; font-size: 14px; font-weight: bold;">Phone:</td><td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{buyer_phone}</td></tr>' if buyer_phone != 'N/A' else ''}
-                                </table>
-
-                                <!-- Important Instructions -->
-                                <table width="100%" cellpadding="15" cellspacing="0" border="0" style="background-color: #dbeafe; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
-                                    <tr>
-                                        <td>
-                                            <p style="color: #000000; font-size: 14px; font-weight: bold; margin: 0 0 10px 0;">Important Instructions:</p>
-                                            <ul style="color: #000000; font-size: 14px; margin: 10px 0; padding-left: 20px; line-height: 1.8;">
-                                                <li>Please confirm receipt of this purchase order</li>
-                                                <li>Provide delivery timeline and availability confirmation</li>
-                                                <li>Ensure all materials meet the specified quality standards</li>
-                                                <li>Include all necessary certifications and documentation</li>
-                                                <li>Contact the buyer for any clarifications or concerns</li>
-                                            </ul>
-                                        </td>
-                                    </tr>
-                                </table>
-
-                                <!-- Delivery Requirements -->
-                                <table width="100%" cellpadding="15" cellspacing="0" border="0" style="background-color: #f0f9ff; border: 1px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
-                                    <tr>
-                                        <td>
-                                            <p style="color: #000000; font-size: 14px; font-weight: bold; margin: 0 0 10px 0;">Delivery Requirements:</p>
-                                            <ul style="color: #000000; font-size: 14px; margin: 10px 0; padding-left: 20px; line-height: 1.8;">
-                                                <li>Materials should be delivered to the project site: <strong>{location}</strong></li>
-                                                <li>Please coordinate delivery schedule with the buyer</li>
-                                                <li>Proper packaging and labeling is required</li>
-                                                <li>Invoice should reference PO Number: <strong>PO-{cr_id}</strong></li>
-                                            </ul>
-                                        </td>
-                                    </tr>
-                                </table>
-
-                                <!-- Signature -->
-                                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #3b82f6;">
-                                    <tr>
-                                        <td>
-                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;"><strong style="color: #3b82f6; font-size: 16px;">Best Regards,</strong></p>
-                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;">{buyer_name}</p>
-                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;">Procurement Department</p>
-                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;">MeterSquare ERP System</p>
-                                        </td>
-                                    </tr>
-                                </table>
-                            </td>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
                         </tr>
-
-                        <!-- Footer -->
                         <tr>
-                            <td style="background: linear-gradient(135deg, #f0f9ff 0%, #dbeafe 100%); padding: 25px; text-align: center; border-top: 2px solid #3b82f6;">
-                                <p style="color: #000000; font-size: 13px; font-weight: bold; margin: 5px 0;">MeterSquare ERP - Construction Management System</p>
-                                <p style="color: #000000; font-size: 13px; margin: 5px 0;">For any queries regarding this purchase order, please contact {buyer_email}</p>
-                                <p style="color: #000000; font-size: 13px; margin: 5px 0;">© 2025 MeterSquare. All rights reserved.</p>
-                            </td>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
                         </tr>
                     </table>
-                </td>
-            </tr>
-        </table>
+                </div>
+
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
+                </div>
+
+                <!-- Action Required -->
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
+                    </ul>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
+            </div>
+        </div>
         """
 
         return wrap_email_content(email_body)
