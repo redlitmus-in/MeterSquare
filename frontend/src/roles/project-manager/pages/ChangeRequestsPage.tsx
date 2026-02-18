@@ -53,6 +53,7 @@ interface Buyer {
   user_id: number;
   full_name: string;
   username: string;
+  is_active: boolean;
 }
 
 // Purchase Request Modal Component with Materials and Preliminaries tabs
@@ -371,7 +372,7 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.getBuyers();
       if (response.success && response.data) {
-        setBuyers(response.data);
+        setBuyers(response.data as Buyer[]);
       }
     } catch (error) {
       console.error('Error fetching buyers:', error);
@@ -2379,20 +2380,10 @@ const ChangeRequestsPage: React.FC = () => {
                   </label>
                 </div>
 
-                {/* Online Status Indicator */}
-                <div className="flex items-center gap-2 mb-4 text-sm">
-                  <div className="flex items-center gap-1.5 text-green-600">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="font-medium">ONLINE</span>
-                  </div>
-                </div>
-
-                {/* Buyers List - Scrollable with visible styled scrollbar */}
+                {/* Buyers List - Scrollable */}
                 <div
-                  className="space-y-3 max-h-[280px] overflow-y-auto pr-2 custom-scrollbar"
-                  style={{
-                    scrollBehavior: 'smooth',
-                  }}
+                  className="space-y-4 max-h-[280px] overflow-y-auto pr-2 custom-scrollbar"
+                  style={{ scrollBehavior: 'smooth' }}
                 >
                   {buyers.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
@@ -2400,58 +2391,128 @@ const ChangeRequestsPage: React.FC = () => {
                       <p>No buyers available</p>
                     </div>
                   ) : (
-                    buyers.map((buyer) => {
-                      const initials = buyer.full_name
-                        ? buyer.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-                        : buyer.username.slice(0, 2).toUpperCase();
-
-                      return (
-                        <label
-                          key={buyer.user_id}
-                          className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                            selectedBuyerId === buyer.user_id
-                              ? 'border-green-500 bg-green-50 shadow-sm'
-                              : 'border-gray-200 hover:border-green-300 hover:bg-gray-50'
-                          }`}
-                          onClick={() => setSelectedBuyerId(buyer.user_id)}
-                        >
-                          {/* Avatar */}
-                          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg ${
-                            selectedBuyerId === buyer.user_id ? 'bg-green-600' : 'bg-blue-600'
-                          }`}>
-                            {initials}
+                    <>
+                      {/* Online Buyers */}
+                      {buyers.filter(b => b.is_active === true).length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                            <span className="text-xs font-bold text-green-700 uppercase tracking-wide">Online</span>
+                            <div className="flex-1 h-px bg-green-200"></div>
                           </div>
-
-                          {/* User Info */}
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-gray-900">
-                                {buyer.full_name || buyer.username}
-                              </span>
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                                <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                                Online
-                              </span>
-                            </div>
-                            <div className="text-sm text-gray-500 mt-0.5">
-                              {buyer.username}
-                            </div>
+                          <div className="space-y-3">
+                            {buyers.filter(b => b.is_active === true).map((buyer) => {
+                              const initials = buyer.full_name
+                                ? buyer.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+                                : buyer.username.slice(0, 2).toUpperCase();
+                              return (
+                                <label
+                                  key={buyer.user_id}
+                                  className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                                    selectedBuyerId === buyer.user_id
+                                      ? 'border-green-500 bg-green-50 shadow-sm'
+                                      : 'border-gray-200 hover:border-green-300 hover:bg-gray-50'
+                                  }`}
+                                  onClick={() => setSelectedBuyerId(buyer.user_id)}
+                                >
+                                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg relative ${
+                                    selectedBuyerId === buyer.user_id ? 'bg-green-600' : 'bg-blue-600'
+                                  }`}>
+                                    {initials}
+                                    <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-semibold text-gray-900">{buyer.full_name || buyer.username}</span>
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                        <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                                        Online
+                                      </span>
+                                    </div>
+                                    <div className="text-sm text-gray-500 mt-0.5">{buyer.username}</div>
+                                  </div>
+                                  <input
+                                    type="radio"
+                                    name="buyer"
+                                    value={buyer.user_id}
+                                    checked={selectedBuyerId === buyer.user_id}
+                                    onChange={() => setSelectedBuyerId(buyer.user_id)}
+                                    className="w-5 h-5 text-green-600 focus:ring-green-500"
+                                  />
+                                </label>
+                              );
+                            })}
                           </div>
+                        </div>
+                      )}
 
-                          {/* Radio Button */}
-                          <input
-                            type="radio"
-                            name="buyer"
-                            value={buyer.user_id}
-                            checked={selectedBuyerId === buyer.user_id}
-                            onChange={() => setSelectedBuyerId(buyer.user_id)}
-                            className="w-5 h-5 text-green-600 focus:ring-green-500"
-                          />
-                        </label>
-                      );
-                    })
+                      {/* Offline Buyers */}
+                      {buyers.filter(b => b.is_active !== true).length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                            <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Offline</span>
+                            <div className="flex-1 h-px bg-gray-200"></div>
+                          </div>
+                          <div className="space-y-3">
+                            {buyers.filter(b => b.is_active !== true).map((buyer) => {
+                              const initials = buyer.full_name
+                                ? buyer.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+                                : buyer.username.slice(0, 2).toUpperCase();
+                              return (
+                                <label
+                                  key={buyer.user_id}
+                                  className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                                    selectedBuyerId === buyer.user_id
+                                      ? 'border-gray-400 bg-gray-100 shadow-sm'
+                                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                  }`}
+                                  onClick={() => setSelectedBuyerId(buyer.user_id)}
+                                >
+                                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg bg-gray-400 relative">
+                                    {initials}
+                                    <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-gray-400 rounded-full border-2 border-white" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-semibold text-gray-700">{buyer.full_name || buyer.username}</span>
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+                                        <div className="w-1.5 h-1.5 bg-gray-400 rounded-full"></div>
+                                        Offline
+                                      </span>
+                                    </div>
+                                    <div className="text-sm text-gray-500 mt-0.5">{buyer.username}</div>
+                                  </div>
+                                  <input
+                                    type="radio"
+                                    name="buyer"
+                                    value={buyer.user_id}
+                                    checked={selectedBuyerId === buyer.user_id}
+                                    onChange={() => setSelectedBuyerId(buyer.user_id)}
+                                    className="w-5 h-5 text-gray-500 focus:ring-gray-400"
+                                  />
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
+
+                {/* Offline email hint */}
+                {(() => {
+                  const selBuyer = buyers.find(b => b.user_id === selectedBuyerId);
+                  return selBuyer && selBuyer.is_active !== true ? (
+                    <p className="text-xs mt-2 text-amber-600 flex items-center gap-1">
+                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      This buyer is offline. An email notification will be sent to notify them.
+                    </p>
+                  ) : null;
+                })()}
               </div>
 
               {/* Comments Section */}

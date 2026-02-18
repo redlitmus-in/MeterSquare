@@ -57,8 +57,6 @@ def create_change_request():
         effective_role = context.get('effective_role', current_user.get('role', ''))
         actual_role = current_user.get('role', '')
 
-        log.info(f"Create change request - User: {user_name}, actual_role: {actual_role}, effective_role: {effective_role}")
-
         # Validate input
         boq_id = data.get('boq_id')
         justification = data.get('justification')
@@ -347,15 +345,12 @@ def create_change_request():
         elif role_lower == 'admin':
             initial_status = 'pending'
 
-        log.info(f"Creating change request with status '{initial_status}' for role '{user_role}'")
-
         # Create change request with role-based status
         # No auto-routing - user must explicitly send for review
         # If admin is viewing as another role, store that role for filtering
         admin_viewing_as = None
         if actual_role.lower() == 'admin' and effective_role.lower() != 'admin':
             admin_viewing_as = effective_role.lower()
-            log.info(f"Admin creating request while viewing as {admin_viewing_as}")
 
         change_request = ChangeRequest(
             boq_id=boq_id,
@@ -382,7 +377,6 @@ def create_change_request():
         db.session.flush()  # Get the cr_id before committing
 
         # Log successful change request creation with sub_item_id
-        log.info(f"✅ Change request CR-{change_request.cr_id} created with sub_item_id={primary_sub_item_id}")
         if primary_sub_item_id:
             log.info(f"   - sub_item_id {primary_sub_item_id} will be saved to change_requests table")
         else:
@@ -426,7 +420,6 @@ def create_change_request():
 
         # Append new action
         current_actions.append(new_action)
-        log.info(f"Appending change_request_created action to BOQ {boq_id} history for CR {change_request.cr_id}")
 
         if existing_history:
             # Update existing history
@@ -461,9 +454,6 @@ def create_change_request():
         response_message = "Change request created successfully"
         response_status = "pending"
         approval_from = None
-
-        log.info(f"Change request {change_request.cr_id} created by {user_name} for BOQ {boq_id}")
-
         # Prepare response
         response = {
             "success": True,
@@ -524,9 +514,6 @@ def send_for_review(cr_id):
         user_context = get_effective_user_context()
         is_admin_viewing_as = user_context.get('is_admin_viewing', False)
         effective_role_for_workflow = user_context.get('effective_role', user_role_lower)
-
-        log.info(f"User {user_id} attempting to send change request. Role: '{user_role}' (lowercase: '{user_role_lower}'), effective_role: '{effective_role_for_workflow}', is_admin_viewing_as: {is_admin_viewing_as}")
-
         # --- Get Change Request ---
         change_request = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
         if not change_request:
@@ -549,7 +536,6 @@ def send_for_review(cr_id):
         buyer_id = data.get('buyer_id')
         # Use effective role for workflow when admin is viewing as another role
         normalized_role = workflow_service.normalize_role(effective_role_for_workflow if is_admin_viewing_as else user_role_lower)
-        log.info(f"send_for_review: normalized_role='{normalized_role}', is_admin_viewing_as={is_admin_viewing_as}, effective_role_for_workflow='{effective_role_for_workflow}'")
 
         # --- Determine next approver ---
         next_approver = None
@@ -590,7 +576,6 @@ def send_for_review(cr_id):
                     item = boq_items[item_index]
                     assigner_role = item.get('assigned_by_role')
                     assigned_approver_id = item.get('assigned_by_pm_user_id')
-                    log.info(f"Found item assignment: assigned_by_role={assigner_role}, assigned_by_pm_user_id={assigned_approver_id}")
 
             # If we couldn't find from BOQ item, check PMAssignSS table
             if not assigned_approver_id:
@@ -607,17 +592,14 @@ def send_for_review(cr_id):
                     assigner_user = User.query.filter_by(user_id=assigned_approver_id, is_deleted=False).first()
                     if assigner_user and assigner_user.role:
                         assigner_role = assigner_user.role.role.lower()
-                        log.info(f"Found assignment from PMAssignSS: assigned_by_pm_id={assigned_approver_id}, role={assigner_role}")
 
             # Determine the correct approver based on who assigned
             if assigner_role and assigner_role.lower() == 'mep':
                 # MEP assigned this SE - route to MEP
                 next_role = CR_CONFIG.ROLE_MEP
-                log.info(f"SE was assigned by MEP, routing to MEP")
             else:
                 # PM assigned this SE (or fallback to PM)
                 next_role = CR_CONFIG.ROLE_PROJECT_MANAGER
-                log.info(f"SE was assigned by PM, routing to PM")
 
             # Get the specific approver (either from assignment or fallback to project level)
             if assigned_approver_id:
@@ -625,7 +607,6 @@ def send_for_review(cr_id):
                 if assigned_approver_user:
                     next_approver = assigned_approver_user.full_name or assigned_approver_user.username
                     next_approver_id = assigned_approver_user.user_id
-                    log.info(f"Routing CR {cr_id} to {next_role}: {next_approver} (user_id={next_approver_id})")
                 else:
                     assigned_approver_id = None  # Reset to trigger fallback
 
@@ -650,7 +631,6 @@ def send_for_review(cr_id):
 
                 next_approver = assigned_approver_user.full_name or assigned_approver_user.username
                 next_approver_id = assigned_approver_user.user_id
-                log.info(f"Routing CR {cr_id} to {next_role} (fallback): {next_approver} (user_id={next_approver_id})")
 
         elif normalized_role in ['projectmanager', 'project_manager', 'mep', 'mepsupervisor', 'admin']:
             # PM/MEP routing logic:
@@ -724,7 +704,6 @@ def send_for_review(cr_id):
                 next_role = CR_CONFIG.ROLE_ESTIMATOR
                 next_approver = assigned_estimator.full_name or assigned_estimator.username
                 next_approver_id = assigned_estimator.user_id
-                log.info(f"Routing CR {cr_id} to Estimator: {next_approver} (user_id={next_approver_id}, project_id={change_request.project_id})")
 
             elif route_to == 'buyer':
                 # Explicitly sending to Buyer - require buyer_id selection
@@ -752,8 +731,6 @@ def send_for_review(cr_id):
                 change_request.assigned_to_buyer_name = next_approver
                 change_request.assigned_to_buyer_date = datetime.utcnow()
 
-                log.info(f"Routing CR {cr_id} directly to Buyer: {next_approver} (user_id={next_approver_id})")
-
             elif has_new_materials:
                 # No route_to specified, has new materials - default to Estimator
                 project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
@@ -767,7 +744,6 @@ def send_for_review(cr_id):
                 next_role = CR_CONFIG.ROLE_ESTIMATOR
                 next_approver = assigned_estimator.full_name or assigned_estimator.username
                 next_approver_id = assigned_estimator.user_id
-                log.info(f"Routing CR {cr_id} with NEW materials to Estimator (default): {next_approver}")
 
             else:
                 # No route_to specified, all materials from BOQ - default to Buyer (require buyer_id)
@@ -794,8 +770,6 @@ def send_for_review(cr_id):
                 change_request.assigned_to_buyer_user_id = next_approver_id
                 change_request.assigned_to_buyer_name = next_approver
                 change_request.assigned_to_buyer_date = datetime.utcnow()
-
-                log.info(f"Routing CR {cr_id} with EXISTING BOQ materials to Buyer (default): {next_approver} (user_id={next_approver_id})")
 
         elif is_admin:
             # Admin sends to assigned PM
@@ -837,7 +811,6 @@ def send_for_review(cr_id):
             change_request.assigned_to_pm_user_id = next_approver_id
             change_request.assigned_to_pm_name = next_approver
             change_request.assigned_to_pm_date = datetime.utcnow()
-            log.info(f"SS/SE sending CR {cr_id} to PM {next_approver} (user_id={next_approver_id}) - status set to '{CR_CONFIG.STATUS_SEND_TO_PM}'")
         elif next_role == CR_CONFIG.ROLE_MEP and normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
             # SS/SE sending to MEP - set status to send_to_mep
             change_request.status = CR_CONFIG.STATUS_SEND_TO_MEP
@@ -845,7 +818,6 @@ def send_for_review(cr_id):
             change_request.assigned_to_pm_user_id = next_approver_id
             change_request.assigned_to_pm_name = next_approver
             change_request.assigned_to_pm_date = datetime.utcnow()
-            log.info(f"SS/SE sending CR {cr_id} to MEP {next_approver} (user_id={next_approver_id}) - status set to '{CR_CONFIG.STATUS_SEND_TO_MEP}'")
         else:
             change_request.status = CR_CONFIG.STATUS_UNDER_REVIEW
 
@@ -910,7 +882,6 @@ def send_for_review(cr_id):
             db.session.add(boq_history)
 
         db.session.commit()
-        log.info(f"Change request {cr_id} sent for review to {next_approver} ({next_role})")
 
         # Send notification to next approver
         try:
@@ -934,6 +905,35 @@ def send_for_review(cr_id):
                 )
         except Exception as notif_error:
             log.error(f"Failed to send CR created notification: {notif_error}")
+
+        # Send email to receiver only if they are offline
+        try:
+            if next_approver_id:
+                receiver_user = User.query.filter_by(user_id=next_approver_id, is_deleted=False).first()
+                if receiver_user:
+                    receiver_status = str(receiver_user.user_status).lower().strip() if receiver_user.user_status else "unknown"
+                    if receiver_status == "offline":
+                        from utils.boq_email_service import BOQEmailService
+                        boq_email_service = BOQEmailService()
+                        project_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                        project_code = change_request.project.project_code if change_request.project else 'N/A'
+                        item_name = change_request.item_name or f"CR #{cr_id}"
+                        sender_display = current_user.get('full_name') or current_user.get('username') or 'User'
+                        email_sent = boq_email_service.send_cr_review_notification(
+                            cr_id=cr_id,
+                            project_name=project_name,
+                            project_code=project_code,
+                            item_name=item_name,
+                            sender_name=sender_display,
+                            sender_role=user_role,
+                            recipient_email=receiver_user.email,
+                            recipient_name=receiver_user.full_name or receiver_user.username,
+                            recipient_role=next_role
+                        )
+                    else:
+                        log.info(f"[send_for_review] Receiver {next_approver_id} is ONLINE - Email skipped")
+        except Exception as email_err:
+            log.error(f"[send_for_review] Failed to send email to receiver: {email_err}")
 
         return jsonify({
             "success": True,
@@ -984,8 +984,6 @@ def get_all_change_requests():
         actual_role = current_user.get('role', '').lower()
         is_admin_viewing = context.get('is_admin_viewing', False)
 
-        log.info(f"Get all change requests - User: {user_id}, actual_role: {actual_role}, effective_role: {effective_role}, is_admin_viewing: {is_admin_viewing}")
-
         # Use effective role for filtering
         user_role = effective_role
 
@@ -1004,8 +1002,6 @@ def get_all_change_requests():
         # Admin viewing as another role should use that role's filters, not admin filters
         # Only direct admin login (not viewing as another role) sees everything
         if actual_user_role == 'admin' and not is_admin_viewing:
-            log.info(f"Admin user (direct login) - showing ALL requests (no filtering). actual_role: {actual_user_role}")
-            # No filtering applied - admin sees everything
             pass
         elif user_role in ['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']:
             # NEW FLOW: SE sees requests from projects with item-level assignments via pm_assign_ss
@@ -1156,7 +1152,6 @@ def get_all_change_requests():
                     # No projects with PM, show nothing
                     query = query.filter(ChangeRequest.cr_id == -1)
 
-                log.info(f"Applied filter: include admin/PM created + SS/SE sent for review, from PM-assigned projects")
             elif pm_project_ids:
                 # Regular PM - sees requests from their assigned projects
                 # IMPORTANT: For SE-originated requests, only show to the PM who was assigned
@@ -1219,8 +1214,6 @@ def get_all_change_requests():
             ).all()
             mep_project_ids = [p.project_id for p in mep_projects]
 
-            log.info(f"Regular MEP {user_id} - has {len(mep_project_ids)} assigned projects")
-
             # Filter for MEP: only show pending requests from MEP
             mep_role_filter = and_(
                 ChangeRequest.requested_by_role.in_(['mep', 'mepsupervisor']),
@@ -1271,8 +1264,6 @@ def get_all_change_requests():
                     Project.is_deleted == False
                 ).all()
                 all_mep_project_ids = [p.project_id for p in all_mep_projects]
-
-                log.info(f"Admin viewing as MEP - showing requests from {len(all_mep_project_ids)} MEP-assigned projects")
 
                 if all_mep_project_ids:
                     # Admin sees all MEP-related requests from all MEP-assigned projects
@@ -1342,13 +1333,9 @@ def get_all_change_requests():
             # 2. Requests they approved (approved_by_user_id = user_id)
             # 3. Completed purchases from their projects (to see pricing history)
             from sqlalchemy import or_, and_
-
-            log.info(f"Estimator filter - user_id: {user_id}, is_admin_viewing: {is_admin_viewing}")
-
             if is_admin_viewing:
                 # Admin viewing as Estimator - show ALL estimator-relevant requests
                 # This includes: requests needing estimator approval, send_to_est, approved by any estimator, completed purchases
-                log.info(f"Admin viewing as Estimator - showing ALL estimator-relevant requests")
                 query = query.filter(
                     or_(
                         ChangeRequest.approval_required_from == 'estimator',  # Pending estimator approval
@@ -1366,8 +1353,6 @@ def get_all_change_requests():
                 # Regular estimator: filter by assigned projects
                 estimator_projects = Project.query.filter_by(estimator_id=user_id, is_deleted=False).all()
                 estimator_project_ids = [p.project_id for p in estimator_projects]
-
-                log.info(f"Regular Estimator {user_id} - has {len(estimator_project_ids)} assigned projects: {estimator_project_ids}")
 
                 if estimator_project_ids:
                     # Estimator sees requests from their assigned projects only
@@ -1460,7 +1445,6 @@ def get_all_change_requests():
                 query = query.filter(ChangeRequest.status.in_(['purchase_completed', 'routed_to_store', 'completed']))
             else:
                 query = query.filter(ChangeRequest.status == status_filter)
-            log.info(f"📋 Filtering by status: {status_filter}")
 
         # Execute query with optional pagination
         ordered_query = query.order_by(ChangeRequest.created_at.desc())
@@ -1470,7 +1454,6 @@ def get_all_change_requests():
             total_count = ordered_query.count()
             offset = (page - 1) * page_size
             change_requests = ordered_query.offset(offset).limit(page_size).all()
-            log.info(f"📊 Processing page {page} ({len(change_requests)}/{total_count} CRs) for user {user_id}")
         else:
             # PERFORMANCE: Default limit when no pagination to prevent loading huge datasets
             change_requests = ordered_query.limit(200).all()
@@ -1478,10 +1461,7 @@ def get_all_change_requests():
 
         # 🔍 DEBUG: Log what we're returning for buyer role
         if user_role == 'buyer':
-            log.info(f"=== BUYER QUERY DEBUG ===")
-            log.info(f"Total CRs returned: {len(change_requests)}")
             sub_crs = [cr for cr in change_requests if cr.is_sub_cr]
-            log.info(f"Sub-CRs in results: {len(sub_crs)}")
             for cr in sub_crs:
                 log.info(f"  Sub-CR {cr.get_formatted_cr_id()}: status={cr.status}, vendor_selection_status={cr.vendor_selection_status}, assigned_to_buyer={cr.assigned_to_buyer_user_id}")
 
@@ -1918,8 +1898,6 @@ def approve_change_request(cr_id):
         # Admin has full approval authority (like TD) - but only when NOT viewing as another role
         is_admin = (current_user.get('role_name', '').lower() in ['admin'] or normalized_role == 'admin') and not is_admin_viewing
 
-        log.info(f"APPROVAL DEBUG - CR {cr_id}: approver_role={approver_role}, normalized_role={normalized_role}, is_admin={is_admin}, is_admin_viewing={is_admin_viewing}, CR status={change_request.status}, approval_required_from={change_request.approval_required_from}")
-
         # PM can approve requests that are under_review or send_to_pm from SE
         if normalized_role in ['projectmanager'] and change_request.status in [CR_CONFIG.STATUS_UNDER_REVIEW, CR_CONFIG.STATUS_SEND_TO_PM]:
             # PM can approve requests from Site Engineers
@@ -1986,8 +1964,6 @@ def approve_change_request(cr_id):
             if has_new_materials:
                 # Has NEW materials → Route to Estimator for pricing
                 change_request.status = CR_CONFIG.STATUS_SEND_TO_EST  # PM approved, send to estimator
-                log.info(f"{approver_role} approving CR {cr_id} - routing to estimator")
-
                 project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
                 if not project or not project.estimator_id:
                     return jsonify({"error": "No Estimator assigned for this project"}), 400
@@ -2000,7 +1976,6 @@ def approve_change_request(cr_id):
                 next_role = CR_CONFIG.ROLE_ESTIMATOR
                 next_approver = assigned_estimator.full_name or assigned_estimator.username
                 next_approver_id = assigned_estimator.user_id
-                log.info(f"PM approved CR {cr_id} with NEW materials → Routing to Estimator: {next_approver} (user_id={next_approver_id})")
             else:
                 # All materials are existing (external buy) → PM MUST select a Buyer
                 if not selected_buyer_id:
@@ -2071,8 +2046,6 @@ def approve_change_request(cr_id):
             }
 
             current_actions.append(new_action)
-            log.info(f"Appending change_request_approved_by_pm action to BOQ {change_request.boq_id} history")
-
             if existing_history:
                 existing_history.action = current_actions
                 flag_modified(existing_history, "action")
@@ -2117,6 +2090,34 @@ def approve_change_request(cr_id):
             except Exception as notif_error:
                 log.error(f"Failed to send CR approval notification: {notif_error}")
 
+            # Send email to receiver only if they are offline
+            try:
+                if next_approver_id:
+                    receiver_user = User.query.filter_by(user_id=next_approver_id, is_deleted=False).first()
+                    if receiver_user:
+                        receiver_status = str(receiver_user.user_status).lower().strip() if receiver_user.user_status else "unknown"
+                        if receiver_status == "offline":
+                            from utils.boq_email_service import BOQEmailService
+                            boq_email_service = BOQEmailService()
+                            pr_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                            pr_code = change_request.project.project_code if change_request.project else 'N/A'
+                            email_sent = boq_email_service.send_cr_review_notification(
+                                cr_id=cr_id,
+                                project_name=pr_name,
+                                project_code=pr_code,
+                                item_name=change_request.item_name or f"CR #{cr_id}",
+                                sender_name=approver_name,
+                                sender_role=approver_role,
+                                recipient_email=receiver_user.email,
+                                recipient_name=receiver_user.full_name or receiver_user.username,
+                                recipient_role=next_role,
+                                context='forwarded'
+                            )
+                        else:
+                            log.info(f"[approve_cr/pm] Receiver {next_approver_id} is ONLINE - Email skipped")
+            except Exception as email_err:
+                log.error(f"[approve_cr/pm] Failed to send email to receiver: {email_err}")
+
             return jsonify({
                 "success": True,
                 "message": f"Approved by PM. Automatically forwarded to {next_approver} for review",
@@ -2133,8 +2134,6 @@ def approve_change_request(cr_id):
             change_request.approval_required_from = None  # No further approval needed
             change_request.current_approver_role = None
             change_request.updated_at = datetime.utcnow()
-
-            log.info(f"TD {approver_name} gave final approval for CR {cr_id} - Change request complete")
 
             # Add to BOQ History - TD Approval
             existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -2172,7 +2171,6 @@ def approve_change_request(cr_id):
             }
 
             current_actions.append(new_action)
-            log.info(f"Appending change_request_approved_by_td action to BOQ {change_request.boq_id} history")
 
             if existing_history:
                 existing_history.action = current_actions
@@ -2201,9 +2199,6 @@ def approve_change_request(cr_id):
                 db.session.add(boq_history)
 
             db.session.commit()
-
-            log.info(f"TD gave final approval for CR {cr_id}")
-
             # Send notification to CR creator about final approval
             try:
                 if change_request.requested_by_user_id:
@@ -2220,6 +2215,32 @@ def approve_change_request(cr_id):
             except Exception as notif_error:
                 log.error(f"Failed to send CR final approval notification: {notif_error}")
 
+            # Send email to CR creator only if they are offline
+            try:
+                if change_request.requested_by_user_id:
+                    creator_user = User.query.filter_by(user_id=change_request.requested_by_user_id, is_deleted=False).first()
+                    if creator_user:
+                        creator_status = str(creator_user.user_status).lower().strip() if creator_user.user_status else "unknown"
+                        if creator_status == "offline":
+                            from utils.boq_email_service import BOQEmailService
+                            boq_email_service = BOQEmailService()
+                            pr_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                            pr_code = change_request.project.project_code if change_request.project else 'N/A'
+                            email_sent = boq_email_service.send_cr_approved_notification(
+                                cr_id=cr_id,
+                                project_name=pr_name,
+                                project_code=pr_code,
+                                item_name=change_request.item_name or f"CR #{cr_id}",
+                                approver_name=approver_name,
+                                approver_role=approver_role,
+                                recipient_email=creator_user.email,
+                                recipient_name=creator_user.full_name or creator_user.username
+                            )
+                        else:
+                            log.info(f"[approve_cr/td] CR creator {change_request.requested_by_user_id} is ONLINE - Email skipped")
+            except Exception as email_err:
+                log.error(f"[approve_cr/td] Failed to send email to CR creator: {email_err}")
+
             return jsonify({
                 "success": True,
                 "message": "Final approval by TD. Change request completed.",
@@ -2229,7 +2250,6 @@ def approve_change_request(cr_id):
 
         elif normalized_role == 'estimator':
             # Estimator approves - change status to send_to_buyer
-            log.info(f"ESTIMATOR APPROVAL BLOCK - CR {cr_id}, approver: {approver_name}, is_admin_viewing: {is_admin_viewing}, current status: {change_request.status}")
             change_request.approved_by_user_id = approver_id
             change_request.approved_by_name = approver_name
             change_request.approval_date = datetime.utcnow()
@@ -2237,7 +2257,6 @@ def approve_change_request(cr_id):
             change_request.approval_required_from = CR_CONFIG.ROLE_BUYER
             change_request.current_approver_role = CR_CONFIG.ROLE_BUYER
             change_request.updated_at = datetime.utcnow()
-            log.info(f"ESTIMATOR APPROVAL - Changed status to send_to_buyer for CR {cr_id}")
 
             # Update materials with pricing if estimator provided updated prices
             updated_materials = data.get('materials_data')
@@ -2248,8 +2267,6 @@ def approve_change_request(cr_id):
                 change_request.materials_data = updated_materials
                 change_request.materials_total_cost = total_cost
                 flag_modified(change_request, "materials_data")
-
-                log.info(f"Estimator updated materials pricing for CR {cr_id}. New total: {total_cost}")
 
             # Get buyer role_id
             from models.role import Role
@@ -2286,7 +2303,6 @@ def approve_change_request(cr_id):
                 change_request.assigned_to_buyer_user_id = buyer.user_id
                 change_request.assigned_to_buyer_name = buyer.full_name
                 change_request.assigned_to_buyer_date = datetime.utcnow()
-                log.info(f"CR {cr_id} assigned to buyer {buyer.full_name} (ID: {buyer.user_id})")
             else:
                 log.warning(f"CR {cr_id} approved but no buyer found in system!")
 
@@ -2326,7 +2342,6 @@ def approve_change_request(cr_id):
             }
 
             current_actions.append(new_action)
-            log.info(f"Appending change_request_approved_by_estimator action to BOQ {change_request.boq_id} history")
 
             if existing_history:
                 existing_history.action = current_actions
@@ -2356,8 +2371,6 @@ def approve_change_request(cr_id):
 
             db.session.commit()
 
-            log.info(f"Estimator approved CR {cr_id}, assigned to Buyer for purchase")
-
             # Send notification to assigned Buyer
             try:
                 if change_request.assigned_to_buyer_user_id:
@@ -2373,6 +2386,34 @@ def approve_change_request(cr_id):
                     )
             except Exception as notif_error:
                 log.error(f"Failed to send CR approval to Buyer notification: {notif_error}")
+
+            # Send email to Buyer only if they are offline
+            try:
+                if change_request.assigned_to_buyer_user_id:
+                    buyer_user = User.query.filter_by(user_id=change_request.assigned_to_buyer_user_id, is_deleted=False).first()
+                    if buyer_user:
+                        buyer_status = str(buyer_user.user_status).lower().strip() if buyer_user.user_status else "unknown"
+                        if buyer_status == "offline":
+                            from utils.boq_email_service import BOQEmailService
+                            boq_email_service = BOQEmailService()
+                            pr_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                            pr_code = change_request.project.project_code if change_request.project else 'N/A'
+                            email_sent = boq_email_service.send_cr_review_notification(
+                                cr_id=cr_id,
+                                project_name=pr_name,
+                                project_code=pr_code,
+                                item_name=change_request.item_name or f"CR #{cr_id}",
+                                sender_name=approver_name,
+                                sender_role=approver_role,
+                                recipient_email=buyer_user.email,
+                                recipient_name=buyer_user.full_name or buyer_user.username,
+                                recipient_role='buyer',
+                                context='purchase'
+                            )
+                        else:
+                            log.info(f"[approve_cr/estimator] Buyer {change_request.assigned_to_buyer_user_id} is ONLINE - Email skipped")
+            except Exception as email_err:
+                log.error(f"[approve_cr/estimator] Failed to send email to Buyer: {email_err}")
 
             return jsonify({
                 "success": True,
@@ -2392,9 +2433,6 @@ def approve_change_request(cr_id):
             change_request.approval_required_from = None  # No further approval needed
             change_request.current_approver_role = None
             change_request.updated_at = datetime.utcnow()
-
-            log.info(f"Admin {approver_name} gave final approval for CR {cr_id} - Change request complete")
-
             # Add to BOQ History - Admin Approval (use 'admin' role in history)
             existing_history = BOQHistory.query.filter_by(boq_id=change_request.boq_id).order_by(BOQHistory.action_date.desc()).first()
 
@@ -2431,8 +2469,6 @@ def approve_change_request(cr_id):
             }
 
             current_actions.append(new_action)
-            log.info(f"Appending change_request_approved_by_admin action to BOQ {change_request.boq_id} history")
-
             if existing_history:
                 existing_history.action = current_actions
                 flag_modified(existing_history, "action")
@@ -2460,9 +2496,6 @@ def approve_change_request(cr_id):
                 db.session.add(boq_history)
 
             db.session.commit()
-
-            log.info(f"Admin gave final approval for CR {cr_id}")
-
             return jsonify({
                 "success": True,
                 "message": "Final approval by Admin. Change request completed.",
@@ -2851,8 +2884,6 @@ def update_change_request(cr_id):
 
         db.session.commit()
 
-        log.info(f"Change request {cr_id} updated by user {user_id}. Original cost: {original_total_cost}, New cost: {materials_total_cost}, Increase: {total_cost_increase}")
-
         return jsonify({
             "success": True,
             "message": "Change request updated successfully",
@@ -2983,7 +3014,6 @@ def reject_change_request(cr_id):
         }
 
         current_actions.append(new_action)
-        log.info(f"Appending change_request_rejected action to BOQ {change_request.boq_id} history")
 
         if existing_history:
             existing_history.action = current_actions
@@ -3013,8 +3043,6 @@ def reject_change_request(cr_id):
 
         db.session.commit()
 
-        log.info(f"Change request {cr_id} rejected by {approver_name}")
-
         # Send notification to CR creator about rejection
         try:
             if change_request.requested_by_user_id:
@@ -3026,7 +3054,8 @@ def reject_change_request(cr_id):
                     rejector_name=approver_name,
                     rejector_role=history_role,
                     creator_user_id=change_request.requested_by_user_id,
-                    rejection_reason=rejection_reason
+                    rejection_reason=rejection_reason,
+                    item_name=change_request.item_name
                 )
         except Exception as notif_error:
             log.error(f"Failed to send CR rejection notification: {notif_error}")
@@ -3177,7 +3206,6 @@ def get_all_buyers():
             # Check online status based on user_status field
             # Only "online" is considered online, everything else (offline/NULL) is offline
             is_online = buyer.user_status == 'online'
-            log.info(f"Buyer {buyer.full_name}: user_status={buyer.user_status}, is_online={is_online}")
 
             buyers_list.append({
                 'user_id': buyer.user_id,
@@ -3238,8 +3266,6 @@ def delete_change_request(cr_id):
         change_request.is_deleted = True
         change_request.updated_at = datetime.utcnow()
         db.session.commit()
-
-        log.info(f"Change request {cr_id} deleted by user {user_id}")
 
         return jsonify({
             "success": True,

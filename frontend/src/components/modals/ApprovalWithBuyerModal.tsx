@@ -34,6 +34,10 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [fetchingBuyers, setFetchingBuyers] = useState(true);
 
+  // Track selected buyer for offline email hint
+  const selectedBuyer = buyers.find(b => b.user_id === selectedBuyerId) ?? null;
+  const isSelectedBuyerOffline = selectedBuyer ? selectedBuyer.is_active !== true : false;
+
   useEffect(() => {
     if (isOpen) {
       fetchBuyers();
@@ -56,7 +60,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
       const response = await changeRequestService.getAllBuyers();
       if (response.success) {
         setBuyers(response.buyers);
-        // Auto-select first buyer if only one exists
+        // Auto-select if only one buyer exists (online or offline)
         if (response.buyers.length === 1) {
           setSelectedBuyerId(response.buyers[0].user_id);
         }
@@ -244,7 +248,13 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                               {buyers.filter(b => b.is_active !== true).map((buyer) => (
                           <div
                             key={buyer.user_id}
-                            className="flex items-center gap-3 p-3 cursor-not-allowed transition-colors rounded-lg border-2 border-gray-200 bg-gray-50 opacity-60"
+                            onClick={() => setSelectedBuyerId(buyer.user_id)}
+                            className={`
+                              flex items-center gap-3 p-3 cursor-pointer transition-colors rounded-lg border-2
+                              ${selectedBuyerId === buyer.user_id
+                                ? 'bg-gray-100 border-gray-400'
+                                : 'border-gray-200 hover:border-gray-300 bg-white'}
+                            `}
                           >
                             {/* Offline Status Indicator */}
                             <div className="relative">
@@ -263,13 +273,18 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                                 <p className="text-sm font-semibold text-gray-700 truncate">
                                   {buyer.full_name}
                                 </p>
-                                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-gray-200 text-gray-700">
+                                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-gray-200 text-gray-600">
                                   <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
                                   Offline
                                 </span>
                               </div>
                               <p className="text-xs text-gray-500 truncate">{buyer.email}</p>
                             </div>
+
+                            {/* Selected Checkmark */}
+                            {selectedBuyerId === buyer.user_id && (
+                              <CheckCircle className="w-5 h-5 text-gray-500 flex-shrink-0" />
+                            )}
                           </div>
                         ))}
                             </div>
@@ -277,9 +292,18 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                         )}
                       </div>
                     )}
-                    <p className="text-xs text-gray-500 mt-2">
-                      The selected procurement team will be notified to complete the purchase
-                    </p>
+                    {isSelectedBuyerOffline ? (
+                      <p className="text-xs mt-2 text-amber-600 flex items-center gap-1">
+                        <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        This buyer is offline. An email notification will be sent to notify them.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-500 mt-2">
+                        The selected procurement team will be notified to complete the purchase
+                      </p>
+                    )}
                   </div>
 
                   {/* Comments (Optional) */}

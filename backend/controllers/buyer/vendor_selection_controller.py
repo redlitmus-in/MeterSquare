@@ -119,7 +119,6 @@ def select_vendor_for_purchase(cr_id):
                 cr.routed_materials = routed_materials
                 from sqlalchemy.orm.attributes import flag_modified
                 flag_modified(cr, 'routed_materials')
-                log.info(f"CR-{cr_id}: Cleared store_request_status and {len(store_keys)} store entries from routed_materials (switching to vendor)")
             else:
                 log.info(f"CR-{cr_id}: Cleared store_request_status (was store_rejected, now selecting vendor)")
 
@@ -276,8 +275,6 @@ def select_vendor_for_purchase(cr_id):
             if not is_td:  # Only notify TD when buyer selects vendor
                 # DEBUG: Log all roles to see what's in the database
                 all_roles = Role.query.filter_by(is_deleted=False).all()
-                log.info(f"[TD Notification DEBUG] All roles in database: {[(r.role_id, r.role) for r in all_roles]}")
-
                 # Get TD users - try multiple role name variations
                 td_role = None
                 role_variations = [
@@ -288,7 +285,6 @@ def select_vendor_for_purchase(cr_id):
                 for role_name in role_variations:
                     td_role = Role.query.filter_by(role=role_name, is_deleted=False).first()
                     if td_role:
-                        log.info(f"[TD Notification] Found TD role with name: '{role_name}', role_id={td_role.role_id}")
                         break
 
                 if not td_role:
@@ -302,13 +298,11 @@ def select_vendor_for_purchase(cr_id):
 
                 if td_role:
                     tds = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
-                    log.info(f"[TD Notification] Found {len(tds)} TD users for role_id={td_role.role_id}")
 
                     if tds:
                         project_name = cr.project.project_name if cr.project else 'Unknown Project'
                         # Send notification to all TDs
                         for td_user in tds:
-                            log.info(f"[TD Notification] Sending notification to TD user_id={td_user.user_id}, name={td_user.full_name}")
                             notification_service.notify_vendor_selected_for_cr(
                                 cr_id=cr_id,
                                 project_name=project_name,
@@ -650,7 +644,6 @@ def select_vendor_for_material(cr_id):
                                     'is_selected': eval_vendor_id == vendor_id
                                 })
                     vendor_selection_data['vendor_comparison_data'] = vendor_comparison_list
-                    log.info(f"Saved vendor comparison data for material '{material_name}': {len(vendor_comparison_list)} vendors evaluated")
 
             cr.material_vendor_selections[material_name] = vendor_selection_data
 
@@ -678,7 +671,6 @@ def select_vendor_for_material(cr_id):
                 cr.routed_materials = routed_materials
                 from sqlalchemy.orm.attributes import flag_modified
                 flag_modified(cr, 'routed_materials')
-                log.info(f"CR-{cr_id}: Cleared {len(store_keys)} store entries from routed_materials (store_rejected, switching to vendor)")
 
         # Check if any materials are store-routed (mixed routing scenario)
         has_store_routing = any(
@@ -708,7 +700,6 @@ def select_vendor_for_material(cr_id):
             # Clear store rejection flags if switching from store to vendor
             if cr.store_request_status == 'store_rejected':
                 cr.store_request_status = None
-                log.info(f"CR-{cr_id}: Cleared store_request_status (store_rejected -> vendor selection)")
             # Set selected_vendor fields from the first material's vendor (for single vendor case)
             first_material = list(cr.material_vendor_selections.values())[0] if cr.material_vendor_selections else None
             if first_material:
@@ -740,24 +731,22 @@ def select_vendor_for_material(cr_id):
                 if not td_role:
                     td_role = Role.query.filter(Role.role.ilike('%technical%director%'), Role.is_deleted == False).first()
 
-                log.info(f"TD notification - Found TD role: {td_role.role if td_role else 'None'}")
-
                 if td_role:
                     from models.user import User
                     td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
-                    log.info(f"TD notification - Found {len(td_users)} TD users")
+                    # Build material names string once (used in both in-app and email)
+                    material_names_str = ', '.join(updated_materials[:3])
+                    if len(updated_materials) > 3:
+                        material_names_str += f' and {len(updated_materials) - 3} more'
+
                     for td_user in td_users:
                         # Customize notification based on whether all materials are submitted
                         if all_materials_have_vendors:
                             notification_title = 'Purchase Order Ready for Approval'
                             notification_message = f'Buyer completed vendor selection for all materials in CR #{cr_id}. Ready for your approval.'
                         else:
-                            # Include material names to make each notification unique (avoid duplicate blocking)
-                            material_names = ', '.join(updated_materials[:3])  # Show first 3 materials
-                            if len(updated_materials) > 3:
-                                material_names += f' and {len(updated_materials) - 3} more'
                             notification_title = 'Vendor Selections Need Approval'
-                            notification_message = f'Buyer selected vendors for {len(updated_materials)} material(s) in CR #{cr_id}: {material_names}'
+                            notification_message = f'Buyer selected vendors for {len(updated_materials)} material(s) in CR #{cr_id}: {material_names_str}'
 
                         notification = NotificationManager.create_notification(
                             user_id=td_user.user_id,
@@ -766,7 +755,7 @@ def select_vendor_for_material(cr_id):
                             message=notification_message,
                             priority='high',
                             category='purchase',
-                            action_url=f'/technical-director/change-requests?cr_id={cr_id}',  # TD reviews vendor selections in change-requests
+                            action_url=f'/technical-director/change-requests?cr_id={cr_id}',
                             action_label='Review Selections',
                             metadata={'cr_id': str(cr_id), 'materials_count': len(updated_materials), 'target_role': 'technical-director'},
                             sender_id=user_id,
@@ -774,6 +763,48 @@ def select_vendor_for_material(cr_id):
                             target_role='technical-director'
                         )
                         send_notification_to_user(td_user.user_id, notification.to_dict())
+
+                        # ── Email: only send when the TD is OFFLINE ──────────────────
+                        try:
+                            is_td_online = td_user.user_status == 'online'
+                            if not is_td_online:
+                                from utils.boq_email_service import BOQEmailService
+                                email_service = BOQEmailService()
+                                # Get primary vendor name from first updated material
+                                primary_vendor = ''
+                                if cr.material_vendor_selections:
+                                    for mat in updated_materials:
+                                        sel = cr.material_vendor_selections.get(mat, {})
+                                        if sel.get('vendor_name'):
+                                            primary_vendor = sel['vendor_name']
+                                            break
+                                sent = email_service.send_vendor_selection_notification(
+                                    cr_id=cr_id,
+                                    project_name=cr.project.project_name if cr.project else 'Unknown Project',
+                                    buyer_name=user_name,
+                                    buyer_role=user_role,
+                                    recipient_email=td_user.email,
+                                    recipient_name=td_user.full_name or td_user.email,
+                                    materials_count=len(updated_materials),
+                                    material_names=material_names_str,
+                                    vendor_name=primary_vendor,
+                                    all_submitted=all_materials_have_vendors
+                                )
+                                if sent:
+                                    log.info(
+                                        f"[VENDOR SELECT EMAIL] Email sent to offline TD {td_user.email} for CR {cr_id}"
+                                    )
+                                else:
+                                    log.warning(
+                                        f"[VENDOR SELECT EMAIL] Email failed for TD {td_user.email}, CR {cr_id}"
+                                    )
+                            else:
+                                log.info(
+                                    f"[VENDOR SELECT EMAIL] Skipping email – TD (user_id={td_user.user_id}) is ONLINE"
+                                )
+                        except Exception as email_err:
+                            log.error(f"[VENDOR SELECT EMAIL] Error for CR {cr_id}, TD {td_user.user_id}: {email_err}")
+
             except Exception as notif_error:
                 log.error(f"Failed to send notification: {notif_error}")
 
@@ -1000,10 +1031,6 @@ def create_po_children(cr_id):
                     flag_modified(parent_cr, 'material_vendor_selections')
 
                     db.session.commit()
-
-                    log.info(f"Single vendor optimization: CR-{parent_cr.cr_id} sent directly to TD approval "
-                             f"for vendor {vendor.company_name} (ID: {single_vendor_id}) - no POChild needed")
-
                     # Send TD notification if requested (skip if TD is the one making the selection)
                     if send_notification and not is_td:
                         try:
@@ -1090,7 +1117,6 @@ def create_po_children(cr_id):
                         if selection_vendor_id is not None and int(selection_vendor_id) == int(vendor_id):
                             if selection.get('supplier_notes'):
                                 child_notes_for_vendor = selection.get('supplier_notes')
-                                log.info(f"Found child_notes for vendor {vendor_id} from material '{mat_name}': {child_notes_for_vendor[:50] if child_notes_for_vendor else ''}...")
                                 break
 
             # Also check materials in vendor_group payload for supplier_notes
@@ -1101,7 +1127,6 @@ def create_po_children(cr_id):
                         selection = parent_cr.material_vendor_selections.get(mat_name, {})
                         if isinstance(selection, dict) and selection.get('supplier_notes'):
                             child_notes_for_vendor = selection.get('supplier_notes')
-                            log.info(f"Found child_notes from material '{mat_name}' selection: {child_notes_for_vendor[:50] if child_notes_for_vendor else ''}...")
                             break
 
             # CRITICAL FIX: Filter out materials that are already in approved POChildren
@@ -1258,7 +1283,6 @@ def create_po_children(cr_id):
                 consolidate_statuses = ['pending_td_approval', 'rejected']
                 if existing_po_child.status in consolidate_statuses:
                     should_consolidate = True
-                    log.info(f"Found existing POChild {existing_po_child.get_formatted_id()} for vendor {vendor.company_name} with status '{existing_po_child.status}' - will MERGE materials")
                 else:
                     # TD already approved or purchase completed - create new POChild for new purchase
                     log.info(f"Existing POChild {existing_po_child.get_formatted_id()} for vendor {vendor.company_name} has status '{existing_po_child.status}' (approved/completed) - will create NEW POChild for new purchase")
@@ -1317,7 +1341,6 @@ def create_po_children(cr_id):
 
                 po_child = existing_po_child
                 routing_label = "vendor" if routing_type == 'vendor' else "store"
-                log.info(f"Consolidated into POChild {po_child.get_formatted_id()} for {routing_label} routing: {materials_added} added, {materials_updated} updated. Total: {len(existing_materials)} materials, AED {new_total_cost:.2f}")
 
                 created_po_children.append({
                     'id': po_child.id,
@@ -1378,9 +1401,6 @@ def create_po_children(cr_id):
                 map_key = vendor_id if routing_type == 'vendor' else f"store_{next_suffix_number}"
                 existing_vendor_po_children[map_key] = po_child
                 next_suffix_number += 1
-
-                log.info(f"{log_message}, {len(po_materials)} materials, child_notes: {child_notes_for_vendor[:50] if child_notes_for_vendor else 'None'}")
-
                 created_po_children.append({
                     'id': po_child.id,
                     'formatted_id': po_child.get_formatted_id(),
@@ -1467,9 +1487,6 @@ def create_po_children(cr_id):
                         'total_cost': store_total_cost,
                         'consolidated': False
                     })
-
-                    log.info(f"Auto-created store POChild {store_po_child.get_formatted_id()} for CR-{parent_cr.cr_id} with {len(store_po_materials)} store-routed materials")
-
         # Only hide parent CR when ALL its materials are covered by POChildren
         # If some materials are still unassigned, keep the parent visible so buyer can manage them
         all_po_children_list = POChild.query.filter_by(
@@ -1509,7 +1526,6 @@ def create_po_children(cr_id):
                 # All materials accounted for - safe to hide parent
                 parent_cr.status = 'split_to_sub_crs'
                 parent_cr.updated_at = datetime.utcnow()
-                log.info(f"Parent CR-{parent_cr.cr_id} marked as 'split_to_sub_crs' - all {len(all_parent_material_names)} materials covered by {len(all_po_children_list)} POChildren")
             else:
                 log.info(f"Parent CR-{parent_cr.cr_id} NOT hidden - {len(uncovered_materials)} materials still unassigned: {uncovered_materials}")
 
@@ -1589,7 +1605,6 @@ def create_po_children(cr_id):
                             reference_id=store_routed_po_children[0].get('id'),  # First POChild ID
                             action_url='/store/incoming-deliveries'
                         )
-                        log.info(f"Notified PM {pm.full_name} about store-routed materials")
             except Exception as pm_notif_error:
                 log.error(f"Failed to send PM notification: {pm_notif_error}")
 
@@ -1693,8 +1708,6 @@ def update_purchase_order(cr_id):
             from sqlalchemy.orm.attributes import flag_modified
             cr.material_vendor_selections = material_vendor_selections
             flag_modified(cr, 'material_vendor_selections')
-            log.info(f"Updated material_vendor_selections for CR {cr_id}: {material_vendor_selections}")
-
         cr.updated_at = datetime.utcnow()
 
         db.session.commit()
@@ -1849,9 +1862,6 @@ def td_approve_vendor(cr_id):
                     ).first()
                     if buyer_user:
                         buyer_to_notify = buyer_user.user_id
-                        log.info(f"[TD Approve] Found buyer user {buyer_to_notify} from role: {buyer_role.role}")
-
-            log.info(f"[TD Approve] Will send approval notification for CR {cr_id} to user {buyer_to_notify}")
 
             if buyer_to_notify:
                 # ✅ Use dynamic URL builder with proper tab/subtab parameters
@@ -1882,6 +1892,41 @@ def td_approve_vendor(cr_id):
                     target_role='buyer'
                 )
                 send_notification_to_user(buyer_to_notify, notification.to_dict())
+
+                # ── Email: only send when the buyer is OFFLINE ────────────────
+                try:
+                    buyer_user = User.query.filter_by(user_id=buyer_to_notify, is_deleted=False).first()
+                    if buyer_user:
+                        is_buyer_online = buyer_user.user_status == 'online'
+                        if not is_buyer_online:
+                            from utils.boq_email_service import BOQEmailService
+                            email_service = BOQEmailService()
+                            sent = email_service.send_td_vendor_approval_notification(
+                                cr_id=cr_id,
+                                project_name=cr.project.project_name if cr.project else 'Unknown Project',
+                                td_name=td_name,
+                                recipient_email=buyer_user.email,
+                                recipient_name=buyer_user.full_name or buyer_user.email,
+                                vendor_name=cr.selected_vendor_name or 'N/A',
+                                item_name=cr.item_name or f'CR-{cr_id}'
+                            )
+                            if sent:
+                                log.info(
+                                    f"[TD APPROVE EMAIL] Email sent to offline buyer {buyer_user.email} for CR {cr_id}"
+                                )
+                            else:
+                                log.warning(
+                                    f"[TD APPROVE EMAIL] Email failed for buyer {buyer_user.email}, CR {cr_id}"
+                                )
+                        else:
+                            log.info(
+                                f"[TD APPROVE EMAIL] Skipping email – buyer (user_id={buyer_to_notify}) is ONLINE"
+                            )
+                    else:
+                        log.warning(f"[TD APPROVE EMAIL] Buyer user_id={buyer_to_notify} not found, skipping email")
+                except Exception as email_err:
+                    log.error(f"[TD APPROVE EMAIL] Error for CR {cr_id}: {email_err}")
+
         except Exception as notif_error:
             log.error(f"Failed to send vendor approval notification: {notif_error}")
 
@@ -1931,9 +1976,10 @@ def td_reject_vendor(cr_id):
         if cr.vendor_selection_status != 'pending_td_approval':
             return jsonify({"error": f"Vendor selection not pending approval. Status: {cr.vendor_selection_status}"}), 400
 
-        # ✅ IMPORTANT: Save buyer ID BEFORE clearing it (needed for notification)
+        # ✅ IMPORTANT: Save buyer ID and vendor name BEFORE clearing (needed for notification)
         original_buyer_id = cr.vendor_selected_by_buyer_id
         original_buyer_name = cr.vendor_selected_by_buyer_name
+        original_vendor_name = cr.selected_vendor_name or 'Unknown Vendor'
 
         # Reject the vendor selection - clear vendor and allow buyer to select again
         cr.vendor_selection_status = 'rejected'
@@ -1982,9 +2028,6 @@ def td_reject_vendor(cr_id):
                     ).first()
                     if buyer_user:
                         buyer_to_notify = buyer_user.user_id
-                        log.info(f"[TD Reject] Found buyer user {buyer_to_notify} from role: {buyer_role.role}")
-
-            log.info(f"[TD Reject] Will send rejection notification for CR {cr_id} to user {buyer_to_notify}")
 
             if buyer_to_notify:
                 # ✅ Use dynamic URL builder with proper tab/subtab parameters for rejected items
@@ -2015,7 +2058,30 @@ def td_reject_vendor(cr_id):
                     target_role='buyer'
                 )
                 send_notification_to_user(buyer_to_notify, notification.to_dict())
-                log.info(f"[TD Reject] Successfully sent rejection notification to buyer {buyer_to_notify} for CR {cr_id}")
+                # Send email ONLY if buyer is offline
+                try:
+                    buyer_user = User.query.filter_by(user_id=buyer_to_notify, is_deleted=False).first()
+                    if buyer_user:
+                        is_buyer_online = buyer_user.user_status == 'online'
+                        if not is_buyer_online:
+                            from utils.boq_email_service import BOQEmailService
+                            project = Project.query.filter_by(project_id=cr.project_id, is_deleted=False).first()
+                            project_name = project.project_name if project else f"Project {cr.project_id}"
+                            email_service = BOQEmailService()
+                            sent = email_service.send_td_vendor_rejection_notification(
+                                cr_id=cr_id,
+                                project_name=project_name,
+                                td_name=td_name,
+                                recipient_email=buyer_user.email,
+                                recipient_name=buyer_user.full_name or buyer_user.username,
+                                vendor_name=original_vendor_name,
+                                item_name=cr.item_name or 'Materials Request',
+                                rejection_reason=reason
+                            )
+                        else:
+                            log.info(f"[TD Reject] Buyer {buyer_to_notify} is online — skipping email")
+                except Exception as email_error:
+                    log.error(f"[TD Reject] Failed to send rejection email to buyer: {email_error}")
             else:
                 log.warning(f"[TD Reject] No buyer to notify for CR {cr_id} (original_buyer_id={original_buyer_id}, cr.created_by={cr.created_by})")
         except Exception as notif_error:
@@ -2541,8 +2607,6 @@ def save_supplier_notes(cr_id):
                 is_deleted=False
             ).first()
 
-            log.info(f"Looking for POChild with parent_cr_id={cr_id}, vendor_id={vendor_id_int}, found: {po_child}")
-
         # Method 2: If not found by vendor_id, find by material_name in materials_data
         if not po_child and material_name:
             # Find all POChildren for this CR and check if any has this material
@@ -2556,7 +2620,6 @@ def save_supplier_notes(cr_id):
                     for mat in pc.materials_data:
                         if mat.get('material_name') == material_name:
                             po_child = pc
-                            log.info(f"Found POChild {pc.id} by material_name '{material_name}'")
                             break
                     if po_child:
                         break
@@ -2590,13 +2653,10 @@ def save_supplier_notes(cr_id):
 
             po_child.updated_at = datetime.utcnow()
             po_child_updated = po_child.id
-            log.info(f"Updated child_notes for POChild {po_child.id}: {po_child.child_notes[:100] if po_child.child_notes else 'empty'}")
         else:
             log.warning(f"No POChild found for CR {cr_id} with vendor_id={vendor_id} or material_name={material_name}")
 
         db.session.commit()
-
-        log.info(f"Supplier notes saved for material '{material_name}' in CR {cr_id} by user {user_id}. POChild updated: {po_child_updated}")
 
         return jsonify({
             "success": True,

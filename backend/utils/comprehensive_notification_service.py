@@ -51,7 +51,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             for notification in notifications:
                 send_notification_to_user(notification.user_id, notification.to_dict())
 
-            log.info(f"Sent BOQ created notification for BOQ {boq_id} to PM {pm_user_id}")
         except Exception as e:
             log.error(f"Error sending BOQ created notification: {e}")
 
@@ -84,7 +83,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(pm_user_id, notification.to_dict())
-            log.info(f"Sent BOQ approval request to user {pm_user_id} for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error sending BOQ approval notification: {e}")
 
@@ -134,7 +132,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
 
             send_notification_to_user(estimator_user_id, notification.to_dict())
-            log.info(f"Sent PM decision notification for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error sending PM decision notification: {e}")
 
@@ -148,17 +145,13 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         ✅ FIXED: Dynamic URL based on recipient's actual role
         """
         try:
-            log.info(f"[notify_boq_sent_to_td] START - BOQ {boq_id}, TD {td_user_id}, Estimator {estimator_name}")
-
             # Check for duplicate notification (within 2 minutes - reduced from 5 for reliability)
             # Use specific title pattern to avoid blocking other BOQ notification types
             if check_duplicate_notification(td_user_id, 'New BOQ for Approval', 'boq_id', boq_id, minutes=2):
-                log.info(f"[notify_boq_sent_to_td] Skipping duplicate notification for TD {td_user_id}, BOQ {boq_id} (recent notification exists)")
                 return
 
             # ✅ Generate dynamic URL based on recipient's role
             action_url = get_td_approval_url(td_user_id, boq_id, tab='pending')
-            log.info(f"[notify_boq_sent_to_td] Action URL: {action_url}")
 
             notification = NotificationManager.create_notification(
                 user_id=td_user_id,
@@ -175,15 +168,9 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 sender_name=estimator_name,
                 target_role='technical_director'
             )
-            log.info(f"[notify_boq_sent_to_td] Notification created in DB with ID: {notification.id}")
-
             # Send via Socket.IO - send to BOTH user room AND role room for reliability
             notification_data = notification.to_dict()
             delivered = send_notification_to_user(td_user_id, notification_data)
-            log.info(f"[notify_boq_sent_to_td] Socket.IO delivery to TD {td_user_id}: {'SUCCESS (active user)' if delivered else 'NO ACTIVE USER'}")
-
-            # ALWAYS send to role room as backup (TD might be in role room but not user room)
-            log.info(f"[notify_boq_sent_to_td] Also sending to technicalDirector role room for reliability")
             send_notification_to_role('technicalDirector', notification_data)
         except Exception as e:
             log.error(f"[notify_boq_sent_to_td] ERROR: {e}")
@@ -214,7 +201,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=estimator_name
                 )
                 send_notification_to_user(td_user_id, notification.to_dict())
-            log.info(f"Sent BOQ to client notification for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error sending BOQ to client notification: {e}")
 
@@ -243,7 +229,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             for td_user in td_users:
                 # Check for duplicate notification (reduced to 2 minutes)
                 if check_duplicate_notification(td_user.user_id, 'Client Approved', 'boq_id', boq_id, minutes=2):
-                    log.info(f"[notify_client_confirmed] Skipping duplicate for TD {td_user.user_id}, BOQ {boq_id}")
                     continue
 
                 notification = NotificationManager.create_notification(
@@ -261,7 +246,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
 
                 send_notification_to_user(td_user.user_id, notification.to_dict())
-                log.info(f"[notify_client_confirmed] Sent to TD {td_user.user_id} for BOQ {boq_id}")
 
         except Exception as e:
             log.error(f"[notify_client_confirmed] Error: {e}")
@@ -290,7 +274,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             for td_user in td_users:
                 # Check for duplicate notification (reduced to 2 minutes)
                 if check_duplicate_notification(td_user.user_id, 'Client Rejected', 'boq_id', boq_id, minutes=2):
-                    log.info(f"[notify_client_rejected] Skipping duplicate for TD {td_user.user_id}, BOQ {boq_id}")
                     continue
 
                 notification = NotificationManager.create_notification(
@@ -309,7 +292,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
 
                 send_notification_to_user(td_user.user_id, notification.to_dict())
-                log.info(f"[notify_client_rejected] Sent to TD {td_user.user_id} for BOQ {boq_id}")
 
         except Exception as e:
             log.error(f"[notify_client_rejected] Error: {e}")
@@ -326,14 +308,12 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         """
         try:
             decision = 'approved' if approved else 'rejected'
-            log.info(f"[notify_td_boq_decision] START - Sending {decision} notification for BOQ {boq_id} to {len(recipient_user_ids)} user(s): {recipient_user_ids}")
             # Use specific title pattern for dedup to avoid blocking different BOQ notification types
             dedup_title = 'BOQ Approved by Technical Director' if approved else 'BOQ Rejected by Technical Director'
             sent_count = 0
             for user_id in recipient_user_ids:
                 # Check for duplicate notification (specific to this decision type)
                 if check_duplicate_notification(user_id, dedup_title, 'boq_id', boq_id, minutes=2):
-                    log.info(f"[notify_td_boq_decision] Skipping duplicate for user {user_id}, BOQ {boq_id}")
                     sent_count += 1  # Count as sent since a recent notification already exists
                     continue
 
@@ -369,12 +349,9 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                         target_role='estimator'
                     )
 
-                log.info(f"[notify_td_boq_decision] Notification created with id={notification.id}, emitting via Socket.IO to user {user_id}")
                 send_notification_to_user(user_id, notification.to_dict())
                 sent_count += 1
-                log.info(f"[notify_td_boq_decision] Sent {decision} notification to user {user_id} for BOQ {boq_id}")
 
-            log.info(f"[notify_td_boq_decision] DONE - Sent to {sent_count}/{len(recipient_user_ids)} users for BOQ {boq_id}")
         except Exception as e:
             log.error(f"[notify_td_boq_decision] Error for BOQ {boq_id}: {e}")
             import traceback
@@ -393,7 +370,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             for pm_user_id in pm_user_ids:
                 # Check for duplicate notification
                 if check_duplicate_notification(pm_user_id, 'Project Assigned', 'project_id', project_id, minutes=5):
-                    log.info(f"Skipping duplicate PM assignment notification for project {project_id} to user {pm_user_id}")
                     continue
 
                 notification = NotificationManager.create_notification(
@@ -413,7 +389,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
 
                 send_notification_to_user(pm_user_id, notification.to_dict())
 
-            log.info(f"Sent PM assignment notification for project {project_id}")
         except Exception as e:
             log.error(f"Error sending PM assignment notification: {e}")
 
@@ -428,7 +403,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         try:
             # Check for duplicate notification
             if check_duplicate_notification(se_user_id, 'Items Assigned', 'boq_id', boq_id, minutes=5):
-                log.info(f"Skipping duplicate SE item assignment notification for BOQ {boq_id}")
                 return
 
             notification = NotificationManager.create_notification(
@@ -447,7 +421,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(se_user_id, notification.to_dict())
-            log.info(f"Sent item assignment notification to SE {se_user_id}")
         except Exception as e:
             log.error(f"Error sending item assignment notification: {e}")
 
@@ -462,7 +435,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         try:
             # Check for duplicate notification
             if check_duplicate_notification(pm_user_id, 'Completion Request', 'boq_id', boq_id, minutes=5):
-                log.info(f"Skipping duplicate completion request notification for BOQ {boq_id}")
                 return
 
             notification = NotificationManager.create_notification(
@@ -481,7 +453,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(pm_user_id, notification.to_dict())
-            log.info(f"Sent completion request notification to PM {pm_user_id}")
         except Exception as e:
             log.error(f"Error sending completion request notification: {e}")
 
@@ -496,7 +467,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         try:
             # Check for duplicate notification
             if check_duplicate_notification(se_user_id, 'Completion Confirmed', 'boq_id', boq_id, minutes=5):
-                log.info(f"Skipping duplicate completion confirmation for BOQ {boq_id}")
                 return
 
             notification = NotificationManager.create_notification(
@@ -514,7 +484,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(se_user_id, notification.to_dict())
-            log.info(f"Sent completion confirmation to SE {se_user_id}")
         except Exception as e:
             log.error(f"Error sending completion confirmation: {e}")
 
@@ -533,12 +502,9 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                              False if all materials are existing BOQ items
         """
         try:
-            log.info(f"[notify_cr_created] CR {cr_id} - Sending to {len(recipient_user_ids)} recipients: {recipient_user_ids}, role: {recipient_role}, request_type: {request_type}, has_new_materials: {has_new_materials}")
-
             for user_id in recipient_user_ids:
                 # Check for duplicate notification
                 if check_duplicate_notification(user_id, 'Materials Purchase', 'cr_id', cr_id, minutes=5):
-                    log.info(f"[notify_cr_created] Skipping duplicate CR created notification for CR {cr_id} to user {user_id}")
                     continue
 
                 # Determine correct route based on recipient_role and request_type
@@ -563,7 +529,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     route = 'extra-material' if request_type == 'EXTRA_MATERIALS' else 'change-requests'
 
                 action_url = f'/{recipient_role_lower}/{route}?cr_id={cr_id}'
-                log.info(f"[notify_cr_created] Creating notification for user {user_id}, action_url: {action_url}")
 
                 # Determine notification title based on whether materials are new or existing BOQ items
                 if has_new_materials:
@@ -589,11 +554,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     target_role=recipient_role_lower
                 )
 
-                log.info(f"[notify_cr_created] Notification created with ID: {notification.id}, sending to user {user_id}")
                 send_notification_to_user(user_id, notification.to_dict())
-                log.info(f"[notify_cr_created] Notification sent successfully to user {user_id}")
-
-            log.info(f"[notify_cr_created] Completed sending CR created notification for CR {cr_id}")
         except Exception as e:
             log.error(f"[notify_cr_created] Error sending CR created notification for CR {cr_id}: {e}")
             import traceback
@@ -636,7 +597,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             for user_id in next_user_ids:
                 # Check for duplicate notification
                 if check_duplicate_notification(user_id, 'Request Approved', 'cr_id', cr_id, minutes=5):
-                    log.info(f"Skipping duplicate CR approved notification for CR {cr_id}")
                     continue
 
                 # ✅ Set correct tab/subtab parameters based on role
@@ -655,8 +615,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     query_params=query_params,
                     fallback_role_route=next_role_lower
                 )
-                log.info(f"[notify_cr_approved] Creating notification for user {user_id}, action_url: {action_url}")
-
                 notification = NotificationManager.create_notification(
                     user_id=user_id,
                     type='approval',
@@ -674,26 +632,26 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
 
                 send_notification_to_user(user_id, notification.to_dict())
-                log.info(f"[notify_cr_approved] Notification sent to user {user_id}")
-
-            log.info(f"Sent CR approved notification for CR {cr_id}")
         except Exception as e:
             log.error(f"Error sending CR approved notification: {e}")
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
 
     @staticmethod
-    def notify_cr_rejected(cr_id, project_name, rejector_id, rejector_name, rejector_role, creator_user_id, rejection_reason, request_type=None, creator_role=None):
+    def notify_cr_rejected(cr_id, project_name, rejector_id, rejector_name, rejector_role, creator_user_id, rejection_reason, request_type=None, creator_role=None, item_name=None):
         """
         Notify creator when CR is rejected
         Trigger: Any approver rejects CR
         Recipients: Original creator
         Priority: HIGH
+
+        Email behaviour:
+          - Creator is OFFLINE  → send email notification (user won't see real-time alert)
+          - Creator is ONLINE   → skip email (real-time WebSocket notification is sufficient)
         """
         try:
             # Check for duplicate notification
             if check_duplicate_notification(creator_user_id, 'Request Rejected', 'cr_id', cr_id, minutes=5):
-                log.info(f"Skipping duplicate CR rejected notification for CR {cr_id}")
                 return
 
             # ✅ Generate dynamic URL based on recipient's actual role from database
@@ -712,8 +670,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 query_params={'cr_id': cr_id, 'tab': 'rejected'},
                 fallback_role_route='site-engineer'  # Fallback if user role not found
             )
-            log.info(f"[CR REJECT NOTIFICATION] Generated URL for user {creator_user_id}: {action_url}")
-
             notification = NotificationManager.create_notification(
                 user_id=creator_user_id,
                 type='rejection',
@@ -730,7 +686,42 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(creator_user_id, notification.to_dict())
-            log.info(f"Sent CR rejected notification for CR {cr_id}")
+            # ── Email: only send when the creator is OFFLINE ──────────────────
+            try:
+                creator_user = User.query.filter_by(user_id=creator_user_id, is_deleted=False).first()
+                if creator_user:
+                    is_online = creator_user.user_status == 'online'
+                    if not is_online:
+                        # User is offline – send email so they don't miss the rejection
+                        from utils.boq_email_service import BOQEmailService
+                        email_service = BOQEmailService()
+                        sent = email_service.send_cr_rejection_notification(
+                            cr_id=cr_id,
+                            project_name=project_name,
+                            rejector_name=rejector_name,
+                            rejector_role=rejector_role,
+                            recipient_email=creator_user.email,
+                            recipient_name=creator_user.full_name or creator_user.email,
+                            rejection_reason=rejection_reason,
+                            item_name=item_name
+                        )
+                        if sent:
+                            log.info(
+                                f"[CR REJECT EMAIL] Email sent to offline user {creator_user.email} for CR {cr_id}"
+                            )
+                        else:
+                            log.warning(
+                                f"[CR REJECT EMAIL] Email sending failed for user {creator_user.email}, CR {cr_id}"
+                            )
+                    else:
+                        log.info(
+                            f"[CR REJECT EMAIL] Skipping email – creator (user_id={creator_user_id}) is ONLINE"
+                        )
+                else:
+                    log.warning(f"[CR REJECT EMAIL] Creator user_id={creator_user_id} not found, skipping email")
+            except Exception as email_err:
+                log.error(f"[CR REJECT EMAIL] Failed to process email for CR {cr_id}: {email_err}")
+
         except Exception as e:
             log.error(f"Error sending CR rejected notification: {e}")
 
@@ -745,10 +736,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         try:
             # Check for duplicate notification
             if check_duplicate_notification(td_user_id, 'Vendor Selection', 'cr_id', cr_id, minutes=5):
-                log.info(f"Skipping duplicate vendor selection notification for CR {cr_id}")
                 return
-
-            log.info(f"[notify_vendor_selected_for_cr] Creating notification for TD user {td_user_id}, CR {cr_id}, vendor {vendor_name}")
 
             notification = NotificationManager.create_notification(
                 user_id=td_user_id,
@@ -767,7 +755,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(td_user_id, notification.to_dict())
-            log.info(f"[notify_vendor_selected_for_cr] Sent vendor selection notification to TD {td_user_id} for CR {cr_id}")
         except Exception as e:
             log.error(f"Error sending vendor selection notification: {e}")
 
@@ -782,7 +769,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         try:
             # Check for duplicate notification
             if check_duplicate_notification(requester_user_id, 'Purchase Completed', 'cr_id', cr_id, minutes=5):
-                log.info(f"Skipping duplicate CR purchase completed notification for CR {cr_id}")
                 return
 
             # ✅ Generate dynamic URL based on recipient's actual role from database
@@ -817,7 +803,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(requester_user_id, notification.to_dict())
-            log.info(f"Sent CR purchase completed notification for CR {cr_id}")
         except Exception as e:
             log.error(f"Error sending CR purchase completed notification: {e}")
 
@@ -834,7 +819,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         try:
             # Check for duplicate notification
             if check_duplicate_notification(td_user_id, 'Extension Request', 'boq_id', boq_id, minutes=5):
-                log.info(f"Skipping duplicate day extension request notification for BOQ {boq_id}")
                 return
 
             notification = NotificationManager.create_notification(
@@ -853,7 +837,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(td_user_id, notification.to_dict())
-            log.info(f"Sent day extension request notification for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error sending day extension request notification: {e}")
 
@@ -868,7 +851,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         try:
             # Check for duplicate notification
             if check_duplicate_notification(pm_user_id, 'Extension Approved', 'boq_id', boq_id, minutes=5):
-                log.info(f"Skipping duplicate day extension approved notification for BOQ {boq_id}")
                 return
 
             notification = NotificationManager.create_notification(
@@ -886,7 +868,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(pm_user_id, notification.to_dict())
-            log.info(f"Sent day extension approved notification for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error sending day extension approved notification: {e}")
 
@@ -901,7 +882,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         try:
             # Check for duplicate notification
             if check_duplicate_notification(pm_user_id, 'Extension Rejected', 'boq_id', boq_id, minutes=5):
-                log.info(f"Skipping duplicate day extension rejected notification for BOQ {boq_id}")
                 return
 
             notification = NotificationManager.create_notification(
@@ -920,7 +900,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(pm_user_id, notification.to_dict())
-            log.info(f"Sent day extension rejected notification for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error sending day extension rejected notification: {e}")
 
@@ -939,7 +918,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         try:
             # Check for duplicate notification
             if check_duplicate_notification(buyer_user_id, 'Vendor Approved', 'vendor_id', vendor_id, minutes=5):
-                log.info(f"Skipping duplicate vendor approved notification for vendor {vendor_id}")
                 return
 
             notification = NotificationManager.create_notification(
@@ -958,7 +936,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(buyer_user_id, notification.to_dict())
-            log.info(f"Sent vendor approved notification for vendor {vendor_id}")
         except Exception as e:
             log.error(f"Error sending vendor approved notification: {e}")
 
@@ -1008,10 +985,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                         target_role='technical_director'
                     )
 
-                    log.info(f"[notify_internal_revision_created] Created notification with title: 'Internal Revision BOQ for Approval' for BOQ {boq_id}")
-
                     send_notification_to_user(td_user.user_id, notification.to_dict())
-                    log.info(f"[notify_internal_revision_created] ✅ Successfully sent notification to TD {td_user.user_id} for BOQ {boq_id}, Internal Revision #{revision_number}")
 
                 except Exception as e:
                     log.error(f"[notify_internal_revision_created] ❌ Failed to send notification to TD {td_user.user_id} for BOQ {boq_id}: {e}")
@@ -1033,11 +1007,8 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         Priority: HIGH
         """
         try:
-            log.info(f"[notify_internal_revision_approved] Creating notification for BOQ {boq_id}, user {actor_user_id}, revision #{revision_number}")
-
             # Check for duplicate notification (reduced window to 2 minutes)
             if check_duplicate_notification(actor_user_id, 'Internal Revision Approved', 'boq_id', boq_id, minutes=2):
-                log.info(f"[notify_internal_revision_approved] Skipping duplicate for BOQ {boq_id}, user {actor_user_id}")
                 return
 
             # Build URL to navigate to Internal Revisions tab
@@ -1063,10 +1034,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 sender_name=td_name,
                 target_role='estimator'
             )
-
-            log.info(f"[notify_internal_revision_approved] Notification created with id={notification.id}, emitting via Socket.IO")
             send_notification_to_user(actor_user_id, notification.to_dict())
-            log.info(f"[notify_internal_revision_approved] Successfully sent for BOQ {boq_id} to user {actor_user_id}")
         except Exception as e:
             log.error(f"[notify_internal_revision_approved] Error for BOQ {boq_id}, user {actor_user_id}: {e}")
             import traceback
@@ -1082,11 +1050,8 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         Priority: HIGH
         """
         try:
-            log.info(f"[notify_internal_revision_rejected] START - BOQ {boq_id}, user {actor_user_id}, revision #{revision_number}")
-
             # Check for duplicate notification (reduced window to 2 minutes)
             if check_duplicate_notification(actor_user_id, 'Internal Revision Rejected', 'boq_id', boq_id, minutes=2):
-                log.info(f"[notify_internal_revision_rejected] Skipping duplicate for BOQ {boq_id}, user {actor_user_id} (recent notification exists)")
                 return  # Recent notification exists, caller should count as sent
 
             # Build URL to navigate to Internal Revisions tab
@@ -1114,9 +1079,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 target_role='estimator'
             )
 
-            log.info(f"[notify_internal_revision_rejected] Notification created with id={notification.id}, emitting via Socket.IO to user {actor_user_id}")
             send_notification_to_user(actor_user_id, notification.to_dict())
-            log.info(f"[notify_internal_revision_rejected] Successfully sent for BOQ {boq_id} to user {actor_user_id}")
         except Exception as e:
             log.error(f"[notify_internal_revision_rejected] Error for BOQ {boq_id}, user {actor_user_id}: {e}")
             import traceback
@@ -1132,8 +1095,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         Priority: HIGH
         """
         try:
-            log.info(f"[notify_client_revision_created] Creating notification for BOQ {boq_id}, revision R{revision_number}")
-
             # Find all Technical Directors
             from models.role import Role
             from models.user import User
@@ -1171,11 +1132,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                         sender_name=actor_name,
                         target_role='technical_director'
                     )
-
-                    log.info(f"[notify_client_revision_created] Created notification with title: 'Client Revision BOQ for Approval' for BOQ {boq_id}")
-
                     send_notification_to_user(td_user.user_id, notification.to_dict())
-                    log.info(f"[notify_client_revision_created] ✅ Successfully sent notification to TD {td_user.user_id} for BOQ {boq_id}, Client Revision R{revision_number}")
 
                 except Exception as e:
                     log.error(f"[notify_client_revision_created] ❌ Failed to send notification to TD {td_user.user_id} for BOQ {boq_id}: {e}")
@@ -1198,11 +1155,8 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         Priority: HIGH
         """
         try:
-            log.info(f"[notify_client_revision_approved] Creating notification for BOQ {boq_id}, estimator {estimator_user_id}, revision R{revision_number}")
-
             # Check for duplicate notification
             if check_duplicate_notification(estimator_user_id, 'Client Revision Approved', 'boq_id', boq_id, minutes=5):
-                log.info(f"[notify_client_revision_approved] Skipping duplicate for BOQ {boq_id}, user {estimator_user_id}")
                 return
 
             # Build message with revision number if available
@@ -1226,9 +1180,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 target_role='estimator'
             )
 
-            log.info(f"[notify_client_revision_approved] Notification created with id={notification.id}, emitting via Socket.IO")
             send_notification_to_user(estimator_user_id, notification.to_dict())
-            log.info(f"[notify_client_revision_approved] Successfully sent for BOQ {boq_id} to estimator {estimator_user_id}")
         except Exception as e:
             log.error(f"[notify_client_revision_approved] Error for BOQ {boq_id}, estimator {estimator_user_id}: {e}")
             import traceback
@@ -1244,11 +1196,8 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         Priority: HIGH
         """
         try:
-            log.info(f"[notify_client_revision_rejected] Creating notification for BOQ {boq_id}, estimator {estimator_user_id}, revision R{revision_number}")
-
             # Check for duplicate notification
             if check_duplicate_notification(estimator_user_id, 'Client Revision Rejected', 'boq_id', boq_id, minutes=5):
-                log.info(f"[notify_client_revision_rejected] Skipping duplicate for BOQ {boq_id}, user {estimator_user_id}")
                 return
 
             # Build message with revision number if available
@@ -1272,10 +1221,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 sender_name=td_name,
                 target_role='estimator'
             )
-
-            log.info(f"[notify_client_revision_rejected] Notification created with id={notification.id}, emitting via Socket.IO")
             send_notification_to_user(estimator_user_id, notification.to_dict())
-            log.info(f"[notify_client_revision_rejected] Successfully sent for BOQ {boq_id} to estimator {estimator_user_id}")
         except Exception as e:
             log.error(f"[notify_client_revision_rejected] Error for BOQ {boq_id}, estimator {estimator_user_id}: {e}")
             import traceback
@@ -1327,7 +1273,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
 
                 send_notification_to_user(se_user_id, notification.to_dict())
-                log.info(f"Sent asset dispatch notification to SE {se_user_id} for project {project_id}")
 
         except Exception as e:
             log.error(f"Error sending asset dispatch notification: {e}")
@@ -1375,7 +1320,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
 
                 send_notification_to_user(pm_user_id, notification.to_dict())
-                log.info(f"Sent asset received notification to PM {pm_user_id}")
 
         except Exception as e:
             log.error(f"Error sending asset received notification: {e}")
@@ -1417,7 +1361,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
 
                 send_notification_to_user(pm_user_id, notification.to_dict())
-                log.info(f"Sent asset return notification to PM {pm_user_id}")
 
         except Exception as e:
             log.error(f"Error sending asset return notification: {e}")
@@ -1498,7 +1441,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
 
                 send_notification_to_user(pm_user_id, notification.to_dict())
-                log.info(f"Sent asset requisition notification to PM {pm_user_id}")
 
         except Exception as e:
             log.error(f"Error sending asset requisition created notification: {e}")
@@ -1538,7 +1480,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
 
                 send_notification_to_user(prod_mgr_id, notification.to_dict())
-                log.info(f"Sent requisition PM approved notification to Prod Mgr {prod_mgr_id}")
 
         except Exception as e:
             log.error(f"Error sending PM approved notification: {e}")
@@ -1574,7 +1515,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(se_user_id, notification.to_dict())
-            log.info(f"Sent requisition PM rejected notification to SE {se_user_id}")
 
         except Exception as e:
             log.error(f"Error sending PM rejected notification: {e}")
@@ -1609,7 +1549,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(se_user_id, notification.to_dict())
-            log.info(f"Sent requisition approved notification to SE {se_user_id}")
 
         except Exception as e:
             log.error(f"Error sending Prod Mgr approved notification: {e}")
@@ -1646,8 +1585,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(se_user_id, notification.to_dict())
-            log.info(f"Sent requisition Prod Mgr rejected notification to SE {se_user_id}")
-
         except Exception as e:
             log.error(f"Error sending Prod Mgr rejected notification: {e}")
 
@@ -1682,8 +1619,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(se_user_id, notification.to_dict())
-            log.info(f"Sent requisition dispatched notification to SE {se_user_id}")
-
         except Exception as e:
             log.error(f"Error sending dispatched notification: {e}")
 
@@ -1749,8 +1684,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=reviewed_by_name
                 )
                 send_notification_to_user(site_engineer_id, notification.to_dict())
-
-            log.info(f"Sent backup stock notification for {material_name} ({quantity} {unit})")
         except Exception as e:
             log.error(f"Error sending backup stock notification: {e}")
 
@@ -1814,8 +1747,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=reviewed_by_name
                 )
                 send_notification_to_user(site_engineer_id, notification.to_dict())
-
-            log.info(f"Sent disposal approval notification for {material_name} ({quantity} {unit})")
         except Exception as e:
             log.error(f"Error sending disposal notification: {e}")
 
@@ -1864,8 +1795,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=returned_by_name
                 )
                 send_notification_to_user(pm.user_id, notification.to_dict())
-
-            log.info(f"Sent damaged return review notification for {material_name} to {len(pm_users)} PMs")
         except Exception as e:
             log.error(f"Error sending damaged return notification: {e}")
 
@@ -1901,7 +1830,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 sender_name=approved_by_name
             )
             send_notification_to_user(site_engineer_id, notification.to_dict())
-            log.info(f"Sent return approved notification to SE {site_engineer_id}")
         except Exception as e:
             log.error(f"Error sending return approved notification: {e}")
 
@@ -1938,7 +1866,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 sender_name=rejected_by_name
             )
             send_notification_to_user(site_engineer_id, notification.to_dict())
-            log.info(f"Sent return rejected notification to SE {site_engineer_id}")
         except Exception as e:
             log.error(f"Error sending return rejected notification: {e}")
 
@@ -1972,8 +1899,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=dispatched_by_name
                 )
                 send_notification_to_user(se_id, notification.to_dict())
-
-            log.info(f"Sent dispatch notification to {len(site_engineer_ids)} SEs for DN {delivery_note_number}")
         except Exception as e:
             log.error(f"Error sending dispatch notification: {e}")
 
@@ -2012,8 +1937,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=confirmed_by_name
                 )
                 send_notification_to_user(pm.user_id, notification.to_dict())
-
-            log.info(f"Sent delivery confirmed notification for DN {delivery_note_number}")
         except Exception as e:
             log.error(f"Error sending delivery confirmed notification: {e}")
 
@@ -2052,8 +1975,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 sender_name=client_name,
                 target_role='support-management'
             )
-
-            log.info(f"Created support ticket notification for #{ticket_number}")
         except Exception as e:
             log.error(f"Error sending ticket submission notification: {e}")
             import traceback
@@ -2073,8 +1994,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 user = User.query.filter_by(email=client_email, is_active=True, is_deleted=False).first()
                 if user:
                     actual_user_id = user.user_id
-                    log.info(f"Found user_id {actual_user_id} from email {client_email} for approval notification")
-
             if actual_user_id:
                 # Check for duplicate
                 if not check_duplicate_notification(actual_user_id, f'Ticket #{ticket_number} Approved', 'ticket_id', ticket_id):
@@ -2099,7 +2018,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                         target_role='client'
                     )
                     send_notification_to_user(actual_user_id, notification.to_dict())
-                    log.info(f"Sent ticket approval notification for ticket #{ticket_number} to user {actual_user_id}")
             else:
                 log.warning(f"Cannot send approval notification for ticket #{ticket_number}: No user_id found (email: {client_email})")
         except Exception as e:
@@ -2139,8 +2057,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                         target_role='client'
                     )
                     send_notification_to_user(client_user_id, notification.to_dict())
-
-            log.info(f"Sent ticket rejection notification for ticket #{ticket_number} to client")
         except Exception as e:
             log.error(f"Error sending ticket rejection notification: {e}")
 
@@ -2185,8 +2101,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                         target_role='client'
                     )
                     send_notification_to_user(client_user_id, notification.to_dict())
-
-            log.info(f"Sent ticket status update notification for ticket #{ticket_number} to client (status: {new_status})")
         except Exception as e:
             log.error(f"Error sending ticket status update notification: {e}")
 
@@ -2224,8 +2138,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                         target_role='client'
                     )
                     send_notification_to_user(client_user_id, notification.to_dict())
-
-            log.info(f"Sent ticket resolution notification for ticket #{ticket_number} to client")
         except Exception as e:
             log.error(f"Error sending ticket resolution notification: {e}")
 
@@ -2261,8 +2173,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 sender_name=client_name,
                 target_role='support-management'
             )
-
-            log.info(f"Created ticket closure notification for ticket #{ticket_number}")
         except Exception as e:
             log.error(f"Error sending ticket closure notification: {e}")
 
@@ -2315,8 +2225,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 target_role='client'
             )
             send_notification_to_user(actual_user_id, notification.to_dict())
-
-            log.info(f"Sent ticket closed notification for ticket #{ticket_number} to client")
         except Exception as e:
             log.error(f"Error sending ticket closed notification: {e}")
 
@@ -2334,7 +2242,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 user = User.query.filter_by(email=client_email, is_active=True, is_deleted=False).first()
                 if user:
                     actual_user_id = user.user_id
-                    log.info(f"Found user_id {actual_user_id} from email {client_email} for comment notification")
 
             if actual_user_id:
                 # Check for duplicate (within 2 minutes for comments)
@@ -2360,7 +2267,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                         target_role='client'
                     )
                     send_notification_to_user(actual_user_id, notification.to_dict())
-                    log.info(f"Sent comment notification for ticket #{ticket_number} to user {actual_user_id}")
                 else:
                     log.info(f"Skipped duplicate comment notification for ticket #{ticket_number}")
             else:
@@ -2399,8 +2305,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 sender_name=client_name,
                 target_role='support-management'
             )
-
-            log.info(f"Created client comment notification for ticket #{ticket_number}")
         except Exception as e:
             log.error(f"Error sending client comment notification: {e}")
 

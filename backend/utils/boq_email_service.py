@@ -604,6 +604,701 @@ class BOQEmailService:
             log.error(f"Error sending SE items assigned notification: {e}")
             return False
 
+    def send_cr_review_notification(self, cr_id, project_name, project_code, item_name, sender_name, sender_role,
+                                     recipient_email, recipient_name, recipient_role, context='review'):
+        """Send notification email to receiver when a change request is sent for review or purchase action.
+
+        context='review'    - Standard review notification (default) — SE/Estimator submits to PM/TD
+        context='forwarded' - PM approved and forwarded to Estimator for new material approval
+        context='purchase'  - CR approved by Estimator, Buyer must now proceed with purchase
+        """
+        try:
+            role_display = recipient_role.replace('_', ' ').title() if recipient_role else "Reviewer"
+            sender_role_display = sender_role.replace('_', ' ').title() if sender_role else "User"
+
+            if context == 'purchase':
+                subject = f"✅ Change Request Approved - Purchase Action Required - {project_name}"
+                email_heading = "Purchase Action Required"
+                body_text = f"<strong style=\"color: #1e293b;\">{sender_name}</strong> ({sender_role_display}) has approved this change request. Please proceed with vendor selection and complete the purchase."
+                status_badge = '<span style="background: #10b981; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">Approved – Pending Purchase</span>'
+                action_text = "Please log in to MeterSquare ERP to select a vendor and complete the purchase for this change request."
+                cta_label = "Proceed to Purchase →"
+                approved_by_label = "Approved By:"
+            elif context == 'forwarded':
+                subject = f"📋 New Material Approval Required - {project_name}"
+                email_heading = "New Material Approval Required"
+                body_text = f"<strong style=\"color: #1e293b;\">{sender_name}</strong> ({sender_role_display}) has approved this change request and forwarded it to you for new material approval."
+                status_badge = '<span style="background: #f59e0b; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">Forwarded – Pending Approval</span>'
+                action_text = "Please log in to MeterSquare ERP to review and approve the new material request in this change request."
+                cta_label = "Review & Approve →"
+                approved_by_label = "Forwarded By:"
+            else:
+                subject = f"📋 Change Request Approval Required - {project_name}"
+                email_heading = "Change Request Approval Required"
+                body_text = f"<strong style=\"color: #1e293b;\">{sender_name}</strong> ({sender_role_display}) has submitted a change request and is requesting your approval."
+                status_badge = '<span style="background: #f59e0b; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">Pending Approval</span>'
+                action_text = "Please log in to MeterSquare ERP to review and approve or reject this change request."
+                cta_label = "Review & Approve →"
+                approved_by_label = "Submitted By:"
+
+            email_body = f"""
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 5px 0; font-weight: 600;">{email_heading}</h1>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{recipient_name}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 22px 0;">
+                    {body_text}
+                </p>
+
+                <!-- CR Details Card -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 14px 18px; border-radius: 8px; margin-bottom: 25px;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px; width: 40%;">CR Reference:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">CR-{cr_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Item:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{item_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">{approved_by_label}</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{sender_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Status:</td>
+                            <td style="padding: 5px 0; font-size: 13px;">
+                                {status_badge}
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Action Required -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border: 1px solid #fcd34d; border-radius: 10px; padding: 16px 20px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 8px 0;">⚠️ Action Required</h3>
+                    <p style="color: #92400e; font-size: 13px; margin: 0; line-height: 1.6;">{action_text}</p>
+                </div>
+
+                <!-- CTA -->
+                <div style="text-align: center; margin: 25px 0;">
+                    <a href="{FRONTEND_URL}" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 13px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+                        {cta_label}
+                    </a>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0 0 2px 0;">{sender_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">{sender_role_display}</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 20px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+            """
+
+            return self.send_email(recipient_email, subject, wrap_email_content(email_body))
+
+        except Exception as e:
+            log.error(f"Error sending CR review notification: {e}")
+            return False
+
+    def send_cr_approved_notification(self, cr_id, project_name, project_code, item_name,
+                                       approver_name, approver_role, recipient_email, recipient_name):
+        """Send notification email to CR creator when change request is fully approved by TD"""
+        try:
+            subject = f"✅ Change Request Approved - {project_name}"
+
+            approver_role_display = approver_role.replace('_', ' ').title() if approver_role else "Approver"
+
+            email_body = f"""
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 5px 0; font-weight: 600;">Change Request Approved</h1>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{recipient_name}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 22px 0;">
+                    Your change request has been <strong style="color: #059669;">approved</strong> by <strong style="color: #1e293b;">{approver_name}</strong> ({approver_role_display}).
+                </p>
+
+                <!-- CR Details Card -->
+                <div style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-left: 4px solid #10b981; padding: 14px 18px; border-radius: 8px; margin-bottom: 25px;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px; width: 40%;">CR Reference:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">CR-{cr_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Item:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{item_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Approved By:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{approver_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Status:</td>
+                            <td style="padding: 5px 0; font-size: 13px;">
+                                <span style="background: #10b981; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">Approved</span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- CTA -->
+                <div style="text-align: center; margin: 25px 0;">
+                    <a href="{FRONTEND_URL}" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 13px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+                        View Change Request →
+                    </a>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0 0 2px 0;">{approver_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">{approver_role_display}</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 20px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2025 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+            """
+
+            return self.send_email(recipient_email, subject, wrap_email_content(email_body))
+
+        except Exception as e:
+            log.error(f"Error sending CR approved notification: {e}")
+            return False
+
+    def send_cr_rejection_notification(self, cr_id, project_name, rejector_name, rejector_role,
+                                       recipient_email, recipient_name, rejection_reason, item_name=None):
+        """
+        Send email notification to CR creator when their change request is rejected.
+        This email is only sent when the recipient is OFFLINE (no real-time notification available).
+
+        Args:
+            cr_id: Change request ID
+            project_name: Name of the project
+            rejector_name: Name of person who rejected
+            rejector_role: Role of person who rejected
+            recipient_email: Email address of CR creator
+            recipient_name: Full name of CR creator
+            rejection_reason: Reason for rejection
+            item_name: Item/material name (optional)
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            subject = f"❌ Change Request Rejected - CR-{cr_id} | {project_name}"
+            rejector_role_display = rejector_role.replace('_', ' ').title() if rejector_role else "Approver"
+            item_display = item_name if item_name else f"CR-{cr_id}"
+
+            email_body = f"""
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 5px 0; font-weight: 600;">Change Request Rejected</h1>
+                <p style="color: #fecaca; font-size: 14px; margin: 6px 0 0 0;">CR-{cr_id} &bull; {project_name}</p>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{recipient_name}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 22px 0;">
+                    Your change request has been <strong style="color: #ef4444;">rejected</strong> by
+                    <strong style="color: #1e293b;">{rejector_name}</strong> ({rejector_role_display}).
+                    Please review the reason below and resubmit if necessary.
+                </p>
+
+                <!-- CR Details Card -->
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-left: 4px solid #f87171; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px; width: 40%;">CR Reference:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">CR-{cr_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Item / Request:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{item_display}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Rejected By:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{rejector_name} ({rejector_role_display})</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Status:</td>
+                            <td style="padding: 5px 0; font-size: 13px;">
+                                <span style="background: #f87171; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">Rejected</span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Rejection Reason Box -->
+                <div style="background: #fff7ed; border-left: 4px solid #f97316; padding: 14px 18px; border-radius: 8px; margin-bottom: 25px;">
+                    <p style="color: #9a3412; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 8px 0;">Rejection Reason</p>
+                    <p style="color: #1e293b; font-size: 14px; line-height: 1.6; margin: 0;">{rejection_reason}</p>
+                </div>
+
+                <!-- CTA -->
+                <div style="text-align: center; margin: 25px 0;">
+                    <a href="{FRONTEND_URL}" style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); color: white; padding: 13px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+                        View Change Request →
+                    </a>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0 0 2px 0;">{rejector_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">{rejector_role_display}</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 20px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2026 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+            """
+
+            return self.send_email(recipient_email, subject, wrap_email_content(email_body))
+
+        except Exception as e:
+            log.error(f"Error sending CR rejection notification email: {e}")
+            return False
+
+    def send_vendor_selection_notification(self, cr_id, project_name, buyer_name, buyer_role,
+                                           recipient_email, recipient_name, materials_count,
+                                           material_names, vendor_name, all_submitted):
+        """
+        Send email notification to TD when buyer selects a vendor for materials.
+        Only sent when the TD recipient is OFFLINE (no real-time notification available).
+
+        Args:
+            cr_id: Change request / Purchase order ID
+            project_name: Name of the project
+            buyer_name: Name of the buyer who selected the vendor
+            buyer_role: Role of the buyer
+            recipient_email: TD's email address
+            recipient_name: TD's full name
+            materials_count: Number of materials with vendor selected
+            material_names: Comma-separated material names (first 3)
+            vendor_name: Primary vendor selected
+            all_submitted: True if all materials now have vendors (ready for final approval)
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            if all_submitted:
+                subject = f"✅ Vendor Selected for Approval - CR-{cr_id} | {project_name}"
+                action_title = "Vendor Selected for Approval"
+                action_message = (
+                    f"<strong>{buyer_name}</strong> has completed vendor selection for all materials "
+                    f"in <strong>CR-{cr_id}</strong>. The purchase order is now ready for your approval."
+                )
+                status_badge_bg = "#10b981"
+                status_badge_text = "Ready for Approval"
+                header_gradient = "linear-gradient(135deg, #10b981 0%, #059669 100%)"
+                header_sub_color = "#d1fae5"
+            else:
+                subject = f"⏳ Vendor Selected — Awaiting Approval - CR-{cr_id} | {project_name}"
+                action_title = "Vendor Selected — Awaiting Approval"
+                action_message = (
+                    f"<strong>{buyer_name}</strong> has selected vendor(s) for "
+                    f"<strong>{materials_count}</strong> material(s) in <strong>CR-{cr_id}</strong>. "
+                    f"Please review and approve the vendor selections."
+                )
+                status_badge_bg = "#f59e0b"
+                status_badge_text = "Pending Approval"
+                header_gradient = "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)"
+                header_sub_color = "#fef3c7"
+
+            buyer_role_display = buyer_role.replace('_', ' ').title() if buyer_role else "Buyer"
+
+            email_body = f"""
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Header -->
+            <div style="background: {header_gradient}; padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 0 0; font-weight: 600;">{action_title}</h1>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{recipient_name}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 22px 0;">
+                    {action_message}
+                </p>
+
+                <!-- Details Card -->
+                <div style="background: #f8fafc; border-left: 4px solid #64748b; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px; width: 40%;">CR Reference:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">CR-{cr_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Selected By:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{buyer_name} ({buyer_role_display})</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Vendor:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{vendor_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Materials:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{material_names} ({materials_count} item(s))</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Status:</td>
+                            <td style="padding: 5px 0; font-size: 13px;">
+                                <span style="background: {status_badge_bg}; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">{status_badge_text}</span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- CTA -->
+                <div style="text-align: center; margin: 25px 0;">
+                    <a href="{FRONTEND_URL}" style="background: {header_gradient}; color: white; padding: 13px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+                        Review Vendor Selection →
+                    </a>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0 0 2px 0;">{buyer_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">{buyer_role_display}</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 20px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2026 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+            """
+
+            return self.send_email(recipient_email, subject, wrap_email_content(email_body))
+
+        except Exception as e:
+            log.error(f"Error sending vendor selection notification email: {e}")
+            return False
+
+    def send_td_vendor_approval_notification(self, cr_id, project_name, td_name,
+                                             recipient_email, recipient_name,
+                                             vendor_name, item_name):
+        """
+        Send email notification to buyer when TD approves their vendor selection.
+        Only sent when the buyer recipient is OFFLINE (no real-time notification available).
+
+        Args:
+            cr_id: Change request / Purchase order ID
+            project_name: Name of the project
+            td_name: Name of the Technical Director who approved
+            recipient_email: Buyer's email address
+            recipient_name: Buyer's full name
+            vendor_name: Approved vendor name
+            item_name: Item / materials description
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            subject = f"✅ Vendor Approved — Proceed with Purchase - CR-{cr_id} | {project_name}"
+
+            email_body = f"""
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 0 0; font-weight: 600;">Vendor Approved</h1>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{recipient_name}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 22px 0;">
+                    <strong style="color: #1e293b;">{td_name}</strong> (Technical Director) has
+                    <strong style="color: #059669;">approved</strong> your vendor selection for
+                    <strong style="color: #1e293b;">CR-{cr_id}</strong>.
+                    You can now proceed with the purchase.
+                </p>
+
+                <!-- Details Card -->
+                <div style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-left: 4px solid #10b981; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px; width: 40%;">CR Reference:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">CR-{cr_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Item / Request:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{item_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Approved Vendor:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{vendor_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Approved By:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{td_name} (Technical Director)</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Status:</td>
+                            <td style="padding: 5px 0; font-size: 13px;">
+                                <span style="background: #10b981; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">Vendor Approved</span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- CTA -->
+                <div style="text-align: center; margin: 25px 0;">
+                    <a href="{FRONTEND_URL}" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 13px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+                        Proceed with Purchase →
+                    </a>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0 0 2px 0;">{td_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">Technical Director</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 20px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2026 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+            """
+
+            return self.send_email(recipient_email, subject, wrap_email_content(email_body))
+
+        except Exception as e:
+            log.error(f"Error sending TD vendor approval notification email: {e}")
+            return False
+
+    def send_td_vendor_rejection_notification(self, cr_id, project_name, td_name,
+                                              recipient_email, recipient_name,
+                                              vendor_name, item_name, rejection_reason):
+        """
+        Send email notification to buyer when TD rejects their vendor selection.
+        Only sent when the buyer recipient is OFFLINE (no real-time notification available).
+
+        Args:
+            cr_id: Change request / Purchase order ID
+            project_name: Name of the project
+            td_name: Name of the Technical Director who rejected
+            recipient_email: Buyer's email address
+            recipient_name: Buyer's full name
+            vendor_name: Rejected vendor name
+            item_name: Item / materials description
+            rejection_reason: Reason provided by TD for rejection
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            subject = f"❌ Vendor Selection Rejected — Action Required - CR-{cr_id} | {project_name}"
+
+            email_body = f"""
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 0 0; font-weight: 600;">Vendor Selection Rejected</h1>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{recipient_name}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 22px 0;">
+                    <strong style="color: #1e293b;">{td_name}</strong> (Technical Director) has
+                    <strong style="color: #ef4444;">rejected</strong> your vendor selection for
+                    <strong style="color: #1e293b;">CR-{cr_id}</strong>.
+                    Please review the reason below and select a new vendor.
+                </p>
+
+                <!-- Details Card -->
+                <div style="background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%); border-left: 4px solid #ef4444; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px; width: 40%;">CR Reference:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">CR-{cr_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Item / Request:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{item_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Rejected Vendor:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{vendor_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Rejected By:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{td_name} (Technical Director)</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Status:</td>
+                            <td style="padding: 5px 0; font-size: 13px;">
+                                <span style="background: #ef4444; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">Vendor Rejected</span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Rejection Reason Box -->
+                <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px 18px; margin-bottom: 22px;">
+                    <p style="color: #991b1b; font-size: 13px; font-weight: 700; margin: 0 0 8px 0; text-transform: uppercase; letter-spacing: 0.05em;">Rejection Reason</p>
+                    <p style="color: #7f1d1d; font-size: 14px; line-height: 1.6; margin: 0;">{rejection_reason}</p>
+                </div>
+
+                <!-- Next Steps -->
+                <p style="color: #475569; font-size: 14px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Please log in to MeterSquare and select an alternative vendor for this purchase to continue the procurement process.
+                </p>
+
+                <!-- CTA -->
+                <div style="text-align: center; margin: 25px 0;">
+                    <a href="{FRONTEND_URL}" style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); color: white; padding: 13px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+                        Select New Vendor →
+                    </a>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0 0 2px 0;">{td_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">Technical Director</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 20px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2026 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
+            """
+
+            return self.send_email(recipient_email, subject, wrap_email_content(email_body))
+
+        except Exception as e:
+            log.error(f"Error sending TD vendor rejection notification email: {e}")
+            return False
+
     def generate_boq_approval_email(self, boq_data, project_data, items_summary, comments, estimator_name=None, pm_name=None):
         """
         Generate PROFESSIONAL BOQ approval email for Project Manager
@@ -2626,121 +3321,105 @@ class BOQEmailService:
                 </tr>
                 """
 
+        # Format greeting — use contact person if available, else company name
+        greeting_name = vendor_contact if vendor_contact else vendor_name
+
         email_body = f"""
         <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
 
-            <!-- Logo Header with Lighter Red -->
-            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
-                <!-- MeterSquare Logo -->
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
                 <div style="margin-bottom: 20px;">
                     <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
                 </div>
-                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
-                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 5px 0; font-weight: 600;">Purchase Order — PO-{cr_id}</h1>
+                <p style="color: #bfdbfe; font-size: 14px; margin: 0;">{project_name}</p>
             </div>
 
             <!-- Main Content -->
             <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <!-- Greeting -->
-                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
-                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{greeting_name}</strong>,
                 </p>
 
-                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
-                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
-                    Please review the feedback below and make the necessary revisions before resubmitting.
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 22px 0;">
+                    We are pleased to issue this Purchase Order to <strong style="color: #1e293b;">{vendor_name}</strong>
+                    for the project <strong style="color: #1e293b;">{project_name}</strong>.
+                    Please review the order details below and arrange delivery accordingly.
                 </p>
 
-                <!-- BOQ Details Card -->
-                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
-                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
-                        📋 BOQ Information
-                    </h3>
-
+                <!-- Order Details Card -->
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-left: 4px solid #1d4ed8; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px;">
                     <table style="width: 100%; border-collapse: collapse;">
                         <tr>
-                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
-                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px; width: 40%;">PO Reference:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">PO-{cr_id}</td>
                         </tr>
                         <tr>
-                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
-                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
                         </tr>
                         <tr>
-                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
-                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Site Location:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
                         </tr>
                     </table>
                 </div>
 
-                <!-- Project Details Card -->
-                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
-                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
-                        🏗️ Project Details
-                    </h3>
+                <!-- Materials Table -->
+                <h3 style="color: #1e293b; font-size: 15px; font-weight: 600; margin: 0 0 12px 0;">Order Items</h3>
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #3b82f6; border-radius: 8px; overflow: hidden;">
+                    <thead>
+                        <tr style="background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);">
+                            <th style="padding: 10px; color: #ffffff; font-size: 12px; text-align: left; font-weight: 600;">#</th>
+                            <th style="padding: 10px; color: #ffffff; font-size: 12px; text-align: left; font-weight: 600;">Material</th>
+                            <th style="padding: 10px; color: #ffffff; font-size: 12px; text-align: left; font-weight: 600;">Brand</th>
+                            <th style="padding: 10px; color: #ffffff; font-size: 12px; text-align: left; font-weight: 600;">Specification</th>
+                            <th style="padding: 10px; color: #ffffff; font-size: 12px; text-align: left; font-weight: 600;">Quantity</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {materials_table_rows}
+                    </tbody>
+                </table>
 
+                <!-- Contact -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 18px; margin-bottom: 22px;">
+                    <p style="color: #64748b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">Procurement Contact</p>
                     <table style="width: 100%; border-collapse: collapse;">
                         <tr>
-                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
-                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                            <td style="padding: 3px 0; color: #64748b; font-size: 13px; width: 30%;">Name:</td>
+                            <td style="padding: 3px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{buyer_name}</td>
                         </tr>
                         <tr>
-                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
-                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                            <td style="padding: 3px 0; color: #64748b; font-size: 13px;">Email:</td>
+                            <td style="padding: 3px 0; color: #1e293b; font-size: 13px;">{buyer_email}</td>
                         </tr>
                         <tr>
-                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
-                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                            <td style="padding: 3px 0; color: #64748b; font-size: 13px;">Phone:</td>
+                            <td style="padding: 3px 0; color: #1e293b; font-size: 13px;">{buyer_phone}</td>
                         </tr>
                     </table>
-                </div>
-
-                <!-- Rejection Reason -->
-                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
-                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
-                        ⚠️ Reason for Revision
-                    </h3>
-                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
-                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
-                    </p>
-                </div>
-
-                <!-- Action Required -->
-                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
-                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
-                        📝 Next Steps
-                    </h3>
-                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
-                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
-                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
-                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
-                    </ul>
                 </div>
 
                 <!-- Signature -->
-                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
-                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
-                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
-                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0 0 2px 0;">{buyer_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">Procurement Team</p>
                     <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
-                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
-                    MeterSquare ERP
-                </p>
-                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
-                    Construction Management System
-                </p>
-                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
-                    This is an automated email notification. Please do not reply to this email.
-                </p>
-                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
-                    © 2025 MeterSquare. All rights reserved.
-                </p>
+            <div style="background: #f8fafc; padding: 20px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2026 MeterSquare. All rights reserved.</p>
             </div>
         </div>
         """
@@ -2792,7 +3471,6 @@ class BOQEmailService:
             success = self.send_email(vendor_email, subject, email_html, attachments)
 
             if success:
-                log.info(f"Purchase order email sent successfully to vendor(s)")
                 return True
             return False
 
