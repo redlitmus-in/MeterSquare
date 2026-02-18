@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
 import { DocumentChartBarIcon, ArrowLeftIcon, ArrowDownTrayIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { showError, showInfo, showSuccess } from '@/utils/toastHelper';
-import { useProjectsAutoSync } from '@/hooks/useAutoSync';
+import { useAutoSync } from '@/hooks/useAutoSync';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -81,6 +81,7 @@ interface PurchaseComparisonData {
   };
   comparison: {
     materials: ComparisonMaterial[];
+    items: any[];
     summary: {
       total_compared: number;
       over_budget_count: number;
@@ -91,6 +92,7 @@ interface PurchaseComparisonData {
   };
   unplanned_materials: {
     materials: UnplannedMaterial[];
+    items: any[];
     summary: {
       total_count: number;
       total_amount: number;
@@ -116,8 +118,11 @@ export default function PurchaseComparison() {
   const [currentPage, setCurrentPage] = useState(1);
 
   // Real-time auto-sync for BOQ list - use dedicated purchase comparison projects endpoint
-  const { data: boqData, isLoading: loading, refetch } = useProjectsAutoSync(
-    async () => {
+  // Uses a unique query key to avoid cache conflicts with other pages using ['projects']
+  const { data: boqData, isLoading: loading, refetch } = useAutoSync({
+    queryKey: ['purchase-comparison-projects'],
+    staleTime: 0, // Always fetch fresh on mount so project_status is never stale
+    fetchFn: async () => {
       const token = localStorage.getItem('access_token');
       const response = await apiClient.get('/purchase_comparison_projects', {
         headers: {
@@ -145,7 +150,7 @@ export default function PurchaseComparison() {
 
       return allBOQs;
     }
-  );
+  });
 
   const boqList = useMemo(() => boqData || [], [boqData]);
 
@@ -347,10 +352,10 @@ export default function PurchaseComparison() {
       });
 
       // Prepare Comparison sheet (side by side)
-      const comparisonData: any[] = [];
+      const comparisonSheetData: any[] = [];
       groupedByItem.forEach((group) => {
         const balance = group.totals.planned_amount - group.totals.actual_amount;
-        comparisonData.push({
+        comparisonSheetData.push({
           'Item': group.item_name,
           'Planned Amount (AED)': group.totals.planned_amount,
           'Actual Amount (incl. VAT)': group.totals.actual_amount,
@@ -361,8 +366,8 @@ export default function PurchaseComparison() {
 
       // Add total row
       const totalBalance = totalPlanned - totalActual;
-      comparisonData.push({});
-      comparisonData.push({
+      comparisonSheetData.push({});
+      comparisonSheetData.push({
         'Item': 'GRAND TOTAL',
         'Planned Amount (AED)': totalPlanned,
         'Actual Amount (incl. VAT)': totalActual,
@@ -373,7 +378,7 @@ export default function PurchaseComparison() {
       // Prepare Summary sheet
       const summaryData = [
         { 'Metric': 'Project Name', 'Value': projectName },
-        { 'Metric': 'BOQ ID', 'Value': comparisonData.boq_id || 'N/A' },
+        { 'Metric': 'BOQ ID', 'Value': comparisonData?.boq_id || 'N/A' },
         { 'Metric': '', 'Value': '' },
         { 'Metric': 'Total Planned Amount (AED)', 'Value': totalPlanned.toFixed(2) },
         { 'Metric': 'Total Actual Amount (incl. VAT) (AED)', 'Value': totalActual.toFixed(2) },
@@ -393,7 +398,7 @@ export default function PurchaseComparison() {
       XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
 
       // Add Comparison sheet
-      const ws2 = XLSX.utils.json_to_sheet(comparisonData);
+      const ws2 = XLSX.utils.json_to_sheet(comparisonSheetData);
       ws2['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 25 }, { wch: 18 }, { wch: 15 }];
       XLSX.utils.book_append_sheet(wb, ws2, 'Comparison');
 
@@ -1108,10 +1113,10 @@ export default function PurchaseComparison() {
                   </TabsTrigger>
                   <TabsTrigger
                     value="completed"
-                    className="px-6 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm transition-all"
+                    className="px-6 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-green-600 data-[state=active]:bg-white data-[state=active]:text-green-600 data-[state=active]:shadow-sm transition-all"
                   >
                     <span className="font-semibold">Completed</span>
-                    <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
+                    <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">
                       {boqList.filter((boq: any) => {
                         const projectStatus = (boq.project_status || '').toLowerCase();
                         const boqStatus = (boq.status || boq.boq_status || '').toLowerCase();
@@ -1249,7 +1254,7 @@ export default function PurchaseComparison() {
                             <span>BOQ ID: #{boq.boq_id}</span>
                             <span>{boq.created_at ? new Date(boq.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}</span>
                           </div>
-                          <button className="w-full mt-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                          <button className="w-full mt-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2">
                             <DocumentChartBarIcon className="w-4 h-4" />
                             View Comparison
                           </button>
@@ -1284,7 +1289,7 @@ export default function PurchaseComparison() {
                                     onClick={() => setCurrentPage(page)}
                                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                                       currentPage === page
-                                        ? 'bg-blue-600 text-white'
+                                        ? 'bg-green-600 text-white'
                                         : 'border border-gray-300 hover:bg-gray-100'
                                     }`}
                                   >

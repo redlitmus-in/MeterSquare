@@ -489,7 +489,8 @@ const ChangeRequestsPage: React.FC = () => {
       purchase_completed: 'bg-green-100 text-green-800',
       routed_to_store: 'bg-green-100 text-green-800',
       rejected: 'bg-red-100 text-red-800',
-      split_to_sub_crs: 'bg-indigo-100 text-indigo-800'
+      split_to_sub_crs: 'bg-indigo-100 text-indigo-800',
+      vendor_approved: 'bg-teal-100 text-teal-800'
     };
     return colors[status as keyof typeof colors] || colors.pending;
   };
@@ -524,6 +525,9 @@ const ChangeRequestsPage: React.FC = () => {
     }
     if (status === 'assigned_to_buyer') {
       return 'ASSIGNED TO BUYER';
+    }
+    if (status === 'vendor_approved') {
+      return 'VENDOR APPROVED';
     }
     if (status === 'purchase_completed') {
       return 'PURCHASE COMPLETED';
@@ -651,7 +655,7 @@ const ChangeRequestsPage: React.FC = () => {
       matchesTab = (
         (activeTab === 'requested' && !isPMCreatedRequest && (req.status === 'send_to_pm' || (req.status === 'under_review' && req.approval_required_from === 'project_manager'))) ||  // Requests needing PM approval (send_to_pm or under_review) - EXCLUDE PM's own requests
         (activeTab === 'pending' && isPendingTabStatus) ||  // ALL requests for pending sub-tabs
-        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || req.status === 'send_to_est' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs' || req.status === 'sent_to_store')) ||  // approved_by_pm, send_to_est, send_to_buyer, pending_td_approval, split_to_sub_crs and sent_to_store status
+        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || req.status === 'send_to_est' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs' || req.status === 'sent_to_store' || req.status === 'vendor_approved' || req.status === 'assigned_to_buyer')) ||  // approved_by_pm, send_to_est, send_to_buyer, pending_td_approval, split_to_sub_crs, sent_to_store, vendor_approved and assigned_to_buyer status
         (activeTab === 'completed' && (req.status === 'purchase_completed' || req.status === 'routed_to_store')) ||
         (activeTab === 'rejected' && req.status === 'rejected')
       );
@@ -659,7 +663,7 @@ const ChangeRequestsPage: React.FC = () => {
       // Change Requests tab filtering - show requests that need PM action or PM created
       matchesTab = (
         (activeTab === 'pending' && ['pending', 'under_review'].includes(req.status)) ||
-        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs', 'sent_to_store'].includes(req.status)) ||
+        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs', 'sent_to_store', 'vendor_approved'].includes(req.status)) ||
         (activeTab === 'completed' && (req.status === 'purchase_completed' || req.status === 'routed_to_store')) ||
         (activeTab === 'rejected' && req.status === 'rejected')
       );
@@ -669,7 +673,7 @@ const ChangeRequestsPage: React.FC = () => {
 
   const stats = {
     pending: changeRequests.filter(r => ['pending', 'under_review'].includes(r.status)).length,
-    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs'].includes(r.status)).length,
+    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs', 'vendor_approved'].includes(r.status)).length,
     completed: changeRequests.filter(r => r.status === 'purchase_completed' || r.status === 'routed_to_store').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length,
     // For Extra Material - Requested tab count (send_to_pm or under_review with PM approval) - EXCLUDE PM's own requests
@@ -687,7 +691,7 @@ const ChangeRequestsPage: React.FC = () => {
         (r.status === 'under_review' && r.approval_required_from === 'buyer') ||  // Sent to Buyer
         r.status === 'assigned_to_buyer'  // Assigned to Buyer
       ).length,  // ALL requests for pending tab sub-tabs (backend already filters by project)
-    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || r.status === 'send_to_est' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs').length,  // approved_by_pm, send_to_est, send_to_buyer, pending_td_approval and split_to_sub_crs status
+    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || r.status === 'send_to_est' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs' || r.status === 'vendor_approved' || r.status === 'assigned_to_buyer').length,  // approved_by_pm, send_to_est, send_to_buyer, pending_td_approval, split_to_sub_crs, vendor_approved and assigned_to_buyer status
     completed_extra: changeRequests.filter(r => r.status === 'purchase_completed' || r.status === 'routed_to_store').length
   };
 

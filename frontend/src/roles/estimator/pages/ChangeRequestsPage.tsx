@@ -276,7 +276,8 @@ const ChangeRequestsPage: React.FC = () => {
       purchase_completed: 'bg-green-100 text-green-800',
       routed_to_store: 'bg-teal-100 text-teal-800',
       rejected: 'bg-red-100 text-red-800',
-      split_to_sub_crs: 'bg-indigo-100 text-indigo-800'
+      split_to_sub_crs: 'bg-indigo-100 text-indigo-800',
+      vendor_approved: 'bg-teal-100 text-teal-800'
     };
     return colors[status as keyof typeof colors] || colors.pending;
   };
@@ -402,7 +403,7 @@ const ChangeRequestsPage: React.FC = () => {
                          req.cr_id.toString().includes(searchTerm.trim());
     const matchesTab = (
       (activeTab === 'pending' && (req.status === 'send_to_est' || req.status === 'under_review' || (req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'approved_by_pm' && req.status !== 'rejected' && req.status !== 'purchase_completed' && req.status !== 'routed_to_store' && req.status !== 'sent_to_store' && req.status !== 'pending_td_approval'))) ||
-      (activeTab === 'approved' && (req.status === 'assigned_to_buyer' || req.status === 'approved_by_pm' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs' || req.status === 'sent_to_store')) ||
+      (activeTab === 'approved' && (req.status === 'assigned_to_buyer' || req.status === 'approved_by_pm' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs' || req.status === 'sent_to_store' || req.status === 'vendor_approved')) ||
       (activeTab === 'escalated' && (req.status === 'purchase_completed' || req.status === 'routed_to_store')) ||
       (activeTab === 'rejected' && req.status === 'rejected')
     );
@@ -411,7 +412,7 @@ const ChangeRequestsPage: React.FC = () => {
 
   const stats = {
     pending: changeRequests.filter(r => r.status === 'send_to_est' || r.status === 'under_review' || (r.approval_required_from === 'estimator' && r.status !== 'assigned_to_buyer' && r.status !== 'approved_by_pm' && r.status !== 'rejected' && r.status !== 'purchase_completed' && r.status !== 'routed_to_store' && r.status !== 'sent_to_store' && r.status !== 'pending_td_approval')).length,
-    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer' || r.status === 'approved_by_pm' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs' || r.status === 'sent_to_store').length,
+    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer' || r.status === 'approved_by_pm' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs' || r.status === 'sent_to_store' || r.status === 'vendor_approved').length,
     escalated: changeRequests.filter(r => r.status === 'purchase_completed' || r.status === 'routed_to_store').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length
   };

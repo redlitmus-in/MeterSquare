@@ -243,10 +243,12 @@ const ExtraMaterialPage: React.FC = () => {
         };
       });
 
+      // Statuses that indicate an approved/in-progress CR (shared between Approved and Completed filters)
+      const approvedStatuses = ['approved', 'approved_by_pm', 'approved_by_estimator', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'send_to_est', 'pending_td_approval', 'split_to_sub_crs', 'vendor_approved'];
+
       // Transform approved materials (only SE's own approved requests WITHOUT purchase completion)
       const filteredApproved = seRequests
         .filter((cr: any) => {
-          const approvedStatuses = ['approved', 'approved_by_pm', 'approved_by_estimator', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'send_to_est', 'pending_td_approval', 'split_to_sub_crs'];
           return approvedStatuses.includes(cr.status?.trim()) && !cr.purchase_completion_date;
         });
 
@@ -314,10 +316,12 @@ const ExtraMaterialPage: React.FC = () => {
       });
 
       // Transform completed materials (purchase completed by buyer - status is 'purchase_completed' or 'routed_to_store')
+      // Also include CRs where purchase_completion_date is set but status wasn't properly updated (data inconsistency fallback)
       const filteredCompleted = seRequests
         .filter((cr: any) => {
           const status = cr.status?.trim();
-          return status === 'purchase_completed' || status === 'routed_to_store';
+          return status === 'purchase_completed' || status === 'routed_to_store' ||
+            (cr.purchase_completion_date && approvedStatuses.includes(status));
         });
 
       const transformedCompleted = filteredCompleted.map((cr: any) => {
@@ -555,6 +559,16 @@ const ExtraMaterialPage: React.FC = () => {
         color: 'bg-red-100 text-red-700 border-red-300',
         icon: <XCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'Rejected'
+      },
+      assigned_to_buyer: {
+        color: 'bg-purple-100 text-purple-700 border-purple-300',
+        icon: <ClockIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
+        label: 'Awaiting Purchase'
+      },
+      vendor_approved: {
+        color: 'bg-teal-100 text-teal-700 border-teal-300',
+        icon: <CheckCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
+        label: 'Vendor Approved'
       },
       split_to_sub_crs: {
         color: 'bg-purple-100 text-purple-700 border-purple-300',
