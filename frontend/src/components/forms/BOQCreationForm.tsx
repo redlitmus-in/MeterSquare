@@ -902,8 +902,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         }));
         setCustomUnits(customUnitsFromDB);
 
-        // Merge predefined and custom units
-        const merged = [...UNIT_OPTIONS, ...customUnitsFromDB];
+        // Merge predefined and custom units, removing duplicates by value (case-insensitive)
+        const predefinedValues = new Set(UNIT_OPTIONS.map(opt => opt.value.toLowerCase()));
+        const uniqueCustomUnits = customUnitsFromDB.filter(
+          (unit: { value: string }) => !predefinedValues.has(unit.value.toLowerCase())
+        );
+        const merged = [...UNIT_OPTIONS, ...uniqueCustomUnits];
         setAllUnitOptions(merged);
       }
     } catch (error) {
@@ -945,8 +949,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         const updatedCustomUnits = [...customUnits, newUnit];
         setCustomUnits(updatedCustomUnits);
 
-        // Update all unit options
-        const merged = [...UNIT_OPTIONS, ...updatedCustomUnits];
+        // Update all unit options, removing duplicates by value (case-insensitive)
+        const predefinedValues = new Set(UNIT_OPTIONS.map(opt => opt.value.toLowerCase()));
+        const uniqueCustomUnits = updatedCustomUnits.filter(
+          unit => !predefinedValues.has(unit.value.toLowerCase())
+        );
+        const merged = [...UNIT_OPTIONS, ...uniqueCustomUnits];
         setAllUnitOptions(merged);
 
         console.log('Custom unit saved:', newUnit);
