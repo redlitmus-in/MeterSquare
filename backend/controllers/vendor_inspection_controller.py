@@ -1583,10 +1583,11 @@ def update_return_request(request_id):
             if 'admin' not in role:
                 return jsonify({"success": False, "error": "You can only modify your own return requests"}), 403
 
-        if return_request.status != 'pending_td_approval':
-            return jsonify({"success": False, "error": "Can only edit return requests pending TD approval"}), 400
+        if return_request.status not in ('pending_td_approval', 'td_rejected'):
+            return jsonify({"success": False, "error": "Can only edit return requests pending TD approval or rejected by TD"}), 400
 
         data = request.get_json()
+        was_rejected = return_request.status == 'td_rejected'
 
         if data.get('resolution_type'):
             return_request.resolution_type = data['resolution_type']
@@ -1614,12 +1615,20 @@ def update_return_request(request_id):
         if 'buyer_notes' in data:
             return_request.buyer_notes = data['buyer_notes']
 
+        # If resubmitting a TD-rejected request, reset status and clear rejection fields
+        if was_rejected:
+            return_request.status = 'pending_td_approval'
+            return_request.td_rejection_reason = None
+            return_request.td_approved_by = None
+            return_request.td_approval_date = None
+
         return_request.updated_at = datetime.utcnow()
         db.session.commit()
 
+        msg = "Return request resubmitted for TD approval" if was_rejected else "Return request updated"
         return jsonify({
             "success": True,
-            "message": "Return request updated",
+            "message": msg,
             "data": return_request.to_dict()
         }), 200
 

@@ -25,6 +25,8 @@ import {
   Upload,
   FileText,
   Trash2,
+  Edit3,
+  Send,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -862,6 +864,183 @@ const ConfirmReplacementModal: React.FC<ConfirmReplacementModalProps> = ({
 };
 
 // ============================================================================
+// Edit & Resubmit Modal (for TD-rejected requests)
+// ============================================================================
+
+type ResolutionType = 'refund' | 'replacement' | 'new_vendor';
+
+const RESOLUTION_OPTIONS: Array<{ value: ResolutionType; label: string; description: string; icon: React.ReactNode }> = [
+  { value: 'refund', label: 'Refund', description: 'Request a full refund from the vendor', icon: <DollarSign className="w-5 h-5" /> },
+  { value: 'replacement', label: 'Replacement', description: 'Request the vendor to replace materials', icon: <RefreshCw className="w-5 h-5" /> },
+  { value: 'new_vendor', label: 'New Vendor', description: 'Select a different vendor to supply materials', icon: <UserX className="w-5 h-5" /> },
+];
+
+interface EditResubmitModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  vrr: VendorReturnRequest;
+  onSuccess: () => void;
+}
+
+const EditResubmitModal: React.FC<EditResubmitModalProps> = ({ isOpen, onClose, vrr, onSuccess }) => {
+  const [resolutionType, setResolutionType] = useState<ResolutionType>(vrr.resolution_type);
+  const [slaDeadline, setSlaDeadline] = useState(vrr.sla_deadline ? vrr.sla_deadline.split('T')[0] : '');
+  const [slaNotes, setSlaNotes] = useState(vrr.sla_notes || '');
+  const [buyerNotes, setBuyerNotes] = useState(vrr.buyer_notes || '');
+  const [submitting, setSubmitting] = useState(false);
+
+  // Reset form when modal opens with new data
+  useEffect(() => {
+    if (isOpen) {
+      setResolutionType(vrr.resolution_type);
+      setSlaDeadline(vrr.sla_deadline ? vrr.sla_deadline.split('T')[0] : '');
+      setSlaNotes(vrr.sla_notes || '');
+      setBuyerNotes(vrr.buyer_notes || '');
+    }
+  }, [isOpen, vrr]);
+
+  const handleResubmit = async () => {
+    setSubmitting(true);
+    try {
+      const payload: Record<string, unknown> = {
+        resolution_type: resolutionType,
+        buyer_notes: buyerNotes,
+        sla_notes: slaNotes,
+      };
+      if (slaDeadline) payload.sla_deadline = slaDeadline;
+
+      const result = await vendorInspectionService.updateReturnRequest(vrr.id, payload as any);
+      if (result.success) {
+        showSuccess(result.message || 'Return request resubmitted for TD approval');
+        onClose();
+        onSuccess();
+      } else {
+        showError(result.message || 'Failed to resubmit');
+      }
+    } catch (error: any) {
+      showError(error.message || 'Failed to resubmit return request');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.95 }}
+          className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col mx-4"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between p-5 border-b border-gray-200">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Edit & Resubmit</h2>
+              <p className="text-xs text-gray-500 mt-0.5">{vrr.return_request_number}</p>
+            </div>
+            <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="p-5 space-y-5 overflow-y-auto flex-1">
+            {/* TD Rejection Reason */}
+            {vrr.td_rejection_reason && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-1">TD Rejection Reason</p>
+                <p className="text-sm text-red-800">{vrr.td_rejection_reason}</p>
+              </div>
+            )}
+
+            {/* Resolution Type */}
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Resolution Type <span className="text-red-500">*</span></h3>
+              <div className="grid grid-cols-3 gap-2">
+                {RESOLUTION_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setResolutionType(option.value)}
+                    className={`flex flex-col items-center p-3 rounded-lg border-2 transition-all text-center ${
+                      resolutionType === option.value
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className={`p-1.5 rounded-full mb-1.5 ${
+                      resolutionType === option.value ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      {option.icon}
+                    </div>
+                    <span className={`text-xs font-semibold ${
+                      resolutionType === option.value ? 'text-blue-700' : 'text-gray-700'
+                    }`}>{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* SLA */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">SLA Deadline</label>
+                <Input
+                  type="date"
+                  value={slaDeadline}
+                  onChange={(e) => setSlaDeadline(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">SLA Notes</label>
+                <Input
+                  type="text"
+                  value={slaNotes}
+                  onChange={(e) => setSlaNotes(e.target.value)}
+                  placeholder="e.g., Urgent"
+                />
+              </div>
+            </div>
+
+            {/* Buyer Notes */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+              <textarea
+                value={buyerNotes}
+                onChange={(e) => setBuyerNotes(e.target.value)}
+                placeholder="Add context for the resubmission..."
+                rows={3}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              />
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-3 p-5 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+            <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
+            <Button
+              onClick={handleResubmit}
+              disabled={submitting}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {submitting ? (
+                <><ModernLoadingSpinners size="xxs" /><span className="ml-1.5">Resubmitting...</span></>
+              ) : (
+                <><Send className="w-4 h-4 mr-1.5" />Resubmit for Approval</>
+              )}
+            </Button>
+          </div>
+        </motion.div>
+      </div>
+    </AnimatePresence>
+  );
+};
+
+// ============================================================================
 // Return Request Detail Row (Expandable)
 // ============================================================================
 
@@ -883,6 +1062,7 @@ const DetailRow: React.FC<DetailRowProps> = ({
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [showReplacementModal, setShowReplacementModal] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [refundLightboxOpen, setRefundLightboxOpen] = useState(false);
@@ -1277,6 +1457,15 @@ const DetailRow: React.FC<DetailRowProps> = ({
 
               {/* Action Buttons */}
               <div className="flex flex-wrap gap-3 pt-2">
+                {vrr.status === 'td_rejected' && (
+                  <Button
+                    onClick={() => setShowEditModal(true)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    Edit & Resubmit
+                  </Button>
+                )}
                 {canInitiateReturn && (
                   <Button
                     onClick={handleInitiateReturn}
@@ -1330,6 +1519,12 @@ const DetailRow: React.FC<DetailRowProps> = ({
       )}
 
       {/* Modals */}
+      <EditResubmitModal
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        vrr={vrr}
+        onSuccess={onRefresh}
+      />
       <SelectNewVendorModal
         isOpen={showVendorModal}
         onClose={() => setShowVendorModal(false)}
