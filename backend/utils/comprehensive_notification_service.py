@@ -2309,5 +2309,41 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             log.error(f"Error sending client comment notification: {e}")
 
 
+    # ==================== GENERIC SIMPLE NOTIFICATION ====================
+
+    @staticmethod
+    def send_simple_notification(user_id, title, message, type='info', action_url=None, metadata=None):
+        """
+        Send a simple notification to a specific user.
+        Used by vendor inspection workflow and other features that need
+        a lightweight notification without complex workflow logic.
+
+        Args:
+            user_id: Target user ID
+            title: Notification title
+            message: Notification body
+            type: Notification type (info, warning, success, error, approval)
+            action_url: Optional frontend URL to navigate to
+            metadata: Optional dict of additional data
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=user_id,
+                type=type,
+                title=title,
+                message=message,
+                priority='normal' if type in ('info', 'success') else 'urgent',
+                category='vendor_inspection',
+                action_required=type in ('warning', 'approval'),
+                action_url=action_url,
+                metadata=metadata or {}
+            )
+
+            send_notification_to_user(user_id, notification.to_dict())
+            log.info(f"Sent simple notification to user {user_id}: {title}")
+        except Exception as e:
+            log.error(f"Error sending simple notification to user {user_id}: {e}")
+
+
 # Create singleton instance
 notification_service = ComprehensiveNotificationService()

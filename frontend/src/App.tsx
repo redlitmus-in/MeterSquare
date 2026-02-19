@@ -100,6 +100,9 @@ const ReceiveReturns = lazy(() => import('@/roles/production-manager/pages/Recei
 const RepairManagement = lazy(() => import('@/roles/production-manager/pages/RepairManagement'));
 const AssetRepairManagement = lazy(() => import('@/roles/production-manager/pages/AssetRepairManagement'));
 const MaterialDisposalPage = lazy(() => import('@/roles/production-manager/pages/MaterialDisposalPage'));
+const RejectedDeliveries = lazy(() => import('@/roles/buyer/pages/RejectedDeliveries'));
+const VendorReturnRequests = lazy(() => import('@/roles/buyer/pages/VendorReturnRequests'));
+const ReturnApprovals = lazy(() => import('@/roles/technical-director/pages/ReturnApprovals'));
 const AssetDisposalPage = lazy(() => import('@/roles/production-manager/pages/AssetDisposalPage'));
 
 // Admin Pages - Mix of custom admin pages and role pages
@@ -1027,6 +1030,16 @@ function App() {
                 <RawMaterialsCatalog />
               </BuyerRoute>
             } />
+            <Route path="rejected-deliveries" element={
+              <BuyerRoute>
+                <RejectedDeliveries />
+              </BuyerRoute>
+            } />
+            <Route path="return-requests" element={
+              <BuyerRoute>
+                <VendorReturnRequests />
+              </BuyerRoute>
+            } />
 
             {/* Vendor Management Routes - Role-specific vendor hub */}
             <Route path="vendors" element={<RoleSpecificVendorHub />} />
@@ -1069,6 +1082,11 @@ function App() {
             <Route path="purchase-comparison" element={
               <TechnicalDirectorRoute>
                 <PurchaseComparison />
+              </TechnicalDirectorRoute>
+            } />
+            <Route path="return-approvals" element={
+              <TechnicalDirectorRoute>
+                <ReturnApprovals />
               </TechnicalDirectorRoute>
             } />
             {/* purchase-orders route moved to general routes (line 916 - RoleSpecificPurchaseOrders) */}

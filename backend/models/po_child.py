@@ -73,6 +73,12 @@ class POChild(db.Model):
 
     rejection_reason = db.Column(db.Text, nullable=True)
 
+    # Vendor Delivery Inspection & Routing (Added 2026-02-16)
+    inspection_status = db.Column(db.String(30), nullable=True)
+    # Values: 'pending_inspection', 'fully_approved', 'partially_approved', 'fully_rejected', 'return_in_progress', 'resolved'
+    delivery_routing = db.Column(db.String(50), default='direct_to_site')
+    store_request_status = db.Column(db.String(50), nullable=True)
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -130,6 +136,9 @@ class POChild(db.Model):
             'purchase_completion_date': self.purchase_completion_date.isoformat() if self.purchase_completion_date else None,
             'status': self.status,
             'rejection_reason': self.rejection_reason,
+            'inspection_status': self.inspection_status,
+            'delivery_routing': self.delivery_routing,
+            'store_request_status': self.store_request_status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'is_deleted': self.is_deleted

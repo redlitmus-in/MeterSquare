@@ -42,7 +42,8 @@ class Project(db.Model):
     # # Day Extension Tracking Fields
     extension_reason = db.Column(db.Text, nullable=True)  # Reason for extension
     extension_status = db.Column(db.String(50), nullable=True)  # pending_td_approval, edited_by_td, approved, rejected
-    extension_days = db.Column(db.Integer, nullable=True)  # TD edited days
+    extension_days = db.Column(db.Integer, nullable=True)  # Current active days (edited by TD or original)
+    extension_original_days = db.Column(db.Integer, nullable=True)  # PM's original requested days (preserved when TD edits)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -87,5 +88,6 @@ class Project(db.Model):
             'last_modified_by': self.last_modified_by,
             'extension_reason': self.extension_reason,
             'extension_status': self.extension_status,
-            'extension_days': self.extension_days
+            'extension_days': self.extension_days,
+            'extension_original_days': self.extension_original_days
         }

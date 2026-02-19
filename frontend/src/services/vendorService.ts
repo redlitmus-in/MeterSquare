@@ -31,6 +31,21 @@ export interface VendorStats {
   }>;
 }
 
+export interface MatchingVendorProduct {
+  product_id: number;
+  vendor_id: number;
+  product_name: string;
+  category?: string;
+  description?: string;
+  unit?: string;
+  unit_price?: number;
+}
+
+export interface MatchingVendor extends Vendor {
+  matching_products: MatchingVendorProduct[];
+  matching_products_count: number;
+}
+
 export interface VendorListResponse {
   status: string;
   page: number;
@@ -75,18 +90,32 @@ class VendorService {
     per_page?: number;
   }): Promise<VendorListResponse> {
     try {
-      const queryParams = {
-        category: params?.category,
-        is_active: params?.is_active !== undefined ? params.is_active : true,
+      const queryParams: Record<string, string | number> = {
         page: params?.page || 1,
-        per_page: params?.per_page || 20
+        per_page: params?.per_page || 20,
       };
-
-      const response = await apiClient.get('/all_vendor', { params: queryParams });
-      if (response.data.status === 'success') {
-        return response.data;
+      if (params?.category) queryParams.category = params.category;
+      if (params?.is_active !== undefined) {
+        queryParams.status = params.is_active ? 'active' : 'inactive';
       }
-      throw new Error(response.data.message || 'Failed to fetch vendors');
+
+      const response = await apiClient.get('/vendor/all', { params: queryParams });
+      if (response.data.success) {
+        // Map backend company_name → frontend vendor_name
+        const vendors = (response.data.vendors || []).map((v: Record<string, unknown>) => ({
+          ...v,
+          vendor_name: v.company_name || v.vendor_name || '',
+        }));
+        return {
+          status: 'success',
+          data: vendors,
+          page: response.data.pagination?.page || 1,
+          per_page: response.data.pagination?.per_page || 20,
+          total: response.data.pagination?.total || 0,
+          pages: response.data.pagination?.pages || 1,
+        };
+      }
+      throw new Error(response.data.error || 'Failed to fetch vendors');
     } catch (error: any) {
       console.error('Error fetching vendors:', error);
       if (!error.response) {
@@ -185,6 +214,26 @@ class VendorService {
       'Maintenance Services',
       'Other'
     ];
+  }
+
+  // Get vendors whose products match given material names
+  async getMatchingVendors(materialNames: string[], excludeVendorId?: number): Promise<MatchingVendor[]> {
+    try {
+      const response = await apiClient.post('/vendor/matching-vendors', {
+        material_names: materialNames,
+        exclude_vendor_id: excludeVendorId,
+      });
+      if (response.data.success) {
+        return (response.data.vendors || []).map((v: Record<string, unknown>) => ({
+          ...v,
+          vendor_name: v.company_name || v.vendor_name || '',
+        }));
+      }
+      throw new Error(response.data.error || 'Failed to fetch matching vendors');
+    } catch (error: any) {
+      console.error('Error fetching matching vendors:', error);
+      throw error;
+    }
   }
 
   // Helper method to format vendor for display

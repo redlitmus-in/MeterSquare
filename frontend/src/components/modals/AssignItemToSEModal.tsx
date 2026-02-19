@@ -761,7 +761,7 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                                               <>
                                                 <span className="text-gray-400">•</span>
                                                 <span className="text-orange-600">
-                                                  ₹{(se.ongoing_items_amount || 0).toLocaleString()}
+                                                  AED {(se.ongoing_items_amount || 0).toLocaleString()}
                                                 </span>
                                               </>
                                             )}
@@ -1091,13 +1091,13 @@ const AssignItemToSEModal: React.FC<AssignItemToSEModalProps> = ({
                                 <div className="flex flex-col">
                                   <span className="text-gray-500 text-xs mb-1">Rate</span>
                                   <span className="font-medium text-gray-900">
-                                    ₹{getItemRate(item).toLocaleString()}
+                                    AED {getItemRate(item).toLocaleString()}
                                   </span>
                                 </div>
                                 <div className="flex flex-col">
                                   <span className="text-gray-500 text-xs mb-1">Amount</span>
                                   <span className="font-semibold text-blue-600">
-                                    ₹{getItemAmount(item).toLocaleString()}
+                                    AED {getItemAmount(item).toLocaleString()}
                                   </span>
                                 </div>
                               </div>

@@ -1495,34 +1495,10 @@ def create_po_children(cr_id):
         ).all()
 
         if all_po_children_list:
-            # Collect all material names covered by POChildren
-            materials_in_po_children = set()
-            for pc in all_po_children_list:
-                if pc.materials_data:
-                    for mat in pc.materials_data:
-                        mat_name = mat.get('material_name', '')
-                        if mat_name:
-                            materials_in_po_children.add(mat_name.lower().strip())
+            from utils.po_helpers import are_all_cr_materials_covered
+            all_covered, uncovered_materials = are_all_cr_materials_covered(parent_cr, all_po_children_list)
 
-            # Collect all material names from parent CR
-            parent_materials = parent_cr.sub_items_data or parent_cr.materials_data or []
-            # Also check store-routed materials
-            routed_mats = parent_cr.routed_materials or {}
-            store_routed = {
-                name.lower().strip() for name, info in routed_mats.items()
-                if isinstance(info, dict) and info.get('routing') == 'store'
-            }
-            all_parent_material_names = set()
-            for mat in parent_materials:
-                mat_name = mat.get('material_name', '')
-                if mat_name:
-                    all_parent_material_names.add(mat_name.lower().strip())
-
-            # Materials covered = in POChildren OR store-routed
-            covered_materials = materials_in_po_children | store_routed
-            uncovered_materials = all_parent_material_names - covered_materials
-
-            if not uncovered_materials:
+            if all_covered:
                 # All materials accounted for - safe to hide parent
                 parent_cr.status = 'split_to_sub_crs'
                 parent_cr.updated_at = datetime.utcnow()

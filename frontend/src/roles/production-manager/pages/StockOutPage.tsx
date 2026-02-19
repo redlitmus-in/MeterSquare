@@ -1175,23 +1175,39 @@ const StockOutPage: React.FC = () => {
                         <div className="flex gap-2 flex-wrap">
                           {normalizeStatus(req.status) === 'PENDING' && (
                             (() => {
-                              // Check if material is in inventory
-                              const matData = req.materials_data?.[0];
-                              const actionInventoryMatch = findInventoryMatch(
-                                matData?.material_name || req.item_name,
-                                matData?.brand || req.brand,
-                                req.item_name
-                              );
-                              const isInInventory = !!actionInventoryMatch;
-                              const isAwaitingVendor = !isInInventory;
+                              // Vendor deliveries bring stock from outside — skip inventory check
+                              let hasEnoughStock = false;
+                              if (req.source_type === 'from_vendor_delivery') {
+                                hasEnoughStock = true;
+                              } else if (req.materials_data && Array.isArray(req.materials_data) && req.materials_data.length > 0) {
+                                // Grouped request: ALL materials must have sufficient stock
+                                hasEnoughStock = req.materials_data.every((mat: any) => {
+                                  const match = findInventoryMatch(mat.material_name, mat.brand, req.item_name);
+                                  return match && (match.current_stock || 0) >= (mat.quantity || 0);
+                                });
+                              } else {
+                                // Single-material: prefer authoritative backend field, fallback to inventory lookup
+                                const singleStock = req.material_details?.current_stock;
+                                if (singleStock !== undefined) {
+                                  hasEnoughStock = singleStock >= (req.quantity || 0);
+                                } else {
+                                  const match = findInventoryMatch(req.item_name, req.brand, req.item_name);
+                                  hasEnoughStock = !!match && (match.current_stock || 0) >= (req.quantity || 0);
+                                }
+                              }
+
+                              const isButtonDisabled = !hasEnoughStock;
+                              const disabledTitle = isButtonDisabled
+                                ? 'Insufficient stock — check inventory levels before approving'
+                                : '';
 
                               return (
                                 <>
                                   <button
                                     onClick={() => handleApproveRequest(req.request_id!)}
-                                    disabled={isAwaitingVendor}
+                                    disabled={isButtonDisabled}
                                     className={`px-3 py-1.5 text-xs rounded-lg font-medium ${
-                                      isAwaitingVendor
+                                      isButtonDisabled
                                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                         : req.source_type === 'from_vendor_delivery'
                                           ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
@@ -1200,7 +1216,7 @@ const StockOutPage: React.FC = () => {
                                     aria-label={req.source_type === 'from_vendor_delivery'
                                       ? `Confirm vendor delivery ${req.request_number}`
                                       : `Approve request ${req.request_number}`}
-                                    title={isAwaitingVendor ? 'Material not yet in inventory - awaiting vendor delivery' : ''}
+                                    title={disabledTitle}
                                   >
                                     {req.source_type === 'from_vendor_delivery' ? 'Confirm Receipt' : 'Approve'}
                                   </button>
@@ -1219,14 +1235,38 @@ const StockOutPage: React.FC = () => {
                             })()
                           )}
                           {(req.status === 'APPROVED' || req.status === 'approved') && (
-                            <button
-                              onClick={() => handleCreateDNFromRequest(req)}
-                              className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 font-medium flex items-center gap-1"
-                              aria-label={`Create delivery note for request ${req.request_number}`}
-                            >
-                              <FileText className="w-3 h-3" />
-                              Create DN
-                            </button>
+                            (() => {
+                              // Check if all materials have sufficient stock
+                              let hasStock = false;
+                              if (req.materials_data && Array.isArray(req.materials_data) && req.materials_data.length > 0) {
+                                hasStock = req.materials_data.every((mat: any) => {
+                                  const match = findInventoryMatch(mat.material_name, mat.brand, req.item_name);
+                                  return match && (match.current_stock || 0) >= (mat.quantity || 0);
+                                });
+                              } else {
+                                const match = findInventoryMatch(req.item_name, req.brand);
+                                hasStock = !!match && (match.current_stock || 0) >= (req.quantity || 0);
+                              }
+
+                              return hasStock ? (
+                                <button
+                                  onClick={() => handleCreateDNFromRequest(req)}
+                                  className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 font-medium flex items-center gap-1"
+                                  aria-label={`Create delivery note for request ${req.request_number}`}
+                                >
+                                  <FileText className="w-3 h-3" />
+                                  Create DN
+                                </button>
+                              ) : (
+                                <span
+                                  className="px-3 py-1.5 text-xs bg-amber-50 text-amber-700 rounded-lg font-medium flex items-center gap-1 border border-amber-200"
+                                  title="Stock is insufficient. Complete vendor delivery inspection in Stock In page first."
+                                >
+                                  <Package className="w-3 h-3" />
+                                  Awaiting Stock
+                                </span>
+                              );
+                            })()
                           )}
                           {(req.status === 'DN_PENDING' || req.status === 'dn_pending') && (
                             <span className="px-3 py-1.5 text-xs bg-indigo-100 text-indigo-600 rounded-lg font-medium flex items-center gap-1">

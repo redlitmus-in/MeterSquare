@@ -1,9 +1,15 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ArrowDownCircle, Package, Plus, Search, FileText, CheckCircle, DollarSign, ChevronDown, ChevronLeft, ChevronRight, X, Download, ExternalLink, Truck, Bell } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ArrowDownCircle, Package, Search, FileText, ChevronDown, ChevronLeft, ChevronRight, X, ExternalLink, Truck, Download, CheckCircle, ClipboardCheck, ArrowLeft, AlertTriangle, Eye, RotateCcw } from 'lucide-react';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import EvidenceLightbox, { EvidenceItem } from '@/components/ui/EvidenceLightbox';
 import { inventoryService, InventoryMaterial, CustomUnit } from '../services/inventoryService';
 import { apiClient } from '@/api/config';
 import { PAGINATION } from '@/lib/constants';
+import { showError, showWarning, showSuccess } from '@/utils/toastHelper';
+import UnifiedStockInModal from '../components/UnifiedStockInModal';
+import { vendorInspectionService, AcceptedMaterialForStockIn } from '@/services/vendorInspectionService';
+
+const isSafeUrl = (url: string) => /^https?:\/\//i.test(url);
 
 // Buyer Transfer Interface
 interface BuyerTransfer {
@@ -19,6 +25,8 @@ interface BuyerTransfer {
   status: string;
   created_by: string;
   created_at: string | null;
+  received_at?: string;
+  materials?: any[];
   items: {
     item_id: number;
     inventory_material_id: number;
@@ -31,7 +39,6 @@ interface BuyerTransfer {
   total_items: number;
   total_quantity: number;
 }
-import ConfirmationModal from '../components/ConfirmationModal';
 
 interface PurchaseTransaction {
   inventory_transaction_id?: number;
@@ -48,18 +55,16 @@ interface PurchaseTransaction {
   total_amount: number;
   reference_number?: string;
   notes?: string;
-  delivery_note_url?: string;  // URL to delivery note file
-  // Transport/Delivery fields
+  delivery_note_url?: string;
   driver_name?: string;
   vehicle_number?: string;
-  per_unit_transport_fee?: number;  // Per-unit transport fee (default 1 AED)
-  transport_fee?: number;  // Calculated total: per_unit_transport_fee × quantity
+  per_unit_transport_fee?: number;
+  transport_fee?: number;
   transport_notes?: string;
-  delivery_batch_ref?: string;  // e.g., "DB-2026-001"
+  delivery_batch_ref?: string;
   created_at?: string;
   created_by?: string;
-  // Delivery Note details (enriched from backend)
-  delivery_note_number?: string;  // Actual DN number from MaterialDeliveryNote
+  delivery_note_number?: string;
   delivery_note_details?: {
     delivery_note_id: number;
     delivery_note_number: string;
@@ -71,88 +76,18 @@ interface PurchaseTransaction {
     transport_fee?: number;
     project_id?: number;
   };
-  // Override fields from DN (preferred over transaction-level fields)
   dn_transport_fee?: number;
   dn_driver_name?: string;
   dn_vehicle_number?: string;
 }
 
-// Predefined units organized by category
-const PREDEFINED_UNITS = [
-  // Count Units
-  { value: 'pcs', label: 'Pieces (pcs)', category: 'Count Units' },
-  { value: 'nos', label: 'Numbers (nos)', category: 'Count Units' },
-  { value: 'units', label: 'Units', category: 'Count Units' },
-  { value: 'sets', label: 'Sets', category: 'Count Units' },
-  { value: 'pairs', label: 'Pairs', category: 'Count Units' },
-  { value: 'dozen', label: 'Dozen', category: 'Count Units' },
-
-  // Length Units
-  { value: 'mm', label: 'Millimeters (mm)', category: 'Length Units' },
-  { value: 'cm', label: 'Centimeters (cm)', category: 'Length Units' },
-  { value: 'm', label: 'Meters (m)', category: 'Length Units' },
-  { value: 'km', label: 'Kilometers (km)', category: 'Length Units' },
-  { value: 'in', label: 'Inches (in)', category: 'Length Units' },
-  { value: 'ft', label: 'Feet (ft)', category: 'Length Units' },
-  { value: 'yd', label: 'Yards (yd)', category: 'Length Units' },
-  { value: 'rft', label: 'Running Feet (rft)', category: 'Length Units' },
-  { value: 'rm', label: 'Running Meters (rm)', category: 'Length Units' },
-
-  // Area Units
-  { value: 'sqmm', label: 'Square Millimeters (sq.mm)', category: 'Area Units' },
-  { value: 'sqcm', label: 'Square Centimeters (sq.cm)', category: 'Area Units' },
-  { value: 'sqm', label: 'Square Meters (sq.m)', category: 'Area Units' },
-  { value: 'sqft', label: 'Square Feet (sq.ft)', category: 'Area Units' },
-  { value: 'sqyd', label: 'Square Yards (sq.yd)', category: 'Area Units' },
-  { value: 'acre', label: 'Acres', category: 'Area Units' },
-  { value: 'hectare', label: 'Hectares (ha)', category: 'Area Units' },
-
-  // Volume Units
-  { value: 'cum', label: 'Cubic Meters (cu.m)', category: 'Volume Units' },
-  { value: 'cuft', label: 'Cubic Feet (cu.ft)', category: 'Volume Units' },
-  { value: 'cuyd', label: 'Cubic Yards (cu.yd)', category: 'Volume Units' },
-  { value: 'L', label: 'Liters (L)', category: 'Volume Units' },
-  { value: 'mL', label: 'Milliliters (mL)', category: 'Volume Units' },
-  { value: 'gal', label: 'Gallons (gal)', category: 'Volume Units' },
-
-  // Weight/Mass Units
-  { value: 'mg', label: 'Milligrams (mg)', category: 'Weight/Mass Units' },
-  { value: 'g', label: 'Grams (g)', category: 'Weight/Mass Units' },
-  { value: 'kg', label: 'Kilograms (kg)', category: 'Weight/Mass Units' },
-  { value: 'ton', label: 'Metric Tons (ton)', category: 'Weight/Mass Units' },
-  { value: 'lb', label: 'Pounds (lb)', category: 'Weight/Mass Units' },
-  { value: 'oz', label: 'Ounces (oz)', category: 'Weight/Mass Units' },
-  { value: 'cwt', label: 'Hundredweight (cwt)', category: 'Weight/Mass Units' },
-
-  // Packaging Units
-  { value: 'bags', label: 'Bags', category: 'Packaging Units' },
-  { value: 'boxes', label: 'Boxes', category: 'Packaging Units' },
-  { value: 'cartons', label: 'Cartons', category: 'Packaging Units' },
-  { value: 'cans', label: 'Cans', category: 'Packaging Units' },
-  { value: 'drums', label: 'Drums', category: 'Packaging Units' },
-  { value: 'barrels', label: 'Barrels', category: 'Packaging Units' },
-  { value: 'bottles', label: 'Bottles', category: 'Packaging Units' },
-  { value: 'buckets', label: 'Buckets', category: 'Packaging Units' },
-  { value: 'bundles', label: 'Bundles', category: 'Packaging Units' },
-  { value: 'coils', label: 'Coils', category: 'Packaging Units' },
-  { value: 'crates', label: 'Crates', category: 'Packaging Units' },
-  { value: 'pallets', label: 'Pallets', category: 'Packaging Units' },
-  { value: 'packs', label: 'Packs', category: 'Packaging Units' },
-  { value: 'rolls', label: 'Rolls', category: 'Packaging Units' },
-  { value: 'sheets', label: 'Sheets', category: 'Packaging Units' },
-  { value: 'tubes', label: 'Tubes', category: 'Packaging Units' },
-
-  // Construction Specific
-  { value: 'panels', label: 'Panels', category: 'Construction Specific' },
-  { value: 'blocks', label: 'Blocks', category: 'Construction Specific' },
-  { value: 'bricks', label: 'Bricks', category: 'Construction Specific' },
-  { value: 'tiles', label: 'Tiles', category: 'Construction Specific' },
-  { value: 'boards', label: 'Boards', category: 'Construction Specific' },
-  { value: 'slabs', label: 'Slabs', category: 'Construction Specific' },
-  { value: 'bars', label: 'Bars', category: 'Construction Specific' },
-  { value: 'rods', label: 'Rods', category: 'Construction Specific' },
-  { value: 'lengths', label: 'Lengths', category: 'Construction Specific' },
-  { value: 'strips', label: 'Strips', category: 'Construction Specific' },
+const REJECTION_CATEGORIES = [
+  { value: 'quality_defect', label: 'Quality Defect' },
+  { value: 'wrong_specification', label: 'Wrong Specification' },
+  { value: 'quantity_shortage', label: 'Quantity Shortage' },
+  { value: 'damaged_in_transit', label: 'Damaged in Transit' },
+  { value: 'expired', label: 'Expired / Outdated' },
+  { value: 'other', label: 'Other' },
 ];
 
 const StockInPage: React.FC = () => {
@@ -166,21 +101,9 @@ const StockInPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [expandedMaterials, setExpandedMaterials] = useState<Set<number>>(new Set());
 
-  // Last transport details for "Copy from Last Entry" feature
-  const [lastTransportDetails, setLastTransportDetails] = useState<{
-    driver_name: string;
-    vehicle_number: string;
-    transport_fee: number;
-    transport_notes: string;
-    delivery_batch_ref: string;
-    delivery_note_url?: string;
-  } | null>(null);
-
-  // Delivery batch selection
-  const [showBatchListModal, setShowBatchListModal] = useState(false);
+  // Delivery batch data
   const [recentBatches, setRecentBatches] = useState<Array<{
     delivery_batch_ref: string;
     driver_name: string;
@@ -192,71 +115,8 @@ const StockInPage: React.FC = () => {
     delivery_note_url?: string;
   }>>([]);
 
-  // Reference info from selected batch (for display only, not saved)
-  const [selectedBatchReference, setSelectedBatchReference] = useState<{
-    original_fee: number;
-    delivery_note_url?: string;
-  } | null>(null);
-
-  // Purchase form data
-  const [purchaseFormData, setPurchaseFormData] = useState<PurchaseTransaction>({
-    inventory_material_id: 0,
-    transaction_type: 'PURCHASE',
-    quantity: 0,
-    unit_price: 0,
-    total_amount: 0,
-    reference_number: '',
-    notes: '',
-    // Transport fields
-    driver_name: '',
-    vehicle_number: '',
-    per_unit_transport_fee: 1,  // Default 1 AED per unit
-    transport_fee: 0,  // Will be calculated as per_unit_transport_fee × quantity
-    transport_notes: '',
-    delivery_batch_ref: ''
-  });
-  const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null);
-
-  // Selected material for display
-  const [selectedMaterial, setSelectedMaterial] = useState<InventoryMaterial | null>(null);
-
-  // Material search combobox state
-  const [materialSearchTerm, setMaterialSearchTerm] = useState('');
-  const [showMaterialDropdown, setShowMaterialDropdown] = useState(false);
-  const materialDropdownRef = useRef<HTMLDivElement>(null);
-  const unitDropdownRef = useRef<HTMLDivElement>(null);
-  const materialInputRef = useRef<HTMLInputElement>(null);
-
-  // New material modal state
-  const [showNewMaterialModal, setShowNewMaterialModal] = useState(false);
-  const [newMaterialData, setNewMaterialData] = useState({
-    material_name: '',
-    brand: '',
-    size: '',
-    category: '',
-    unit: 'pcs',
-    unit_price: 0,
-    current_stock: 0,
-    min_stock_level: 0,
-    description: ''
-  });
-  const [savingNewMaterial, setSavingNewMaterial] = useState(false);
-
-  // Custom units states
+  // Custom units
   const [customUnits, setCustomUnits] = useState<CustomUnit[]>([]);
-  const [unitSearchTerm, setUnitSearchTerm] = useState('');
-  const [showUnitDropdown, setShowUnitDropdown] = useState(false);
-  const [showAddUnitModal, setShowAddUnitModal] = useState(false);
-  const [newUnitData, setNewUnitData] = useState({ value: '', label: '' });
-
-  // Confirmation modal
-  const [confirmModal, setConfirmModal] = useState({
-    show: false,
-    title: '',
-    message: '',
-    onConfirm: () => {},
-    confirmText: 'Confirm'
-  });
 
   // Buyer Transfers state
   const [showBuyerTransfersModal, setShowBuyerTransfersModal] = useState(false);
@@ -266,67 +126,106 @@ const StockInPage: React.FC = () => {
   const [receivingTransferId, setReceivingTransferId] = useState<number | null>(null);
   const [buyerTransfersTab, setBuyerTransfersTab] = useState<'pending' | 'history'>('pending');
 
+  // Inspection Centre modal state
+  const [showVendorDeliveriesModal, setShowVendorDeliveriesModal] = useState(false);
+  const [inspectionCentreTab, setInspectionCentreTab] = useState<'pending' | 'awaiting_stockin' | 'history' | 'held'>('pending');
+
+  // Pending tab
+  const [pendingInspections, setPendingInspections] = useState<any[]>([]);
+  const [pendingInspectionsCount, setPendingInspectionsCount] = useState(0);
+  const [loadingInspections, setLoadingInspections] = useState(false);
+  const [selectedIMR, setSelectedIMR] = useState<any | null>(null);
+  const [loadingIMRDetails, setLoadingIMRDetails] = useState(false);
+  const [materialDecisions, setMaterialDecisions] = useState<Array<{
+    material_name: string; brand: string; size: string; unit: string;
+    ordered_qty: number; accepted_qty: number; rejected_qty: number;
+    rejection_category: string; rejection_notes: string;
+  }>>([]);
+  const [vendorDriverName, setVendorDriverName] = useState('');
+  const [vendorVehicleNumber, setVendorVehicleNumber] = useState('');
+  const [vendorReferenceNumber, setVendorReferenceNumber] = useState('');
+  const [inspectionOverallNotes, setInspectionOverallNotes] = useState('');
+  const [submittingInspection, setSubmittingInspection] = useState(false);
+  // Evidence upload for inspection
+  const [evidenceFiles, setEvidenceFiles] = useState<Array<{
+    file: File;
+    preview: string;
+    fileType: 'image' | 'video';
+    uploading: boolean;
+    uploaded?: { url: string; file_name: string; file_type: string };
+    error?: string;
+  }>>([]);
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
+
+  // History tab
+  const [inspectionHistory, setInspectionHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('');
+  const [expandedHistoryId, setExpandedHistoryId] = useState<number | null>(null);
+  const [historyLightboxOpen, setHistoryLightboxOpen] = useState(false);
+  const [historyLightboxIndex, setHistoryLightboxIndex] = useState(0);
+  const [historyLightboxEvidence, setHistoryLightboxEvidence] = useState<any[]>([]);
+
+  // Awaiting Stock In tab
+  const [awaitingStockInInspections, setAwaitingStockInInspections] = useState<any[]>([]);
+  const [awaitingStockInCount, setAwaitingStockInCount] = useState(0);
+  const [loadingAwaitingStockIn, setLoadingAwaitingStockIn] = useState(false);
+  const [activeStockInInspectionId, setActiveStockInInspectionId] = useState<number | null>(null);
+
+  // Held Materials tab
+  const [heldMaterials, setHeldMaterials] = useState<any[]>([]);
+  const [loadingHeld, setLoadingHeld] = useState(false);
+  const [refundEvidenceOpen, setRefundEvidenceOpen] = useState(false);
+  const [refundEvidenceList, setRefundEvidenceList] = useState<EvidenceItem[]>([]);
+  const [refundEvidenceIndex, setRefundEvidenceIndex] = useState(0);
+
+  // Pre-fill stock-in data from inspection result
+  const [prefillStockInData, setPrefillStockInData] = useState<{
+    materials: Array<{
+      material_name: string; brand?: string; size?: string; unit?: string;
+      quantity: number; unit_price: number; driver_name?: string;
+      vehicle_number?: string; reference_number?: string; per_unit_transport_fee?: number;
+    }>;
+  } | null>(null);
+
+
   useEffect(() => {
     fetchData();
   }, []);
 
   useEffect(() => {
     filterTransactions();
-    extractRecentBatches(); // Extract delivery batches when transactions change
+    extractRecentBatches();
   }, [searchTerm, purchaseTransactions]);
-
-  // Filter materials based on search term using useMemo for better performance
-  const filteredMaterials = useMemo(() => {
-    if (materialSearchTerm.trim() === '') {
-      return allMaterials;
-    }
-    const search = materialSearchTerm.toLowerCase();
-    return allMaterials.filter(m =>
-      m.material_name?.toLowerCase().includes(search) ||
-      m.material_code?.toLowerCase().includes(search) ||
-      m.brand?.toLowerCase().includes(search)
-    );
-  }, [materialSearchTerm, allMaterials]);
-
-  // Close dropdowns when clicking outside
-  useEffect(() => {
-    if (!showMaterialDropdown && !showUnitDropdown) return;
-
-    const handleClickOutside = (event: MouseEvent) => {
-      // Check material dropdown
-      if (showMaterialDropdown && materialDropdownRef.current && !materialDropdownRef.current.contains(event.target as Node)) {
-        setShowMaterialDropdown(false);
-      }
-      // Check unit dropdown
-      if (showUnitDropdown && unitDropdownRef.current && !unitDropdownRef.current.contains(event.target as Node)) {
-        setShowUnitDropdown(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showMaterialDropdown, showUnitDropdown]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch materials and transactions (required)
       const [materials, transactionsResult] = await Promise.all([
         inventoryService.getAllInventoryItems(),
         inventoryService.getAllInventoryTransactions({ transaction_type: 'PURCHASE' })
       ]);
 
       setAllMaterials(materials);
-      setPurchaseTransactions(transactionsResult.transactions);
+      setPurchaseTransactions(transactionsResult.transactions as unknown as PurchaseTransaction[]);
 
-      // Fetch custom units (optional - fail gracefully if not accessible)
+      // Fetch custom units (optional)
       try {
         const customUnitsData = await inventoryService.getCustomUnits();
         setCustomUnits(customUnitsData);
       } catch (error) {
         console.warn('Custom units not available:', error);
-        setCustomUnits([]); // Continue with empty custom units
+        setCustomUnits([]);
       }
+
+      // After main data fetch, fetch inspection counts silently
+      vendorInspectionService.getPendingInspections(1, 1).then(res => {
+        setPendingInspectionsCount(res.total || 0);
+      }).catch(() => {});
+      vendorInspectionService.getPendingStockInInspections(1, 1).then(res => {
+        setAwaitingStockInCount(res.total || 0);
+      }).catch(() => {});
+
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -336,7 +235,6 @@ const StockInPage: React.FC = () => {
 
   const filterTransactions = () => {
     let filtered = [...purchaseTransactions];
-
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
       filtered = filtered.filter(txn =>
@@ -345,9 +243,9 @@ const StockInPage: React.FC = () => {
         txn.reference_number?.toLowerCase().includes(search)
       );
     }
-
     setFilteredTransactions(filtered);
   };
+
 
   // Fetch pending buyer transfers
   const fetchBuyerTransfers = async () => {
@@ -355,17 +253,12 @@ const StockInPage: React.FC = () => {
     try {
       const [pendingResponse, historyResponse] = await Promise.all([
         apiClient.get('/inventory/buyer-transfers/pending', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-          }
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
         }),
         apiClient.get('/inventory/buyer-transfers/history', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-          }
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
         })
       ]);
-
       if (pendingResponse.data.success) {
         setBuyerTransfers(pendingResponse.data.transfers || []);
       }
@@ -386,19 +279,17 @@ const StockInPage: React.FC = () => {
     setReceivingTransferId(deliveryNoteId);
     try {
       const response = await apiClient.post(`/inventory/buyer-transfers/${deliveryNoteId}/receive`, {}, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        }
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
       });
       if (response.data.success) {
-        alert(`Transfer ${response.data.delivery_note_number} received successfully! Materials added to inventory.`);
-        // Refresh both buyer transfers and main data
+        showSuccess(`Transfer ${response.data.delivery_note_number} received successfully! Materials added to inventory.`);
         fetchBuyerTransfers();
         fetchData();
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error receiving transfer:', error);
-      alert(error.response?.data?.error || 'Failed to receive transfer');
+      const message = error instanceof Error ? error.message : 'Failed to receive transfer';
+      showError(message);
     } finally {
       setReceivingTransferId(null);
     }
@@ -408,20 +299,14 @@ const StockInPage: React.FC = () => {
   const handleDownloadBuyerTransferPDF = async (deliveryNoteId: number, deliveryNoteNumber: string) => {
     try {
       const response = await apiClient.get(`/inventory/delivery_note/${deliveryNoteId}/download`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        },
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` },
         responseType: 'blob'
       });
-
-      // Check if response is actually JSON error (not PDF)
       if (response.data.type === 'application/json') {
         const text = await response.data.text();
         const errorData = JSON.parse(text);
         throw new Error(errorData.error || 'Failed to download PDF');
       }
-
-      // Create download link
       const blob = new Blob([response.data], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -431,17 +316,316 @@ const StockInPage: React.FC = () => {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error downloading PDF:', error);
-      const errorMessage = error.message || error.response?.data?.error || 'Failed to download PDF';
-      alert(errorMessage);
+      const message = error instanceof Error ? error.message : 'Failed to download PDF';
+      showError(message);
     }
   };
 
-  // Open buyer transfers modal
   const handleOpenBuyerTransfersModal = () => {
     setShowBuyerTransfersModal(true);
     fetchBuyerTransfers();
+  };
+
+  // Vendor Inspection Handlers
+  const fetchPendingInspections = async () => {
+    setLoadingInspections(true);
+    try {
+      const result = await vendorInspectionService.getPendingInspections();
+      setPendingInspections(result.data || []);
+      setPendingInspectionsCount(result.total || 0);
+    } catch (error) {
+      setPendingInspections([]);
+    } finally {
+      setLoadingInspections(false);
+    }
+  };
+
+  const fetchInspectionHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const result = await vendorInspectionService.getInspectionHistory(1, 50, historyStatusFilter || undefined);
+      setInspectionHistory(result.data || []);
+    } catch {
+      setInspectionHistory([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const fetchAwaitingStockIn = async () => {
+    setLoadingAwaitingStockIn(true);
+    try {
+      const result = await vendorInspectionService.getPendingStockInInspections();
+      setAwaitingStockInInspections(result.data || []);
+      setAwaitingStockInCount(result.total || 0);
+    } catch {
+      setAwaitingStockInInspections([]);
+    } finally {
+      setLoadingAwaitingStockIn(false);
+    }
+  };
+
+  const fetchHeldMaterials = async () => {
+    setLoadingHeld(true);
+    try {
+      const result = await vendorInspectionService.getHeldMaterials();
+      setHeldMaterials(result.data || []);
+    } catch {
+      setHeldMaterials([]);
+    } finally {
+      setLoadingHeld(false);
+    }
+  };
+
+  const handleOpenVendorDeliveries = () => {
+    setShowVendorDeliveriesModal(true);
+    setSelectedIMR(null);
+    setInspectionCentreTab('pending');
+    fetchPendingInspections();
+  };
+
+  const handleInspectionCentreTabChange = (tab: 'pending' | 'awaiting_stockin' | 'history' | 'held') => {
+    setInspectionCentreTab(tab);
+    setSelectedIMR(null);
+    if (tab === 'pending') fetchPendingInspections();
+    if (tab === 'awaiting_stockin') fetchAwaitingStockIn();
+    if (tab === 'history') fetchInspectionHistory();
+    if (tab === 'held') fetchHeldMaterials();
+  };
+
+  const handleSelectIMRForInspection = async (imrId: number) => {
+    setLoadingIMRDetails(true);
+    setSelectedIMR(null);
+    setMaterialDecisions([]);
+    try {
+      const result = await vendorInspectionService.getInspectionDetails(imrId);
+      const imrData = (result as any).data;
+      setSelectedIMR(imrData);
+      const decisions = (imrData.materials_for_inspection || []).map((mat: any) => ({
+        material_name: mat.material_name || '',
+        brand: mat.brand || '',
+        size: mat.size || '',
+        unit: mat.unit || '',
+        ordered_qty: mat.ordered_qty || 0,
+        accepted_qty: mat.ordered_qty || 0,
+        rejected_qty: 0,
+        rejection_category: '',
+        rejection_notes: '',
+      }));
+      setMaterialDecisions(decisions);
+      setVendorDriverName('');
+      setVendorVehicleNumber('');
+      setVendorReferenceNumber('');
+      setInspectionOverallNotes('');
+      setEvidenceFiles([]);
+    } catch (error) {
+      showError('Failed to load delivery details');
+    } finally {
+      setLoadingIMRDetails(false);
+    }
+  };
+
+  const handleEvidenceFileSelect = async (files: FileList | null) => {
+    if (!files || !selectedIMR) return;
+    const crId = selectedIMR.cr_id;
+
+    const newEntries = Array.from(files).map(file => {
+      const isVideo = file.type.startsWith('video/');
+      const preview = isVideo ? '' : URL.createObjectURL(file);
+      return { file, preview, fileType: isVideo ? 'video' as const : 'image' as const, uploading: true };
+    });
+
+    setEvidenceFiles(prev => [...prev, ...newEntries]);
+    setUploadingEvidence(true);
+
+    // Upload each file
+    const uploadResults = await Promise.all(
+      newEntries.map(async (entry, i) => {
+        try {
+          const result = await vendorInspectionService.uploadInspectionEvidence(entry.file, crId);
+          return { index: evidenceFiles.length + i, success: true, data: result };
+        } catch (err) {
+          return { index: evidenceFiles.length + i, success: false, error: err instanceof Error ? err.message : 'Upload failed' };
+        }
+      })
+    );
+
+    setEvidenceFiles(prev => {
+      const updated = [...prev];
+      uploadResults.forEach(result => {
+        if (result.index < updated.length) {
+          if (result.success && result.data) {
+            updated[result.index] = { ...updated[result.index], uploading: false, uploaded: result.data };
+          } else {
+            updated[result.index] = { ...updated[result.index], uploading: false, error: result.error };
+          }
+        }
+      });
+      return updated;
+    });
+    setUploadingEvidence(false);
+  };
+
+  const handleRemoveEvidence = (index: number) => {
+    setEvidenceFiles(prev => {
+      const entry = prev[index];
+      if (entry.preview) URL.revokeObjectURL(entry.preview);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const handleMaterialQtyChange = (index: number, acceptedQty: number) => {
+    setMaterialDecisions(prev => prev.map((d, i) => {
+      if (i !== index) return d;
+      const accepted = Math.min(Math.max(0, acceptedQty), d.ordered_qty);
+      return { ...d, accepted_qty: accepted, rejected_qty: d.ordered_qty - accepted };
+    }));
+  };
+
+  const handleMaterialRejectionChange = (index: number, field: 'rejection_category' | 'rejection_notes', value: string) => {
+    setMaterialDecisions(prev => prev.map((d, i) => i === index ? { ...d, [field]: value } : d));
+  };
+
+  const computeOverallDecision = (): 'fully_approved' | 'partially_approved' | 'fully_rejected' => {
+    if (materialDecisions.length === 0) return 'fully_approved';
+    const allAccepted = materialDecisions.every(d => d.accepted_qty >= d.ordered_qty);
+    const allRejected = materialDecisions.every(d => d.accepted_qty === 0);
+    if (allAccepted) return 'fully_approved';
+    if (allRejected) return 'fully_rejected';
+    return 'partially_approved';
+  };
+
+  const handleAcceptAllMaterials = () => {
+    setMaterialDecisions(prev => prev.map(d => ({
+      ...d,
+      accepted_qty: d.ordered_qty,
+      rejected_qty: 0, rejection_category: '', rejection_notes: '',
+    })));
+  };
+
+  const handleRejectAllMaterials = () => {
+    setMaterialDecisions(prev => prev.map(d => ({
+      ...d, accepted_qty: 0, rejected_qty: d.ordered_qty,
+    })));
+  };
+
+  const handleSubmitInspection = async () => {
+    if (!selectedIMR) return;
+    const missingCategory = materialDecisions.some(d => d.rejected_qty > 0 && !d.rejection_category);
+    if (missingCategory) {
+      showError('Please select a rejection reason for all rejected materials');
+      return;
+    }
+    const decision = computeOverallDecision();
+
+    // Evidence is required when there are any rejections
+    if (decision !== 'fully_approved') {
+      const uploadedCount = evidenceFiles.filter(e => e.uploaded).length;
+      if (uploadedCount === 0) {
+        showError('Please upload at least one photo or video as evidence for rejected materials');
+        return;
+      }
+      if (uploadingEvidence || evidenceFiles.some(e => e.uploading)) {
+        showError('Please wait for all files to finish uploading');
+        return;
+      }
+    }
+
+    const uploadedEvidence = evidenceFiles
+      .filter(e => e.uploaded)
+      .map(e => ({ url: e.uploaded!.url, file_name: e.uploaded!.file_name, file_type: e.uploaded!.file_type }));
+
+    setSubmittingInspection(true);
+    try {
+      const response = await vendorInspectionService.submitInspection(selectedIMR.request_id, {
+        decision,
+        materials_inspection: materialDecisions.map(d => ({
+          material_name: d.material_name,
+          brand: d.brand || undefined,
+          size: d.size || undefined,
+          unit: d.unit,
+          ordered_qty: d.ordered_qty,
+          accepted_qty: d.accepted_qty,
+          rejected_qty: d.rejected_qty,
+          rejection_category: d.rejection_category || undefined,
+          rejection_notes: d.rejection_notes || undefined,
+        })),
+        overall_notes: inspectionOverallNotes || undefined,
+        evidence_urls: uploadedEvidence.length > 0 ? uploadedEvidence : undefined,
+        stock_in_details: decision !== 'fully_rejected' ? {
+          driver_name: vendorDriverName || undefined,
+          vehicle_number: vendorVehicleNumber || undefined,
+          reference_number: vendorReferenceNumber || undefined,
+        } : undefined,
+      });
+
+      const messages: Record<string, string> = {
+        fully_approved: 'Inspection submitted! You can stock-in now or find it later in "Awaiting Stock In" tab.',
+        partially_approved: 'Inspection submitted! Buyer notified for rejected items. Stock-in accepted materials now or later.',
+        fully_rejected: 'All materials rejected. Buyer has been notified to handle the return.',
+      };
+      showSuccess(messages[decision]);
+      setSelectedIMR(null);
+      setEvidenceFiles([]);
+      setShowVendorDeliveriesModal(false);
+      fetchPendingInspections();
+      fetchData();
+
+      // Refresh awaiting stock-in count
+      vendorInspectionService.getPendingStockInInspections(1, 1).then(res => {
+        setAwaitingStockInCount(res.total || 0);
+      }).catch(() => {});
+
+      // Auto-open stock-in form pre-filled with accepted materials
+      const acceptedMaterials: AcceptedMaterialForStockIn[] = response.data?.accepted_materials ?? [];
+      if (acceptedMaterials.length > 0) {
+        setActiveStockInInspectionId(response.data?.inspection_id ?? null);
+        setPrefillStockInData({ materials: acceptedMaterials });
+        setShowPurchaseModal(true);
+      }
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Failed to submit inspection');
+    } finally {
+      setSubmittingInspection(false);
+    }
+  };
+
+  const handleStockInFromInspection = (inspection: any) => {
+    const acceptedMaterials = inspection.accepted_materials || [];
+    if (acceptedMaterials.length === 0) {
+      showWarning('No accepted materials found for this inspection');
+      return;
+    }
+    setActiveStockInInspectionId(inspection.id);
+    // Close Inspection Centre, then open the regular stock-in form with prefilled materials
+    setShowVendorDeliveriesModal(false);
+    setPrefillStockInData({ materials: acceptedMaterials });
+    setShowPurchaseModal(true);
+  };
+
+  const handleStockInSaveComplete = async () => {
+    fetchData();
+    setShowPurchaseModal(false);
+
+    // If this stock-in was for an inspected delivery, mark it complete
+    if (activeStockInInspectionId) {
+      try {
+        await vendorInspectionService.completeInspectionStockIn(activeStockInInspectionId);
+        showSuccess('Stock-in completed and inspection marked as done');
+      } catch (error) {
+        console.error('Failed to mark inspection stock-in complete:', error);
+        showWarning('Stock was saved, but failed to mark the inspection as complete. Please retry from the Awaiting Stock In tab.');
+      }
+      setActiveStockInInspectionId(null);
+      // Refresh awaiting stock-in count
+      vendorInspectionService.getPendingStockInInspections(1, 1).then(res => {
+        setAwaitingStockInCount(res.total || 0);
+      }).catch(() => {});
+      fetchAwaitingStockIn();
+    }
+    setPrefillStockInData(null);
   };
 
   // Extract recent delivery batches from transactions
@@ -457,7 +641,6 @@ const StockInPage: React.FC = () => {
       delivery_note_url?: string;
     }>();
 
-    // Group transactions by delivery_batch_ref
     purchaseTransactions.forEach(txn => {
       if (txn.delivery_batch_ref) {
         if (!batchMap.has(txn.delivery_batch_ref)) {
@@ -469,26 +652,19 @@ const StockInPage: React.FC = () => {
             transport_notes: txn.transport_notes || '',
             created_at: txn.created_at || '',
             material_count: 1,
-            delivery_note_url: txn.delivery_note_url // Keep the first delivery note
+            delivery_note_url: txn.delivery_note_url
           });
         } else {
           const existing = batchMap.get(txn.delivery_batch_ref)!;
           existing.material_count += 1;
-          // Keep the MAXIMUM transport fee (the one that was actually paid, prioritize DN fee)
           const txnTransportFee = txn.dn_transport_fee ?? txn.transport_fee ?? 0;
           if (txnTransportFee && txnTransportFee > existing.transport_fee) {
             existing.transport_fee = txnTransportFee;
           }
-          // Update driver/vehicle if current transaction has them but existing doesn't (prioritize DN fields)
           const txnDriver = txn.dn_driver_name || txn.driver_name;
-          if (!existing.driver_name && txnDriver) {
-            existing.driver_name = txnDriver;
-          }
+          if (!existing.driver_name && txnDriver) existing.driver_name = txnDriver;
           const txnVehicle = txn.dn_vehicle_number || txn.vehicle_number;
-          if (!existing.vehicle_number && txnVehicle) {
-            existing.vehicle_number = txnVehicle;
-          }
-          // Keep delivery note URL if current one is empty but transaction has one
+          if (!existing.vehicle_number && txnVehicle) existing.vehicle_number = txnVehicle;
           if (!existing.delivery_note_url && txn.delivery_note_url) {
             existing.delivery_note_url = txn.delivery_note_url;
           }
@@ -496,12 +672,10 @@ const StockInPage: React.FC = () => {
       }
     });
 
-    // Convert to array and sort by date (most recent first)
     const batches = Array.from(batchMap.values()).sort((a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
-
-    setRecentBatches(batches.slice(0, 10)); // Keep only 10 most recent batches
+    setRecentBatches(batches.slice(0, 10));
   };
 
   // Create batch details map for transport fee and delivery notes lookup
@@ -516,11 +690,9 @@ const StockInPage: React.FC = () => {
       vehicle_number: string;
     }>();
 
-    // Count materials per batch and collect material names
     purchaseTransactions.forEach(txn => {
       if (txn.delivery_batch_ref) {
         if (!map.has(txn.delivery_batch_ref)) {
-          // Initialize batch with first transaction's data (prioritize DN fields)
           map.set(txn.delivery_batch_ref, {
             delivery_batch_ref: txn.delivery_batch_ref,
             transport_fee: txn.dn_transport_fee ?? txn.transport_fee ?? 0,
@@ -530,86 +702,38 @@ const StockInPage: React.FC = () => {
             material_count: 1,
             material_names: [txn.material_name || 'Unknown']
           });
-
-          console.log(`Initialized batch ${txn.delivery_batch_ref}:`, {
-            transport_notes: txn.transport_notes,
-            transport_fee: txn.dn_transport_fee ?? txn.transport_fee,
-            driver: txn.dn_driver_name || txn.driver_name,
-            vehicle: txn.dn_vehicle_number || txn.vehicle_number
-          });
         } else {
           const existing = map.get(txn.delivery_batch_ref)!;
           existing.material_count += 1;
-
-          // Add material name if not already in the list
           const materialName = txn.material_name || 'Unknown';
           if (!existing.material_names.includes(materialName)) {
             existing.material_names.push(materialName);
           }
-
-          // Keep the maximum transport fee (the actual one paid)
-          // Prioritize DN fields over transaction-level fields
           const txnTransportFee = txn.dn_transport_fee ?? txn.transport_fee ?? 0;
           if (txnTransportFee && txnTransportFee > existing.transport_fee) {
-            console.log(`Updating batch ${txn.delivery_batch_ref} with higher fee transaction:`, {
-              old_fee: existing.transport_fee,
-              new_fee: txnTransportFee,
-              old_notes: existing.transport_notes,
-              new_notes: txn.transport_notes
-            });
-
             existing.transport_fee = txnTransportFee;
-            // Update transport notes, driver, and vehicle from the transaction that paid the fee
-            if (txn.transport_notes) {
-              existing.transport_notes = txn.transport_notes;
-            }
+            if (txn.transport_notes) existing.transport_notes = txn.transport_notes;
             const txnDriver = txn.dn_driver_name || txn.driver_name;
-            if (txnDriver) {
-              existing.driver_name = txnDriver;
-            }
+            if (txnDriver) existing.driver_name = txnDriver;
             const txnVehicle = txn.dn_vehicle_number || txn.vehicle_number;
-            if (txnVehicle) {
-              existing.vehicle_number = txnVehicle;
-            }
+            if (txnVehicle) existing.vehicle_number = txnVehicle;
           } else {
-            // If this transaction doesn't have a higher fee, only fill in empty fields
-            if (!existing.transport_notes && txn.transport_notes) {
-              existing.transport_notes = txn.transport_notes;
-            }
+            if (!existing.transport_notes && txn.transport_notes) existing.transport_notes = txn.transport_notes;
             const txnDriver = txn.dn_driver_name || txn.driver_name;
-            if (!existing.driver_name && txnDriver) {
-              existing.driver_name = txnDriver;
-            }
+            if (!existing.driver_name && txnDriver) existing.driver_name = txnDriver;
             const txnVehicle = txn.dn_vehicle_number || txn.vehicle_number;
-            if (!existing.vehicle_number && txnVehicle) {
-              existing.vehicle_number = txnVehicle;
-            }
+            if (!existing.vehicle_number && txnVehicle) existing.vehicle_number = txnVehicle;
           }
         }
       }
     });
-
-    console.log('Final batchDetailsMap:', Array.from(map.entries()).map(([key, value]) => ({
-      batch: key,
-      transport_fee: value.transport_fee,
-      transport_notes: value.transport_notes,
-      material_count: value.material_count,
-      materials: value.material_names
-    })));
-
     return map;
   }, [purchaseTransactions]);
 
   // Group transactions by material
   const groupedTransactions = useMemo(() => {
     const groups = new Map<number, {
-      material: {
-        id: number;
-        code: string;
-        name: string;
-        brand?: string;
-        unit: string;
-      };
+      material: { id: number; code: string; name: string; brand?: string; unit: string };
       transactions: PurchaseTransaction[];
       totalQuantity: number;
       totalAmount: number;
@@ -638,26 +762,23 @@ const StockInPage: React.FC = () => {
     });
 
     return Array.from(groups.values()).sort((a, b) => {
-      // Sort by most recent transaction date
       const aLatest = Math.max(...a.transactions.map(t => new Date(t.created_at || '').getTime()));
       const bLatest = Math.max(...b.transactions.map(t => new Date(t.created_at || '').getTime()));
       return bLatest - aLatest;
     });
   }, [filteredTransactions]);
 
-  // Pagination for grouped transactions
+  // Pagination
   const totalPages = Math.ceil(groupedTransactions.length / PAGINATION.DEFAULT_PAGE_SIZE);
   const paginatedGroups = useMemo(() => {
     const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
     return groupedTransactions.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
   }, [groupedTransactions, currentPage]);
 
-  // Reset page when search changes
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
 
-  // Clamp page when total pages changes
   useEffect(() => {
     if (currentPage > totalPages && totalPages > 0) {
       setCurrentPage(totalPages);
@@ -667,388 +788,18 @@ const StockInPage: React.FC = () => {
   const toggleMaterialExpansion = (materialId: number) => {
     setExpandedMaterials(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(materialId)) {
-        newSet.delete(materialId);
-      } else {
-        newSet.add(materialId);
-      }
+      if (newSet.has(materialId)) newSet.delete(materialId);
+      else newSet.add(materialId);
       return newSet;
     });
   };
 
-  const handleOpenPurchaseModal = () => {
-    setPurchaseFormData({
-      inventory_material_id: 0,
-      transaction_type: 'PURCHASE',
-      quantity: 0,
-      unit_price: 0,
-      total_amount: 0,
-      reference_number: '',
-      notes: '',
-      // Reset transport fields
-      driver_name: '',
-      vehicle_number: '',
-      per_unit_transport_fee: 1,  // Default 1 AED per unit
-      transport_fee: 0,
-      transport_notes: '',
-      delivery_batch_ref: ''
-    });
-    setSelectedMaterial(null);
-    setMaterialSearchTerm('');
-    setShowMaterialDropdown(false);
-    setShowNewMaterialModal(false); // Ensure Add Material modal is closed
-    setDeliveryNoteFile(null); // Clear any previously uploaded file
-    setSelectedBatchReference(null); // Clear batch reference info
-    setShowPurchaseModal(true);
-  };
-
-  const handleMaterialSearchChange = (value: string) => {
-    setMaterialSearchTerm(value);
-    setShowMaterialDropdown(true);
-    // Clear selection if user is typing
-    if (selectedMaterial && value !== `${selectedMaterial.material_code} - ${selectedMaterial.material_name}`) {
-      setSelectedMaterial(null);
-      setPurchaseFormData(prev => ({
-        ...prev,
-        inventory_material_id: 0,
-        unit_price: 0
-      }));
-    }
-  };
-
-  const handleSelectMaterialFromDropdown = (material: InventoryMaterial) => {
-    setSelectedMaterial(material);
-    setMaterialSearchTerm(`${material.material_code} - ${material.material_name}${material.brand ? ` (${material.brand})` : ''}`);
-    setPurchaseFormData(prev => ({
-      ...prev,
-      inventory_material_id: material.inventory_material_id || 0,
-      unit_price: material.unit_price || 0
-    }));
-    setShowMaterialDropdown(false);
-
-    // Also ensure the input doesn't refocus and reopen dropdown
-    if (materialInputRef.current) {
-      materialInputRef.current.blur();
-    }
-  };
-
-  // Combined units list (predefined + custom from DB)
-  const allUnits = useMemo(() => {
-    const combined = [
-      ...PREDEFINED_UNITS.map(u => ({ value: u.value, label: u.label, category: u.category, isCustom: false })),
-      ...customUnits.map(u => ({ value: u.value, label: u.label, category: 'Custom Units', isCustom: true }))
-    ];
-    return combined;
-  }, [customUnits]);
-
-  // Filtered units based on search term
-  const filteredUnits = useMemo(() => {
-    if (!unitSearchTerm.trim()) return allUnits;
-    const search = unitSearchTerm.toLowerCase();
-    return allUnits.filter(unit =>
-      unit.value.toLowerCase().includes(search) ||
-      unit.label.toLowerCase().includes(search)
-    );
-  }, [allUnits, unitSearchTerm]);
-
-  const handleUnitSearchChange = (value: string) => {
-    setUnitSearchTerm(value);
-    setNewMaterialData(prev => ({ ...prev, unit: value }));
-    setShowUnitDropdown(true);
-  };
-
-  const handleSelectUnit = (unitValue: string) => {
-    const selectedUnit = allUnits.find(u => u.value === unitValue);
-    setNewMaterialData(prev => ({ ...prev, unit: unitValue }));
-    setUnitSearchTerm(selectedUnit?.label || unitValue);
-    setShowUnitDropdown(false);
-  };
-
-  const handleCreateCustomUnit = async () => {
-    if (!newUnitData.value.trim() || !newUnitData.label.trim()) {
-      alert('Please enter both unit value and label');
-      return;
-    }
-
-    try {
-      const createdUnit = await inventoryService.createCustomUnit(
-        newUnitData.value.trim(),
-        newUnitData.label.trim()
-      );
-
-      // Add to custom units list
-      setCustomUnits(prev => [createdUnit, ...prev]);
-
-      // Auto-select the newly created unit
-      handleSelectUnit(createdUnit.value);
-
-      // Reset and close modal
-      setNewUnitData({ value: '', label: '' });
-      setShowAddUnitModal(false);
-      alert('Custom unit created successfully!');
-    } catch (error: any) {
-      console.error('Error creating custom unit:', error);
-      alert(error.message || 'Failed to create custom unit');
-    }
-  };
-
-  const handleClearMaterialSelection = () => {
-    setSelectedMaterial(null);
-    setMaterialSearchTerm('');
-    setPurchaseFormData(prev => ({
-      ...prev,
-      inventory_material_id: 0,
-      unit_price: 0
-    }));
-    materialInputRef.current?.focus();
-  };
-
-  const handleOpenNewMaterialModal = () => {
-    setNewMaterialData({
-      material_name: materialSearchTerm, // Pre-fill with search term
-      brand: '',
-      size: '',
-      category: '',
-      unit: 'pcs',
-      unit_price: 0,
-      current_stock: 0,
-      min_stock_level: 0,
-      description: ''
-    });
-    setUnitSearchTerm('Pieces (pcs)'); // Initialize unit search with default
-    setShowNewMaterialModal(true);
-    setShowMaterialDropdown(false);
-  };
-
-  const handleSaveNewMaterial = async () => {
-    if (!newMaterialData.material_name.trim()) {
-      alert('Please enter a material name');
-      return;
-    }
-    if (!newMaterialData.unit.trim()) {
-      alert('Please enter a unit');
-      return;
-    }
-    // Validate numeric fields
-    if (newMaterialData.unit_price < 0 || isNaN(newMaterialData.unit_price)) {
-      alert('Unit price must be a valid positive number');
-      return;
-    }
-    if (newMaterialData.min_stock_level < 0 || isNaN(newMaterialData.min_stock_level)) {
-      alert('Min stock level must be a valid positive number');
-      return;
-    }
-
-    setSavingNewMaterial(true);
-    try {
-      // Check if the unit exists in predefined or custom units
-      const unitExists = allUnits.some(u => u.value.toLowerCase() === newMaterialData.unit.toLowerCase());
-
-      // If unit doesn't exist, create it first
-      if (!unitExists) {
-        try {
-          const createdUnit = await inventoryService.createCustomUnit(
-            newMaterialData.unit.toLowerCase().trim(),
-            unitSearchTerm || newMaterialData.unit // Use the display name from search term or the value itself
-          );
-          // Add to custom units list
-          setCustomUnits(prev => [createdUnit, ...prev]);
-        } catch (error) {
-          console.warn('Failed to create custom unit, continuing with material creation:', error);
-          // Continue even if custom unit creation fails - the material can still use the unit value
-        }
-      }
-
-      // Create the material (stock starts at 0, will be added via Stock In)
-      const createdMaterial = await inventoryService.createInventoryItem({
-        material_name: newMaterialData.material_name,
-        brand: newMaterialData.brand || undefined,
-        size: newMaterialData.size || undefined,
-        category: newMaterialData.category || undefined,
-        unit: newMaterialData.unit,
-        unit_price: newMaterialData.unit_price,
-        current_stock: 0,
-        min_stock_level: newMaterialData.min_stock_level || undefined,
-        description: newMaterialData.description || undefined
-      });
-
-      // Add to materials list
-      setAllMaterials(prev => [createdMaterial, ...prev]);
-
-      // Auto-select the newly created material in the Stock In form
-      handleSelectMaterialFromDropdown(createdMaterial);
-
-      // Reset the new material form
-      setNewMaterialData({
-        material_name: '',
-        brand: '',
-        size: '',
-        category: '',
-        unit: 'pcs',
-        unit_price: 0,
-        current_stock: 0,
-        min_stock_level: 0,
-        description: ''
-      });
-      setUnitSearchTerm('Pieces (pcs)');
-
-      setShowNewMaterialModal(false);
-      alert('Material created successfully! You can now enter the quantity and price.');
-    } catch (error: any) {
-      console.error('Error creating material:', error);
-      // Show specific error message from backend (e.g., duplicate detection)
-      const errorMessage = error.response?.data?.error || error.message || 'Failed to create material. Please try again.';
-      alert(errorMessage);
-    } finally {
-      setSavingNewMaterial(false);
-    }
-  };
-
-  const handleQuantityChange = (quantity: number) => {
-    const total = quantity * purchaseFormData.unit_price;
-    // Keep transport_fee as-is (flat fee, not recalculated)
-    setPurchaseFormData({
-      ...purchaseFormData,
-      quantity,
-      total_amount: total
-    });
-  };
-
-  const handleUnitPriceChange = (unitPrice: number) => {
-    const total = purchaseFormData.quantity * unitPrice;
-    setPurchaseFormData({
-      ...purchaseFormData,
-      unit_price: unitPrice,
-      total_amount: total
-    });
-  };
-
-  const handlePerUnitTransportFeeChange = (totalFee: number) => {
-    const perUnitFee = purchaseFormData.quantity > 0 ? totalFee / purchaseFormData.quantity : 0;
-    setPurchaseFormData({
-      ...purchaseFormData,
-      per_unit_transport_fee: perUnitFee,
-      transport_fee: totalFee
-    });
-  };
-
-  const handleSavePurchase = async () => {
-    try {
-      // Validation
-      if (!purchaseFormData.inventory_material_id) {
-        alert('Please select a material');
-        return;
-      }
-      if (purchaseFormData.quantity <= 0) {
-        alert('Please enter a valid quantity');
-        return;
-      }
-      if (purchaseFormData.unit_price <= 0) {
-        alert('Please enter a valid unit price');
-        return;
-      }
-      // Check if delivery note is provided (either new file OR existing URL from batch)
-      if (!deliveryNoteFile && !selectedBatchReference?.delivery_note_url) {
-        alert('Please upload a delivery note from vendor');
-        return;
-      }
-
-      // Auto-generate delivery batch reference if transport details provided and no existing batch ref
-      let finalBatchRef = purchaseFormData.delivery_batch_ref;
-
-      // Check if user made changes that require a new batch ref (different delivery)
-      // Note: Only transport fee changes create a new batch. Delivery notes can be different for materials in the same batch.
-      const hasTransportFeeChange = selectedBatchReference &&
-        purchaseFormData.transport_fee !== 0 &&
-        purchaseFormData.transport_fee !== selectedBatchReference.original_fee;
-
-      // If user changed transport fee, this is a different delivery - create new batch
-      // Note: Uploading a new delivery note does NOT create a new batch - materials in the same batch can have different delivery notes
-      if (finalBatchRef && hasTransportFeeChange) {
-        finalBatchRef = ''; // Clear batch ref to force generation of new one
-      }
-
-      if (!finalBatchRef && (purchaseFormData.driver_name || purchaseFormData.vehicle_number)) {
-        // First material in a new delivery - generate new batch ref like MSQ-IN-01
-        // Count existing transactions to get next sequence number
-        const existingBatchRefs = purchaseTransactions
-          .map(txn => txn.delivery_batch_ref)
-          .filter(ref => ref && ref.startsWith('MSQ-IN-'));
-
-        const sequenceNumbers = existingBatchRefs.map(ref => {
-          const match = ref.match(/MSQ-IN-(\d+)/);
-          return match ? parseInt(match[1]) : 0;
-        });
-
-        const nextSequence = sequenceNumbers.length > 0
-          ? Math.max(...sequenceNumbers) + 1
-          : 1;
-
-        finalBatchRef = `MSQ-IN-${String(nextSequence).padStart(2, '0')}`;
-      }
-
-      const transactionToSave = {
-        ...purchaseFormData,
-        delivery_batch_ref: finalBatchRef,
-        // Use existing delivery note URL if no new file uploaded
-        delivery_note_url: !deliveryNoteFile && selectedBatchReference?.delivery_note_url
-          ? selectedBatchReference.delivery_note_url
-          : undefined
-      };
-
-      setConfirmModal({
-        show: true,
-        title: 'Confirm Stock In',
-        message: `Are you sure you want to receive ${purchaseFormData.quantity} ${selectedMaterial?.unit} of ${selectedMaterial?.material_name}? This will add stock to inventory.`,
-        onConfirm: async () => {
-          setSaving(true);
-          try {
-            // Use createTransactionWithFile to handle file upload or existing URL
-            const result = await inventoryService.createTransactionWithFile(transactionToSave, deliveryNoteFile);
-
-            // Save transport details INCLUDING batch ref and delivery note URL for quick reuse
-            if (purchaseFormData.driver_name || purchaseFormData.vehicle_number || purchaseFormData.transport_fee) {
-              setLastTransportDetails({
-                driver_name: purchaseFormData.driver_name || '',
-                vehicle_number: purchaseFormData.vehicle_number || '',
-                transport_fee: purchaseFormData.transport_fee || 0,
-                transport_notes: purchaseFormData.transport_notes || '',
-                delivery_batch_ref: finalBatchRef || '',
-                delivery_note_url: result.delivery_note_url || transactionToSave.delivery_note_url
-              });
-            }
-
-            alert('Stock In recorded successfully!');
-            setShowPurchaseModal(false);
-            setDeliveryNoteFile(null); // Clear uploaded file
-            await fetchData();
-          } catch (error) {
-            console.error('Error creating purchase transaction:', error);
-            alert('Failed to record Stock In. Please try again.');
-          } finally {
-            setSaving(false);
-            setConfirmModal({ ...confirmModal, show: false });
-          }
-        },
-        confirmText: 'Confirm'
-      });
-    } catch (error) {
-      console.error('Error:', error);
-    }
-  };
-
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
+    return new Date(dateString).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const formatCurrency = (amount: number) => {
-    return `AED ${amount.toFixed(2)}`;
-  };
+  const formatCurrency = (amount: number) => `AED ${amount.toFixed(2)}`;
 
   if (loading) {
     return (
@@ -1078,8 +829,21 @@ const StockInPage: React.FC = () => {
             <Truck className="w-5 h-5" />
             <span>Buyer Transfers</span>
           </button>
+          {/* Vendor Deliveries Button */}
           <button
-            onClick={handleOpenPurchaseModal}
+            onClick={handleOpenVendorDeliveries}
+            className="relative flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <ClipboardCheck className="w-5 h-5" />
+            <span>Vendor Deliveries</span>
+            {pendingInspectionsCount > 0 && (
+              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                {pendingInspectionsCount > 9 ? '9+' : pendingInspectionsCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => { setPrefillStockInData(null); setShowPurchaseModal(true); }}
             className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
           >
             <ArrowDownCircle className="w-5 h-5" />
@@ -1119,13 +883,12 @@ const StockInPage: React.FC = () => {
 
               return (
                 <div key={group.material.id} className="hover:bg-gray-50">
-                  {/* Material Header Row - Clickable - Full Width Layout */}
+                  {/* Material Header Row */}
                   <div
                     onClick={() => toggleMaterialExpansion(group.material.id)}
                     className="px-6 py-4 cursor-pointer select-none"
                   >
                     <div className="grid grid-cols-12 gap-4 items-center">
-                      {/* Left: Expand Icon + Material Info (6 cols) */}
                       <div className="col-span-6 flex items-center space-x-3">
                         <ChevronDown
                           className={`w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-0' : '-rotate-90'}`}
@@ -1142,8 +905,6 @@ const StockInPage: React.FC = () => {
                           </div>
                         </div>
                       </div>
-
-                      {/* Center: Transaction Count (2 cols) */}
                       <div className="col-span-2 text-center">
                         <div className="inline-flex items-center space-x-1 bg-blue-50 px-3 py-1 rounded-full">
                           <FileText className="w-3.5 h-3.5 text-blue-600" />
@@ -1153,25 +914,13 @@ const StockInPage: React.FC = () => {
                           {transactionCount === 1 ? 'transaction' : 'transactions'}
                         </div>
                       </div>
-
-                      {/* Right-Center: Total Quantity (2 cols) */}
                       <div className="col-span-2 text-center">
-                        <div className="text-sm font-semibold text-gray-900">
-                          {group.totalQuantity.toFixed(2)}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {group.material.unit}
-                        </div>
+                        <div className="text-sm font-semibold text-gray-900">{group.totalQuantity.toFixed(2)}</div>
+                        <div className="text-xs text-gray-500">{group.material.unit}</div>
                       </div>
-
-                      {/* Right: Total Amount (2 cols) */}
                       <div className="col-span-2 text-right">
-                        <div className="text-sm font-bold text-green-600">
-                          {formatCurrency(group.totalAmount)}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          Total Value
-                        </div>
+                        <div className="text-sm font-bold text-green-600">{formatCurrency(group.totalAmount)}</div>
+                        <div className="text-xs text-gray-500">Total Value</div>
                       </div>
                     </div>
                   </div>
@@ -1198,35 +947,17 @@ const StockInPage: React.FC = () => {
                           <tbody className="bg-white divide-y divide-gray-100">
                             {group.transactions.map((txn) => (
                               <tr key={txn.inventory_transaction_id} className="hover:bg-gray-50">
-                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">
-                                  {formatDate(txn.created_at)}
-                                </td>
-                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">
-                                  {txn.quantity} {txn.unit}
-                                </td>
-                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">
-                                  {formatCurrency(txn.unit_price)}
-                                </td>
-                                <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                                  {formatCurrency(txn.total_amount)}
-                                </td>
-                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
-                                  {txn.reference_number || '-'}
-                                </td>
+                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">{formatDate(txn.created_at)}</td>
+                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">{txn.quantity} {txn.unit}</td>
+                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">{formatCurrency(txn.unit_price)}</td>
+                                <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{formatCurrency(txn.total_amount)}</td>
+                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">{txn.reference_number || '-'}</td>
                                 <td className="px-6 py-3 whitespace-nowrap text-sm">
                                   {txn.delivery_note_number ? (
                                     <div className="flex items-center space-x-2">
-                                      <span className="text-gray-900 font-medium">
-                                        {txn.delivery_note_number}
-                                      </span>
-                                      {txn.delivery_note_url && (
-                                        <a
-                                          href={txn.delivery_note_url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex items-center text-blue-600 hover:text-blue-800"
-                                          title="View/Download Delivery Note File"
-                                        >
+                                      <span className="text-gray-900 font-medium">{txn.delivery_note_number}</span>
+                                      {txn.delivery_note_url && isSafeUrl(txn.delivery_note_url) && (
+                                        <a href={txn.delivery_note_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-blue-600 hover:text-blue-800" title="View/Download Delivery Note File">
                                           <ExternalLink className="w-3 h-3" />
                                         </a>
                                       )}
@@ -1234,38 +965,29 @@ const StockInPage: React.FC = () => {
                                   ) : txn.reference_number ? (
                                     <div className="flex items-center space-x-2">
                                       <span className="text-gray-500 text-xs">Ref:</span>
-                                      <span className="text-gray-600">
-                                        {txn.reference_number}
-                                      </span>
-                                      {txn.delivery_note_url && (
-                                        <a
-                                          href={txn.delivery_note_url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex items-center text-blue-600 hover:text-blue-800"
-                                          title="View/Download Delivery Note File"
-                                        >
+                                      <span className="text-gray-600">{txn.reference_number}</span>
+                                      {txn.delivery_note_url && isSafeUrl(txn.delivery_note_url) && (
+                                        <a href={txn.delivery_note_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-blue-600 hover:text-blue-800" title="View/Download Delivery Note File">
                                           <ExternalLink className="w-3 h-3" />
                                         </a>
                                       )}
                                     </div>
+                                  ) : txn.delivery_note_url && isSafeUrl(txn.delivery_note_url) ? (
+                                    <a href={txn.delivery_note_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-blue-600 hover:text-blue-800" title="View/Download Delivery Note File">
+                                      <ExternalLink className="w-3 h-3 mr-1" />
+                                      <span className="text-xs">View File</span>
+                                    </a>
                                   ) : (
                                     <span className="text-gray-400">-</span>
                                   )}
                                 </td>
-                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
-                                  {txn.dn_driver_name || txn.driver_name || '-'}
-                                </td>
-                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
-                                  {txn.dn_vehicle_number || txn.vehicle_number || '-'}
-                                </td>
+                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">{txn.dn_driver_name || txn.driver_name || '-'}</td>
+                                <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">{txn.dn_vehicle_number || txn.vehicle_number || '-'}</td>
                                 <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-900">
                                   {(() => {
-                                    // Check if this transaction is part of a batch
                                     if (txn.delivery_batch_ref && batchDetailsMap.has(txn.delivery_batch_ref)) {
                                       const batchDetails = batchDetailsMap.get(txn.delivery_batch_ref)!;
                                       const isMultiMaterial = batchDetails.material_count > 1;
-
                                       if (batchDetails.transport_fee > 0) {
                                         return (
                                           <div className="flex items-center gap-1.5">
@@ -1276,30 +998,15 @@ const StockInPage: React.FC = () => {
                                                   <Package className="w-3 h-3 mr-0.5" />
                                                   {batchDetails.material_count}
                                                 </span>
-
-                                                {/* Tooltip - Below badge */}
                                                 <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 hidden group-hover:block z-[9999]">
                                                   <div className="bg-gray-900 text-white rounded-lg shadow-2xl py-2.5 px-3.5 w-[280px]">
-                                                    {/* Header */}
-                                                    <div className="font-semibold text-sm mb-2 pb-2 border-b border-gray-700">
-                                                      Batch Delivery ({batchDetails.material_count} materials)
-                                                    </div>
-
-                                                    {/* Batch Reference */}
-                                                    <div className="mb-2.5 text-xs">
-                                                      <span className="text-gray-400">Batch: </span>
-                                                      <span className="font-medium">{batchDetails.delivery_batch_ref}</span>
-                                                    </div>
-
-                                                    {/* Material Names List */}
+                                                    <div className="font-semibold text-sm mb-2 pb-2 border-b border-gray-700">Batch Delivery ({batchDetails.material_count} materials)</div>
+                                                    <div className="mb-2.5 text-xs"><span className="text-gray-400">Batch: </span><span className="font-medium">{batchDetails.delivery_batch_ref}</span></div>
                                                     <div className="space-y-1">
                                                       <div className="text-gray-400 text-xs mb-1">Materials delivered together:</div>
                                                       <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
                                                         {batchDetails.material_names.map((name, idx) => (
-                                                          <div key={idx} className="flex items-start text-xs">
-                                                            <span className="text-blue-400 mr-2">•</span>
-                                                            <span className="font-medium">{name}</span>
-                                                          </div>
+                                                          <div key={idx} className="flex items-start text-xs"><span className="text-blue-400 mr-2">&#8226;</span><span className="font-medium">{name}</span></div>
                                                         ))}
                                                       </div>
                                                     </div>
@@ -1311,8 +1018,6 @@ const StockInPage: React.FC = () => {
                                         );
                                       }
                                     }
-
-                                    // Fallback to individual transaction fee (prioritize DN transport fee)
                                     const transportFee = txn.dn_transport_fee ?? txn.transport_fee;
                                     return transportFee ? formatCurrency(transportFee) : '-';
                                   })()}
@@ -1323,11 +1028,9 @@ const StockInPage: React.FC = () => {
                                     let hasDeliveryNotes = false;
                                     let deliveryNotesElement = null;
 
-                                    // Check for batch-level delivery notes
                                     if (txn.delivery_batch_ref && batchDetailsMap.has(txn.delivery_batch_ref)) {
                                       const batchDetails = batchDetailsMap.get(txn.delivery_batch_ref)!;
                                       const isMultiMaterial = batchDetails.material_count > 1;
-
                                       if (batchDetails.transport_notes) {
                                         hasDeliveryNotes = true;
                                         deliveryNotesElement = (
@@ -1338,39 +1041,18 @@ const StockInPage: React.FC = () => {
                                             {isMultiMaterial && (
                                               <div className="relative group inline-block flex-shrink-0">
                                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 cursor-help">
-                                                  <Package className="w-3 h-3 mr-0.5" />
-                                                  {batchDetails.material_count}
+                                                  <Package className="w-3 h-3 mr-0.5" />{batchDetails.material_count}
                                                 </span>
-
-                                                {/* Tooltip - Below badge */}
                                                 <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 hidden group-hover:block z-[9999]">
                                                   <div className="bg-gray-900 text-white rounded-lg shadow-2xl py-2.5 px-3.5 w-[280px]">
-                                                    {/* Header */}
-                                                    <div className="font-semibold text-sm mb-2 pb-2 border-b border-gray-700">
-                                                      Batch Delivery ({batchDetails.material_count} materials)
-                                                    </div>
-
-                                                    {/* Batch Reference */}
-                                                    <div className="mb-2.5 text-xs">
-                                                      <span className="text-gray-400">Batch: </span>
-                                                      <span className="font-medium">{batchDetails.delivery_batch_ref}</span>
-                                                    </div>
-
-                                                    {/* Delivery Notes */}
-                                                    <div className="mb-2.5 text-xs">
-                                                      <span className="text-gray-400">Delivery Notes: </span>
-                                                      <span className="font-medium">{batchDetails.transport_notes}</span>
-                                                    </div>
-
-                                                    {/* Material Names List */}
+                                                    <div className="font-semibold text-sm mb-2 pb-2 border-b border-gray-700">Batch Delivery ({batchDetails.material_count} materials)</div>
+                                                    <div className="mb-2.5 text-xs"><span className="text-gray-400">Batch: </span><span className="font-medium">{batchDetails.delivery_batch_ref}</span></div>
+                                                    <div className="mb-2.5 text-xs"><span className="text-gray-400">Delivery Notes: </span><span className="font-medium">{batchDetails.transport_notes}</span></div>
                                                     <div className="space-y-1">
                                                       <div className="text-gray-400 text-xs mb-1">Materials in this delivery:</div>
                                                       <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
                                                         {batchDetails.material_names.map((name, idx) => (
-                                                          <div key={idx} className="flex items-start text-xs">
-                                                            <span className="text-blue-400 mr-2">•</span>
-                                                            <span className="font-medium">{name}</span>
-                                                          </div>
+                                                          <div key={idx} className="flex items-start text-xs"><span className="text-blue-400 mr-2">&#8226;</span><span className="font-medium">{name}</span></div>
                                                         ))}
                                                       </div>
                                                     </div>
@@ -1382,7 +1064,6 @@ const StockInPage: React.FC = () => {
                                         );
                                       }
                                     } else if (txn.transport_notes) {
-                                      // Fallback to individual transaction delivery notes
                                       hasDeliveryNotes = true;
                                       deliveryNotesElement = (
                                         <div className="truncate text-blue-600" title={txn.transport_notes}>
@@ -1391,17 +1072,13 @@ const StockInPage: React.FC = () => {
                                       );
                                     }
 
-                                    // Render the notes
                                     if (!hasTransactionNotes && !hasDeliveryNotes) {
                                       return <span className="text-gray-400">-</span>;
                                     }
-
                                     return (
                                       <div className="space-y-1">
                                         {hasTransactionNotes && (
-                                          <div className="truncate" title={txn.notes}>
-                                            <span className="font-medium text-gray-700">Notes:</span> {txn.notes}
-                                          </div>
+                                          <div className="truncate" title={txn.notes}><span className="font-medium text-gray-700">Notes:</span> {txn.notes}</div>
                                         )}
                                         {deliveryNotesElement}
                                       </div>
@@ -1430,24 +1107,12 @@ const StockInPage: React.FC = () => {
               </div>
               {totalPages > 1 && (
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    Previous
+                  <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1">
+                    <ChevronLeft className="h-4 w-4" />Previous
                   </button>
-                  <span className="text-sm text-gray-600 px-2">
-                    Page {currentPage} of {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                    disabled={currentPage === totalPages}
-                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                  >
-                    Next
-                    <ChevronRight className="h-4 w-4" />
+                  <span className="text-sm text-gray-600 px-2">Page {currentPage} of {totalPages}</span>
+                  <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1">
+                    Next<ChevronRight className="h-4 w-4" />
                   </button>
                 </div>
               )}
@@ -1456,882 +1121,20 @@ const StockInPage: React.FC = () => {
         )}
       </div>
 
-      {/* Purchase Modal */}
-      {showPurchaseModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 sticky top-0 bg-white">
-              <div className="flex items-center space-x-3">
-                <ArrowDownCircle className="w-6 h-6 text-green-600" />
-                <h2 className="text-xl font-bold text-gray-900">New Stock In</h2>
-              </div>
-              <button
-                onClick={() => setShowPurchaseModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <span className="text-2xl">&times;</span>
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 space-y-6">
-              {/* Material Selection - Searchable Combobox */}
-              <div ref={materialDropdownRef} className="relative">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <Package className="w-4 h-4 inline mr-1" />
-                  Material *
-                </label>
-                <div className="relative">
-                  <input
-                    ref={materialInputRef}
-                    type="text"
-                    value={materialSearchTerm}
-                    onChange={(e) => handleMaterialSearchChange(e.target.value)}
-                    onFocus={() => {
-                      // Only show dropdown if no material is selected
-                      if (!selectedMaterial) {
-                        setShowMaterialDropdown(true);
-                      }
-                    }}
-                    onClick={(e) => {
-                      // If material is selected, prevent editing
-                      if (selectedMaterial) {
-                        e.currentTarget.blur();
-                      }
-                    }}
-                    placeholder="Search material..."
-                    className={`w-full px-4 py-2 pr-20 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                      selectedMaterial ? 'bg-gray-50 cursor-not-allowed' : ''
-                    }`}
-                    readOnly={selectedMaterial !== null}
-                    disabled={selectedMaterial !== null}
-                  />
-                  <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-1">
-                    {selectedMaterial && (
-                      <button
-                        type="button"
-                        onClick={handleClearMaterialSelection}
-                        className="p-1 text-gray-400 hover:text-gray-600"
-                        title="Clear selection"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                    {!selectedMaterial && (
-                      <button
-                        type="button"
-                        onClick={() => setShowMaterialDropdown(!showMaterialDropdown)}
-                        className="p-1 text-gray-400 hover:text-gray-600"
-                        title="Toggle dropdown"
-                      >
-                        <ChevronDown className={`w-4 h-4 transition-transform ${showMaterialDropdown ? 'rotate-180' : ''}`} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Dropdown List */}
-                {showMaterialDropdown && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                    {/* Show existing materials */}
-                    {filteredMaterials.length === 0 && materialSearchTerm.trim() === '' ? (
-                      <div className="px-4 py-3 text-gray-500 text-sm">
-                        Type to search materials...
-                      </div>
-                    ) : (
-                      <>
-                        {filteredMaterials.map((material) => (
-                          <button
-                            key={material.inventory_material_id}
-                            type="button"
-                            onClick={() => handleSelectMaterialFromDropdown(material)}
-                            className={`w-full px-4 py-2 text-left hover:bg-gray-100 flex flex-col ${
-                              selectedMaterial?.inventory_material_id === material.inventory_material_id ? 'bg-green-50' : ''
-                            }`}
-                          >
-                          <span className="font-medium text-gray-900">
-                            {material.material_code} - {material.material_name}
-                          </span>
-                          {material.brand && (
-                            <span className="text-sm text-gray-500">{material.brand}</span>
-                          )}
-                        </button>
-                      ))}
-
-                      {/* Show "Create New Material" option when user types something */}
-                      {materialSearchTerm.trim() !== '' && (
-                        <button
-                          type="button"
-                          onClick={handleOpenNewMaterialModal}
-                          className="w-full px-4 py-3 text-left hover:bg-green-50 border-t border-gray-200 flex items-center space-x-2 text-green-600 font-medium"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>+ Create New Material: "{materialSearchTerm}"</span>
-                        </button>
-                      )}
-                    </>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {selectedMaterial && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <span className="text-gray-600">Material Code:</span>
-                      <span className="ml-2 font-medium">{selectedMaterial.material_code}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Current Stock:</span>
-                      <span className="ml-2 font-medium">{selectedMaterial.current_stock} {selectedMaterial.unit}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Reference Price:</span>
-                      <span className="ml-2 font-medium">
-                        {selectedMaterial.unit_price && selectedMaterial.unit_price > 0
-                          ? `AED ${selectedMaterial.unit_price.toFixed(2)}`
-                          : 'Not set yet (first purchase)'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Quantity */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Quantity Received *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={purchaseFormData.quantity || ''}
-                  onChange={(e) => handleQuantityChange(Number(e.target.value))}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Enter quantity received"
-                  required
-                />
-                {selectedMaterial && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Unit: {selectedMaterial.unit}
-                  </p>
-                )}
-              </div>
-
-              {/* Unit Price - Actual Purchase Price */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <DollarSign className="w-4 h-4 inline mr-1" />
-                  Actual Purchase Price (AED) *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={purchaseFormData.unit_price || ''}
-                  onChange={(e) => handleUnitPriceChange(Number(e.target.value))}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Enter actual purchase price per unit"
-                  required
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Enter the actual price paid to vendor for this purchase
-                </p>
-              </div>
-
-              {/* Total Amount (Read-only) */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Total Amount (AED)
-                </label>
-                <input
-                  type="text"
-                  value={formatCurrency(purchaseFormData.total_amount)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
-                  readOnly
-                  disabled
-                />
-              </div>
-
-              {/* Reference Number */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <FileText className="w-4 h-4 inline mr-1" />
-                  Reference Number (PO/Invoice)
-                </label>
-                <input
-                  type="text"
-                  value={purchaseFormData.reference_number || ''}
-                  onChange={(e) => setPurchaseFormData({ ...purchaseFormData, reference_number: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Enter PO or Invoice number"
-                />
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Notes
-                </label>
-                <textarea
-                  value={purchaseFormData.notes || ''}
-                  onChange={(e) => setPurchaseFormData({ ...purchaseFormData, notes: e.target.value })}
-                  rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Add any additional notes..."
-                />
-              </div>
-
-              {/* Transport & Delivery Details */}
-              <div className="border-t pt-6 mt-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold text-gray-900 flex items-center">
-                    <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
-                    </svg>
-                    Transport & Delivery Details
-                  </h3>
-                  {recentBatches.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setShowBatchListModal(true)}
-                      className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm flex items-center space-x-1"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                      </svg>
-                      <span>Recent Deliveries</span>
-                    </button>
-                  )}
-                </div>
-
-                {recentBatches.length > 0 && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm text-blue-800">
-                        <strong>Last Delivery:</strong> {recentBatches[0].driver_name} • {recentBatches[0].vehicle_number}
-                        {recentBatches[0].delivery_batch_ref && (
-                          <span className="ml-2 px-2 py-0.5 bg-blue-100 rounded text-xs font-mono">
-                            {recentBatches[0].delivery_batch_ref}
-                          </span>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // Use the most recent batch from recentBatches instead of lastTransportDetails
-                          // This ensures we always have the delivery_note_url from the database
-                          const mostRecentBatch = recentBatches[0];
-                          if (mostRecentBatch) {
-                            console.log('Last Delivery clicked. Using most recent batch:', mostRecentBatch);
-                            console.log('Delivery note URL:', mostRecentBatch.delivery_note_url);
-
-                            setSelectedBatchReference({
-                              original_fee: mostRecentBatch.transport_fee || 0,
-                              delivery_note_url: mostRecentBatch.delivery_note_url
-                            });
-
-                            setPurchaseFormData(prev => ({
-                              ...prev,
-                              driver_name: mostRecentBatch.driver_name,
-                              vehicle_number: mostRecentBatch.vehicle_number,
-                              per_unit_transport_fee: 0,  // Set to 0 for same batch (fee was already paid on first material)
-                              transport_fee: 0,  // Set to 0 for same batch (fee was already paid on first material)
-                              transport_notes: mostRecentBatch.transport_notes,
-                              delivery_batch_ref: mostRecentBatch.delivery_batch_ref
-                            }));
-                          }
-                        }}
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex items-center space-x-1"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                        <span>Last Delivery</span>
-                      </button>
-                    </div>
-                    <p className="text-xs text-blue-600 mt-2">
-                      Materials from the same delivery will share the batch reference and transport details. Only the first material should have the transport fee.
-                    </p>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Driver Name */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Driver Name
-                    </label>
-                    <input
-                      type="text"
-                      value={purchaseFormData.driver_name || ''}
-                      onChange={(e) => setPurchaseFormData({ ...purchaseFormData, driver_name: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="Enter driver name"
-                    />
-                  </div>
-
-                  {/* Vehicle Number */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Vehicle Number
-                    </label>
-                    <input
-                      type="text"
-                      value={purchaseFormData.vehicle_number || ''}
-                      onChange={(e) => setPurchaseFormData({ ...purchaseFormData, vehicle_number: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="Enter vehicle number"
-                    />
-                  </div>
-                </div>
-
-                {/* Transport Fee Calculation */}
-                <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
-                    Transport Fee Calculation
-                  </label>
-
-                  {/* Show reference info if batch was selected */}
-                  {selectedBatchReference && selectedBatchReference.original_fee > 0 && (
-                    <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                      <p className="text-amber-800 font-medium text-sm">
-                        Reference: Original transport fee for this batch was: <span className="font-bold">AED {selectedBatchReference.original_fee.toFixed(2)}</span>
-                      </p>
-                      <p className="text-amber-700 text-xs mt-2">
-                        You can edit the per-unit fee below if there was an additional charge for this specific material.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Transport Fee Input */}
-                  <div className="mb-3">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Enter total transport fee <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={purchaseFormData.transport_fee === 0 ? '' : purchaseFormData.transport_fee}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === '') {
-                          handlePerUnitTransportFeeChange(0);
-                        } else {
-                          const numValue = parseFloat(value);
-                          if (!isNaN(numValue)) {
-                            handlePerUnitTransportFeeChange(numValue);
-                          }
-                        }
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                      placeholder="0.00"
-                    />
-                    <p className="text-xs text-gray-500 mt-1.5 flex items-start">
-                      <svg className="w-4 h-4 text-gray-400 mr-1 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      This is the total transport cost paid for material delivered.
-                    </p>
-                  </div>
-
-                  {/* Total Transport Fee Display */}
-                  {purchaseFormData.transport_fee > 0 && (
-                    <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-lg p-4 shadow-sm">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center">
-                          <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                          </svg>
-                          <span className="text-sm text-blue-900 font-semibold">
-                            Total Transport Fee:
-                          </span>
-                        </div>
-                        <span className="text-2xl font-bold text-blue-900">
-                          AED {(purchaseFormData.transport_fee || 0).toFixed(2)}
-                        </span>
-                      </div>
-                      <div className="bg-white rounded-md p-2 border border-blue-200">
-                        <p className="text-xs text-blue-800 font-medium">
-                          📊 Calculation: 1 × {(purchaseFormData.transport_fee || 0).toFixed(2)} = <span className="font-bold">{(purchaseFormData.transport_fee || 0).toFixed(2)} AED</span>
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {!purchaseFormData.quantity && (
-                    <p className="text-xs text-gray-500 italic mt-2">
-                      💡 Total transport fee will be calculated automatically when you enter the quantity
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Delivery Note Upload */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <FileText className="w-4 h-4 inline mr-1" />
-                  Delivery Note from Vendor <span className="text-red-500">*</span>
-                </label>
-
-                {/* Show reference to original batch delivery note - allow using it */}
-                {selectedBatchReference && !deliveryNoteFile ? (
-                  selectedBatchReference.delivery_note_url ? (
-                    <div className="mb-3 bg-green-50 border-2 border-green-300 rounded-lg p-4">
-                      <div className="flex items-start space-x-3">
-                        <div className="flex-shrink-0">
-                          <CheckCircle className="w-6 h-6 text-green-600" />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-green-800 font-semibold mb-2 text-sm">
-                            ✓ Delivery Note Available from Batch
-                          </p>
-                          <a
-                            href={selectedBatchReference.delivery_note_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800 underline font-medium mb-3"
-                          >
-                            <FileText className="w-4 h-4" />
-                            <span>View Batch Delivery Note</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                          <p className="text-green-700 text-xs leading-relaxed">
-                            This material will use the delivery note from the selected batch. You can upload a different file below if this specific material has a separate delivery note.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mb-3 bg-orange-50 border-2 border-orange-300 rounded-lg p-4">
-                      <div className="flex items-start space-x-3">
-                        <div className="flex-shrink-0">
-                          <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                          </svg>
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-orange-800 font-semibold mb-2 text-sm">
-                            ⚠ No Delivery Note in Selected Batch
-                          </p>
-                          <p className="text-orange-700 text-xs leading-relaxed mb-2">
-                            The first material from this batch ({purchaseFormData.delivery_batch_ref}) was received without uploading a delivery note. You must upload a delivery note for this material.
-                          </p>
-                          <p className="text-orange-600 text-xs font-medium">
-                            Please upload the delivery note below before proceeding.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                ) : null}
-
-                {/* File input */}
-                <div>
-                  <div className="relative">
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          // Check file size (max 10MB)
-                          if (file.size > 10 * 1024 * 1024) {
-                            alert('File size must be less than 10MB');
-                            e.target.value = '';
-                            return;
-                          }
-                          setDeliveryNoteFile(file);
-                        }
-                      }}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {selectedBatchReference && selectedBatchReference.delivery_note_url
-                      ? '(Optional) Upload a new file only if this material has a different delivery note'
-                      : 'Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)'}
-                  </p>
-                </div>
-
-                {deliveryNoteFile && (
-                  <div className="mt-2 flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4 text-green-600" />
-                      <span className="text-sm text-green-700 font-medium">{deliveryNoteFile.name}</span>
-                      <span className="text-xs text-green-600">({(deliveryNoteFile.size / 1024).toFixed(2)} KB)</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setDeliveryNoteFile(null)}
-                      className="text-red-500 hover:text-red-700"
-                      title="Remove file"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex justify-end space-x-3 p-6 border-t border-gray-200 bg-gray-50">
-              <button
-                onClick={() => setShowPurchaseModal(false)}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
-                disabled={saving}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSavePurchase}
-                disabled={saving}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-              >
-                {saving ? (
-                  <>
-                    <ModernLoadingSpinners size="xxs" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="w-5 h-5" />
-                    <span>Confirm Stock In</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* New Material Modal */}
-      {showNewMaterialModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 sticky top-0 bg-white">
-              <div className="flex items-center space-x-3">
-                <Plus className="w-6 h-6 text-green-600" />
-                <h2 className="text-xl font-bold text-gray-900">Add New Material</h2>
-              </div>
-              <button
-                onClick={() => setShowNewMaterialModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <span className="text-2xl">&times;</span>
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 space-y-4">
-              {/* Material Name */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Material Name *
-                </label>
-                <input
-                  type="text"
-                  value={newMaterialData.material_name}
-                  onChange={(e) => setNewMaterialData({ ...newMaterialData, material_name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Enter material name"
-                  autoFocus
-                />
-              </div>
-
-              {/* Brand */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Brand
-                </label>
-                <input
-                  type="text"
-                  value={newMaterialData.brand}
-                  onChange={(e) => setNewMaterialData({ ...newMaterialData, brand: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Enter brand (optional)"
-                />
-              </div>
-
-              {/* Size and Category Row */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Size
-                  </label>
-                  <input
-                    type="text"
-                    value={newMaterialData.size}
-                    onChange={(e) => setNewMaterialData({ ...newMaterialData, size: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    placeholder="e.g., 10mm, 1L"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Category
-                  </label>
-                  <input
-                    type="text"
-                    value={newMaterialData.category}
-                    onChange={(e) => setNewMaterialData({ ...newMaterialData, category: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    placeholder="e.g., Electrical, Plumbing"
-                  />
-                </div>
-              </div>
-
-              {/* Unit - Searchable with Custom Units */}
-              <div className="relative" ref={unitDropdownRef}>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Unit *
-                </label>
-                <input
-                  type="text"
-                  value={unitSearchTerm}
-                  onChange={(e) => handleUnitSearchChange(e.target.value)}
-                  onFocus={() => setShowUnitDropdown(true)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Search or type unit (e.g., pcs, kg, m)"
-                  required
-                />
-
-                {/* Unit Dropdown */}
-                {showUnitDropdown && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                    {/* Filtered Units */}
-                    {filteredUnits.length === 0 ? (
-                      <div className="px-4 py-3 text-gray-500 text-sm">
-                        No units found. Type to add custom unit (will be created when you save material).
-                      </div>
-                    ) : (
-                      <>
-                        {filteredUnits.map((unit) => (
-                          <button
-                            key={unit.value}
-                            type="button"
-                            onClick={() => handleSelectUnit(unit.value)}
-                            className="w-full px-4 py-2 text-left hover:bg-gray-100 text-sm flex items-center justify-between"
-                          >
-                            <span>{unit.label}</span>
-                            {unit.isCustom && (
-                              <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded">Custom</span>
-                            )}
-                          </button>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                )}
-
-                <p className="text-xs text-gray-500 mt-1">
-                  Search from {allUnits.length} units or add custom unit. Price will be set on first Stock In.
-                </p>
-              </div>
-
-              {/* Min Stock Level */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Min Stock Level
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={newMaterialData.min_stock_level || ''}
-                  onChange={(e) => setNewMaterialData({ ...newMaterialData, min_stock_level: Number(e.target.value) })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="0"
-                />
-              </div>
-
-              {/* Description */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description
-                </label>
-                <textarea
-                  value={newMaterialData.description}
-                  onChange={(e) => setNewMaterialData({ ...newMaterialData, description: e.target.value })}
-                  rows={2}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Optional description..."
-                />
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex justify-end space-x-3 p-6 border-t border-gray-200 bg-gray-50">
-              <button
-                onClick={() => setShowNewMaterialModal(false)}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
-                disabled={savingNewMaterial}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveNewMaterial}
-                disabled={savingNewMaterial}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-              >
-                {savingNewMaterial ? (
-                  <>
-                    <ModernLoadingSpinners size="xxs" />
-                    <span>Creating...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="w-5 h-5" />
-                    <span>Create Material</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Recent Delivery Batches Modal */}
-      {showBatchListModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-hidden">
-            {/* Modal Header */}
-            <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-6 py-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold flex items-center">
-                <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                </svg>
-                Recent Delivery Batches
-              </h2>
-              <button
-                type="button"
-                onClick={() => setShowBatchListModal(false)}
-                className="text-white hover:bg-purple-800 rounded-lg p-1"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto max-h-[calc(80vh-180px)]">
-              <p className="text-sm text-gray-600 mb-4">
-                Select a recent delivery to copy transport and driver details to the form. Click on any batch to auto-fill the form.
-              </p>
-
-              <div className="space-y-3">
-                {recentBatches.map((batch, index) => (
-                  <div
-                    key={batch.delivery_batch_ref}
-                    onClick={() => {
-                      // Store reference info for display
-                      setSelectedBatchReference({
-                        original_fee: batch.transport_fee || 0,
-                        delivery_note_url: batch.delivery_note_url
-                      });
-
-                      // Populate form with batch details, but fee = 0 (already paid)
-                      setPurchaseFormData(prev => ({
-                        ...prev,
-                        driver_name: batch.driver_name,
-                        vehicle_number: batch.vehicle_number,
-                        per_unit_transport_fee: 0, // Set to 0 - fee already paid on first material
-                        transport_fee: 0, // Set to 0 - fee already paid on first material
-                        transport_notes: batch.transport_notes,
-                        delivery_batch_ref: batch.delivery_batch_ref
-                      }));
-
-                      // Do NOT copy the file - each material needs its own delivery note
-                      setDeliveryNoteFile(null);
-
-                      setShowBatchListModal(false);
-                    }}
-                    className="border border-gray-200 rounded-lg p-4 hover:bg-purple-50 hover:border-purple-300 cursor-pointer transition-all"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-2">
-                          <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-sm font-mono font-semibold">
-                            {batch.delivery_batch_ref}
-                          </span>
-                          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
-                            {batch.material_count} material{batch.material_count > 1 ? 's' : ''}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div>
-                            <span className="text-gray-600">Driver:</span>
-                            <span className="ml-2 font-medium text-gray-900">{batch.driver_name || 'N/A'}</span>
-                          </div>
-                          <div>
-                            <span className="text-gray-600">Vehicle:</span>
-                            <span className="ml-2 font-medium text-gray-900">{batch.vehicle_number || 'N/A'}</span>
-                          </div>
-                          <div>
-                            <span className="text-gray-600">Transport Fee:</span>
-                            <span className="ml-2 font-medium text-gray-900">AED {batch.transport_fee?.toFixed(2) || '0.00'}</span>
-                          </div>
-                          <div>
-                            <span className="text-gray-600">Date:</span>
-                            <span className="ml-2 font-medium text-gray-900">
-                              {new Date(batch.created_at).toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                year: 'numeric'
-                              })}
-                            </span>
-                          </div>
-                        </div>
-                        {batch.transport_notes && (
-                          <div className="mt-2 text-xs text-gray-600 bg-gray-50 rounded p-2">
-                            <strong>Notes:</strong> {batch.transport_notes}
-                          </div>
-                        )}
-                      </div>
-                      <ChevronDown className="w-5 h-5 text-purple-600 transform -rotate-90" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {recentBatches.length === 0 && (
-                <div className="text-center py-8 text-gray-500">
-                  <Package className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-                  <p>No recent delivery batches found</p>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="bg-gray-50 px-6 py-4 flex justify-end border-t">
-              <button
-                type="button"
-                onClick={() => setShowBatchListModal(false)}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confirmation Modal */}
-      {confirmModal.show && (
-        <ConfirmationModal
-          show={confirmModal.show}
-          title={confirmModal.title}
-          message={confirmModal.message}
-          onConfirm={confirmModal.onConfirm}
-          onCancel={() => setConfirmModal({ ...confirmModal, show: false })}
-          confirmText={confirmModal.confirmText}
-          confirmColor="APPROVE"
-        />
-      )}
+      {/* Stock In Modal */}
+      <UnifiedStockInModal
+        isOpen={showPurchaseModal}
+        onClose={() => { setShowPurchaseModal(false); setPrefillStockInData(null); setActiveStockInInspectionId(null); }}
+        allMaterials={allMaterials}
+        recentBatches={recentBatches}
+        customUnits={customUnits}
+        purchaseTransactions={purchaseTransactions}
+        onSaveComplete={handleStockInSaveComplete}
+        onMaterialCreated={(material) => setAllMaterials(prev => [material, ...prev])}
+        onCustomUnitCreated={(unit) => setCustomUnits(prev => [unit, ...prev])}
+        prefillData={prefillStockInData}
+        fromInspection={!!activeStockInInspectionId}
+      />
 
       {/* Buyer Transfers Modal */}
       {showBuyerTransfersModal && (
@@ -2346,10 +1149,7 @@ const StockInPage: React.FC = () => {
                   <p className="text-sm text-gray-500">Receive materials sent by buyers to M2 Store</p>
                 </div>
               </div>
-              <button
-                onClick={() => setShowBuyerTransfersModal(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
+              <button onClick={() => setShowBuyerTransfersModal(false)} className="text-gray-400 hover:text-gray-600">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -2359,9 +1159,7 @@ const StockInPage: React.FC = () => {
               <button
                 onClick={() => setBuyerTransfersTab('pending')}
                 className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  buyerTransfersTab === 'pending'
-                    ? 'border-orange-500 text-orange-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                  buyerTransfersTab === 'pending' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
               >
                 Pending ({buyerTransfers.length})
@@ -2369,9 +1167,7 @@ const StockInPage: React.FC = () => {
               <button
                 onClick={() => setBuyerTransfersTab('history')}
                 className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  buyerTransfersTab === 'history'
-                    ? 'border-orange-500 text-orange-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                  buyerTransfersTab === 'history' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
               >
                 History ({buyerTransfersHistory.length})
@@ -2392,81 +1188,60 @@ const StockInPage: React.FC = () => {
                     <p className="text-sm text-gray-400 mt-1">All transfers have been received</p>
                   </div>
                 ) : (
-                <div className="space-y-4">
-                  {buyerTransfers.map((transfer) => (
-                    <div
-                      key={transfer.delivery_note_id}
-                      className="border border-gray-200 rounded-lg p-4 hover:border-orange-300 transition-colors"
-                    >
-                      {/* Transfer Header */}
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <span className="font-semibold text-orange-600">{transfer.delivery_note_number}</span>
-                            <span className={`px-2 py-0.5 text-xs rounded-full ${
-                              transfer.status === 'DRAFT' ? 'bg-yellow-100 text-yellow-700' :
-                              transfer.status === 'ISSUED' ? 'bg-blue-100 text-blue-700' :
-                              'bg-purple-100 text-purple-700'
-                            }`}>
-                              {transfer.status}
-                            </span>
-                          </div>
-                          <p className="text-sm text-gray-500 mt-1">From: {transfer.created_by}</p>
-                          {transfer.delivery_date && (
-                            <p className="text-xs text-gray-400">
-                              Date: {new Date(transfer.delivery_date).toLocaleDateString()}
-                            </p>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleReceiveBuyerTransfer(transfer.delivery_note_id)}
-                          disabled={receivingTransferId === transfer.delivery_note_id}
-                          className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-white transition-colors ${
-                            receivingTransferId === transfer.delivery_note_id
-                              ? 'bg-gray-400 cursor-not-allowed'
-                              : 'bg-green-600 hover:bg-green-700'
-                          }`}
-                        >
-                          {receivingTransferId === transfer.delivery_note_id ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              <span>Receiving...</span>
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle className="w-4 h-4" />
-                              <span>Receive</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      {/* Materials List */}
-                      <div className="bg-gray-50 rounded-lg p-3 mt-3">
-                        <p className="text-xs font-medium text-gray-500 mb-2">Materials ({transfer.total_items})</p>
-                        <div className="space-y-1">
-                          {transfer.items.map((item, idx) => (
-                            <div key={item.item_id || idx} className="flex justify-between text-sm">
-                              <span className="text-gray-700">{item.material_name}</span>
-                              <span className="text-gray-500 font-medium">{item.quantity} {item.unit}</span>
+                  <div className="space-y-4">
+                    {buyerTransfers.map((transfer) => (
+                      <div key={transfer.delivery_note_id} className="border border-gray-200 rounded-lg p-4 hover:border-orange-300 transition-colors">
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <span className="font-semibold text-orange-600">{transfer.delivery_note_number}</span>
+                              <span className={`px-2 py-0.5 text-xs rounded-full ${
+                                transfer.status === 'DRAFT' ? 'bg-yellow-100 text-yellow-700' :
+                                transfer.status === 'ISSUED' ? 'bg-blue-100 text-blue-700' :
+                                'bg-purple-100 text-purple-700'
+                              }`}>{transfer.status}</span>
                             </div>
-                          ))}
+                            <p className="text-sm text-gray-500 mt-1">From: {transfer.created_by}</p>
+                            {transfer.delivery_date && (
+                              <p className="text-xs text-gray-400">Date: {new Date(transfer.delivery_date).toLocaleDateString()}</p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleReceiveBuyerTransfer(transfer.delivery_note_id)}
+                            disabled={receivingTransferId === transfer.delivery_note_id}
+                            className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-white transition-colors ${
+                              receivingTransferId === transfer.delivery_note_id ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
+                            }`}
+                          >
+                            {receivingTransferId === transfer.delivery_note_id ? (
+                              <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /><span>Receiving...</span></>
+                            ) : (
+                              <><CheckCircle className="w-4 h-4" /><span>Receive</span></>
+                            )}
+                          </button>
                         </div>
+                        <div className="bg-gray-50 rounded-lg p-3 mt-3">
+                          <p className="text-xs font-medium text-gray-500 mb-2">Materials ({transfer.total_items})</p>
+                          <div className="space-y-1">
+                            {transfer.items.map((item, idx) => (
+                              <div key={item.item_id || idx} className="flex justify-between text-sm">
+                                <span className="text-gray-700">{item.material_name}</span>
+                                <span className="text-gray-500 font-medium">{item.quantity} {item.unit}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        {(transfer.vehicle_number || transfer.driver_name) && (
+                          <div className="flex items-center space-x-4 mt-3 text-xs text-gray-500">
+                            {transfer.vehicle_number && <span>Vehicle: {transfer.vehicle_number}</span>}
+                            {transfer.driver_name && <span>Driver: {transfer.driver_name}</span>}
+                          </div>
+                        )}
                       </div>
-
-                      {/* Transport Info */}
-                      {(transfer.vehicle_number || transfer.driver_name) && (
-                        <div className="flex items-center space-x-4 mt-3 text-xs text-gray-500">
-                          {transfer.vehicle_number && <span>Vehicle: {transfer.vehicle_number}</span>}
-                          {transfer.driver_name && <span>Driver: {transfer.driver_name}</span>}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
                 )
               ) : (
-                /* History Tab */
                 buyerTransfersHistory.length === 0 ? (
                   <div className="text-center py-12">
                     <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
@@ -2476,36 +1251,25 @@ const StockInPage: React.FC = () => {
                 ) : (
                   <div className="space-y-4">
                     {buyerTransfersHistory.map((transfer) => (
-                      <div
-                        key={transfer.delivery_note_id}
-                        className="border border-green-200 rounded-lg p-4 bg-green-50"
-                      >
-                        {/* Transfer Header */}
+                      <div key={transfer.delivery_note_id} className="border border-green-200 rounded-lg p-4 bg-green-50">
                         <div className="flex justify-between items-start mb-3">
                           <div>
                             <div className="flex items-center space-x-2">
                               <span className="font-semibold text-green-700">{transfer.delivery_note_number}</span>
-                              <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">
-                                RECEIVED
-                              </span>
+                              <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">RECEIVED</span>
                             </div>
                             <p className="text-sm text-gray-600 mt-1">From: {transfer.created_by}</p>
                             {transfer.received_at && (
-                              <p className="text-xs text-gray-500">
-                                Received: {new Date(transfer.received_at).toLocaleString()}
-                              </p>
+                              <p className="text-xs text-gray-500">Received: {new Date(transfer.received_at).toLocaleString()}</p>
                             )}
                           </div>
                           <button
                             onClick={() => handleDownloadBuyerTransferPDF(transfer.delivery_note_id, transfer.delivery_note_number)}
                             className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-white border border-green-300 text-green-700 hover:bg-green-50 transition-colors text-sm"
                           >
-                            <Download className="w-4 h-4" />
-                            <span>PDF</span>
+                            <Download className="w-4 h-4" /><span>PDF</span>
                           </button>
                         </div>
-
-                        {/* Materials List */}
                         <div className="bg-white rounded-lg p-3 mt-3 border border-green-200">
                           <p className="text-xs font-medium text-gray-600 mb-2">Materials ({transfer.total_items})</p>
                           <div className="space-y-2 max-h-32 overflow-y-auto">
@@ -2517,19 +1281,11 @@ const StockInPage: React.FC = () => {
                             ))}
                           </div>
                         </div>
-
-                        {/* Transport Info */}
                         {transfer.vehicle_number && (
                           <div className="mt-3 pt-3 border-t border-green-200 grid grid-cols-2 gap-2 text-xs">
-                            <div>
-                              <span className="text-gray-500">Vehicle:</span>
-                              <span className="ml-1 text-gray-700">{transfer.vehicle_number}</span>
-                            </div>
+                            <div><span className="text-gray-500">Vehicle:</span><span className="ml-1 text-gray-700">{transfer.vehicle_number}</span></div>
                             {transfer.driver_name && (
-                              <div>
-                                <span className="text-gray-500">Driver:</span>
-                                <span className="ml-1 text-gray-700">{transfer.driver_name}</span>
-                              </div>
+                              <div><span className="text-gray-500">Driver:</span><span className="ml-1 text-gray-700">{transfer.driver_name}</span></div>
                             )}
                           </div>
                         )}
@@ -2548,16 +1304,850 @@ const StockInPage: React.FC = () => {
                   : `${buyerTransfersHistory.length} received transfer${buyerTransfersHistory.length !== 1 ? 's' : ''}`
                 }
               </p>
-              <button
-                onClick={() => setShowBuyerTransfersModal(false)}
-                className="px-4 py-2 text-gray-600 hover:text-gray-800"
-              >
+              <button onClick={() => setShowBuyerTransfersModal(false)} className="px-4 py-2 text-gray-600 hover:text-gray-800">
                 Close
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Inspection Centre Modal (3 tabs: Pending / History / Held) */}
+      {showVendorDeliveriesModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-blue-50 flex-shrink-0">
+              <div className="flex items-center space-x-3">
+                {selectedIMR && (
+                  <button onClick={() => setSelectedIMR(null)} className="text-blue-600 hover:text-blue-800 mr-1">
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
+                )}
+                <ClipboardCheck className="w-6 h-6 text-blue-600" />
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    {selectedIMR
+                      ? `Inspect Delivery — ${selectedIMR.formatted_cr_id || selectedIMR.cr_details?.formatted_cr_id || ''}`
+                      : 'Inspection Centre'}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    {selectedIMR
+                      ? `${selectedIMR.vendor_name || selectedIMR.cr_details?.vendor_name || 'Unknown Vendor'} · ${selectedIMR.project_name || selectedIMR.cr_details?.project_name || ''}`
+                      : 'Manage vendor deliveries, inspection history, and held materials'}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => { setShowVendorDeliveriesModal(false); setSelectedIMR(null); }} className="text-gray-400 hover:text-gray-600">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Tabs (hidden when inspecting a specific delivery) */}
+            {!selectedIMR && (
+              <div className="flex border-b border-gray-200 bg-white flex-shrink-0">
+                <button
+                  onClick={() => handleInspectionCentreTabChange('pending')}
+                  className={`flex items-center space-x-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    inspectionCentreTab === 'pending'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <ClipboardCheck className="w-4 h-4" />
+                  <span>Pending Inspections</span>
+                  {pendingInspectionsCount > 0 && (
+                    <span className="bg-amber-100 text-amber-700 text-xs font-bold rounded-full px-2 py-0.5">
+                      {pendingInspectionsCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => handleInspectionCentreTabChange('awaiting_stockin')}
+                  className={`flex items-center space-x-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    inspectionCentreTab === 'awaiting_stockin'
+                      ? 'border-green-600 text-green-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <ArrowDownCircle className="w-4 h-4" />
+                  <span>Awaiting Stock In</span>
+                  {awaitingStockInCount > 0 && (
+                    <span className="bg-green-100 text-green-700 text-xs font-bold rounded-full px-2 py-0.5">
+                      {awaitingStockInCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => handleInspectionCentreTabChange('history')}
+                  className={`flex items-center space-x-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    inspectionCentreTab === 'history'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Inspection History</span>
+                </button>
+                <button
+                  onClick={() => handleInspectionCentreTabChange('held')}
+                  className={`flex items-center space-x-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    inspectionCentreTab === 'held'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Held Materials</span>
+                </button>
+              </div>
+            )}
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-6">
+
+              {/* ── INSPECTION FORM VIEW (when a delivery is selected) ── */}
+              {selectedIMR ? (
+                loadingIMRDetails ? (
+                  <div className="flex items-center justify-center py-12">
+                    <ModernLoadingSpinners size="md" />
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {/* Decision Quick Actions */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm font-medium text-gray-700">Quick Actions:</span>
+                        <button onClick={handleAcceptAllMaterials} className="flex items-center space-x-1 px-3 py-1.5 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg hover:bg-green-100 transition-colors">
+                          <CheckCircle className="w-3.5 h-3.5" /><span>Accept All</span>
+                        </button>
+                        <button onClick={handleRejectAllMaterials} className="flex items-center space-x-1 px-3 py-1.5 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg hover:bg-red-100 transition-colors">
+                          <X className="w-3.5 h-3.5" /><span>Reject All</span>
+                        </button>
+                      </div>
+                      {(() => {
+                        const decision = computeOverallDecision();
+                        const config = {
+                          fully_approved: { label: 'Full Approval', cls: 'bg-green-100 text-green-800 border-green-200' },
+                          partially_approved: { label: 'Partial Approval', cls: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
+                          fully_rejected: { label: 'Full Rejection', cls: 'bg-red-100 text-red-800 border-red-200' },
+                        };
+                        const c = config[decision];
+                        return <span className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${c.cls}`}>Decision: {c.label}</span>;
+                      })()}
+                    </div>
+
+                    {/* Materials Table */}
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
+                            <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase w-24">Ordered</th>
+                            <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase w-28">Accepted</th>
+                            <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase w-20">Rejected</th>
+                            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Rejection Reason</th>
+                            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {materialDecisions.map((mat, index) => (
+                              /* ── STANDARD PO MATERIAL ROW ── */
+                              <tr key={index} className={mat.rejected_qty > 0 ? 'bg-red-50' : 'bg-white'}>
+                                <td className="px-4 py-3">
+                                  <div className="font-medium text-gray-900">{mat.material_name}</div>
+                                  {(mat.brand || mat.size) && (
+                                    <div className="text-xs text-gray-500">{[mat.brand, mat.size].filter(Boolean).join(' · ')}</div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-center text-gray-700">{mat.ordered_qty} {mat.unit}</td>
+                                <td className="px-4 py-3 text-center">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={mat.ordered_qty}
+                                    value={mat.accepted_qty}
+                                    onChange={(e) => handleMaterialQtyChange(index, parseFloat(e.target.value) || 0)}
+                                    className="w-20 text-center border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  />
+                                  <span className="ml-1 text-xs text-gray-400">{mat.unit}</span>
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className={`font-medium ${mat.rejected_qty > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                                    {mat.rejected_qty}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  {mat.rejected_qty > 0 ? (
+                                    <select
+                                      value={mat.rejection_category}
+                                      onChange={(e) => handleMaterialRejectionChange(index, 'rejection_category', e.target.value)}
+                                      className={`text-sm border rounded px-2 py-1 w-full focus:ring-2 focus:ring-red-400 ${!mat.rejection_category ? 'border-red-300 bg-red-50' : 'border-gray-300'}`}
+                                    >
+                                      <option value="">Select reason *</option>
+                                      {REJECTION_CATEGORIES.map(c => (
+                                        <option key={c.value} value={c.value}>{c.label}</option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <span className="text-gray-300 text-xs">—</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {mat.rejected_qty > 0 ? (
+                                    <input
+                                      type="text"
+                                      placeholder="Optional notes..."
+                                      value={mat.rejection_notes}
+                                      onChange={(e) => handleMaterialRejectionChange(index, 'rejection_notes', e.target.value)}
+                                      className="text-sm border border-gray-300 rounded px-2 py-1 w-full focus:ring-2 focus:ring-blue-500"
+                                    />
+                                  ) : (
+                                    <span className="text-gray-300 text-xs">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Transport Details (only when not fully rejected) */}
+                    {computeOverallDecision() !== 'fully_rejected' && (
+                      <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center space-x-1">
+                          <Truck className="w-4 h-4" /><span>Transport Details (for stock-in record)</span>
+                        </h4>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Driver Name</label>
+                            <input type="text" placeholder="Enter driver name" value={vendorDriverName}
+                              onChange={(e) => setVendorDriverName(e.target.value)}
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Vehicle Number</label>
+                            <input type="text" placeholder="Enter vehicle number" value={vendorVehicleNumber}
+                              onChange={(e) => setVendorVehicleNumber(e.target.value)}
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Reference / PO Number</label>
+                            <input type="text" placeholder="Enter reference number" value={vendorReferenceNumber}
+                              onChange={(e) => setVendorReferenceNumber(e.target.value)}
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Overall Notes */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Overall Inspection Notes</label>
+                      <textarea
+                        placeholder="Add any overall notes about this delivery..."
+                        value={inspectionOverallNotes}
+                        onChange={(e) => setInspectionOverallNotes(e.target.value)}
+                        rows={2}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    {/* Evidence Upload — required for partial/full rejection, optional for full approval */}
+                    {(() => {
+                      const decision = computeOverallDecision();
+                      const isRequired = decision !== 'fully_approved';
+                      const uploadedCount = evidenceFiles.filter(e => e.uploaded).length;
+                      return (
+                        <div className={`rounded-lg p-4 border ${isRequired ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-gray-50'}`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className={`text-sm font-semibold flex items-center space-x-1.5 ${isRequired ? 'text-red-700' : 'text-gray-700'}`}>
+                              <span>📷</span>
+                              <span>Inspection Evidence {isRequired ? <span className="text-red-500">*</span> : <span className="text-gray-400 font-normal">(optional)</span>}</span>
+                            </h4>
+                            {isRequired && uploadedCount === 0 && (
+                              <span className="text-xs text-red-500 font-medium">Required for rejected materials</span>
+                            )}
+                            {uploadedCount > 0 && (
+                              <span className="text-xs text-green-600 font-medium">{uploadedCount} file{uploadedCount !== 1 ? 's' : ''} uploaded</span>
+                            )}
+                          </div>
+
+                          {/* File thumbnails */}
+                          {evidenceFiles.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mb-3">
+                              {evidenceFiles.map((entry, idx) => (
+                                <div key={idx} className="relative w-20 h-20 rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
+                                  {entry.fileType === 'image' && entry.preview ? (
+                                    <img src={entry.preview} alt={entry.file.name} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="flex flex-col items-center justify-center text-gray-400 text-xs p-1 text-center">
+                                      <span className="text-2xl">🎥</span>
+                                      <span className="truncate w-full text-center">{entry.file.name.split('.').pop()?.toUpperCase()}</span>
+                                    </div>
+                                  )}
+                                  {/* Overlay: uploading / error / success */}
+                                  {entry.uploading && (
+                                    <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+                                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    </div>
+                                  )}
+                                  {entry.error && (
+                                    <div className="absolute inset-0 bg-red-500 bg-opacity-60 flex items-center justify-center">
+                                      <AlertTriangle className="w-5 h-5 text-white" />
+                                    </div>
+                                  )}
+                                  {entry.uploaded && (
+                                    <div className="absolute top-1 right-1 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                                      <CheckCircle className="w-3 h-3 text-white" />
+                                    </div>
+                                  )}
+                                  {/* Remove button */}
+                                  {!entry.uploading && (
+                                    <button
+                                      onClick={() => handleRemoveEvidence(idx)}
+                                      className="absolute top-0 left-0 w-5 h-5 bg-gray-800 bg-opacity-70 text-white rounded-br flex items-center justify-center hover:bg-opacity-90"
+                                      title="Remove"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+
+                              {/* Add more */}
+                              <label className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors text-gray-400">
+                                <span className="text-xl">+</span>
+                                <span className="text-xs">Add more</span>
+                                <input
+                                  type="file"
+                                  multiple
+                                  accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
+                                  className="hidden"
+                                  onChange={(e) => handleEvidenceFileSelect(e.target.files)}
+                                />
+                              </label>
+                            </div>
+                          )}
+
+                          {/* Initial upload drop zone */}
+                          {evidenceFiles.length === 0 && (
+                            <label className={`flex flex-col items-center justify-center w-full py-6 rounded-lg border-2 border-dashed cursor-pointer transition-colors ${
+                              isRequired ? 'border-red-300 hover:border-red-400 hover:bg-red-100' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'
+                            }`}>
+                              <span className="text-3xl mb-1">📸</span>
+                              <p className="text-sm font-medium text-gray-700">Upload photos or videos</p>
+                              <p className="text-xs text-gray-400 mt-0.5">JPG, PNG, WebP, GIF · MP4, MOV, WebM · Max 50MB / 200MB</p>
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
+                                className="hidden"
+                                onChange={(e) => handleEvidenceFileSelect(e.target.files)}
+                              />
+                            </label>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Rejection Warning */}
+                    {computeOverallDecision() !== 'fully_approved' && (
+                      <div className="flex items-start space-x-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <p className="text-xs text-amber-700">
+                          {computeOverallDecision() === 'fully_rejected'
+                            ? 'All materials will be marked as rejected. The buyer will be notified to create a return/refund request with the vendor.'
+                            : 'Partially rejected materials will be held. Accepted materials will be added to inventory. The buyer will be notified to handle the return of rejected materials.'
+                          }
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )
+
+              /* ── TAB: PENDING INSPECTIONS ── */
+              ) : inspectionCentreTab === 'pending' ? (
+                loadingInspections ? (
+                  <div className="flex items-center justify-center py-12">
+                    <ModernLoadingSpinners size="md" />
+                  </div>
+                ) : pendingInspections.length === 0 ? (
+                  <div className="text-center py-12">
+                    <ClipboardCheck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-gray-500 font-medium">No pending vendor deliveries</p>
+                    <p className="text-sm text-gray-400 mt-1">All deliveries have been inspected</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {pendingInspections.map((inspection: any) => {
+                      const materials = inspection.materials_data || [];
+                      const materialCount = Array.isArray(materials) ? materials.reduce((acc: number, m: any) => {
+                        const subMats = m.materials || [m];
+                        return acc + subMats.length;
+                      }, 0) : 0;
+                      return (
+                        <div key={inspection.request_id} className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors bg-white">
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                                <span className="font-semibold text-blue-700">{inspection.formatted_cr_id || `IMR-${inspection.request_id}`}</span>
+                                <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 font-medium">Awaiting Inspection</span>
+                                {inspection.is_replacement && (
+                                  <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700 font-medium flex items-center gap-1">
+                                    <RotateCcw className="w-3 h-3" />
+                                    Replacement
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-sm text-gray-600 mt-1">
+                                <span className="font-medium">{inspection.vendor_name || 'Unknown Vendor'}</span>
+                                {inspection.project_name && <span className="text-gray-400"> · {inspection.project_name}</span>}
+                              </p>
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                Routed on {inspection.created_at ? new Date(inspection.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}
+                              </p>
+                              {materialCount > 0 && (
+                                <p className="text-xs text-gray-500 mt-1.5">
+                                  <Package className="w-3 h-3 inline mr-1" />{materialCount} material{materialCount !== 1 ? 's' : ''}
+                                </p>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => handleSelectIMRForInspection(inspection.request_id)}
+                              className="ml-4 flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                            >
+                              <ClipboardCheck className="w-4 h-4" />
+                              <span>Inspect</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+
+              /* ── TAB: AWAITING STOCK IN ── */
+              ) : inspectionCentreTab === 'awaiting_stockin' ? (
+                loadingAwaitingStockIn ? (
+                  <div className="flex items-center justify-center py-12">
+                    <ModernLoadingSpinners size="md" />
+                  </div>
+                ) : awaitingStockInInspections.length === 0 ? (
+                  <div className="text-center py-12">
+                    <ArrowDownCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-gray-500 font-medium">No inspections awaiting stock-in</p>
+                    <p className="text-sm text-gray-400 mt-1">Approved deliveries will appear here until stock-in is completed</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {awaitingStockInInspections.map((inspection: any) => {
+                      const accepted: any[] = inspection.accepted_materials || [];
+                      const statusConfig: Record<string, { label: string; cls: string }> = {
+                        fully_approved: { label: 'Fully Approved', cls: 'bg-green-100 text-green-800' },
+                        partially_approved: { label: 'Partially Approved', cls: 'bg-yellow-100 text-yellow-800' },
+                      };
+                      const sc = statusConfig[inspection.inspection_status] || { label: inspection.inspection_status, cls: 'bg-gray-100 text-gray-700' };
+                      return (
+                        <div key={inspection.id} className="border border-green-200 rounded-lg p-4 bg-green-50 hover:border-green-400 transition-colors">
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                                <span className="font-semibold text-green-700">{inspection.formatted_cr_id || inspection.formatted_po_id || `INS-${inspection.id}`}</span>
+                                <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${sc.cls}`}>{sc.label}</span>
+                              </div>
+                              <p className="text-sm text-gray-600 mt-1">
+                                <span className="font-medium">{inspection.vendor_name || 'Unknown Vendor'}</span>
+                                {inspection.project_id && <span className="text-gray-400"> · Project #{inspection.project_id}</span>}
+                              </p>
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                Inspected on {inspection.inspected_at ? new Date(inspection.inspected_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}
+                                {inspection.inspected_by_name && ` by ${inspection.inspected_by_name}`}
+                              </p>
+                              {accepted.length > 0 && (
+                                <div className="mt-2 bg-white rounded p-2 border border-green-100">
+                                  <p className="text-xs font-medium text-gray-500 mb-1">Accepted Materials ({accepted.length})</p>
+                                  <div className="space-y-0.5">
+                                    {accepted.map((mat: any, idx: number) => (
+                                      <div key={idx} className="flex justify-between text-sm">
+                                        <span className="text-gray-700">{mat.material_name}{mat.brand ? ` (${mat.brand})` : ''}</span>
+                                        <span className="text-gray-500 font-medium">{mat.quantity} {mat.unit}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => handleStockInFromInspection(inspection)}
+                              className="ml-4 flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium shrink-0"
+                            >
+                              <ArrowDownCircle className="w-4 h-4" />
+                              <span>Stock In</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+
+              /* ── TAB: INSPECTION HISTORY ── */
+              ) : inspectionCentreTab === 'history' ? (
+                <div className="space-y-4">
+                  {/* Status filter */}
+                  <div className="flex items-center space-x-3">
+                    <select
+                      value={historyStatusFilter}
+                      onChange={(e) => {
+                        setHistoryStatusFilter(e.target.value);
+                        vendorInspectionService.getInspectionHistory(1, 50, e.target.value || undefined)
+                          .then(r => setInspectionHistory(r.data || []))
+                          .catch(() => {});
+                      }}
+                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">All statuses</option>
+                      <option value="fully_approved">Fully Approved</option>
+                      <option value="partially_approved">Partially Approved</option>
+                      <option value="fully_rejected">Fully Rejected</option>
+                    </select>
+                    <span className="text-xs text-gray-400">{inspectionHistory.length} record{inspectionHistory.length !== 1 ? 's' : ''}</span>
+                  </div>
+
+                  {loadingHistory ? (
+                    <div className="flex items-center justify-center py-12">
+                      <ModernLoadingSpinners size="md" />
+                    </div>
+                  ) : inspectionHistory.length === 0 ? (
+                    <div className="text-center py-12">
+                      <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                      <p className="text-gray-500 font-medium">No inspection records found</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {inspectionHistory.map((record: any) => {
+                        const statusConfig: Record<string, { label: string; cls: string }> = {
+                          fully_approved: { label: 'Fully Approved', cls: 'bg-green-100 text-green-800 border-green-200' },
+                          partially_approved: { label: 'Partially Approved', cls: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
+                          fully_rejected: { label: 'Fully Rejected', cls: 'bg-red-100 text-red-800 border-red-200' },
+                        };
+                        const sc = statusConfig[record.inspection_status] || { label: record.inspection_status, cls: 'bg-gray-100 text-gray-700 border-gray-200' };
+                        const isExpanded = expandedHistoryId === record.id;
+                        const materials: any[] = record.materials_inspection || [];
+                        return (
+                          <div key={record.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                            <button
+                              onClick={() => setExpandedHistoryId(isExpanded ? null : record.id)}
+                              className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 transition-colors text-left"
+                            >
+                              <div className="flex items-center space-x-3 min-w-0">
+                                <span className="font-semibold text-blue-700 shrink-0">{record.formatted_cr_id || `INS-${record.id}`}</span>
+                                <span className={`px-2 py-0.5 text-xs rounded-full font-medium border shrink-0 ${sc.cls}`}>{sc.label}</span>
+                                <span className="text-sm text-gray-600 truncate">{record.vendor_name || '—'}</span>
+                              </div>
+                              <div className="flex items-center space-x-3 shrink-0 ml-3">
+                                <span className="text-xs text-gray-400">
+                                  {record.inspected_at ? new Date(record.inspected_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}
+                                </span>
+                                <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              </div>
+                            </button>
+                            {isExpanded && (
+                              <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 space-y-3">
+                                <div className="grid grid-cols-3 gap-3 text-xs text-gray-500">
+                                  <div><span className="font-medium text-gray-700">Inspected by:</span> {record.inspected_by_name || '—'}</div>
+                                  <div><span className="font-medium text-gray-700">Iteration:</span> #{record.iteration_number ?? 0}</div>
+                                  {record.overall_notes && <div className="col-span-3"><span className="font-medium text-gray-700">Notes:</span> {record.overall_notes}</div>}
+                                </div>
+                                {materials.length > 0 && (
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="text-gray-500 border-b border-gray-200">
+                                        <th className="text-left pb-1 font-medium">Material</th>
+                                        <th className="text-center pb-1 font-medium w-20">Ordered</th>
+                                        <th className="text-center pb-1 font-medium w-20">Accepted</th>
+                                        <th className="text-center pb-1 font-medium w-20">Rejected</th>
+                                        <th className="text-left pb-1 font-medium">Reason</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                      {materials.map((m: any, i: number) => (
+                                        <tr key={i} className={m.rejected_qty > 0 ? 'text-red-700' : 'text-gray-700'}>
+                                          <td className="py-1.5">
+                                            <div>{m.material_name}</div>
+                                            {(m.brand || m.size) && <div className="text-gray-400">{[m.brand, m.size].filter(Boolean).join(' · ')}</div>}
+                                          </td>
+                                          <td className="text-center py-1.5">{m.ordered_qty ?? '—'} {m.unit}</td>
+                                          <td className="text-center py-1.5 text-green-700 font-medium">{m.accepted_qty ?? '—'}</td>
+                                          <td className="text-center py-1.5">{m.rejected_qty > 0 ? <span className="text-red-600 font-medium">{m.rejected_qty}</span> : <span className="text-gray-300">—</span>}</td>
+                                          <td className="py-1.5">
+                                            {m.rejection_category ? (
+                                              <div>
+                                                <div>{m.rejection_category.replace(/_/g, ' ')}</div>
+                                                {m.rejection_notes && <div className="text-gray-500 text-[10px] mt-0.5 italic">{m.rejection_notes}</div>}
+                                              </div>
+                                            ) : <span className="text-gray-300">—</span>}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                                {/* Inspection Evidence — scrollable proof strip */}
+                                {record.evidence_urls && record.evidence_urls.filter((e: any) => e?.url).length > 0 && (
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600 mb-2">
+                                      Inspection Evidence ({record.evidence_urls.filter((e: any) => e?.url).length})
+                                    </p>
+                                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-200">
+                                      {record.evidence_urls.filter((e: any) => e?.url).map((ev: any, ei: number) => {
+                                        const isVideo = ev.file_type?.startsWith('video') || /\.(mp4|mov|webm)$/i.test(ev.file_name || '');
+                                        const label = ev.file_name
+                                          ? ev.file_name.length > 18 ? ev.file_name.slice(0, 15) + '…' : ev.file_name
+                                          : `Evidence ${ei + 1}`;
+                                        return (
+                                          <button
+                                            key={ei}
+                                            type="button"
+                                            onClick={() => { setHistoryLightboxEvidence(record.evidence_urls.filter((e: any) => e?.url)); setHistoryLightboxIndex(ei); setHistoryLightboxOpen(true); }}
+                                            title={`View ${ev.file_name || 'evidence'}`}
+                                            className="flex-shrink-0 flex flex-col items-center justify-between w-28 h-28 border border-gray-200 rounded-xl bg-white hover:border-blue-400 hover:shadow-md transition-all group p-2 gap-1"
+                                          >
+                                            <div className={`flex-1 flex items-center justify-center w-full rounded-lg ${isVideo ? 'bg-gray-900' : 'bg-blue-50'}`}>
+                                              {isVideo ? (
+                                                <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                  <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z"/>
+                                                </svg>
+                                              ) : (
+                                                <svg className="w-7 h-7 text-blue-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                                                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3 12V6.75A2.25 2.25 0 015.25 4.5h13.5A2.25 2.25 0 0121 6.75V17.25A2.25 2.25 0 0118.75 19.5H5.25A2.25 2.25 0 013 17.25V12z"/>
+                                                </svg>
+                                              )}
+                                            </div>
+                                            <div className="w-full flex items-center justify-between gap-1 mt-1">
+                                              <span className="text-[10px] text-gray-500 truncate leading-tight">{label}</span>
+                                              <Eye className="w-3 h-3 text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
+                                            </div>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {record.inspection_status !== 'fully_approved' && (
+                                  <div className="flex items-start space-x-2 bg-amber-50 border border-amber-200 rounded p-2 text-xs text-amber-700">
+                                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                    <span>
+                                      {record.inspection_status === 'fully_rejected'
+                                        ? 'All materials rejected — buyer handles return/refund with vendor.'
+                                        : 'Rejected materials held at store — buyer creates return request. Check Held Materials tab for status.'}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+              /* ── TAB: HELD MATERIALS ── */
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-start space-x-2 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      These materials were physically rejected during inspection and are currently held at M2 Store.
+                      The buyer is responsible for creating a return/refund/replacement request with the vendor.
+                      Once resolved, they will no longer appear here.
+                    </span>
+                  </div>
+
+                  {loadingHeld ? (
+                    <div className="flex items-center justify-center py-12">
+                      <ModernLoadingSpinners size="md" />
+                    </div>
+                  ) : heldMaterials.length === 0 ? (
+                    <div className="text-center py-12">
+                      <CheckCircle className="w-12 h-12 text-green-300 mx-auto mb-3" />
+                      <p className="text-gray-500 font-medium">No held materials</p>
+                      <p className="text-sm text-gray-400 mt-1">All rejected materials have been resolved</p>
+                    </div>
+                  ) : (
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
+                            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Vendor / CR</th>
+                            <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase w-24">Rejected Qty</th>
+                            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Rejection Reason</th>
+                            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Return Status</th>
+                            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Refund Info</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {heldMaterials.map((item: any, i: number) => {
+                            const hasReturn = item.has_return_request;
+                            return (
+                              <tr key={i} className="bg-white hover:bg-gray-50">
+                                <td className="px-4 py-3">
+                                  <div className="font-medium text-gray-900">{item.material_name}</div>
+                                  {(item.brand || item.size) && (
+                                    <div className="text-xs text-gray-500">{[item.brand, item.size].filter(Boolean).join(' · ')}</div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="text-gray-700">{item.vendor_name || '—'}</div>
+                                  <div className="text-xs text-blue-600">{item.formatted_cr_id || `INS-${item.inspection_id}`}</div>
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className="font-semibold text-red-600">{item.rejected_qty}</span>
+                                  <span className="text-xs text-gray-400 ml-1">{item.unit}</span>
+                                </td>
+                                <td className="px-4 py-3 text-xs text-gray-600">
+                                  {item.rejection_category ? item.rejection_category.replace(/_/g, ' ') : '—'}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {hasReturn ? (
+                                    <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-medium">
+                                      Return: {(item.return_status || '').replace(/_/g, ' ')}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 border border-amber-200 font-medium">
+                                      Awaiting Buyer Action
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {item.credit_note_number ? (
+                                    <div className="space-y-1">
+                                      <div className="text-xs text-green-700 font-medium">
+                                        {item.credit_note_number}
+                                      </div>
+                                      {item.credit_note_amount != null && (
+                                        <div className="text-[10px] text-green-600">
+                                          {formatCurrency(item.credit_note_amount)}
+                                        </div>
+                                      )}
+                                      {item.refund_evidence && item.refund_evidence.length > 0 && (
+                                        <div className="flex gap-1 mt-1">
+                                          {item.refund_evidence.slice(0, 3).map((ev: any, ei: number) => (
+                                            <button
+                                              key={ei}
+                                              onClick={() => {
+                                                setRefundEvidenceList(item.refund_evidence);
+                                                setRefundEvidenceIndex(ei);
+                                                setRefundEvidenceOpen(true);
+                                              }}
+                                              className="relative group w-8 h-8 rounded border border-gray-200 overflow-hidden hover:border-blue-400 transition-colors"
+                                              title={`View proof: ${ev.file_name || 'file'}`}
+                                              aria-label={`View refund proof: ${ev.file_name || 'file'}`}
+                                            >
+                                              {ev.file_type?.startsWith('image') ? (
+                                                <img src={ev.url} alt="" className="w-full h-full object-cover" />
+                                              ) : (
+                                                <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                                                  <FileText className="w-3 h-3 text-gray-400" />
+                                                </div>
+                                              )}
+                                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center">
+                                                <Eye className="w-3 h-3 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                              </div>
+                                            </button>
+                                          ))}
+                                          {item.refund_evidence.length > 3 && (
+                                            <span className="text-[10px] text-gray-400 self-center">
+                                              +{item.refund_evidence.length - 3}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : hasReturn ? (
+                                    <span className="text-[10px] text-gray-400">Pending</span>
+                                  ) : (
+                                    <span className="text-[10px] text-gray-300">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center flex-shrink-0">
+              {selectedIMR ? (
+                <>
+                  <button onClick={() => setSelectedIMR(null)} className="flex items-center space-x-1 text-sm text-gray-500 hover:text-gray-700">
+                    <ArrowLeft className="w-4 h-4" /><span>Back to list</span>
+                  </button>
+                  <button
+                    onClick={handleSubmitInspection}
+                    disabled={submittingInspection}
+                    className={`flex items-center space-x-2 px-5 py-2 rounded-lg text-white font-medium transition-colors ${
+                      submittingInspection ? 'bg-gray-400 cursor-not-allowed' :
+                      computeOverallDecision() === 'fully_approved' ? 'bg-green-600 hover:bg-green-700' :
+                      computeOverallDecision() === 'fully_rejected' ? 'bg-red-600 hover:bg-red-700' :
+                      'bg-yellow-600 hover:bg-yellow-700'
+                    }`}
+                  >
+                    {submittingInspection ? (
+                      <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /><span>Submitting...</span></>
+                    ) : (
+                      <><CheckCircle className="w-4 h-4" /><span>Submit Inspection</span></>
+                    )}
+                  </button>
+                </>
+              ) : (
+                <>
+                  {inspectionCentreTab === 'pending' && (
+                    <p className="text-sm text-gray-500">{pendingInspections.length} pending inspection{pendingInspections.length !== 1 ? 's' : ''}</p>
+                  )}
+                  {inspectionCentreTab === 'awaiting_stockin' && (
+                    <p className="text-sm text-gray-500">{awaitingStockInInspections.length} inspection{awaitingStockInInspections.length !== 1 ? 's' : ''} awaiting stock-in</p>
+                  )}
+                  {inspectionCentreTab === 'history' && (
+                    <p className="text-sm text-gray-500">{inspectionHistory.length} inspection{inspectionHistory.length !== 1 ? 's' : ''} recorded</p>
+                  )}
+                  {inspectionCentreTab === 'held' && (
+                    <p className="text-sm text-gray-500">{heldMaterials.length} material{heldMaterials.length !== 1 ? 's' : ''} held at store</p>
+                  )}
+                  <button onClick={() => setShowVendorDeliveriesModal(false)} className="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm">Close</button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Evidence Lightbox for inspection history */}
+      <EvidenceLightbox
+        evidence={historyLightboxEvidence}
+        isOpen={historyLightboxOpen}
+        onClose={() => setHistoryLightboxOpen(false)}
+        initialIndex={historyLightboxIndex}
+      />
+
+      {/* Evidence Lightbox for refund proof */}
+      <EvidenceLightbox
+        evidence={refundEvidenceList}
+        isOpen={refundEvidenceOpen}
+        onClose={() => setRefundEvidenceOpen(false)}
+        initialIndex={refundEvidenceIndex}
+      />
     </div>
   );
 };

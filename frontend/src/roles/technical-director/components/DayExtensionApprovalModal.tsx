@@ -24,7 +24,6 @@ interface ExtensionRequest {
   requested_by: string;
   original_duration: number;
   requested_days: number;
-  original_requested_days?: number; // Store original before editing
   new_duration: number;
   original_end_date: string;
   new_end_date: string;
@@ -251,12 +250,8 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
           const currentRequest = updatedRequests[currentIndex];
 
           if (currentRequest) {
-            // Store original if not already edited
-            if (!currentRequest.is_edited) {
-              currentRequest.original_requested_days = currentRequest.requested_days;
-            }
-
-            // Update the request with edited values
+            // requested_days stays as the PM's original request (never changes)
+            // Only update edited_days and actual_days
             currentRequest.is_edited = true;
             currentRequest.edited_days = alteredDays;
             currentRequest.status = 'edited_by_td';
@@ -491,34 +486,52 @@ const DayExtensionApprovalModal: React.FC<DayExtensionApprovalModalProps> = ({
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div>
-                <p className="text-gray-600 mb-0.5">
-                  {extensionRequest.is_edited ? 'TD Edited Days' : 'Additional Days'}
-                </p>
-                {extensionRequest.is_edited ? (
+            {extensionRequest.is_edited ? (
+              <>
+                {/* Show original request with strikethrough */}
+                <div className="grid grid-cols-2 gap-2 text-xs mb-2">
                   <div>
-                    <p className="text-sm text-gray-500 line-through">
-                      +{extensionRequest.original_requested_days || extensionRequest.requested_days} days
-                    </p>
-                    <p className="text-lg font-bold text-orange-600">
-                      +{extensionRequest.edited_days || extensionRequest.actual_days} days
+                    <p className="text-gray-500 mb-0.5">Originally Requested</p>
+                    <p className="text-sm text-gray-400 line-through">
+                      +{extensionRequest.requested_days} days
                     </p>
                   </div>
-                ) : (
+                  <div>
+                    <p className="text-gray-500 mb-0.5">Original End Date</p>
+                    <p className="text-sm text-gray-400 line-through">
+                      {calculateNewEndDate(extensionRequest.requested_days)}
+                    </p>
+                  </div>
+                </div>
+                {/* Show TD edited values */}
+                <div className="grid grid-cols-2 gap-2 text-xs border-t border-orange-200 pt-2">
+                  <div>
+                    <p className="text-gray-600 mb-0.5">TD Edited Days</p>
+                    <p className="text-lg font-bold text-orange-600">
+                      +{extensionRequest.edited_days ?? extensionRequest.actual_days} days
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600 mb-0.5">New End Date</p>
+                    <p className="text-sm font-bold text-gray-900">{formatDate(extensionRequest.new_end_date)}</p>
+                  </div>
+                </div>
+                <div className="mt-2 pt-2 border-t border-orange-200">
+                  <p className="text-xs text-orange-700">
+                    <span className="font-semibold">Note:</span> TD modified the requested extension. Please review and approve the edited request.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <p className="text-gray-600 mb-0.5">Additional Days</p>
                   <p className="text-lg font-bold text-blue-600">+{extensionRequest.requested_days} days</p>
-                )}
-              </div>
-              <div>
-                <p className="text-gray-600 mb-0.5">New End Date</p>
-                <p className="text-sm font-bold text-gray-900">{formatDate(extensionRequest.new_end_date)}</p>
-              </div>
-            </div>
-            {extensionRequest.is_edited && (
-              <div className="mt-2 pt-2 border-t border-orange-200">
-                <p className="text-xs text-orange-700">
-                  <span className="font-semibold">Note:</span> TD modified the requested extension. Please review and approve the edited request.
-                </p>
+                </div>
+                <div>
+                  <p className="text-gray-600 mb-0.5">New End Date</p>
+                  <p className="text-sm font-bold text-gray-900">{formatDate(extensionRequest.new_end_date)}</p>
+                </div>
               </div>
             )}
           </div>

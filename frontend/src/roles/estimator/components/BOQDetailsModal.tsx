@@ -762,7 +762,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                                 {subItem.location && <div><span className="text-gray-600">Location:</span> <span className="font-medium">{subItem.location}</span></div>}
                                                 {subItem.brand && <div><span className="text-gray-600">Brand:</span> <span className="font-medium">{subItem.brand}</span></div>}
                                                 <div><span className="text-gray-600">Qty:</span> <span className="font-medium">{subItem.quantity} {subItem.unit}</span></div>
-                                                {subItem.rate && <div><span className="text-gray-600">Rate:</span> <span className="font-medium">₹{subItem.rate}</span></div>}
+                                                {subItem.rate && <div><span className="text-gray-600">Rate:</span> <span className="font-medium">AED {subItem.rate}</span></div>}
                                               </div>
 
                                               {/* Sub-item Images */}
@@ -1350,7 +1350,7 @@ const BOQDetailsModal: React.FC<BOQDetailsModalProps> = ({
                                             {subItem.location && <div><span className="text-gray-600">Location:</span> <span className="font-medium">{subItem.location}</span></div>}
                                             {subItem.brand && <div><span className="text-gray-600">Brand:</span> <span className="font-medium">{subItem.brand}</span></div>}
                                             <div><span className="text-gray-600">Qty:</span> <span className="font-medium">{subItem.quantity} {subItem.unit}</span></div>
-                                            {subItem.rate && <div><span className="text-gray-600">Rate:</span> <span className="font-medium">₹{subItem.rate}</span></div>}
+                                            {subItem.rate && <div><span className="text-gray-600">Rate:</span> <span className="font-medium">AED {subItem.rate}</span></div>}
                                           </div>
                                         </div>
 

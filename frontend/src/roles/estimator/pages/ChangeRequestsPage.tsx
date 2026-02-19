@@ -28,7 +28,6 @@ import {
   LayoutGrid,
   List,
   Pencil,
-  GitBranch,
   MapPin
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
@@ -282,113 +281,7 @@ const ChangeRequestsPage: React.FC = () => {
     return colors[status as keyof typeof colors] || colors.pending;
   };
 
-  // Helper to get store routing status info
-  const getStoreRoutingStatusInfo = (status: string | null | undefined) => {
-    if (!status) return null;
 
-    const statusMap: Record<string, { label: string; color: string; icon: string }> = {
-      pending_vendor_delivery: {
-        label: 'Pending Vendor Delivery to Store',
-        color: 'bg-amber-100 text-amber-700 border-amber-200',
-        icon: '🚚'
-      },
-      delivered_to_store: {
-        label: 'Delivered to M2 Store',
-        color: 'bg-blue-100 text-blue-700 border-blue-200',
-        icon: '📦'
-      },
-      dispatched_to_site: {
-        label: 'Dispatched to Site',
-        color: 'bg-purple-100 text-purple-700 border-purple-200',
-        icon: '🚛'
-      },
-      delivered_to_site: {
-        label: 'Delivered to Site',
-        color: 'bg-green-100 text-green-700 border-green-200',
-        icon: '✅'
-      }
-    };
-
-    return statusMap[status] || null;
-  };
-
-  // Helper to render store routing status
-  const renderStoreRoutingStatus = (request: ChangeRequestItem) => {
-    if (!request.store_request_status) {
-      return null;
-    }
-
-    const statusInfo = getStoreRoutingStatusInfo(request.store_request_status);
-    if (!statusInfo) return null;
-
-    return (
-      <div className="px-4 pb-3">
-        <div className={`rounded-lg p-3 border ${statusInfo.color}`}>
-          <div className="flex items-center gap-2">
-            <span className="text-base">{statusInfo.icon}</span>
-            <span className="text-xs font-semibold">{statusInfo.label}</span>
-          </div>
-          {request.vendor_delivery_date && request.store_request_status !== 'pending_vendor_delivery' && (
-            <div className="mt-1 text-[10px] opacity-75">
-              Vendor delivered: {new Date(request.vendor_delivery_date).toLocaleDateString()}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  // Helper to render POChildren (vendor splits) info
-  const renderPOChildrenInfo = (request: ChangeRequestItem) => {
-    if (!request.has_po_children || !request.po_children || request.po_children.length === 0) {
-      return null;
-    }
-
-    const getChildStatusColor = (status: string) => {
-      switch (status) {
-        case 'purchase_completed': return 'bg-green-100 text-green-700';
-        case 'vendor_approved': return 'bg-blue-100 text-blue-700';
-        case 'pending_td_approval': return 'bg-yellow-100 text-yellow-700';
-        case 'rejected': return 'bg-red-100 text-red-700';
-        default: return 'bg-gray-100 text-gray-700';
-      }
-    };
-
-    const getChildStatusLabel = (status: string) => {
-      switch (status) {
-        case 'purchase_completed': return 'Completed';
-        case 'vendor_approved': return 'Vendor Approved';
-        case 'pending_td_approval': return 'Pending TD';
-        case 'rejected': return 'Rejected';
-        default: return status;
-      }
-    };
-
-    return (
-      <div className="px-4 pb-3">
-        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-3 border border-indigo-200">
-          <div className="flex items-center gap-2 mb-2">
-            <GitBranch className="h-4 w-4 text-indigo-600" />
-            <span className="text-xs font-semibold text-indigo-700">Split into {request.po_children.length} Vendor{request.po_children.length > 1 ? 's' : ''}</span>
-          </div>
-          <div className="space-y-1.5">
-            {request.po_children.map((child) => (
-              <div key={child.id} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-gray-700">{child.formatted_id}</span>
-                  <span className="text-gray-500">→</span>
-                  <span className="text-gray-600 truncate max-w-[100px]">{child.vendor_name || 'No vendor'}</span>
-                </div>
-                <Badge className={`text-[10px] px-1.5 py-0.5 ${getChildStatusColor(child.status)}`}>
-                  {getChildStatusLabel(child.status)}
-                </Badge>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   const filteredRequests = changeRequests.filter(req => {
     const projectName = req.project_name || req.boq_name || '';
@@ -667,11 +560,6 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* POChildren (Vendor Splits) Info */}
-                        {renderPOChildrenInfo(request)}
-
-                        {/* Budget Comparison - Hidden */}
-
                         {/* Actions */}
                         <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
                           <button
@@ -781,9 +669,6 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* POChildren (Vendor Splits) Info */}
-                        {renderPOChildrenInfo(request)}
-
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button
                             onClick={() => handleReview(request.cr_id)}
@@ -859,8 +744,7 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* POChildren (Vendor Splits) Info */}
-                        {renderPOChildrenInfo(request)}
+                        {/* POChildren hidden - Estimator doesn't need vendor split details */}
 
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button
@@ -937,8 +821,7 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* POChildren (Vendor Splits) Info */}
-                        {renderPOChildrenInfo(request)}
+                        {/* POChildren hidden - Estimator doesn't need vendor split details */}
 
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button

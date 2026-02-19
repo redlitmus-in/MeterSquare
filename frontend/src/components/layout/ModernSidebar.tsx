@@ -398,7 +398,23 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         href: buildPath('/purchase-orders'),
         icon: DocumentPlusIcon,
         iconSolid: DocumentPlusSolid,
-        color: 'text-amber-600'
+        color: 'text-amber-600',
+        children: [
+          {
+            name: 'All Orders',
+            href: buildPath('/purchase-orders'),
+            icon: DocumentPlusIcon,
+            iconSolid: DocumentPlusSolid,
+            color: 'text-amber-600'
+          },
+          {
+            name: 'Return Approvals',
+            href: buildPath('/return-approvals'),
+            icon: ArrowUturnLeftIcon,
+            iconSolid: ArrowUturnLeftIcon,
+            color: 'text-orange-600'
+          }
+        ]
       },
       // ========== OPERATIONS & PRODUCTION ==========
       {
@@ -600,6 +616,29 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             icon: RectangleGroupIcon,
             iconSolid: RectangleGroupSolid,
             color: 'text-indigo-500'
+          }
+        ]
+      },
+      {
+        name: 'Vendor Returns',
+        href: buildPath('/rejected-deliveries'),
+        icon: ArrowUturnLeftIcon,
+        iconSolid: ArrowUturnLeftIcon,
+        color: 'text-orange-600',
+        children: [
+          {
+            name: 'Rejected Deliveries',
+            href: buildPath('/rejected-deliveries'),
+            icon: ExclamationTriangleIcon,
+            iconSolid: ExclamationTriangleSolid,
+            color: 'text-red-500'
+          },
+          {
+            name: 'Return Requests',
+            href: buildPath('/return-requests'),
+            icon: ClipboardDocumentListIcon,
+            iconSolid: ClipboardDocumentListSolid,
+            color: 'text-amber-500'
           }
         ]
       }

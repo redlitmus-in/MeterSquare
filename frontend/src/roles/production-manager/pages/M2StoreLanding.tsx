@@ -158,7 +158,7 @@ const M2StoreLanding: React.FC = () => {
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Stock Value</p>
                     <p className="text-2xl font-bold text-gray-900 mt-1">
-                      ₹{stats.totalValue >= 100000 ? `${(stats.totalValue / 100000).toFixed(1)}L` : stats.totalValue.toLocaleString()}
+                      AED {stats.totalValue >= 100000 ? `${(stats.totalValue / 100000).toFixed(1)}L` : stats.totalValue.toLocaleString()}
                     </p>
                   </div>
                   <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">

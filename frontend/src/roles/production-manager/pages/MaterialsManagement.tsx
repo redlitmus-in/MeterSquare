@@ -834,7 +834,7 @@ const MaterialsManagement: React.FC = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Unit Price (₹)
+                    Unit Price (AED)
                   </label>
                   <input
                     type="number"
@@ -1027,7 +1027,7 @@ const MaterialsManagement: React.FC = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Unit Price (₹)
+                    Unit Price (AED)
                   </label>
                   <input
                     type="number"

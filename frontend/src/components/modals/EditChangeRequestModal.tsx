@@ -25,6 +25,7 @@ interface MaterialItem {
   quantity: number;
   original_boq_quantity?: number;  // Original BOQ quantity for validation
   already_purchased?: number;  // Already purchased in other requests
+  se_requested_quantity?: number;  // SE's originally requested quantity (cap for PM edits)
   unit: string;
   unit_price: number;
   total_price: number;
@@ -126,6 +127,23 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
               }, 0);
           }
 
+          // SE's original quantity: use original_quantity if available (set after first edit),
+          // otherwise the current quantity IS the SE's original (first time PM opens edit)
+          const seOriginalQty = item.original_quantity != null
+            ? parseFloat(item.original_quantity)
+            : parseFloat(item.quantity || item.qty || 0);
+
+          // Determine the available BOQ quantity for this material
+          let quantity = parseFloat(item.quantity || item.qty || 0);
+          const parsedBoqQty = boqQty != null ? parseFloat(boqQty) : undefined;
+          if (parsedBoqQty !== undefined) {
+            const availableBoqQty = parsedBoqQty - alreadyPurchased;
+            // Auto-set quantity to available BOQ qty if current exceeds it
+            if (availableBoqQty > 0 && quantity > availableBoqQty) {
+              quantity = availableBoqQty;
+            }
+          }
+
           const materialData = {
             id: `existing-${index}`,
             material_name: item.material_name || item.sub_item_name || '',
@@ -133,12 +151,13 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
             brand: item.brand || '',
             size: item.size || item.dimensions || item.size_dimension || '',
             specification: item.specification || item.spec || '',
-            quantity: parseFloat(item.quantity || item.qty || 0),
-            original_boq_quantity: boqQty != null ? parseFloat(boqQty) : undefined,
+            quantity,
+            original_boq_quantity: parsedBoqQty,
             already_purchased: alreadyPurchased,
+            se_requested_quantity: seOriginalQty,
             unit: item.unit || 'nos',
             unit_price: parseFloat(item.unit_price || item.unit_rate || 0),
-            total_price: parseFloat(item.total_price || (item.quantity * item.unit_price) || 0),
+            total_price: quantity * parseFloat(item.unit_price || item.unit_rate || 0),
             reason: item.reason || '',
             master_material_id: item.master_material_id || null,
             sub_item_id: item.sub_item_id || null
@@ -225,13 +244,19 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
       return;
     }
 
-    // Validate that existing materials don't exceed BOQ quantity
-    const exceedingMaterial = materials.find(m =>
-      m.master_material_id && m.original_boq_quantity && m.quantity > m.original_boq_quantity
-    );
+    // Validate that existing BOQ materials don't exceed remaining BOQ quantity
+    const exceedingBOQMaterial = materials.find(m => {
+      if (!m.master_material_id || !m.original_boq_quantity) return false;
+      const hasValidId = typeof m.master_material_id === 'string' && m.master_material_id.startsWith('mat_');
+      if (!hasValidId) return false;
+      const remaining = m.original_boq_quantity - (m.already_purchased || 0);
+      if (remaining <= 0) return false; // Treated as new purchase, no limit
+      return m.quantity > remaining;
+    });
 
-    if (exceedingMaterial) {
-      showError(`Material "${exceedingMaterial.material_name}" quantity (${exceedingMaterial.quantity}) exceeds BOQ allocated quantity (${exceedingMaterial.original_boq_quantity} ${exceedingMaterial.unit})`);
+    if (exceedingBOQMaterial) {
+      const remaining = (exceedingBOQMaterial.original_boq_quantity || 0) - (exceedingBOQMaterial.already_purchased || 0);
+      showError(`Material "${exceedingBOQMaterial.material_name}" quantity (${exceedingBOQMaterial.quantity}) exceeds available BOQ quantity (${remaining} ${exceedingBOQMaterial.unit}). BOQ total: ${exceedingBOQMaterial.original_boq_quantity}, already purchased: ${exceedingBOQMaterial.already_purchased || 0}`);
       return;
     }
 
@@ -485,9 +510,9 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                             <div>
                               <label className="block text-xs font-medium text-gray-600 mb-1">
                                 Quantity <span className="text-red-500">*</span>
-                                {material.master_material_id && material.original_boq_quantity && (
-                                  <span className="text-xs text-gray-500 font-normal ml-1">
-                                    (Max: {material.original_boq_quantity} {material.unit})
+                                {isExistingBOQMaterial && !isTreatedAsNew && remainingQty > 0 && (
+                                  <span className="text-xs text-blue-600 font-normal ml-1">
+                                    (BOQ Available: {remainingQty} {material.unit})
                                   </span>
                                 )}
                               </label>
@@ -498,9 +523,9 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                                 value={material.quantity || ''}
                                 onChange={(e) => {
                                   const newQty = parseFloat(e.target.value) || 0;
-                                  // Validate against BOQ quantity for existing materials
-                                  if (material.master_material_id && material.original_boq_quantity && newQty > material.original_boq_quantity) {
-                                    showError(`Quantity cannot exceed BOQ allocated quantity of ${material.original_boq_quantity} ${material.unit}`);
+                                  if (isExistingBOQMaterial && !isTreatedAsNew && remainingQty > 0 && newQty > remainingQty) {
+                                    showWarning(`Quantity cannot exceed remaining BOQ allocation of ${remainingQty} ${material.unit} (BOQ: ${material.original_boq_quantity}, already purchased: ${material.already_purchased || 0})`);
+                                    handleMaterialChange(material.id, 'quantity', remainingQty);
                                     return;
                                   }
                                   handleMaterialChange(material.id, 'quantity', newQty);
@@ -508,52 +533,30 @@ const EditChangeRequestModal: React.FC<EditChangeRequestModalProps> = ({
                                 onWheel={(e) => e.currentTarget.blur()}
                                 className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
                                   (!isProjectManagerOrEstimator && material.master_material_id !== null && material.master_material_id !== undefined) ? 'bg-gray-50 cursor-not-allowed' :
-                                  (material.master_material_id && material.original_boq_quantity && material.quantity > material.original_boq_quantity) ? 'border-red-500 bg-red-50' : ''
+                                  (isExistingBOQMaterial && !isTreatedAsNew && remainingQty > 0 && material.quantity > remainingQty) ? 'border-red-500 bg-red-50' : ''
                                 }`}
                                 placeholder="0.00"
                                 required
-                                max={material.master_material_id && material.original_boq_quantity ? material.original_boq_quantity : undefined}
+                                max={isExistingBOQMaterial && !isTreatedAsNew && remainingQty > 0 ? remainingQty : undefined}
                                 disabled={loading || (!isProjectManagerOrEstimator && material.master_material_id !== null && material.master_material_id !== undefined)}
                               />
-                              {/* BOQ Quantity Breakdown for existing materials */}
-                              {material.master_material_id && material.original_boq_quantity !== undefined && (
-                                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                                  <div className="flex items-center gap-1 mb-1">
-                                    <Package className="w-3 h-3 text-blue-600" />
-                                    <p className="text-[10px] font-semibold text-blue-900">BOQ Allocation Breakdown</p>
-                                  </div>
-                                  <div className="space-y-1 text-[10px]">
-                                    <div className="flex justify-between">
-                                      <span className="text-gray-600">BOQ Allocated:</span>
-                                      <span className="font-semibold text-gray-900">{material.original_boq_quantity} {material.unit}</span>
-                                    </div>
-                                    {material.already_purchased !== undefined && material.already_purchased > 0 && (
-                                      <div className="flex justify-between">
-                                        <span className="text-orange-600">Already Requested/Purchased:</span>
-                                        <span className="font-semibold text-orange-700">{material.already_purchased} {material.unit}</span>
-                                      </div>
-                                    )}
-                                    <div className="flex justify-between">
-                                      <span className="text-blue-600">This Request:</span>
-                                      <span className="font-semibold text-blue-700">{material.quantity} {material.unit}</span>
-                                    </div>
-                                    <div className="flex justify-between pt-1 border-t border-blue-300">
-                                      <span className="text-gray-700 font-medium">Remaining:</span>
-                                      <span className={`font-bold ${
-                                        (material.original_boq_quantity - (material.already_purchased || 0) - material.quantity) >= 0
-                                          ? 'text-green-600'
-                                          : 'text-red-600'
-                                      }`}>
-                                        {(material.original_boq_quantity - (material.already_purchased || 0) - material.quantity).toFixed(2)} {material.unit}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  {material.quantity > material.original_boq_quantity && (
-                                    <p className="text-[10px] text-red-600 mt-1 font-medium">
-                                      ⚠️ Exceeds BOQ allocated quantity
-                                    </p>
+                              {/* BOQ Quantity indicator */}
+                              {isExistingBOQMaterial && (
+                                <div className="mt-1 flex items-center gap-2 text-[11px]">
+                                  <span className="text-gray-500">BOQ Qty: <span className="font-semibold text-gray-700">{material.original_boq_quantity} {material.unit}</span></span>
+                                  {(material.already_purchased || 0) > 0 && (
+                                    <span className="text-orange-600">| Purchased: <span className="font-semibold">{material.already_purchased} {material.unit}</span></span>
+                                  )}
+                                  {!isTreatedAsNew && remainingQty > 0 && (
+                                    <span className="text-blue-600">| Available: <span className="font-semibold">{remainingQty} {material.unit}</span></span>
+                                  )}
+                                  {isTreatedAsNew && (
+                                    <span className="text-orange-600 font-medium">| Fully consumed</span>
                                   )}
                                 </div>
+                              )}
+                              {!isExistingBOQMaterial && material.quantity > 0 && (
+                                <p className="mt-1 text-[11px] text-gray-400">Not linked to BOQ</p>
                               )}
                             </div>
 

@@ -237,8 +237,11 @@ def check_store_availability(cr_id):
         # Exclude materials already in active POChildren (sent to vendor / pending TD)
         materials_in_po_children = _get_materials_in_active_po_children(cr_id)
 
-        # Get store request status for display
-        existing_store_requests = InternalMaterialRequest.query.filter_by(cr_id=cr_id).all()
+        # Get store request status for display (buyer-initiated only, not vendor delivery IMRs)
+        existing_store_requests = [
+            r for r in InternalMaterialRequest.query.filter_by(cr_id=cr_id).all()
+            if r.source_type in ('buyer_store_routing', 'manual') or r.source_type is None
+        ]
         store_request_status = 'pending'
         if existing_store_requests:
             statuses = [r.status for r in existing_store_requests if r.status]
@@ -554,7 +557,11 @@ def complete_from_store(cr_id):
 def get_store_request_status(cr_id):
     """Get the status of store requests for a CR"""
     try:
-        requests = InternalMaterialRequest.query.filter_by(cr_id=cr_id).all()
+        # Only return buyer-initiated store routing IMRs, not vendor delivery tracking IMRs
+        requests = [
+            r for r in InternalMaterialRequest.query.filter_by(cr_id=cr_id).all()
+            if r.source_type in ('buyer_store_routing', 'manual') or r.source_type is None
+        ]
 
         if not requests:
             return jsonify({

@@ -69,9 +69,9 @@ class InventoryTransaction(db.Model):
 
     # Transport/Delivery fields (for vendor deliveries - Production Manager role)
     driver_name = db.Column(db.Text, nullable=True)
+    driver_contact = db.Column(db.String(50), nullable=True)
     vehicle_number = db.Column(db.Text, nullable=True)
     transport_fee = db.Column(db.Float, nullable=True, default=0.0)
-    # transport_notes = db.Column(db.Text, nullable=True)
     delivery_batch_ref = db.Column(db.Text, nullable=True, index=True)  # e.g., "MSQ-IN-01"
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -91,9 +91,9 @@ class InventoryTransaction(db.Model):
             'delivery_note_url': self.delivery_note_url,
             # Transport/Delivery fields
             'driver_name': self.driver_name,
+            'driver_contact': self.driver_contact,
             'vehicle_number': self.vehicle_number,
             'transport_fee': self.transport_fee,
-            # 'transport_notes': self.transport_notes,
             'delivery_batch_ref': self.delivery_batch_ref,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by

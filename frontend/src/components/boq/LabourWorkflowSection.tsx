@@ -331,7 +331,7 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
                               {req.approved_by_name && (
                                 <div><span className="font-semibold">Approved by:</span> {req.approved_by_name}</div>
                               )}
-                              <div><span className="font-semibold">Total Cost:</span> ₹{formatCurrency(req.total_cost)}</div>
+                              <div><span className="font-semibold">Total Cost:</span> AED {formatCurrency(req.total_cost)}</div>
                             </div>
                           </div>
                           <div className="ml-4">
@@ -368,12 +368,12 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
                                     </div>
                                     <div>
                                       <div className="text-xs text-gray-500">Rate/Hr</div>
-                                      <div className="font-semibold text-gray-900">₹{formatCurrency(assignment.hourly_rate)}</div>
+                                      <div className="font-semibold text-gray-900">AED {formatCurrency(assignment.hourly_rate)}</div>
                                     </div>
                                     <div>
                                       <div className="text-xs text-gray-500">Total Hours/Cost</div>
                                       <div className="font-semibold text-gray-900">
-                                        {assignment.total_hours_worked}h / ₹{formatCurrency(assignment.total_cost)}
+                                        {assignment.total_hours_worked}h / AED {formatCurrency(assignment.total_cost)}
                                       </div>
                                     </div>
                                   </div>
@@ -422,7 +422,7 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
                                                     <span className="text-xs text-orange-600 ml-1">+{att.overtime_hours}OT</span>
                                                   )}
                                                 </td>
-                                                <td className="text-right py-1 px-2 font-semibold">₹{formatCurrency(att.total_cost)}</td>
+                                                <td className="text-right py-1 px-2 font-semibold">AED {formatCurrency(att.total_cost)}</td>
                                                 <td className="text-center py-1 px-2">
                                                   {getApprovalStatusBadge(att.approval_status)}
                                                 </td>
@@ -445,7 +445,7 @@ const LabourWorkflowSection: React.FC<LabourWorkflowSectionProps> = ({
                                   </div>
                                   <div>
                                     <div className="text-gray-300 text-xs">Total Cost</div>
-                                    <div className="font-bold">₹{formatCurrency(req.total_cost)}</div>
+                                    <div className="font-bold">AED {formatCurrency(req.total_cost)}</div>
                                   </div>
                                   <div>
                                     <div className="text-gray-300 text-xs">Lock Status</div>

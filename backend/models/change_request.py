@@ -149,6 +149,10 @@ class ChangeRequest(db.Model):
     buyer_completion_notes = db.Column(db.Text, nullable=True)  # Buyer notes when completing
     store_request_status = db.Column(db.String(50), nullable=True)  # Workflow status: pending_vendor_delivery, delivered_to_store, pm_received, dispatched_to_site, delivered_to_site
 
+    # Vendor Delivery Inspection (Added 2026-02-16)
+    inspection_status = db.Column(db.String(30), nullable=True)
+    # Values: 'pending_inspection', 'fully_approved', 'partially_approved', 'fully_rejected', 'return_in_progress', 'resolved'
+
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)  # ✅ PERFORMANCE: Added index
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
@@ -356,6 +360,9 @@ class ChangeRequest(db.Model):
             'vendor_delivery_date': self.vendor_delivery_date.isoformat() if self.vendor_delivery_date else None,
             'buyer_completion_notes': self.buyer_completion_notes,
             'store_request_status': self.store_request_status,
+
+            # Vendor Delivery Inspection
+            'inspection_status': self.inspection_status,
 
             # Material Routing Tracking (Prevent duplicates)
             'routed_materials': self.routed_materials if self.routed_materials else {},

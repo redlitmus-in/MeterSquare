@@ -1100,19 +1100,27 @@ def complete_po_child_purchase(po_child_id):
             is_deleted=False
         ).all()
 
-        # Parent only completes when ALL children are done — sent_to_store needs PM approval first
+        # Parent only completes when ALL children are done AND all materials are covered
         all_routed = all(pc.status in ['routed_to_store', 'purchase_completed'] for pc in all_po_children)
 
-        # If all POChildren completed/routed, update parent CR status
+        # Also verify all parent CR materials have PO children (prevents premature completion
+        # when only some materials have been split into PO children)
         if all_routed and parent_cr:
-            parent_cr.status = 'routed_to_store'
-            parent_cr.delivery_routing = 'via_production_manager'
-            parent_cr.store_request_status = 'pending_vendor_delivery'
-            parent_cr.purchase_completed_by_user_id = buyer_id
-            parent_cr.purchase_completed_by_name = buyer_name
-            parent_cr.purchase_completion_date = datetime.utcnow()
-            parent_cr.updated_at = datetime.utcnow()
-            db.session.commit()
+            from utils.po_helpers import are_all_cr_materials_covered
+            all_covered, uncovered = are_all_cr_materials_covered(parent_cr, all_po_children)
+
+            if all_covered:
+                parent_cr.status = 'routed_to_store'
+                parent_cr.delivery_routing = 'via_production_manager'
+                parent_cr.store_request_status = 'pending_vendor_delivery'
+                parent_cr.purchase_completed_by_user_id = buyer_id
+                parent_cr.purchase_completed_by_name = buyer_name
+                parent_cr.purchase_completion_date = datetime.utcnow()
+                parent_cr.updated_at = datetime.utcnow()
+            else:
+                log.info(f"CR-{parent_cr.cr_id}: All POChildren routed but {len(uncovered)} materials uncovered — NOT completing parent")
+
+        db.session.commit()
 
         return jsonify({
             "success": True,

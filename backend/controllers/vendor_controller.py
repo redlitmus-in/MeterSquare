@@ -697,3 +697,89 @@ def get_or_create_category(category_name):
 
     log.info(f"Auto-created new vendor category: {category_name}")
     return new_category.name
+
+
+def get_vendors_matching_materials():
+    """
+    POST /api/vendor/matching-vendors
+    Find vendors whose products match the given material names.
+    Returns only vendors that supply at least one of the requested materials,
+    with matching product details (including unit_price).
+
+    Request body:
+    {
+        "material_names": ["Cement 50kg", "Steel Rod 12mm"],
+        "exclude_vendor_id": 5  // optional - exclude the original vendor
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get('material_names'):
+            return jsonify({"success": False, "error": "material_names is required"}), 400
+
+        material_names = data['material_names']
+        exclude_vendor_id = data.get('exclude_vendor_id')
+
+        # Build ILIKE conditions for fuzzy matching on product_name
+        product_conditions = []
+        for name in material_names:
+            clean_name = name.strip()
+            if clean_name:
+                product_conditions.append(
+                    func.lower(VendorProduct.product_name).contains(clean_name.lower())
+                )
+
+        if not product_conditions:
+            return jsonify({"success": True, "vendors": []}), 200
+
+        # Find all matching products with their vendors
+        matching_products = VendorProduct.query.join(
+            Vendor, VendorProduct.vendor_id == Vendor.vendor_id
+        ).filter(
+            Vendor.is_deleted == False,
+            Vendor.status == 'active',
+            VendorProduct.is_deleted == False,
+            db.or_(*product_conditions)
+        )
+
+        if exclude_vendor_id:
+            matching_products = matching_products.filter(
+                Vendor.vendor_id != exclude_vendor_id
+            )
+
+        matching_products = matching_products.all()
+
+        if not matching_products:
+            return jsonify({"success": True, "vendors": [], "total": 0}), 200
+
+        # Group products by vendor_id
+        vendor_ids = set()
+        products_by_vendor = {}
+        for product in matching_products:
+            vendor_ids.add(product.vendor_id)
+            if product.vendor_id not in products_by_vendor:
+                products_by_vendor[product.vendor_id] = []
+            products_by_vendor[product.vendor_id].append(product.to_dict())
+
+        # Fetch vendor details
+        vendors = Vendor.query.filter(
+            Vendor.vendor_id.in_(vendor_ids)
+        ).order_by(Vendor.company_name.asc()).all()
+
+        vendors_list = []
+        for vendor in vendors:
+            vendor_data = vendor.to_dict()
+            vendor_data['vendor_name'] = vendor.company_name
+            vendor_data['matching_products'] = products_by_vendor.get(vendor.vendor_id, [])
+            vendor_data['matching_products_count'] = len(vendor_data['matching_products'])
+            vendors_list.append(vendor_data)
+
+        return jsonify({
+            "success": True,
+            "vendors": vendors_list,
+            "total": len(vendors_list)
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error finding matching vendors: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to find matching vendors"}), 500

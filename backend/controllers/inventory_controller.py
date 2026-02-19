@@ -1515,6 +1515,7 @@ def internal_inventory_material_request():
             notes=data.get('notes'),
             request_send=True if is_buyer_request else data.get('request_send', False),
             status='send_request' if is_buyer_request else 'PENDING',
+            source_type='manual',  # Direct PM/buyer stock request, not a vendor delivery IMR
             created_by=current_user,
             request_buyer_id=g.user.get('user_id'),
             last_modified_by=current_user
@@ -2128,11 +2129,12 @@ def approve_internal_request(request_id):
                     log.info(f"POChild {po_child.id}: {po_child.status} → purchase_completed (PM approved vendor delivery)")
 
             # ✅ FIX: Update CR status when PM approves vendor delivery
+            # Only complete parent when ALL children are done AND all materials are covered
             if internal_req.cr_id:
                 cr = ChangeRequest.query.get(internal_req.cr_id)
                 if cr and cr.status in ['sent_to_store', 'routed_to_store']:
-                    # Check if CR has POChildren — only complete parent when ALL children are done
                     from models.po_child import POChild as POChildModel
+                    from utils.po_helpers import are_all_cr_materials_covered
                     po_children = POChildModel.query.filter_by(
                         parent_cr_id=cr.cr_id, is_deleted=False
                     ).all()
@@ -2141,12 +2143,16 @@ def approve_internal_request(request_id):
                             pc.status in ['routed_to_store', 'purchase_completed']
                             for pc in po_children
                         )
-                        if all_done:
+                        all_covered, uncovered = are_all_cr_materials_covered(cr, po_children)
+                        if all_done and all_covered:
                             cr.status = 'purchase_completed'
                             cr.store_request_status = 'completed'
                             cr.updated_at = datetime.utcnow()
-                            log.info(f"CR-{cr.cr_id}: All POChildren done, parent → purchase_completed")
+                            log.info(f"CR-{cr.cr_id}: All POChildren done + all materials covered → purchase_completed")
+                        elif all_done and not all_covered:
+                            log.info(f"CR-{cr.cr_id}: All POChildren done but {len(uncovered)} materials uncovered — NOT completing parent")
                     else:
+                        # No POChildren — all materials handled at parent level, safe to complete
                         cr.status = 'purchase_completed'
                         cr.store_request_status = 'completed'
                         cr.updated_at = datetime.utcnow()
@@ -2270,12 +2276,12 @@ def approve_internal_request(request_id):
                     log.info(f"POChild {po_child.id}: sent_to_store → purchase_completed (PM approved)")
 
             # ✅ FIX: Update CR status when PM approves store request (grouped materials)
-            # Only transition from expected intermediate statuses to 'purchase_completed'
+            # Only complete parent when ALL children are done AND all materials are covered
             if internal_req.cr_id:
                 cr = ChangeRequest.query.get(internal_req.cr_id)
                 if cr and cr.status in ['sent_to_store', 'routed_to_store']:
-                    # Check if CR has POChildren — only complete parent when ALL children are done
                     from models.po_child import POChild as POChildModel
+                    from utils.po_helpers import are_all_cr_materials_covered
                     po_children = POChildModel.query.filter_by(
                         parent_cr_id=cr.cr_id, is_deleted=False
                     ).all()
@@ -2284,13 +2290,16 @@ def approve_internal_request(request_id):
                             pc.status in ['routed_to_store', 'purchase_completed']
                             for pc in po_children
                         )
-                        if all_done:
+                        all_covered, uncovered = are_all_cr_materials_covered(cr, po_children)
+                        if all_done and all_covered:
                             cr.status = 'purchase_completed'
                             cr.store_request_status = 'completed'
                             cr.updated_at = datetime.utcnow()
-                            log.info(f"CR-{cr.cr_id}: All POChildren done, parent → purchase_completed")
+                            log.info(f"CR-{cr.cr_id}: All POChildren done + all materials covered → purchase_completed")
+                        elif all_done and not all_covered:
+                            log.info(f"CR-{cr.cr_id}: All POChildren done but {len(uncovered)} materials uncovered — NOT completing parent")
                     else:
-                        # No POChildren — update parent directly
+                        # No POChildren — all materials handled at parent level, safe to complete
                         cr.status = 'purchase_completed'
                         cr.store_request_status = 'completed'
                         cr.updated_at = datetime.utcnow()
@@ -2358,10 +2367,12 @@ def approve_internal_request(request_id):
                 log.info(f"POChild {po_child.id}: → purchase_completed (PM approved single material)")
 
         # ✅ FIX: Update CR status when PM approves store request (single material)
+        # Only complete parent when ALL children are done AND all materials are covered
         if internal_req.cr_id:
             cr = ChangeRequest.query.get(internal_req.cr_id)
             if cr and cr.status in ['sent_to_store', 'routed_to_store']:
                 from models.po_child import POChild as POChildModel
+                from utils.po_helpers import are_all_cr_materials_covered
                 po_children = POChildModel.query.filter_by(
                     parent_cr_id=cr.cr_id, is_deleted=False
                 ).all()
@@ -2370,11 +2381,15 @@ def approve_internal_request(request_id):
                         pc.status in ['routed_to_store', 'purchase_completed']
                         for pc in po_children
                     )
-                    if all_done:
+                    all_covered, uncovered = are_all_cr_materials_covered(cr, po_children)
+                    if all_done and all_covered:
                         cr.status = 'purchase_completed'
                         cr.store_request_status = 'completed'
                         cr.updated_at = datetime.utcnow()
+                    elif all_done and not all_covered:
+                        log.info(f"CR-{cr.cr_id}: All POChildren done but {len(uncovered)} materials uncovered — NOT completing parent")
                 else:
+                    # No POChildren — all materials handled at parent level, safe to complete
                     cr.status = 'purchase_completed'
                     cr.store_request_status = 'completed'
                     cr.updated_at = datetime.utcnow()

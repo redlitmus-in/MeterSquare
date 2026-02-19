@@ -1328,10 +1328,10 @@ def get_all_change_requests():
                 )
 
         elif user_role == 'estimator':
-            # Estimator sees:
+            # Estimator sees ONLY CRs they are involved in:
             # 1. Requests from their assigned projects that need estimator approval
             # 2. Requests they approved (approved_by_user_id = user_id)
-            # 3. Completed purchases from their projects (to see pricing history)
+            # CRs that went directly PM→Buyer (bypassing estimator) are NOT shown
             from sqlalchemy import or_, and_
             if is_admin_viewing:
                 # Admin viewing as Estimator - show ALL estimator-relevant requests
@@ -1340,13 +1340,7 @@ def get_all_change_requests():
                     or_(
                         ChangeRequest.approval_required_from == 'estimator',  # Pending estimator approval
                         ChangeRequest.status == CR_CONFIG.STATUS_SEND_TO_EST,  # Sent to estimator
-                        ChangeRequest.approved_by_user_id.isnot(None),  # Approved by any estimator
-                        ChangeRequest.status == 'purchase_completed',  # Completed purchases
-                        ChangeRequest.status == 'routed_to_store',  # Materials sent to M2 Store
-                        ChangeRequest.status == 'send_to_buyer',  # Sent to buyer after estimator approval
-                        ChangeRequest.status == 'pending_td_approval',  # Pending TD approval
-                        ChangeRequest.status == 'rejected',  # Rejected requests
-                        ChangeRequest.status == 'split_to_sub_crs'  # Split to sub-CRs
+                        ChangeRequest.approved_by_user_id.isnot(None)  # Approved by any estimator
                     )
                 )
             else:
@@ -1355,27 +1349,17 @@ def get_all_change_requests():
                 estimator_project_ids = [p.project_id for p in estimator_projects]
 
                 if estimator_project_ids:
-                    # Estimator sees requests from their assigned projects only
+                    # Estimator only sees CRs they are involved in:
+                    # 1. CRs pending their approval (approval_required_from='estimator')
+                    # 2. CRs they already approved (tracks their approval history)
+                    # CRs that went directly PM→Buyer (bypassing estimator) are NOT shown
                     query = query.filter(
                         or_(
                             and_(
                                 ChangeRequest.approval_required_from == 'estimator',
                                 ChangeRequest.project_id.in_(estimator_project_ids)
                             ),
-                            ChangeRequest.approved_by_user_id == user_id,
-                            and_(
-                                ChangeRequest.status.in_(['purchase_completed', 'routed_to_store']),
-                                ChangeRequest.project_id.in_(estimator_project_ids)
-                            ),
-                            and_(
-                                ChangeRequest.status == 'under_review',
-                                ChangeRequest.approval_required_from == 'estimator',
-                                ChangeRequest.project_id.in_(estimator_project_ids)
-                            ),
-                            and_(
-                                ChangeRequest.status == 'pending_td_approval',
-                                ChangeRequest.project_id.in_(estimator_project_ids)
-                            )
+                            ChangeRequest.approved_by_user_id == user_id
                         )
                     )
                 else:
@@ -1738,31 +1722,51 @@ def get_change_request_by_id(cr_id):
                                 mat_name = boq_material.get('material_name', '').lower().strip()
                                 if mat_name:
                                     material_sub_items[f"name:{mat_name}"] = sub_item_name
+                                    # Also store BOQ data by name for fallback enrichment
+                                    material_boq_data[f"name:{mat_name}"] = {
+                                        'quantity': boq_material.get('quantity', 0),
+                                        'unit': boq_material.get('unit', 'nos'),
+                                        'unit_price': boq_material.get('unit_price', 0),
+                                        'size': boq_material.get('size'),
+                                        'brand': boq_material.get('brand'),
+                                        'specification': boq_material.get('specification'),
+                                        'material_id': material_id
+                                    }
+
+                # Helper to enrich a material/sub_item dict with BOQ data
+                def _enrich_with_boq(mat_dict, boq_data, fallback_material_id=None):
+                    mat_dict['original_boq_quantity'] = boq_data['quantity']
+                    if fallback_material_id and not mat_dict.get('master_material_id'):
+                        mat_dict['master_material_id'] = fallback_material_id
+                    if not mat_dict.get('unit_price') or mat_dict.get('unit_price') == 0:
+                        mat_dict['unit_price'] = boq_data.get('unit_price', 0)
+                        mat_dict['total_price'] = mat_dict.get('quantity', 0) * mat_dict.get('unit_price', 0)
+                    if not mat_dict.get('size') and boq_data.get('size'):
+                        mat_dict['size'] = boq_data.get('size')
+                    if not mat_dict.get('brand') and boq_data.get('brand'):
+                        mat_dict['brand'] = boq_data.get('brand')
+                    if not mat_dict.get('specification') and boq_data.get('specification'):
+                        mat_dict['specification'] = boq_data.get('specification')
 
                 # Enrich materials_data with BOQ prices and sub_item_name if stored value is 0
                 if result.get('materials_data'):
                     for material in result['materials_data']:
                         material_id = material.get('master_material_id')
                         if material_id and material_id in material_boq_data:
-                            boq_data = material_boq_data[material_id]
-                            material['original_boq_quantity'] = boq_data['quantity']
-                            if not material.get('unit_price') or material.get('unit_price') == 0:
-                                material['unit_price'] = boq_data.get('unit_price', 0)
-                                material['total_price'] = material.get('quantity', 0) * material.get('unit_price', 0)
-                            # Enrich size, brand, specification if missing
-                            if not material.get('size') and boq_data.get('size'):
-                                material['size'] = boq_data.get('size')
-                            if not material.get('brand') and boq_data.get('brand'):
-                                material['brand'] = boq_data.get('brand')
-                            if not material.get('specification') and boq_data.get('specification'):
-                                material['specification'] = boq_data.get('specification')
+                            _enrich_with_boq(material, material_boq_data[material_id])
+                        else:
+                            # Fallback: match by material name to find BOQ quantity
+                            mat_name = material.get('material_name', '').lower().strip()
+                            if mat_name and f"name:{mat_name}" in material_boq_data:
+                                boq_data = material_boq_data[f"name:{mat_name}"]
+                                _enrich_with_boq(material, boq_data, fallback_material_id=boq_data.get('material_id'))
 
                         # Enrich sub_item_name if missing
                         if not material.get('sub_item_name'):
+                            material_id = material.get('master_material_id')
                             if material_id and material_id in material_sub_items:
                                 material['sub_item_name'] = material_sub_items[material_id]
                             else:
-                                # Fallback to name lookup
                                 mat_name = material.get('material_name', '').lower().strip()
                                 if mat_name and f"name:{mat_name}" in material_sub_items:
                                     material['sub_item_name'] = material_sub_items[f"name:{mat_name}"]
@@ -1772,25 +1776,20 @@ def get_change_request_by_id(cr_id):
                     for sub_item in result['sub_items_data']:
                         material_id = sub_item.get('master_material_id')
                         if material_id and material_id in material_boq_data:
-                            boq_data = material_boq_data[material_id]
-                            sub_item['original_boq_quantity'] = boq_data['quantity']
-                            if not sub_item.get('unit_price') or sub_item.get('unit_price') == 0:
-                                sub_item['unit_price'] = boq_data.get('unit_price', 0)
-                                sub_item['total_price'] = sub_item.get('quantity', 0) * sub_item.get('unit_price', 0)
-                            # Enrich size, brand, specification if missing
-                            if not sub_item.get('size') and boq_data.get('size'):
-                                sub_item['size'] = boq_data.get('size')
-                            if not sub_item.get('brand') and boq_data.get('brand'):
-                                sub_item['brand'] = boq_data.get('brand')
-                            if not sub_item.get('specification') and boq_data.get('specification'):
-                                sub_item['specification'] = boq_data.get('specification')
+                            _enrich_with_boq(sub_item, material_boq_data[material_id])
+                        else:
+                            # Fallback: match by material name to find BOQ quantity
+                            mat_name = sub_item.get('material_name', '').lower().strip()
+                            if mat_name and f"name:{mat_name}" in material_boq_data:
+                                boq_data = material_boq_data[f"name:{mat_name}"]
+                                _enrich_with_boq(sub_item, boq_data, fallback_material_id=boq_data.get('material_id'))
 
                         # Enrich sub_item_name if missing
                         if not sub_item.get('sub_item_name'):
+                            material_id = sub_item.get('master_material_id')
                             if material_id and material_id in material_sub_items:
                                 sub_item['sub_item_name'] = material_sub_items[material_id]
                             else:
-                                # Fallback to name lookup
                                 mat_name = sub_item.get('material_name', '').lower().strip()
                                 if mat_name and f"name:{mat_name}" in material_sub_items:
                                     sub_item['sub_item_name'] = material_sub_items[f"name:{mat_name}"]
@@ -2595,11 +2594,38 @@ def get_boq_change_requests(boq_id):
                         material_boq_quantities[material_id] = {
                             'quantity': boq_material.get('quantity', 0),
                             'unit': boq_material.get('unit', 'nos'),
-                            'unit_price': boq_material.get('unit_price', 0),  # Include unit price for enrichment
+                            'unit_price': boq_material.get('unit_price', 0),
                             'size': boq_material.get('size'),
                             'brand': boq_material.get('brand'),
                             'specification': boq_material.get('specification')
                         }
+                        # Also store by material name for fallback enrichment
+                        mat_name = boq_material.get('material_name', '').lower().strip()
+                        if mat_name:
+                            material_boq_quantities[f"name:{mat_name}"] = {
+                                'quantity': boq_material.get('quantity', 0),
+                                'unit': boq_material.get('unit', 'nos'),
+                                'unit_price': boq_material.get('unit_price', 0),
+                                'size': boq_material.get('size'),
+                                'brand': boq_material.get('brand'),
+                                'specification': boq_material.get('specification'),
+                                'material_id': material_id
+                            }
+
+        # Helper to enrich a material dict with BOQ data
+        def _enrich_material_boq(mat_dict, boq_data, fallback_material_id=None):
+            mat_dict['original_boq_quantity'] = boq_data['quantity']
+            if fallback_material_id and not mat_dict.get('master_material_id'):
+                mat_dict['master_material_id'] = fallback_material_id
+            if not mat_dict.get('unit_price') or mat_dict.get('unit_price') == 0:
+                mat_dict['unit_price'] = boq_data.get('unit_price', 0)
+                mat_dict['total_price'] = mat_dict.get('quantity', 0) * mat_dict.get('unit_price', 0)
+            if not mat_dict.get('size') and boq_data.get('size'):
+                mat_dict['size'] = boq_data.get('size')
+            if not mat_dict.get('brand') and boq_data.get('brand'):
+                mat_dict['brand'] = boq_data.get('brand')
+            if not mat_dict.get('specification') and boq_data.get('specification'):
+                mat_dict['specification'] = boq_data.get('specification')
 
         # Get all change requests for this BOQ
         change_requests = ChangeRequest.query.filter_by(
@@ -2618,20 +2644,12 @@ def get_boq_change_requests(boq_id):
                 for material in request_data['materials_data']:
                     material_id = material.get('master_material_id')
                     if material_id and material_id in material_boq_quantities:
-                        boq_data = material_boq_quantities[material_id]
-                        material['original_boq_quantity'] = boq_data['quantity']
-                        # Enrich unit_price from BOQ if stored value is 0 (SE-created requests)
-                        if not material.get('unit_price') or material.get('unit_price') == 0:
-                            material['unit_price'] = boq_data.get('unit_price', 0)
-                            # Also recalculate total_price
-                            material['total_price'] = material.get('quantity', 0) * material.get('unit_price', 0)
-                        # Enrich size, brand, specification if missing
-                        if not material.get('size') and boq_data.get('size'):
-                            material['size'] = boq_data.get('size')
-                        if not material.get('brand') and boq_data.get('brand'):
-                            material['brand'] = boq_data.get('brand')
-                        if not material.get('specification') and boq_data.get('specification'):
-                            material['specification'] = boq_data.get('specification')
+                        _enrich_material_boq(material, material_boq_quantities[material_id])
+                    else:
+                        mat_name = material.get('material_name', '').lower().strip()
+                        if mat_name and f"name:{mat_name}" in material_boq_quantities:
+                            boq_data = material_boq_quantities[f"name:{mat_name}"]
+                            _enrich_material_boq(material, boq_data, fallback_material_id=boq_data.get('material_id'))
                     enriched_materials.append(material)
                 request_data['materials_data'] = enriched_materials
 
@@ -2641,20 +2659,12 @@ def get_boq_change_requests(boq_id):
                 for sub_item in request_data['sub_items_data']:
                     material_id = sub_item.get('master_material_id')
                     if material_id and material_id in material_boq_quantities:
-                        boq_data = material_boq_quantities[material_id]
-                        sub_item['original_boq_quantity'] = boq_data['quantity']
-                        # Enrich unit_price from BOQ if stored value is 0 (SE-created requests)
-                        if not sub_item.get('unit_price') or sub_item.get('unit_price') == 0:
-                            sub_item['unit_price'] = boq_data.get('unit_price', 0)
-                            # Also recalculate total_price
-                            sub_item['total_price'] = sub_item.get('quantity', 0) * sub_item.get('unit_price', 0)
-                        # Enrich size, brand, specification if missing
-                        if not sub_item.get('size') and boq_data.get('size'):
-                            sub_item['size'] = boq_data.get('size')
-                        if not sub_item.get('brand') and boq_data.get('brand'):
-                            sub_item['brand'] = boq_data.get('brand')
-                        if not sub_item.get('specification') and boq_data.get('specification'):
-                            sub_item['specification'] = boq_data.get('specification')
+                        _enrich_material_boq(sub_item, material_boq_quantities[material_id])
+                    else:
+                        mat_name = sub_item.get('material_name', '').lower().strip()
+                        if mat_name and f"name:{mat_name}" in material_boq_quantities:
+                            boq_data = material_boq_quantities[f"name:{mat_name}"]
+                            _enrich_material_boq(sub_item, boq_data, fallback_material_id=boq_data.get('material_id'))
                     enriched_sub_items.append(sub_item)
                 request_data['sub_items_data'] = enriched_sub_items
 

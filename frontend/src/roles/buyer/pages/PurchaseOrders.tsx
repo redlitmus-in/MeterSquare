@@ -813,8 +813,9 @@ const PurchaseOrders: React.FC = () => {
         showWarning('Purchase completed but display may not be fully updated. Please refresh if needed.');
       }
 
-      // Switch to completed tab (even if cache refresh partially failed)
-      setActiveTab('completed');
+      // Switch to Pending Approval > Store Requests tab (materials sent to store, not yet delivered)
+      setActiveTab('pending_approval');
+      setPendingApprovalSubTab('store_requests');
     } catch (error: any) {
       showError(error.message || 'Failed to complete purchase');
     } finally {
@@ -964,12 +965,13 @@ const PurchaseOrders: React.FC = () => {
       await new Promise(resolve => setTimeout(resolve, 500));
       await refetchPending();
       await refetchCompleted();
-      // Switch to pending approval tab if partial selection, completed if all selected
+      // Switch to Pending Approval > Store Requests tab (materials sent to store)
       if (storeAvailability && selectedMaterialsList.length < storeAvailability.available_materials.length) {
         // Partial selection - stay on ongoing tab
         showInfo('Remaining materials can be ordered from vendor or requested from store later');
       } else {
-        setActiveTab('completed');
+        setActiveTab('pending_approval');
+        setPendingApprovalSubTab('store_requests');
       }
     } catch (error: any) {
       showError(error.message || 'Failed to request from store');
@@ -2128,8 +2130,8 @@ const PurchaseOrders: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Complete button - Show ONLY when ALL store requests are approved */}
-                      {purchase.status === 'pending' && purchase.has_store_requests && purchase.all_store_requests_approved && !purchase.vendor_id && (
+                      {/* Complete button - Show ONLY when ALL store requests are approved AND no materials remain for vendor selection */}
+                      {purchase.status === 'pending' && purchase.has_store_requests && purchase.all_store_requests_approved && !purchase.vendor_id && ((purchase.materials_count || 0) - (purchase.store_requested_materials?.length || 0)) === 0 && (
                         <Button
                           onClick={() => handleMarkAsComplete(purchase.cr_id)}
                           disabled={completingPurchaseId === purchase.cr_id}
@@ -2925,9 +2927,10 @@ const PurchaseOrders: React.FC = () => {
               refetchApprovedPOChildren()
             ]);
 
-            // Reset to first page and switch to completed tab to show the newly completed purchase
-            setCompletedPage(1);
-            setActiveTab('completed');
+            // Reset to first page and switch to Pending Approval > Store Requests tab
+            setPendingApprovalStoreRequestsPage(1);
+            setActiveTab('pending_approval');
+            setPendingApprovalSubTab('store_requests');
           }}
         />
       )}

@@ -693,7 +693,7 @@ const AssetStockIn: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={`$${(unitCost * quantity).toFixed(2)}`}
+                  value={`AED ${(unitCost * quantity).toFixed(2)}`}
                   disabled
                   className="w-full px-3 py-2 border rounded-lg bg-gray-50"
                 />
@@ -908,7 +908,7 @@ const AssetStockIn: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">{si.quantity}</td>
                     <td className="px-4 py-3 text-gray-600">{si.vendor_name || '-'}</td>
-                    <td className="px-4 py-3">${si.total_cost.toFixed(2)}</td>
+                    <td className="px-4 py-3">AED {si.total_cost.toFixed(2)}</td>
                     <td className="px-4 py-3 text-gray-500 text-sm">
                       {new Date(si.created_at).toLocaleDateString()}
                     </td>

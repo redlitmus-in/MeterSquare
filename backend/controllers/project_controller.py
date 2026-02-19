@@ -1039,8 +1039,9 @@ def request_day_extension(boq_id):
             "reason": reason,
             "status": "day_request_send_td"
         }
-        # Save day extension request to BOQ (NOT history!)
+        # Save day extension request to project
         project.extension_days = additional_days
+        project.extension_original_days = additional_days
         project.extension_reason = reason
         project.extension_status = 'day_request_send_td'
 
@@ -1140,7 +1141,11 @@ def edit_day_extension(boq_id):
         if project.start_date:
             preview_end_date = project.start_date + timedelta(days=preview_duration)
 
-        # Update BOQ with edited days
+        # Preserve original requested days if not already saved
+        if not project.extension_original_days:
+            project.extension_original_days = project.extension_days
+
+        # Update with TD's edited days
         project.extension_days = edited_days
         project.extension_status = 'day_edit_td'
 
@@ -1220,11 +1225,13 @@ def approve_day_extension(boq_id):
         boq.has_pending_day_extension = False
         boq.pending_extension_status = 'approved'
 
-        # Update Project with approved days
+        # Update Project with approved days and clear extension tracking
         project.duration_days = final_duration
         if final_end_date:
             project.end_date = final_end_date
         project.extension_status = 'approved'
+        project.extension_days = None
+        project.extension_original_days = None
         project.last_modified_by = user_name
         project.last_modified_at = datetime.utcnow()
 
@@ -1365,8 +1372,10 @@ def reject_day_extension(boq_id):
         boq.has_pending_day_extension = False
         boq.pending_extension_status = 'rejected'
 
-        # Update Project extension status
+        # Update Project extension status and clear tracking fields
         project.extension_status = 'rejected'
+        project.extension_days = None
+        project.extension_original_days = None
         project.last_modified_by = user_name
         project.last_modified_at = datetime.utcnow()
 
@@ -1577,10 +1586,31 @@ def get_pending_day_extensions(boq_id):
             project_boqs = BOQ.query.filter_by(project_id=proj.project_id, is_deleted=False).all()
 
             original_duration = proj.duration_days or 0
-            requested_days = proj.extension_days or 0
-            actual_days = requested_days
+            is_edited = proj.extension_status == 'day_edit_td'
 
-            new_duration = original_duration + actual_days
+            # Separate original requested days from TD's edited days
+            original_requested = proj.extension_original_days or proj.extension_days or 0
+            current_days = proj.extension_days or 0
+
+            # If edited and original_requested equals current_days, the backfill
+            # couldn't recover the true original. Look it up from BOQ history.
+            if is_edited and original_requested == current_days and project_boqs:
+                for pboq in project_boqs:
+                    hist = BOQHistory.query.filter_by(boq_id=pboq.boq_id).order_by(BOQHistory.action_date.desc()).first()
+                    if hist and hist.action and isinstance(hist.action, list):
+                        for act in hist.action:
+                            if act.get('type') == 'day_extension_requested':
+                                history_days = act.get('requested_additional_days') or act.get('requested_days')
+                                if history_days and history_days != current_days:
+                                    original_requested = history_days
+                                    # Also fix the project record for future lookups
+                                    proj.extension_original_days = history_days
+                                    db.session.commit()
+                                break
+                    if original_requested != current_days:
+                        break
+
+            new_duration = original_duration + current_days
 
             # Calculate new end date
             new_end_date = None
@@ -1591,16 +1621,16 @@ def get_pending_day_extensions(boq_id):
             first_boq_id = project_boqs[0].boq_id if project_boqs else None
 
             extension_data = {
-                "boq_id": first_boq_id,  # Add boq_id for frontend modal
+                "boq_id": first_boq_id,
                 "project_id": proj.project_id,
                 "project_name": proj.project_name,
                 "boqs": [
                     {"boq_id": b.boq_id, "boq_name": b.boq_name} for b in project_boqs
                 ],
                 "original_duration": original_duration,
-                "requested_days": requested_days,
-                "edited_days": actual_days,
-                "actual_days": actual_days,
+                "requested_days": original_requested,
+                "edited_days": current_days if is_edited else None,
+                "actual_days": current_days,
                 "new_duration": new_duration,
                 "request_date": proj.last_modified_at.isoformat() if proj.last_modified_at else None,
                 "requested_by": proj.last_modified_by,
@@ -1608,7 +1638,7 @@ def get_pending_day_extensions(boq_id):
                 "new_end_date": new_end_date.isoformat() if new_end_date else None,
                 "reason": proj.extension_reason or 'No reason provided',
                 "status": proj.extension_status,
-                "is_edited": proj.extension_status == 'day_edit_td'
+                "is_edited": is_edited
             }
 
             pending_extensions.append(extension_data)

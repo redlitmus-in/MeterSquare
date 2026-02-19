@@ -138,7 +138,13 @@ def get_buyer_dashboard_analytics():
             vendor_selection_pending_td = (cr.vendor_selection_status == 'pending_td_approval')
 
             # Compute store request flags (SAME as get_buyer_pending_purchases)
-            store_requests = cr.store_requests if cr.store_requests else []
+            # Only count buyer-initiated store routing IMRs ('buyer_store_routing', 'manual').
+            # Exclude 'from_vendor_delivery' IMRs — vendor delivery tracking, not store routing.
+            all_imrs_dashboard = cr.store_requests if cr.store_requests else []
+            store_requests = [
+                r for r in all_imrs_dashboard
+                if r.source_type in ('buyer_store_routing', 'manual') or r.source_type is None
+            ]
             has_store_requests = len(store_requests) > 0
 
             all_store_approved = False

@@ -370,7 +370,7 @@ const M2ReceiveStockForm: React.FC<M2ReceiveStockFormProps> = ({ isOpen, onClose
                           </div>
                           <div>
                             <label className="block text-xs font-medium text-gray-600 mb-1">
-                              Unit Price (₹)
+                              Unit Price (AED)
                             </label>
                             <input
                               type="number"
@@ -387,7 +387,7 @@ const M2ReceiveStockForm: React.FC<M2ReceiveStockFormProps> = ({ isOpen, onClose
                           <div className="text-sm">
                             <span className="text-gray-600">Line Total: </span>
                             <span className="font-semibold text-gray-900">
-                              ₹{(line.quantity * line.unitPrice).toLocaleString()}
+                              AED {(line.quantity * line.unitPrice).toLocaleString()}
                             </span>
                           </div>
                         )}
@@ -428,7 +428,7 @@ const M2ReceiveStockForm: React.FC<M2ReceiveStockFormProps> = ({ isOpen, onClose
                 <div className="flex items-center justify-between">
                   <span className="text-lg font-semibold text-gray-900">Total Value:</span>
                   <span className="text-2xl font-bold text-blue-600">
-                    ₹{calculateTotal().toLocaleString()}
+                    AED {calculateTotal().toLocaleString()}
                   </span>
                 </div>
               </div>
