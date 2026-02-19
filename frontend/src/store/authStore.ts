@@ -93,12 +93,29 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      logout: () => {
+      logout: async () => {
+        const state = get();
+        const user = state.user;
+        const token = localStorage.getItem('access_token');
+
+        // Call logout API to set user status to offline (fire and forget)
+        if (token && user?.user_id) {
+          try {
+            await apiWrapper.post(
+              API_ENDPOINTS.AUTH.LOGOUT,
+              { user_id: user.user_id }
+            );
+          } catch (error) {
+            // Don't block logout if API call fails
+            console.warn('Logout API call failed, continuing with local logout');
+          }
+        }
+
         // Clear all auth-related data from localStorage
         localStorage.removeItem('access_token');
         localStorage.removeItem('user');
         localStorage.removeItem('auth-storage');
-        
+
         // Reset state
         set({
           user: null,

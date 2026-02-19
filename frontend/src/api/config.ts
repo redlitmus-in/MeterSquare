@@ -588,6 +588,8 @@ export const API_ENDPOINTS = {
     LOGIN: '/login',
     REGISTER: '/register',
     ME: '/self',
+    LOGOUT: '/logout',
+    USER_STATUS: '/user_status',
   },
   
   // Common purchase endpoints used across roles

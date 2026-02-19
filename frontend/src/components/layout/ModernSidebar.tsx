@@ -1349,9 +1349,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                     </Link>
 
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         const { logout } = useAuthStore.getState();
-                        logout();
+                        await logout();
                       }}
                       className="w-full flex items-center px-4 py-3.5 md:py-3 text-sm md:text-xs font-medium text-gray-700 hover:bg-red-50 hover:text-red-700 transition-colors duration-200 border-t border-gray-100"
                     >

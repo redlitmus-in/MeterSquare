@@ -689,8 +689,7 @@ const PublicSupportPage: React.FC = () => {
                     value={formData.reporter_email}
                     onChange={(e) => setFormData(prev => ({ ...prev, reporter_email: e.target.value }))}
                     placeholder="Enter your email"
-                    disabled={isAuthenticated}
-                    className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${isAuthenticated ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
                 <div>

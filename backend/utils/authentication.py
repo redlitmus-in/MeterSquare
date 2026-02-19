@@ -451,8 +451,9 @@ def verification_otp():
         on_login_failed(email_id)  # Audit log expired OTP attempt
         return jsonify({"error": "OTP expired"}), 400
     
-    # Update last login
+    # Update last login and set user status to online
     user.last_login = current_time
+    user.user_status = 'online'  # Auto-set online on login
     db.session.commit()
 
     # Record login history for audit trail
@@ -507,7 +508,8 @@ def verification_otp():
             "role": role_name,
             "role_id": user.role_id,
             "department": user.department,
-            "permissions": role_permissions
+            "permissions": role_permissions,
+            "user_status": "online"  # Auto-set online on login
         }
     }
     
