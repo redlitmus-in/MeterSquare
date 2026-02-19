@@ -28,7 +28,7 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
 if ENVIRONMENT == "production":
     FRONTEND_URL = os.getenv("PROD_FRONTEND_URL", "https://msq.kol.tel")
 else:
-    FRONTEND_URL = os.getenv("DEV_FRONTEND_URL", "http://localhost:5173")
+    FRONTEND_URL = os.getenv("DEV_FRONTEND_URL", "http://localhost:3000")
 
 
 class BOQEmailService:
