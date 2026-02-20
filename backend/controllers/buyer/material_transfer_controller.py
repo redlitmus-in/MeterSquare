@@ -169,6 +169,7 @@ def create_buyer_material_transfer():
         destination_type = data.get('destination_type')  # 'site' or 'store'
         site_engineer_id = data.get('site_engineer_id')  # Site Engineer selection
         project_id_from_request = data.get('project_id')  # Project selection (cascading dropdown)
+        project_manager_id = data.get('project_manager_id')  # Optional PM selection
         materials = data.get('materials', [])  # [{inventory_material_id, quantity}]
 
         # Optional fields for DN - SANITIZE to prevent XSS
@@ -247,6 +248,17 @@ def create_buyer_material_transfer():
 
             project_id = project.project_id
 
+        # Resolve Project Manager name for checked_by field
+        pm_name = None
+        if project_manager_id:
+            pm_user = User.query.filter_by(
+                user_id=project_manager_id,
+                is_deleted=False,
+                is_active=True
+            ).first()
+            if pm_user:
+                pm_name = pm_user.full_name
+
         # Parse transfer date
         delivery_date = datetime.utcnow()
         if transfer_date:
@@ -281,6 +293,7 @@ def create_buyer_material_transfer():
             driver_contact=driver_contact,
             transport_fee=transfer_fee,
             prepared_by=buyer_name,
+            checked_by=pm_name,  # Project Manager selected by buyer
             status='DRAFT',  # Start as DRAFT, buyer will issue it
             notes=notes,
             created_by=buyer_name,
@@ -561,18 +574,23 @@ def get_projects_for_site_engineer(site_engineer_id):
         # Site Engineers are assigned to BOQs, which link to projects
         # Filter out: 1) completed/draft projects, 2) PM confirmed completion assignments
         from models.pm_assign_ss import PMAssignSS
+        PMUser = db.aliased(User)
 
-        # Query: PMAssignSS → BOQ → Project (only active ongoing projects)
+        # Query: PMAssignSS → BOQ → Project, also fetch the PM who assigned the SE
         assignments = (
             db.session.query(
                 Project.project_id,
                 Project.project_name,
                 Project.project_code,
                 Project.location,
-                Project.area
+                Project.area,
+                PMAssignSS.assigned_by_pm_id,
+                PMUser.full_name.label('pm_name'),
+                PMUser.email.label('pm_email')
             )
             .join(BOQ, Project.project_id == BOQ.project_id)
             .join(PMAssignSS, BOQ.boq_id == PMAssignSS.boq_id)
+            .outerjoin(PMUser, PMUser.user_id == PMAssignSS.assigned_by_pm_id)
             .filter(
                 PMAssignSS.assigned_to_se_id == site_engineer_id,
                 PMAssignSS.is_deleted == False,
@@ -580,7 +598,7 @@ def get_projects_for_site_engineer(site_engineer_id):
                 Project.is_deleted == False,
                 ~Project.status.in_(['completed', 'Completed', 'draft', 'Draft'])  # Only active projects
             )
-            .distinct()  # Prevent duplicates if SE is assigned to multiple BOQs in same project
+            .distinct(Project.project_id)
             .all()
         )
 
@@ -594,10 +612,13 @@ def get_projects_for_site_engineer(site_engineer_id):
                 'project_code': proj.project_code,
                 'location': proj.location,
                 'area': proj.area,
-                'display_label': f"{proj.project_name} ({proj.project_code or 'No Code'})"
+                'display_label': f"{proj.project_name} ({proj.project_code or 'No Code'})",
+                'pm_id': proj.assigned_by_pm_id,
+                'pm_name': proj.pm_name,
+                'pm_email': proj.pm_email
             }
             project_list.append(project_data)
-            log.info(f"  - {proj.project_name} (ID: {proj.project_id})")
+            log.info(f"  - {proj.project_name} (ID: {proj.project_id}), PM: {proj.pm_name}")
 
         return jsonify(project_list), 200
 
@@ -681,3 +702,5 @@ def get_buyer_transfer_history():
             "error": f"Failed to get transfer history: {str(e)}",
             "transfers": []
         }), 500
+
+

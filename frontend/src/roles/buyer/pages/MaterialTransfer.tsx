@@ -33,6 +33,7 @@ interface SiteEngineer {
   display_label: string;
 }
 
+
 interface Project {
   project_id: number;
   project_name: string;
@@ -40,6 +41,9 @@ interface Project {
   location: string | null;
   area: string | null;
   display_label: string;
+  pm_id: number | null;
+  pm_name: string | null;
+  pm_email: string | null;
 }
 
 const MaterialTransfer: React.FC = () => {
@@ -98,6 +102,7 @@ const MaterialTransfer: React.FC = () => {
       setIsLoadingSiteEngineers(false);
     }
   };
+
 
   // Fetch Projects for selected Site Engineer
   const fetchProjectsForSE = async (siteEngineerId: number) => {
@@ -205,7 +210,7 @@ const MaterialTransfer: React.FC = () => {
 
     setIsDispatching(true);
     try {
-      const response = await apiClient.post(`/delivery_note/${selectedDNForDispatch.id}/dispatch`, {}, {
+      await apiClient.post(`/delivery_note/${selectedDNForDispatch.id}/dispatch`, {}, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
@@ -382,7 +387,8 @@ const MaterialTransfer: React.FC = () => {
         driver_contact: driverContact,
         transfer_date: new Date(transferDate).toISOString(),
         notes: transferNotes,
-        transfer_fee: transferFee || 0
+        transfer_fee: transferFee || 0,
+        project_manager_id: selectedProject?.pm_id || null
       };
 
       if (transferDestination === 'site') {
@@ -586,6 +592,9 @@ const MaterialTransfer: React.FC = () => {
                       <div className="bg-blue-50 p-4 rounded-lg mt-2">
                         <h4 className="font-medium text-gray-900">Delivery Details</h4>
                         <div className="mt-2 text-sm text-gray-600 space-y-1">
+                          {selectedProject.pm_name && (
+                            <p><strong>Project Manager:</strong> {selectedProject.pm_name}</p>
+                          )}
                           <p><strong>Site Engineer:</strong> {selectedSiteEngineer.full_name}</p>
                           <p><strong>Contact:</strong> {selectedSiteEngineer.phone_number || 'N/A'}</p>
                           <p><strong>Project:</strong> {selectedProject.project_name}</p>
