@@ -4915,6 +4915,7 @@ def get_estimator_tab_counts():
             counts_dict.get('pm_approved', 0) +
             counts_dict.get('approved', 0) +
             counts_dict.get('revision_approved', 0) +
+            counts_dict.get('internal_revision_approved', 0) +
             counts_dict.get('sent_for_confirmation', 0) +
             counts_dict.get('client_confirmed', 0) +
             counts_dict.get('items_assigned', 0)
@@ -5416,7 +5417,7 @@ def get_approved_boq():
             .filter(
                 BOQ.is_deleted == False,
                 Project.is_deleted == False,
-                BOQ.status.in_(['approved', 'Approved', 'items_assigned', 'Sent_for_Confirmation', 'Client_Confirmed','PM_Approved','Revision_Approved'])
+                BOQ.status.in_(['approved', 'Approved', 'items_assigned', 'Sent_for_Confirmation', 'Client_Confirmed','PM_Approved','Revision_Approved','Internal_Revision_Approved'])
             )
         )
 

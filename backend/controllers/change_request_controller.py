@@ -3070,6 +3070,31 @@ def reject_change_request(cr_id):
         except Exception as notif_error:
             log.error(f"Failed to send CR rejection notification: {notif_error}")
 
+        # Send email to CR creator only if they are offline
+        try:
+            if change_request.requested_by_user_id:
+                creator_user = User.query.filter_by(user_id=change_request.requested_by_user_id, is_deleted=False).first()
+                if creator_user:
+                    creator_status = str(creator_user.user_status).lower().strip() if creator_user.user_status else "unknown"
+                    if creator_status == "offline":
+                        from utils.boq_email_service import BOQEmailService
+                        boq_email_service = BOQEmailService()
+                        project_name = change_request.project.project_name if change_request.project else 'Unknown Project'
+                        email_sent = boq_email_service.send_cr_rejection_notification(
+                            cr_id=cr_id,
+                            project_name=project_name,
+                            item_name=change_request.item_name or f"CR #{cr_id}",
+                            rejection_reason=rejection_reason,
+                            rejected_by_name=approver_name,
+                            rejected_by_role=history_role,
+                            recipient_email=creator_user.email,
+                            recipient_name=creator_user.full_name or creator_user.username
+                        )
+                    else:
+                        log.info(f"[reject_change_request] Creator {change_request.requested_by_user_id} is ONLINE - Email skipped")
+        except Exception as email_err:
+            log.error(f"[reject_change_request] Failed to send rejection email: {email_err}")
+
         return jsonify({
             "success": True,
             "message": "Change request rejected",

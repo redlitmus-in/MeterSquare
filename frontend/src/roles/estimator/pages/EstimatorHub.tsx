@@ -402,6 +402,7 @@ const EstimatorHub: React.FC = () => {
   const [isRevisionEdit, setIsRevisionEdit] = useState(false);
   const [isSendingToTD, setIsSendingToTD] = useState(false);
   const [isLoadingBoqForEdit, setIsLoadingBoqForEdit] = useState(false);
+  const [confirmingApprovalBoqId, setConfirmingApprovalBoqId] = useState<number | null>(null);
 
   // Full-screen BOQ view states
   const [showFullScreenBOQ, setShowFullScreenBOQ] = useState(false);
@@ -1988,7 +1989,7 @@ const EstimatorHub: React.FC = () => {
     const revisionNumber = boq.revision_number || 0;
 
     // Draft: Not sent to TD/PM yet (can edit/delete/send) - status NOT in workflow states
-    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_td_approval' && status !== 'pm_approved' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'pm_rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled' && status !== 'items_assigned');
+    const isDraft = !status || status === 'draft' || (status !== 'pending' && status !== 'pending_pm_approval' && status !== 'pending_td_approval' && status !== 'pm_approved' && status !== 'pending_revision' && status !== 'under_revision' && status !== 'approved' && status !== 'revision_approved' && status !== 'internal_revision_approved' && status !== 'sent_for_confirmation' && status !== 'client_confirmed' && status !== 'rejected' && status !== 'pm_rejected' && status !== 'completed' && status !== 'client_rejected' && status !== 'client_cancelled' && status !== 'items_assigned');
     // Sent to TD or PM: Waiting for approval
     const isSentToTD = status === 'pending' || status === 'pending_pm_approval';
     // PM Approved: Ready to send to TD for final approval
@@ -2003,6 +2004,8 @@ const EstimatorHub: React.FC = () => {
     const isApprovedByTD = status === 'approved';
     // Revision Approved: TD approved revision, ready to send to client
     const isRevisionApproved = status === 'revision_approved';
+    // Internal Revision Approved: Internally approved, ready to send to client
+    const isInternalRevisionApproved = status === 'internal_revision_approved';
     // Sent to client: Waiting for client confirmation
     const isSentToClient = status === 'sent_for_confirmation';
     // Client confirmed: Ready for TD to assign PM
@@ -2214,7 +2217,7 @@ const EstimatorHub: React.FC = () => {
           </button>
 
           {/* Show Compare button only if revision number > 0 and not in approved/client/cancelled/items_assigned statuses */}
-          {revisionNumber > 0 && !isApprovedByTD && !isSentToClient && !isClientConfirmed && !isClientCancelled && !isItemsAssigned && (
+          {revisionNumber > 0 && !isApprovedByTD && !isInternalRevisionApproved && !isSentToClient && !isClientConfirmed && !isClientCancelled && !isItemsAssigned && (
             <button
               className="text-blue-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-0.5 sm:gap-1 px-1 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm font-semibold"
               onClick={() => {
@@ -2392,24 +2395,36 @@ const EstimatorHub: React.FC = () => {
             /* Sent to client - waiting for client confirmation */
             <>
               <button
-                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-1"
+                className="text-white text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-1 disabled:opacity-60 disabled:cursor-not-allowed"
                 style={{ backgroundColor: 'rgb(34, 197, 94)' }}
+                disabled={confirmingApprovalBoqId === boq.boq_id}
                 onClick={async () => {
-                  const result = await estimatorService.confirmClientApproval(boq.boq_id!);
-                  if (result.success) {
-                    showSuccess(result.message);
-                    // Refresh both BOQs and projects to update UI immediately
-                    await Promise.all([loadBOQs(), loadProjects(currentPage)]);
-                    // Trigger realtime update for other components
-                    useRealtimeUpdateStore.getState().triggerBOQUpdate();
-                  } else {
-                    showError(result.message);
+                  setConfirmingApprovalBoqId(boq.boq_id!);
+                  try {
+                    const result = await estimatorService.confirmClientApproval(boq.boq_id!);
+                    if (result.success) {
+                      showSuccess(result.message);
+                      await Promise.all([loadBOQs(false), loadProjects(currentPage)]);
+                      useRealtimeUpdateStore.getState().triggerBOQUpdate();
+                    } else {
+                      showError(result.message);
+                    }
+                  } finally {
+                    setConfirmingApprovalBoqId(null);
                   }
                 }}
               >
-                <CheckCircle className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Client Approved</span>
-                <span className="sm:hidden">Approved</span>
+                {confirmingApprovalBoqId === boq.boq_id ? (
+                  <div className="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full" />
+                ) : (
+                  <CheckCircle className="h-3.5 w-3.5" />
+                )}
+                <span className="hidden sm:inline">
+                  {confirmingApprovalBoqId === boq.boq_id ? 'Confirming...' : 'Client Approved'}
+                </span>
+                <span className="sm:hidden">
+                  {confirmingApprovalBoqId === boq.boq_id ? '...' : 'Approved'}
+                </span>
               </button>
               <button
                 className="text-red-900 text-[10px] sm:text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1 px-1 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 shadow-sm"
@@ -2601,7 +2616,7 @@ const EstimatorHub: React.FC = () => {
                 )}
               </button>
             </>
-          ) : isApprovedByTD || isRevisionApproved ? (
+          ) : isApprovedByTD || isRevisionApproved || isInternalRevisionApproved ? (
             /* Approved by TD - Check if client already confirmed */
             boq.client_status ? (
               /* Client already confirmed - show badge */
@@ -2833,9 +2848,9 @@ const EstimatorHub: React.FC = () => {
                             <Button variant="ghost" size="sm" onClick={async () => { setIsLoadingBoqForEdit(true); try { if (boq.boq_id) { const result = await estimatorService.getBOQById(boq.boq_id); if (result.success && result.data) { setEditingBoq(result.data); setSelectedProjectForBOQ(result.data.project || boq.project); setFullScreenBoqMode('edit'); setShowFullScreenBOQ(true); } else { showError('Failed to load BOQ details'); } } } finally { setIsLoadingBoqForEdit(false); } }} className="h-8 w-8 p-0" title="Edit BOQ">
                               <Edit className="h-4 w-4 text-green-600" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={async () => { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { showSuccess(result.message); await Promise.all([loadBOQs(), loadProjects(currentPage)]); useRealtimeUpdateStore.getState().triggerBOQUpdate(); } else { showError(result.message); } }} className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50" title="Client Approved">
-                              <CheckCircle className="h-4 w-4 mr-1" />
-                              <span className="text-xs">Approved</span>
+                            <Button variant="ghost" size="sm" disabled={confirmingApprovalBoqId === boq.boq_id} onClick={async () => { setConfirmingApprovalBoqId(boq.boq_id!); try { const result = await estimatorService.confirmClientApproval(boq.boq_id!); if (result.success) { showSuccess(result.message); await Promise.all([loadBOQs(false), loadProjects(currentPage)]); useRealtimeUpdateStore.getState().triggerBOQUpdate(); } else { showError(result.message); } } finally { setConfirmingApprovalBoqId(null); } }} className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50 disabled:opacity-60" title="Client Approved">
+                              {confirmingApprovalBoqId === boq.boq_id ? <div className="animate-spin h-4 w-4 border-2 border-green-600 border-t-transparent rounded-full mr-1" /> : <CheckCircle className="h-4 w-4 mr-1" />}
+                              <span className="text-xs">{confirmingApprovalBoqId === boq.boq_id ? 'Confirming...' : 'Approved'}</span>
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => handleShowRevisionModal(boq)} className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" title="Revisions">
                               <Edit className="h-4 w-4 mr-1" />
@@ -3942,12 +3957,17 @@ const EstimatorHub: React.FC = () => {
                   setShowComparisonModal(true);
                 }}
                 onClientApproval={async (boq) => {
-                  const result = await estimatorService.confirmClientApproval(boq.boq_id!);
-                  if (result.success) {
-                    showSuccess(result.message);
-                    loadBOQs();
-                  } else {
-                    showError(result.message);
+                  setConfirmingApprovalBoqId(boq.boq_id!);
+                  try {
+                    const result = await estimatorService.confirmClientApproval(boq.boq_id!);
+                    if (result.success) {
+                      showSuccess(result.message);
+                      await loadBOQs(false);
+                    } else {
+                      showError(result.message);
+                    }
+                  } finally {
+                    setConfirmingApprovalBoqId(null);
                   }
                 }}
                 onRevisionRequest={(boq) => {

@@ -573,28 +573,33 @@ def send_boq_to_project_manager():
         # Initialize email service
         boq_email_service = BOQEmailService()
 
-        # Check if PM is offline - only send email if offline
+        # Send email only when PM is offline (case-insensitive, handles None)
+        pm_status = (pm.user_status or "").lower().strip()
         email_sent = False
-        if pm.user_status == "offline":
-            # Send professional BOQ approval email to PM
+        log.info(f"📧 PM {pm.full_name} user_status={repr(pm.user_status)} → normalized='{pm_status}'")
+
+        if pm_status == "offline":
             email_sent = boq_email_service.send_boq_approval_to_pm(
                 boq_data=boq_data,
                 project_data=project_data,
                 items_summary=items_summary,
                 pm_email=pm.email,
-                comments=None,  # No comments when estimator sends to PM
+                comments=None,
                 estimator_name=current_user_name,
                 pm_name=pm.full_name
             )
+            if email_sent:
+                log.info(f"✅ BOQ approval email sent to offline PM {pm.full_name} ({pm.email})")
+            else:
+                log.error(f"❌ Failed to send BOQ approval email to PM {pm.full_name} ({pm.email})")
         else:
-            # PM is online - they will receive in-app notification only
-            log.info(f"📧 ⏭️  PM {pm.full_name} is ONLINE - Email skipped, will send in-app notification")
+            log.info(f"⏭️  PM {pm.full_name} is '{pm.user_status}' - skipping email, in-app notification only")
 
-        # Update BOQ status (regardless of online/offline status)
+        # Update BOQ status
         boq.status = 'Pending_PM_Approval'
         boq.last_modified_by = current_user_name
         boq.last_modified_at = datetime.utcnow()
-        boq.email_sent = email_sent  # Only True if email was actually sent (PM offline)
+        boq.email_sent = email_sent
         boq.last_pm_user_id = pm_id  # Store which PM this BOQ was sent to
 
         # NOTE: PM is NOT assigned to project here - only after client approval and TD assignment

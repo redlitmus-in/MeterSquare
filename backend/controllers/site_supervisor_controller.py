@@ -592,22 +592,26 @@ def assign_projects_sitesupervisor():
         #         import traceback
         #         log.error(f"Email error traceback: {traceback.format_exc()}")
 
-        # Send email notification to Buyer (if assigned)
+        # Send email notification to Buyer (if assigned and offline)
         buyer_email_sent = False
         if buyer_user and buyer_user.email and projects_data_for_buyer_email:
             try:
-                email_service = BOQEmailService()
-                buyer_email_sent = email_service.send_buyer_assignment_notification(
-                    buyer_email=buyer_user.email,
-                    buyer_name=buyer_user.full_name,
-                    pm_name=pm_name,
-                    projects_data=projects_data_for_buyer_email
-                )
-
-                if buyer_email_sent:
-                    log.info(f"Buyer assignment notification email sent successfully to {buyer_user.email}")
+                buyer_status = (buyer_user.user_status or "").lower().strip()
+                log.info(f"Buyer {buyer_user.full_name} user_status={repr(buyer_user.user_status)} → normalized='{buyer_status}'")
+                if buyer_status == "offline":
+                    email_service = BOQEmailService()
+                    buyer_email_sent = email_service.send_buyer_assignment_notification(
+                        buyer_email=buyer_user.email,
+                        buyer_name=buyer_user.full_name,
+                        pm_name=pm_name,
+                        projects_data=projects_data_for_buyer_email
+                    )
+                    if buyer_email_sent:
+                        log.info(f"Buyer assignment notification email sent successfully to offline buyer {buyer_user.email}")
+                    else:
+                        log.warning(f"Failed to send buyer assignment notification email to {buyer_user.email}")
                 else:
-                    log.warning(f"Failed to send buyer assignment notification email to {buyer_user.email}")
+                    log.info(f"Buyer {buyer_user.full_name} is '{buyer_user.user_status}' - skipping email, in-app notification only")
             except Exception as email_error:
                 log.error(f"Error sending buyer assignment notification email: {email_error}")
                 # Don't fail the entire request if email fails

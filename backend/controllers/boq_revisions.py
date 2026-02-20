@@ -492,7 +492,8 @@ def client_revision_td_mail_send():
                     rejection_reason=rejection_reason or comments or "No reason provided",
                     estimator_name=estimator_name,
                     pm_name=td_name,  # TD acts as rejector
-                    approver_role="Technical Director"  # Show TD role in heading
+                    approver_role="Technical Director",  # Show TD role in heading
+                    is_client_revision=True
                 )
 
                 if email_sent:
@@ -1019,7 +1020,8 @@ def send_td_client_boq_email(boq_id):
                     if td_status == "offline":
                         boq_email_service = BOQEmailService()
                         email_sent = boq_email_service.send_boq_to_technical_director(
-                            boq_data, project_data, items_summary, td_email
+                            boq_data, project_data, items_summary, td_email,
+                            sender_name=user_name
                         )
                     else:
                         log.info(f"[send_client_revision] TD is ONLINE - Email skipped (in-app notification only)")
@@ -1249,7 +1251,8 @@ def send_td_client_boq_email(boq_id):
                             if td_status == "offline":
                                 boq_email_service = BOQEmailService()
                                 email_sent = boq_email_service.send_boq_to_technical_director(
-                                    boq_data, project_data, items_summary, td_email_addr
+                                    boq_data, project_data, items_summary, td_email_addr,
+                                    sender_name=user_name
                                 )
                             else:
                                 log.info(f"[send_client_revision] TD {td_user_id} is ONLINE - Email skipped (in-app notification only)")
