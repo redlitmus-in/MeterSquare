@@ -579,7 +579,31 @@ def send_vendor_email(cr_id, po_child_id=None):
         # ==================== SEND EMAIL ====================
         from utils.boq_email_service import BOQEmailService
         email_service = BOQEmailService()
-        cc_email_list = [cc.get('email') for cc in cc_emails if cc.get('email')]
+
+        # Build CC email list — if stored email is missing, try to resolve by name from users table
+        cc_email_list = []
+        for cc in cc_emails:
+            email = (cc.get('email') or '').strip()
+            if email:
+                cc_email_list.append(email)
+            else:
+                name = (cc.get('name') or '').strip()
+                if name:
+                    resolved = User.query.filter(
+                        User.is_deleted == False,
+                        User.email.isnot(None),
+                        User.email != '',
+                        or_(
+                            User.full_name.ilike(name),
+                            User.email.ilike(f"{name}@%")
+                        )
+                    ).first()
+                    if resolved and resolved.email:
+                        cc_email_list.append(resolved.email)
+                        log.info(f"CC email resolved by name '{name}' → {resolved.email}")
+                    else:
+                        log.warning(f"CC recipient '{name}' has no email — skipping")
+
         log.info(f"Email sending for {formatted_id}: TO={email_list}, CC={cc_email_list}")
 
         email_sent = email_service.send_vendor_purchase_order_async(
@@ -593,6 +617,41 @@ def send_vendor_email(cr_id, po_child_id=None):
             email_record.vendor_email_sent_date = datetime.utcnow()
             email_record.updated_at = datetime.utcnow()
             db.session.commit()
+
+            # Send in-app notifications to CC recipients who are system users
+            if cc_email_list:
+                try:
+                    from utils.notification_utils import NotificationManager
+                    cc_users = User.query.filter(
+                        User.email.in_(cc_email_list),
+                        User.is_deleted == False
+                    ).all()
+                    buyer_display_name = buyer_data.get('buyer_name', 'Buyer')
+                    for cc_user in cc_users:
+                        try:
+                            NotificationManager.create_notification(
+                                user_id=cc_user.user_id,
+                                type='info',
+                                title=f'Purchase Order Sent — {formatted_id}',
+                                message=f'{buyer_display_name} sent purchase order {formatted_id} to {vendor.company_name} for {project.project_name}. You were CC\'d on this email.',
+                                category='purchase',
+                                priority='low',
+                                metadata={
+                                    'cr_id': cr_id,
+                                    'formatted_id': formatted_id,
+                                    'vendor_name': vendor.company_name,
+                                    'project_name': project.project_name,
+                                    'po_child_id': po_child_id
+                                },
+                                sender_id=buyer_id,
+                                sender_name=buyer_display_name
+                            )
+                        except Exception as notif_err:
+                            log.warning(f"Failed to create CC notification for user {cc_user.user_id}: {notif_err}")
+                    if cc_users:
+                        log.info(f"Sent in-app notifications to {len(cc_users)} CC user(s)")
+                except Exception as notif_bulk_err:
+                    log.warning(f"CC notification block failed: {notif_bulk_err}")
 
             recipient_count = len(email_list)
             cc_count = len(cc_email_list)

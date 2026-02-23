@@ -321,11 +321,16 @@ def create_app():
         if isinstance(data, dict):
             filtered = {}
 
-            # Check if this dict has a user_id (it's user data)
+            # Check if this dict has a user_id (it's user account data)
             data_user_id = data.get('user_id')
             # Also check for worker_id for worker data
             data_worker_id = data.get('worker_id')
             is_own_data = data_user_id and str(data_user_id) == str(current_user_id)
+            # Only user account data (has user_id) needs PII protection.
+            # Vendor records, CC lists, and other business data expose email/phone freely.
+            is_user_profile_data = data_user_id is not None
+            # Vendor business data — for admin-only fields (gst_number, fax)
+            is_vendor_data = bool(data.get('vendor_id')) and 'company_name' in data
 
             for key, value in data.items():
                 key_lower = key.lower()
@@ -334,9 +339,10 @@ def create_app():
                 if key_lower in never_include:
                     continue
 
-                # LEVEL 2: Skip PII fields if not admin and not own data
+                # LEVEL 2: Protect PII only on user account data (has user_id).
+                # CC lists, vendor contacts, and other entity emails are business data — not filtered.
                 if key_lower in sensitive_pii_fields:
-                    if not is_admin and not is_own_data:
+                    if is_user_profile_data and not is_admin and not is_own_data:
                         continue
 
                 # LEVEL 3: Skip vendor-hidden fields if user is vendor
@@ -344,7 +350,8 @@ def create_app():
                     continue
 
                 # LEVEL 4: Skip admin-only fields if not admin
-                if key_lower in admin_only_fields and not is_admin:
+                # Vendor gst_number/fax are business fields, visible to authorized roles
+                if key_lower in admin_only_fields and not is_admin and not is_vendor_data:
                     continue
 
                 # Recursively filter nested data

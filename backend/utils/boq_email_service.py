@@ -3022,3 +3022,439 @@ class BOQEmailService:
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
+
+    def send_inspection_result_notification(self, cr_ref, project_name, pm_name,
+                                             recipient_email, recipient_name,
+                                             decision, accepted_count, rejected_count):
+        """
+        Send vendor delivery inspection result email to Buyer/Procurement.
+
+        Args:
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            pm_name: Production Manager who performed the inspection
+            recipient_email: Buyer's email address
+            recipient_name: Buyer's full name
+            decision: 'fully_approved' | 'partially_approved' | 'fully_rejected'
+            accepted_count: Number of material lines accepted
+            rejected_count: Number of material lines rejected
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            if decision == 'fully_approved':
+                subject = f"Delivery Fully Approved - {cr_ref}"
+                heading = "Delivery Fully Approved"
+                intro = (f"<strong>{pm_name}</strong> has completed the quality inspection for "
+                         f"<strong>{cr_ref}</strong>. All materials have been accepted into the M2 Store.")
+                alert_class = "alert-success"
+                alert_body = f"<strong>Result:</strong> All {accepted_count} material line(s) accepted. Materials are now in inventory and will be dispatched to site."
+            elif decision == 'partially_approved':
+                subject = f"Delivery Partially Approved - {cr_ref}"
+                heading = "Delivery Partially Approved"
+                intro = (f"<strong>{pm_name}</strong> has completed the quality inspection for "
+                         f"<strong>{cr_ref}</strong>. Some materials were rejected and need to be returned to the vendor.")
+                alert_class = "alert-info"
+                alert_body = (f"<strong>Result:</strong> {accepted_count} material line(s) accepted, "
+                              f"{rejected_count} material line(s) rejected. "
+                              f"Please log in to create a return request for the rejected items.")
+            else:  # fully_rejected
+                subject = f"Delivery Fully Rejected - {cr_ref}"
+                heading = "Delivery Fully Rejected"
+                intro = (f"<strong>{pm_name}</strong> has completed the quality inspection for "
+                         f"<strong>{cr_ref}</strong>. All materials have been rejected and must be returned to the vendor.")
+                alert_class = "alert-danger"
+                alert_body = (f"<strong>Result:</strong> All {rejected_count} material line(s) rejected. "
+                              f"Please log in to create a return request for all items.")
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>{heading}</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p>{intro}</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">Reference:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Inspected By:</span> <span class="value">{pm_name}</span></p>
+        </div>
+
+        <div class="alert {alert_class}">
+            {alert_body}
+        </div>
+
+        <p>Please log in to MeterSquare ERP to review the inspection details and take the necessary action.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>MeterSquare ERP</strong>
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_inspection_result_notification] Email sent to {recipient_email} for {cr_ref} ({decision})")
+            else:
+                log.error(f"[send_inspection_result_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_inspection_result_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_return_request_td_notification(self, vrr_number, cr_ref, project_name,
+                                             buyer_name, resolution_type, total_value,
+                                             recipient_email, recipient_name):
+        """
+        Send return request email to TD when buyer creates a new return request.
+
+        Args:
+            vrr_number: Return request number e.g. "VRR-2026-001"
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            buyer_name: Buyer who created the request
+            resolution_type: 'refund' | 'replacement' | 'new_vendor'
+            total_value: Total rejected value (float)
+            recipient_email: TD's email address
+            recipient_name: TD's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            resolution_labels = {
+                'refund': 'Refund',
+                'replacement': 'Replacement from same vendor',
+                'new_vendor': 'New vendor selection required',
+            }
+            resolution_label = resolution_labels.get(resolution_type, resolution_type.replace('_', ' ').title())
+
+            subject = f"Return Request Pending Approval - {vrr_number}"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Return Request Pending Your Approval</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{buyer_name}</strong> has submitted a vendor return request that requires your approval.</p>
+
+        <div class="info-box">
+            <p><span class="label">Return Request:</span> <span class="value">{vrr_number}</span></p>
+            <p><span class="label">Purchase Order:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">Resolution Type:</span> <span class="value">{resolution_label}</span></p>
+            <p><span class="label">Total Rejected Value:</span> <span class="value">AED {total_value:,.2f}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Action Required:</strong> Please log in to MeterSquare ERP to review and approve or reject this return request.
+        </div>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>MeterSquare ERP</strong>
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_return_request_td_notification] Email sent to {recipient_email} for {vrr_number}")
+            else:
+                log.error(f"[send_return_request_td_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_return_request_td_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_return_request_approved_buyer_notification(self, vrr_number, cr_ref, project_name,
+                                                         td_name, resolution_type,
+                                                         recipient_email, recipient_name,
+                                                         new_vendor_name=None, new_po_ref=None):
+        """
+        Send return request approval email to Buyer when TD approves.
+
+        Args:
+            vrr_number: Return request number e.g. "VRR-2026-001"
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            td_name: Technical Director's name
+            resolution_type: 'refund' | 'replacement' | 'new_vendor'
+            recipient_email: Buyer's email address
+            recipient_name: Buyer's full name
+            new_vendor_name: (new_vendor only) Approved vendor name
+            new_po_ref: (new_vendor only) New PO child reference
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            resolution_labels = {
+                'refund': 'Refund',
+                'replacement': 'Replacement from same vendor',
+                'new_vendor': 'New vendor selection',
+            }
+            resolution_label = resolution_labels.get(resolution_type, resolution_type.replace('_', ' ').title())
+
+            subject = f"Return Request Approved - {vrr_number}"
+
+            if resolution_type == 'new_vendor' and new_vendor_name:
+                action_detail = f"""
+        <div class="alert alert-success">
+            <strong>Approved:</strong> Vendor <strong>{new_vendor_name}</strong> has been approved.
+            New Purchase Order <strong>{new_po_ref or 'N/A'}</strong> has been created. Please proceed with LPO generation.
+        </div>"""
+            else:
+                action_detail = f"""
+        <div class="alert alert-success">
+            <strong>Approved:</strong> Please log in to MeterSquare ERP to proceed with the {resolution_label.lower()}.
+        </div>"""
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Return Request Approved</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{td_name}</strong> has approved your vendor return request.</p>
+
+        <div class="info-box">
+            <p><span class="label">Return Request:</span> <span class="value">{vrr_number}</span></p>
+            <p><span class="label">Purchase Order:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">Resolution Type:</span> <span class="value">{resolution_label}</span></p>
+        </div>
+        {action_detail}
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{td_name}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_return_request_approved_buyer_notification] Email sent to {recipient_email} for {vrr_number}")
+            else:
+                log.error(f"[send_return_request_approved_buyer_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_return_request_approved_buyer_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_return_request_rejected_buyer_notification(self, vrr_number, cr_ref, project_name,
+                                                          td_name, rejection_reason,
+                                                          recipient_email, recipient_name):
+        """
+        Send return request rejection email to Buyer when TD rejects.
+
+        Args:
+            vrr_number: Return request number e.g. "VRR-2026-001"
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            td_name: Technical Director's name
+            rejection_reason: Reason for rejection
+            recipient_email: Buyer's email address
+            recipient_name: Buyer's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"Return Request Rejected - {vrr_number}"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Return Request Rejected</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{td_name}</strong> has rejected your vendor return request.</p>
+
+        <div class="info-box">
+            <p><span class="label">Return Request:</span> <span class="value">{vrr_number}</span></p>
+            <p><span class="label">Purchase Order:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+        </div>
+
+        <div class="alert alert-danger">
+            <strong>Rejection Reason:</strong> {rejection_reason or 'No reason provided'}
+        </div>
+
+        <p>Please log in to MeterSquare ERP to review the rejection and take the necessary action.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{td_name}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_return_request_rejected_buyer_notification] Email sent to {recipient_email} for {vrr_number}")
+            else:
+                log.error(f"[send_return_request_rejected_buyer_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_return_request_rejected_buyer_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_return_initiated_pm_notification(self, vrr_number, cr_ref, project_name,
+                                               buyer_name, resolution_type,
+                                               recipient_email, recipient_name):
+        """
+        Send email to Production Manager when buyer initiates a vendor return.
+
+        Args:
+            vrr_number: Return request number e.g. "VRR-2026-001"
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            buyer_name: Buyer who initiated the return
+            resolution_type: 'refund' | 'replacement' | 'new_vendor'
+            recipient_email: PM's email address
+            recipient_name: PM's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            resolution_labels = {
+                'refund': 'Refund',
+                'replacement': 'Replacement from same vendor',
+                'new_vendor': 'New vendor selection',
+            }
+            resolution_label = resolution_labels.get(resolution_type, resolution_type.replace('_', ' ').title())
+
+            subject = f"Materials Being Returned to Vendor - {vrr_number}"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Materials Being Returned to Vendor</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{buyer_name}</strong> has initiated a vendor return. Please prepare to receive the returned materials at the M2 Store once the vendor confirms collection.</p>
+
+        <div class="info-box">
+            <p><span class="label">Return Request:</span> <span class="value">{vrr_number}</span></p>
+            <p><span class="label">Purchase Order:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">Resolution Type:</span> <span class="value">{resolution_label}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Action Required:</strong> Please log in to MeterSquare ERP to track the return and confirm receipt once materials arrive at the store.
+        </div>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>MeterSquare ERP</strong>
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_return_initiated_pm_notification] Email sent to {recipient_email} for {vrr_number}")
+            else:
+                log.error(f"[send_return_initiated_pm_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_return_initiated_pm_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_replacement_arrival_pm_notification(self, vrr_number, cr_ref, project_name,
+                                                  buyer_name, materials_count,
+                                                  recipient_email, recipient_name):
+        """
+        Send email to Production Manager when buyer confirms replacement materials
+        have arrived at the M2 Store and are ready for inspection.
+
+        Args:
+            vrr_number: Return request number e.g. "VRR-2026-001"
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            buyer_name: Buyer who confirmed replacement arrival
+            materials_count: Number of replacement material lines
+            recipient_email: PM's email address
+            recipient_name: PM's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"Replacement Materials Ready for Inspection - {vrr_number}"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Replacement Materials Ready for Inspection</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{buyer_name}</strong> has confirmed that replacement materials have arrived at the M2 Store and are ready for quality inspection.</p>
+
+        <div class="info-box">
+            <p><span class="label">Return Request:</span> <span class="value">{vrr_number}</span></p>
+            <p><span class="label">Purchase Order:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">Materials:</span> <span class="value">{materials_count} line(s) to inspect</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Action Required:</strong> Please log in to MeterSquare ERP and go to Stock In → Vendor Deliveries to inspect the replacement materials.
+        </div>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>MeterSquare ERP</strong>
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_replacement_arrival_pm_notification] Email sent to {recipient_email} for {vrr_number}")
+            else:
+                log.error(f"[send_replacement_arrival_pm_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_replacement_arrival_pm_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False

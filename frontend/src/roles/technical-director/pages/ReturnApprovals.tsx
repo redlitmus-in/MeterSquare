@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
@@ -1036,13 +1037,23 @@ const ApprovalDetailRow: React.FC<ApprovalDetailRowProps> = ({
 type ViewTab = 'pending' | 'new_vendor' | 'history';
 type HistorySubTab = 'all' | 'td_approved' | 'td_rejected' | 'return_in_progress' | 'completed';
 
+const VALID_VIEW_TABS: ViewTab[] = ['pending', 'new_vendor', 'history'];
+const VALID_HISTORY_SUBTABS: HistorySubTab[] = ['all', 'td_approved', 'td_rejected', 'return_in_progress', 'completed'];
+
 const ReturnApprovals: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const [pendingData, setPendingData] = useState<VendorReturnRequest[]>([]);
   const [allData, setAllData] = useState<VendorReturnRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<ViewTab>('pending');
-  const [historySubTab, setHistorySubTab] = useState<HistorySubTab>('all');
+  const [activeTab, setActiveTab] = useState<ViewTab>(() => {
+    const tabParam = searchParams.get('tab') as ViewTab;
+    return VALID_VIEW_TABS.includes(tabParam) ? tabParam : 'pending';
+  });
+  const [historySubTab, setHistorySubTab] = useState<HistorySubTab>(() => {
+    const subParam = searchParams.get('subtab') as HistorySubTab;
+    return VALID_HISTORY_SUBTABS.includes(subParam) ? subParam : 'all';
+  });
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 

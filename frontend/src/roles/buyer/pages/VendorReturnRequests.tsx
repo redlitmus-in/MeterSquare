@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
@@ -1571,13 +1571,22 @@ const DetailRow: React.FC<DetailRowProps> = ({
 // Main Page Component
 // ============================================================================
 
+const VALID_FILTER_TABS: FilterTab[] = ['all', 'pending_td_approval', 'td_approved', 'in_progress', 'completed', 'rejected'];
+
 const VendorReturnRequests: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const [returnRequests, setReturnRequests] = useState<VendorReturnRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
+  const [activeFilter, setActiveFilter] = useState<FilterTab>(() => {
+    const tabParam = searchParams.get('tab') as FilterTab;
+    return VALID_FILTER_TABS.includes(tabParam) ? tabParam : 'all';
+  });
   const [currentPage, setCurrentPage] = useState(1);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(() => {
+    const vrrId = searchParams.get('vrr_id');
+    return vrrId ? parseInt(vrrId, 10) : null;
+  });
 
   useEffect(() => {
     fetchReturnRequests();

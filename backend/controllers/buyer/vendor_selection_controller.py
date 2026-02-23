@@ -2350,6 +2350,7 @@ def update_vendor_price(vendor_id):
             "success": True,
             "message": message,
             "vendor_id": vendor_id,
+            "vendor_email": vendor.email,
             "material_name": material_name,
             "new_price": new_price,
             "save_for_future": save_for_future,

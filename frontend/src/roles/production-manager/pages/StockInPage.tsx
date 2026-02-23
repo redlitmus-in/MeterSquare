@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ArrowDownCircle, Package, Search, FileText, ChevronDown, ChevronLeft, ChevronRight, X, ExternalLink, Truck, Download, CheckCircle, ClipboardCheck, ArrowLeft, AlertTriangle, Eye, RotateCcw } from 'lucide-react';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import EvidenceLightbox, { EvidenceItem, EvidenceThumbnailCard } from '@/components/ui/EvidenceLightbox';
@@ -128,7 +129,10 @@ const StockInPage: React.FC = () => {
   const [buyerTransfersTab, setBuyerTransfersTab] = useState<'pending' | 'history'>('pending');
 
   // Inspection Centre modal state
-  const [showVendorDeliveriesModal, setShowVendorDeliveriesModal] = useState(false);
+  // Lazy initializer: open immediately on page load/reload if URL has ?view=vendor_deliveries
+  const [showVendorDeliveriesModal, setShowVendorDeliveriesModal] = useState<boolean>(
+    () => new URLSearchParams(window.location.search).get('view') === 'vendor_deliveries'
+  );
   const [inspectionCentreTab, setInspectionCentreTab] = useState<'pending' | 'awaiting_stockin' | 'history' | 'held'>('pending');
 
   // Pending tab
@@ -191,6 +195,8 @@ const StockInPage: React.FC = () => {
   } | null>(null);
 
 
+  const [searchParams] = useSearchParams();
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -199,6 +205,17 @@ const StockInPage: React.FC = () => {
     filterTransactions();
     extractRecentBatches();
   }, [searchTerm, purchaseTransactions]);
+
+  // Auto-open Vendor Deliveries modal when navigated from notification
+  // Note: showVendorDeliveriesModal is already initialized to true via lazy useState above.
+  // This effect handles the side-effects: fetch data and reset to pending tab.
+  useEffect(() => {
+    if (searchParams.get('view') === 'vendor_deliveries') {
+      setSelectedIMR(null);
+      setInspectionCentreTab('pending');
+      fetchPendingInspections();
+    }
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);

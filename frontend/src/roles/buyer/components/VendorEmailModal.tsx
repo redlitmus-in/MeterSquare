@@ -565,6 +565,11 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
         ...selectedDefaults.map(d => ({ email: d.email, name: d.name })),
         ...buyerCcRecipients.map(r => ({ email: r.email, name: r.name })),
       ];
+      // Warn if any CC recipients are missing emails (backend will try to resolve by name)
+      const ccWithoutEmail = allCcEmails.filter(cc => !cc.email);
+      if (ccWithoutEmail.length > 0) {
+        showWarning(`${ccWithoutEmail.length} CC recipient(s) have no email stored — will attempt to resolve automatically.`);
+      }
       if (allCcEmails.length > 0) {
         emailData.cc_emails = allCcEmails;
       }

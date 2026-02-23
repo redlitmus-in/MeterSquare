@@ -704,10 +704,9 @@ def submit_inspection(imr_id):
 
         db.session.commit()
 
-        # Send notifications
+        # Send notifications for all outcomes
         try:
-            if decision in ('partially_approved', 'fully_rejected'):
-                _notify_buyer_inspection_result(cr, inspection, decision)
+            _notify_buyer_inspection_result(cr, inspection, decision, accepted_count, rejected_count)
         except Exception as notif_err:
             log.error(f"Failed to send inspection notification: {str(notif_err)}")
 
@@ -860,23 +859,32 @@ def _add_material_to_inventory(material_data, current_user, imr, inv_material_co
     return created_new
 
 
-def _notify_buyer_inspection_result(cr, inspection, decision):
-    """Notify buyer about inspection result"""
+def _notify_buyer_inspection_result(cr, inspection, decision, accepted_count=0, rejected_count=0):
+    """Notify buyer about inspection result via in-app notification + email if offline."""
     try:
         from utils.comprehensive_notification_service import ComprehensiveNotificationService
+        from models.user import User
+
         buyer_id = cr.assigned_to_buyer_user_id or cr.purchase_completed_by_user_id
         if not buyer_id:
             return
 
-        if decision == 'fully_rejected':
-            title = f"Delivery Fully Rejected - {cr.get_formatted_cr_id()}"
-            message = f"All materials in {cr.get_formatted_cr_id()} have been rejected during quality inspection. Please create a return request."
+        cr_ref = cr.get_formatted_cr_id()
+
+        if decision == 'fully_approved':
+            title = f"Delivery Fully Approved - {cr_ref}"
+            message = f"All materials in {cr_ref} have passed quality inspection and are now in the M2 Store."
+            notif_type = 'success'
+        elif decision == 'fully_rejected':
+            title = f"Delivery Fully Rejected - {cr_ref}"
+            message = f"All materials in {cr_ref} were rejected during quality inspection. Please create a return request."
             notif_type = 'warning'
-        else:
-            title = f"Delivery Partially Approved - {cr.get_formatted_cr_id()}"
-            message = f"Some materials in {cr.get_formatted_cr_id()} were rejected during quality inspection. Please review and create a return request for rejected items."
+        else:  # partially_approved
+            title = f"Delivery Partially Approved - {cr_ref}"
+            message = f"Some materials in {cr_ref} were rejected during quality inspection. Please review and create a return request for rejected items."
             notif_type = 'info'
 
+        # In-app notification
         ComprehensiveNotificationService.send_simple_notification(
             user_id=buyer_id,
             title=title,
@@ -889,6 +897,34 @@ def _notify_buyer_inspection_result(cr, inspection, decision):
                 'workflow': 'vendor_inspection'
             }
         )
+
+        # Email notification if buyer is offline
+        try:
+            buyer_user = User.query.filter_by(user_id=buyer_id, is_deleted=False).first()
+            if buyer_user and buyer_user.user_status != 'online':
+                from utils.boq_email_service import BOQEmailService
+                project_name = cr.project.project_name if cr.project else f"Project #{cr.project_id}"
+                pm_name = inspection.inspected_by_name or 'Production Manager'
+                email_service = BOQEmailService()
+                sent = email_service.send_inspection_result_notification(
+                    cr_ref=cr_ref,
+                    project_name=project_name,
+                    pm_name=pm_name,
+                    recipient_email=buyer_user.email,
+                    recipient_name=buyer_user.full_name or buyer_user.email,
+                    decision=decision,
+                    accepted_count=accepted_count,
+                    rejected_count=rejected_count
+                )
+                if sent:
+                    log.info(f"[INSPECTION EMAIL] Sent to offline buyer {buyer_user.email} for {cr_ref} ({decision})")
+                else:
+                    log.warning(f"[INSPECTION EMAIL] Failed to send to {buyer_user.email} for {cr_ref}")
+            else:
+                log.info(f"[INSPECTION EMAIL] Skipping – buyer (user_id={buyer_id}) is online")
+        except Exception as email_err:
+            log.error(f"[INSPECTION EMAIL] Error sending email for {cr_ref}: {email_err}")
+
     except Exception as e:
         log.error(f"Failed to notify buyer about inspection: {str(e)}")
 
@@ -1433,48 +1469,66 @@ def get_rejected_deliveries():
         for inspection in inspections:
             data = inspection.to_dict()
 
-            # Enrich materials_inspection with unit_price from POChild
+            # Enrich materials_inspection with unit_price and unit from POChild
             if inspection.po_child and inspection.po_child.materials_data:
                 price_map = {}
+                unit_map = {}
                 for mat in inspection.po_child.materials_data:
                     # Handle flat structure
                     name = (mat.get('material_name', '') or mat.get('name', '') or '').strip().lower()
                     price = mat.get('unit_price') or mat.get('price') or mat.get('unit_cost')
+                    unit = mat.get('unit') or mat.get('uom')
                     if name and price:
                         price_map[name] = _safe_float(price)
+                    if name and unit:
+                        unit_map[name] = unit
                     # Handle nested structure (sub-items with materials array)
                     for sub_mat in (mat.get('materials', []) or []):
                         sub_name = (sub_mat.get('material_name', '') or sub_mat.get('name', '') or '').strip().lower()
                         sub_price = sub_mat.get('unit_price') or sub_mat.get('price') or sub_mat.get('unit_cost')
+                        sub_unit = sub_mat.get('unit') or sub_mat.get('uom')
                         if sub_name and sub_price:
                             price_map[sub_name] = _safe_float(sub_price)
+                        if sub_name and sub_unit:
+                            unit_map[sub_name] = sub_unit
 
-                if price_map and data.get('materials_inspection'):
+                if data.get('materials_inspection'):
                     for m in data['materials_inspection']:
-                        if not m.get('unit_price'):
-                            mat_key = (m.get('material_name', '') or '').strip().lower()
+                        mat_key = (m.get('material_name', '') or '').strip().lower()
+                        if not m.get('unit_price') and price_map:
                             m['unit_price'] = price_map.get(mat_key, 0)
+                        if unit_map.get(mat_key):
+                            m['unit'] = unit_map[mat_key]
 
             # Fallback: enrich from CR sub_items_data / materials_data if still missing
             if data.get('materials_inspection') and inspection.change_request:
                 cr = inspection.change_request
                 cr_materials = cr.sub_items_data or cr.materials_data or []
                 cr_price_map = {}
+                cr_unit_map = {}
                 for item in cr_materials:
                     iname = (item.get('material_name', '') or item.get('name', '') or '').strip().lower()
                     iprice = item.get('unit_price') or item.get('price') or item.get('unit_cost')
+                    iunit = item.get('unit') or item.get('uom')
                     if iname and iprice:
                         cr_price_map[iname] = _safe_float(iprice)
+                    if iname and iunit:
+                        cr_unit_map[iname] = iunit
                     for sub_mat in (item.get('materials', []) or []):
                         sname = (sub_mat.get('material_name', '') or sub_mat.get('name', '') or '').strip().lower()
                         sprice = sub_mat.get('unit_price') or sub_mat.get('price') or sub_mat.get('unit_cost')
+                        sunit = sub_mat.get('unit') or sub_mat.get('uom')
                         if sname and sprice:
                             cr_price_map[sname] = _safe_float(sprice)
-                if cr_price_map:
+                        if sname and sunit:
+                            cr_unit_map[sname] = sunit
+                if cr_price_map or cr_unit_map:
                     for m in data['materials_inspection']:
-                        if not m.get('unit_price'):
-                            mat_key = (m.get('material_name', '') or '').strip().lower()
+                        mat_key = (m.get('material_name', '') or '').strip().lower()
+                        if not m.get('unit_price') and cr_price_map:
                             m['unit_price'] = cr_price_map.get(mat_key, 0)
+                        if not m.get('unit') and cr_unit_map.get(mat_key):
+                            m['unit'] = cr_unit_map[mat_key]
 
             # Check if return request already exists (from batch-fetched map)
             existing_return = return_req_map.get(inspection.id)
@@ -1665,7 +1719,7 @@ def create_return_request():
 
 
 def _notify_td_return_request_created(return_request, cr):
-    """Notify TD about new return request requiring approval"""
+    """Notify TD about new return request requiring approval. Email sent only if TD is offline."""
     try:
         from utils.comprehensive_notification_service import ComprehensiveNotificationService
         from models.user import User
@@ -1678,12 +1732,16 @@ def _notify_td_return_request_created(return_request, cr):
         if not td_role:
             return
 
+        cr_ref = cr.get_formatted_cr_id() if cr else 'N/A'
+        project_name = cr.project.project_name if cr and cr.project else f"Project #{cr.project_id if cr else 'N/A'}"
+
         td_users = User.query.filter_by(role_id=td_role.role_id, is_active=True).all()
         for td in td_users:
+            # In-app notification (always)
             ComprehensiveNotificationService.send_simple_notification(
                 user_id=td.user_id,
                 title=f"Return Request Pending Approval - {return_request.return_request_number}",
-                message=f"Buyer {return_request.created_by_buyer_name} has created a {return_request.resolution_type} return request for {cr.get_formatted_cr_id() if cr else 'N/A'}. Total value: AED {return_request.total_rejected_value:,.2f}",
+                message=f"Buyer {return_request.created_by_buyer_name} has created a {return_request.resolution_type} return request for {cr_ref}. Total value: AED {return_request.total_rejected_value:,.2f}",
                 type='warning',
                 action_url='/technical-director/return-approvals',
                 metadata={
@@ -1692,6 +1750,31 @@ def _notify_td_return_request_created(return_request, cr):
                     'workflow': 'vendor_return'
                 }
             )
+
+            # Email only if TD is offline
+            try:
+                if td.user_status != 'online':
+                    from utils.boq_email_service import BOQEmailService
+                    email_service = BOQEmailService()
+                    sent = email_service.send_return_request_td_notification(
+                        vrr_number=return_request.return_request_number,
+                        cr_ref=cr_ref,
+                        project_name=project_name,
+                        buyer_name=return_request.created_by_buyer_name,
+                        resolution_type=return_request.resolution_type,
+                        total_value=float(return_request.total_rejected_value or 0),
+                        recipient_email=td.email,
+                        recipient_name=td.full_name or td.email
+                    )
+                    if sent:
+                        log.info(f"[VRR EMAIL] Sent to offline TD {td.email} for {return_request.return_request_number}")
+                    else:
+                        log.warning(f"[VRR EMAIL] Failed to send to {td.email}")
+                else:
+                    log.info(f"[VRR EMAIL] Skipping – TD (user_id={td.user_id}) is online")
+            except Exception as email_err:
+                log.error(f"[VRR EMAIL] Error sending email to TD {td.user_id}: {email_err}")
+
     except Exception as e:
         log.error(f"Failed to notify TD: {str(e)}")
 
@@ -1899,6 +1982,13 @@ def update_return_request(request_id):
         return_request.updated_at = datetime.utcnow()
         db.session.commit()
 
+        # Notify TD on both update and resubmit
+        try:
+            cr = ChangeRequest.query.filter_by(cr_id=return_request.cr_id, is_deleted=False).first()
+            _notify_td_return_request_created(return_request, cr)
+        except Exception as notif_err:
+            log.error(f"Failed to notify TD about return request update: {str(notif_err)}")
+
         msg = "Return request resubmitted for TD approval" if was_rejected else "Return request updated"
         return jsonify({
             "success": True,
@@ -1967,7 +2057,7 @@ def initiate_vendor_return(request_id):
 
 
 def _notify_pm_return_initiated(return_request):
-    """Notify PM that materials are being returned to vendor"""
+    """Notify PM that materials are being returned to vendor. Email sent only if PM is offline."""
     try:
         from utils.comprehensive_notification_service import ComprehensiveNotificationService
         from models.user import User
@@ -1980,8 +2070,13 @@ def _notify_pm_return_initiated(return_request):
         if not pm_role:
             return
 
+        cr = ChangeRequest.query.filter_by(cr_id=return_request.cr_id, is_deleted=False).first()
+        cr_ref = cr.get_formatted_cr_id() if cr else f"CR #{return_request.cr_id}"
+        project_name = cr.project.project_name if cr and cr.project else f"Project #{return_request.cr_id}"
+
         pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True).all()
         for pm in pm_users:
+            # In-app notification (always)
             ComprehensiveNotificationService.send_simple_notification(
                 user_id=pm.user_id,
                 title=f"Materials Being Returned to Vendor - {return_request.return_request_number}",
@@ -1993,6 +2088,29 @@ def _notify_pm_return_initiated(return_request):
                     'workflow': 'vendor_return'
                 }
             )
+
+            # Email only if PM is offline
+            try:
+                if pm.user_status != 'online':
+                    from utils.boq_email_service import BOQEmailService
+                    sent = BOQEmailService().send_return_initiated_pm_notification(
+                        vrr_number=return_request.return_request_number,
+                        cr_ref=cr_ref,
+                        project_name=project_name,
+                        buyer_name=return_request.created_by_buyer_name,
+                        resolution_type=return_request.resolution_type,
+                        recipient_email=pm.email,
+                        recipient_name=pm.full_name or pm.email
+                    )
+                    if sent:
+                        log.info(f"[VRR INITIATE EMAIL] Sent to offline PM {pm.email} for {return_request.return_request_number}")
+                    else:
+                        log.warning(f"[VRR INITIATE EMAIL] Failed to send to {pm.email}")
+                else:
+                    log.info(f"[VRR INITIATE EMAIL] Skipping – PM (user_id={pm.user_id}) is online")
+            except Exception as email_err:
+                log.error(f"[VRR INITIATE EMAIL] Error sending email to PM {pm.user_id}: {email_err}")
+
     except Exception as e:
         log.error(f"Failed to notify PM about return: {str(e)}")
 
@@ -2180,6 +2298,58 @@ def confirm_replacement_received(request_id):
         db.session.commit()
 
         log.info(f"Replacement materials sent for inspection: VRR {return_request.return_request_number} → IMR {imr.request_id}")
+
+        # Notify PM about replacement materials ready for inspection
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            from models.user import User
+            from models.role import Role
+
+            pm_role = Role.query.filter(
+                db.func.lower(db.func.replace(Role.role, ' ', '')).like('%productionmanager%')
+            ).first()
+
+            if pm_role:
+                cr_ref = cr.get_formatted_cr_id()
+                project_name = cr.project.project_name if cr.project else f"Project #{cr.project_id}"
+                materials_count = len(replacement_materials)
+
+                pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True).all()
+                for pm in pm_users:
+                    # In-app notification (always)
+                    ComprehensiveNotificationService.send_simple_notification(
+                        user_id=pm.user_id,
+                        title=f"Replacement Materials Ready for Inspection - {return_request.return_request_number}",
+                        message=f"Buyer {buyer_name} confirmed replacement delivery for {cr_ref}. {materials_count} material(s) awaiting inspection at M2 Store.",
+                        type='info',
+                        action_url='/production-manager/m2-store/stock-in',
+                        metadata={
+                            'return_request_id': return_request.id,
+                            'imr_id': imr.request_id,
+                            'workflow': 'vendor_return'
+                        }
+                    )
+
+                    # Email only if PM is offline
+                    try:
+                        if pm.user_status != 'online':
+                            from utils.boq_email_service import BOQEmailService
+                            BOQEmailService().send_replacement_arrival_pm_notification(
+                                vrr_number=return_request.return_request_number,
+                                cr_ref=cr_ref,
+                                project_name=project_name,
+                                buyer_name=buyer_name,
+                                materials_count=materials_count,
+                                recipient_email=pm.email,
+                                recipient_name=pm.full_name or pm.email
+                            )
+                            log.info(f"[REPLACEMENT EMAIL] Sent to offline PM {pm.email} for {return_request.return_request_number}")
+                        else:
+                            log.info(f"[REPLACEMENT EMAIL] Skipping – PM (user_id={pm.user_id}) is online")
+                    except Exception as email_err:
+                        log.error(f"[REPLACEMENT EMAIL] Error sending to PM {pm.user_id}: {email_err}")
+        except Exception as notif_err:
+            log.error(f"Failed to notify PM about replacement arrival: {str(notif_err)}")
 
         return jsonify({
             "success": True,
@@ -2584,10 +2754,16 @@ def td_approve_return_request(request_id):
             # Notify buyer about vendor approval + POChild creation
             try:
                 from utils.comprehensive_notification_service import ComprehensiveNotificationService
+                from models.user import User
+
+                cr_ref = cr.get_formatted_cr_id()
+                new_po_ref = new_po_child.get_formatted_id()
+
+                # In-app notification (always)
                 ComprehensiveNotificationService.send_simple_notification(
                     user_id=return_request.created_by_buyer_id,
                     title=f"New Vendor Approved - {return_request.return_request_number}",
-                    message=f"TD approved {return_request.new_vendor_name} for {cr.get_formatted_cr_id()}. New PO: {new_po_child.get_formatted_id()}. Please proceed with LPO generation.",
+                    message=f"TD approved {return_request.new_vendor_name} for {cr_ref}. New PO: {new_po_ref}. Please proceed with LPO generation.",
                     type='success',
                     action_url='/buyer/purchase-orders',
                     metadata={
@@ -2596,6 +2772,26 @@ def td_approve_return_request(request_id):
                         'workflow': 'vendor_return_new_vendor'
                     }
                 )
+
+                # Email only if buyer is offline
+                buyer_user = User.query.filter_by(user_id=return_request.created_by_buyer_id, is_deleted=False).first()
+                if buyer_user and buyer_user.user_status != 'online':
+                    from utils.boq_email_service import BOQEmailService
+                    project_name = cr.project.project_name if cr.project else f"Project #{cr.project_id}"
+                    BOQEmailService().send_return_request_approved_buyer_notification(
+                        vrr_number=return_request.return_request_number,
+                        cr_ref=cr_ref,
+                        project_name=project_name,
+                        td_name=current_user.get('full_name', 'Technical Director'),
+                        resolution_type='new_vendor',
+                        recipient_email=buyer_user.email,
+                        recipient_name=buyer_user.full_name or buyer_user.email,
+                        new_vendor_name=return_request.new_vendor_name,
+                        new_po_ref=new_po_ref
+                    )
+                    log.info(f"[VRR NEW VENDOR EMAIL] Sent to offline buyer {buyer_user.email} for {return_request.return_request_number}")
+                else:
+                    log.info(f"[VRR NEW VENDOR EMAIL] Skipping – buyer (user_id={return_request.created_by_buyer_id}) is online")
             except Exception as notif_err:
                 log.error(f"Failed to notify buyer: {str(notif_err)}")
 
@@ -2616,7 +2812,7 @@ def td_approve_return_request(request_id):
 
         # Notify buyer
         try:
-            _notify_buyer_return_approved(return_request)
+            _notify_buyer_return_approved(return_request, td_name=current_user.get('full_name', 'Technical Director'), cr=cr)
         except Exception as notif_err:
             log.error(f"Failed to notify buyer: {str(notif_err)}")
 
@@ -2632,10 +2828,13 @@ def td_approve_return_request(request_id):
         return jsonify({"success": False, "error": "An internal error occurred. Please try again."}), 500
 
 
-def _notify_buyer_return_approved(return_request):
-    """Notify buyer that TD approved their return request"""
+def _notify_buyer_return_approved(return_request, td_name='Technical Director', cr=None):
+    """Notify buyer that TD approved their return request. Email sent only if buyer is offline."""
     try:
         from utils.comprehensive_notification_service import ComprehensiveNotificationService
+        from models.user import User
+
+        # In-app notification (always)
         ComprehensiveNotificationService.send_simple_notification(
             user_id=return_request.created_by_buyer_id,
             title=f"Return Request Approved - {return_request.return_request_number}",
@@ -2647,6 +2846,33 @@ def _notify_buyer_return_approved(return_request):
                 'workflow': 'vendor_return'
             }
         )
+
+        # Email only if buyer is offline
+        try:
+            buyer_user = User.query.filter_by(user_id=return_request.created_by_buyer_id, is_deleted=False).first()
+            if buyer_user and buyer_user.user_status != 'online':
+                from utils.boq_email_service import BOQEmailService
+                cr_ref = cr.get_formatted_cr_id() if cr else f"CR #{return_request.cr_id}"
+                project_name = cr.project.project_name if cr and cr.project else f"Project #{return_request.cr_id}"
+                email_service = BOQEmailService()
+                sent = email_service.send_return_request_approved_buyer_notification(
+                    vrr_number=return_request.return_request_number,
+                    cr_ref=cr_ref,
+                    project_name=project_name,
+                    td_name=td_name,
+                    resolution_type=return_request.resolution_type,
+                    recipient_email=buyer_user.email,
+                    recipient_name=buyer_user.full_name or buyer_user.email
+                )
+                if sent:
+                    log.info(f"[VRR APPROVE EMAIL] Sent to offline buyer {buyer_user.email} for {return_request.return_request_number}")
+                else:
+                    log.warning(f"[VRR APPROVE EMAIL] Failed to send to {buyer_user.email}")
+            else:
+                log.info(f"[VRR APPROVE EMAIL] Skipping – buyer (user_id={return_request.created_by_buyer_id}) is online")
+        except Exception as email_err:
+            log.error(f"[VRR APPROVE EMAIL] Error: {email_err}")
+
     except Exception as e:
         log.error(f"Failed to notify buyer: {str(e)}")
 
@@ -2686,6 +2912,9 @@ def td_reject_return_request(request_id):
         # Notify buyer
         try:
             from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            from models.user import User
+
+            # In-app notification (always)
             ComprehensiveNotificationService.send_simple_notification(
                 user_id=return_request.created_by_buyer_id,
                 title=f"Return Request Rejected - {return_request.return_request_number}",
@@ -2697,6 +2926,26 @@ def td_reject_return_request(request_id):
                     'workflow': 'vendor_return'
                 }
             )
+
+            # Email only if buyer is offline
+            buyer_user = User.query.filter_by(user_id=return_request.created_by_buyer_id, is_deleted=False).first()
+            if buyer_user and buyer_user.user_status != 'online':
+                from utils.boq_email_service import BOQEmailService
+                cr = ChangeRequest.query.filter_by(cr_id=return_request.cr_id, is_deleted=False).first()
+                cr_ref = cr.get_formatted_cr_id() if cr else f"CR #{return_request.cr_id}"
+                project_name = cr.project.project_name if cr and cr.project else f"Project #{return_request.cr_id}"
+                BOQEmailService().send_return_request_rejected_buyer_notification(
+                    vrr_number=return_request.return_request_number,
+                    cr_ref=cr_ref,
+                    project_name=project_name,
+                    td_name=current_user.get('full_name', 'Technical Director'),
+                    rejection_reason=return_request.td_rejection_reason,
+                    recipient_email=buyer_user.email,
+                    recipient_name=buyer_user.full_name or buyer_user.email
+                )
+                log.info(f"[VRR REJECT EMAIL] Sent to offline buyer {buyer_user.email} for {return_request.return_request_number}")
+            else:
+                log.info(f"[VRR REJECT EMAIL] Skipping – buyer (user_id={return_request.created_by_buyer_id}) is online")
         except Exception as notif_err:
             log.error(f"Failed to notify buyer: {str(notif_err)}")
 

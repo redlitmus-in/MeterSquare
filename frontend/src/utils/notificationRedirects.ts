@@ -246,6 +246,144 @@ const REDIRECT_RULES: RedirectRule[] = [
   },
 
   // ═══════════════════════════════════════════════════════════
+  // VENDOR RETURN REQUESTS (must come before generic return/vendor/cr rules)
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'vendor_return_delivery_partial',
+    match: ({ titleLower, metadata }) =>
+      has(titleLower, 'delivery partially approved') ||
+      metadata?.workflow === 'vendor_inspection',
+    resolve: ({ buildPath, role }) => {
+      const isBuyer = role === 'buyer' || role === 'procurement';
+      if (isBuyer) {
+        return { path: buildPath('/rejected-deliveries') };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+  {
+    id: 'vendor_return_new_vendor_approved',
+    match: ({ titleLower, metadata }) =>
+      has(titleLower, 'new vendor approved') ||
+      (metadata?.workflow === 'vendor_return_new_vendor' && has(titleLower, 'approved')),
+    resolve: ({ buildPath, metadata, role }) => {
+      const isBuyer = role === 'buyer' || role === 'procurement';
+      if (isBuyer) {
+        return {
+          path: buildPath('/return-requests'),
+          queryParams: {
+            tab: 'in_progress',
+            ...(metadata?.return_request_id && { vrr_id: String(metadata.return_request_id) })
+          }
+        };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+  {
+    id: 'vendor_return_request_approved',
+    match: ({ titleLower, metadata }) =>
+      has(titleLower, 'return request approved') ||
+      (metadata?.workflow === 'vendor_return' && has(titleLower, 'return') && has(titleLower, 'approved')),
+    resolve: ({ buildPath, metadata, role }) => {
+      const isBuyer = role === 'buyer' || role === 'procurement';
+      if (isBuyer) {
+        return {
+          path: buildPath('/return-requests'),
+          queryParams: {
+            tab: 'td_approved',
+            ...(metadata?.return_request_id && { vrr_id: String(metadata.return_request_id) })
+          }
+        };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+  {
+    id: 'vendor_return_request_rejected',
+    match: ({ titleLower, metadata }) =>
+      has(titleLower, 'return request rejected') ||
+      (metadata?.workflow === 'vendor_return' && has(titleLower, 'return') && has(titleLower, 'rejected')),
+    resolve: ({ buildPath, metadata, role }) => {
+      const isBuyer = role === 'buyer' || role === 'procurement';
+      if (isBuyer) {
+        return {
+          path: buildPath('/return-requests'),
+          queryParams: {
+            tab: 'rejected',
+            ...(metadata?.return_request_id && { vrr_id: String(metadata.return_request_id) })
+          }
+        };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+  {
+    id: 'vendor_return_pending_approval',
+    match: ({ titleLower, metadata }) =>
+      has(titleLower, 'return request pending approval') ||
+      (metadata?.workflow === 'vendor_return' && has(titleLower, 'return') && has(titleLower, 'pending')),
+    resolve: ({ buildPath, metadata, role }) => {
+      if (role === 'technical-director') {
+        return {
+          path: buildPath('/return-approvals'),
+          queryParams: {
+            tab: 'pending',
+            ...(metadata?.return_request_id && { vrr_id: String(metadata.return_request_id) })
+          }
+        };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+  {
+    id: 'vendor_return_new_vendor_approval_required',
+    match: ({ titleLower, metadata }) =>
+      has(titleLower, 'new vendor approval required') ||
+      (metadata?.workflow === 'vendor_return_new_vendor' && has(titleLower, 'approval required', 'requires approval')),
+    resolve: ({ buildPath, metadata, role }) => {
+      if (role === 'technical-director') {
+        return {
+          path: buildPath('/return-approvals'),
+          queryParams: {
+            tab: 'new_vendor',
+            ...(metadata?.return_request_id && { vrr_id: String(metadata.return_request_id) })
+          }
+        };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+  {
+    id: 'vendor_return_materials_returned',
+    match: ({ titleLower }) =>
+      has(titleLower, 'materials being returned to vendor') ||
+      has(titleLower, 'being returned to vendor'),
+    resolve: ({ buildPath, metadata, role }) => {
+      if (role === 'production-manager') {
+        return {
+          path: buildPath('/m2-store/stock-in'),
+          queryParams: {
+            view: 'vendor_deliveries',
+            ...(metadata?.return_request_id && { vrr_id: String(metadata.return_request_id) })
+          }
+        };
+      }
+      if (role === 'technical-director') {
+        return {
+          path: buildPath('/return-approvals'),
+          queryParams: {
+            tab: 'history',
+            subtab: 'return_in_progress',
+            ...(metadata?.return_request_id && { vrr_id: String(metadata.return_request_id) })
+          }
+        };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════
   // INVENTORY: BACKUP / DISPOSAL / DAMAGED RETURNS
   // ═══════════════════════════════════════════════════════════
   {
@@ -623,6 +761,36 @@ const REDIRECT_RULES: RedirectRule[] = [
       return {
         path: buildPath('/vendors'),
         queryParams: { tab: 'pending' }
+      };
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // PURCHASE ORDER READY FOR APPROVAL (TD approves new vendor in VRR context)
+  // Must come BEFORE cr_new / po_generic to avoid wrong routing for TD
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'po_ready_for_td_approval',
+    match: ({ titleLower }) =>
+      has(titleLower, 'purchase order ready for approval') ||
+      has(titleLower, 'vendor selections need approval'),
+    resolve: ({ buildPath, metadata, role }) => {
+      if (role === 'technical-director') {
+        return {
+          path: buildPath('/return-approvals'),
+          queryParams: {
+            tab: 'new_vendor',
+            ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+          }
+        };
+      }
+      // For other roles fall through to generic rules
+      return {
+        path: buildPath('/change-requests'),
+        queryParams: {
+          tab: 'pending',
+          ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+        }
       };
     }
   },

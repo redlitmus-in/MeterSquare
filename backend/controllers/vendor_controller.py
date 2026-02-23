@@ -275,17 +275,25 @@ def get_all_vendors_with_products():
 def get_vendor_by_id(vendor_id):
     """Get vendor by ID with products"""
     try:
-        vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+        from sqlalchemy.orm import joinedload
+        # Single query: fetch vendor + products together (avoids second DB round-trip)
+        vendor = Vendor.query.options(
+            joinedload(Vendor.products)
+        ).filter_by(vendor_id=vendor_id, is_deleted=False).first()
 
         if not vendor:
             return jsonify({"success": False, "error": "Vendor not found"}), 404
 
         vendor_data = vendor.to_dict()
+        vendor_data['email'] = vendor.email
 
-        # Get vendor products
-        # ✅ PERFORMANCE: Limit to 200 products per vendor (use pagination for more)
-        products = VendorProduct.query.filter_by(vendor_id=vendor_id, is_deleted=False).order_by(VendorProduct.product_id.desc()).limit(200).all()
-        vendor_data['products'] = [product.to_dict() for product in products]
+        # Filter, sort, limit in Python — no extra DB query needed
+        products = sorted(
+            [p for p in vendor.products if not p.is_deleted],
+            key=lambda p: p.product_id,
+            reverse=True
+        )[:200]
+        vendor_data['products'] = [p.to_dict() for p in products]
         vendor_data['products_count'] = len(products)
 
         return jsonify({

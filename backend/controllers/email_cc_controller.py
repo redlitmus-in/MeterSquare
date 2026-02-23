@@ -23,9 +23,18 @@ def _normalize_role(role: str) -> str:
 # ─── Admin: Default CC Management ────────────────────────────────────────────
 
 def get_cc_defaults():
-    """GET /api/email/cc-defaults — Get all active admin CC defaults."""
+    """GET /api/email/cc-defaults — Get all active admin CC defaults with valid emails only."""
     try:
-        defaults = EmailCcDefault.query.filter_by(is_active=True).order_by(EmailCcDefault.id).all()
+        defaults = (
+            EmailCcDefault.query
+            .filter(
+                EmailCcDefault.is_active == True,
+                EmailCcDefault.email.isnot(None),
+                EmailCcDefault.email != ''
+            )
+            .order_by(EmailCcDefault.id)
+            .all()
+        )
         return jsonify({
             "success": True,
             "data": [d.to_dict() for d in defaults]
@@ -102,16 +111,22 @@ def remove_cc_default(default_id):
 # ─── Buyer: Custom CC Management ─────────────────────────────────────────────
 
 def get_buyer_cc_recipients():
-    """GET /api/buyer/cc-recipients — Get buyer's custom CC recipients."""
+    """GET /api/buyer/cc-recipients — Get buyer's custom CC recipients with valid emails only."""
     current_user = g.get("user")
     buyer_id = current_user['user_id']
 
     try:
-        recipients = BuyerCcRecipient.query.filter_by(
-            buyer_user_id=buyer_id,
-            is_active=True
-        ).order_by(BuyerCcRecipient.id).all()
-
+        recipients = (
+            BuyerCcRecipient.query
+            .filter(
+                BuyerCcRecipient.buyer_user_id == buyer_id,
+                BuyerCcRecipient.is_active == True,
+                BuyerCcRecipient.email.isnot(None),
+                BuyerCcRecipient.email != ''
+            )
+            .order_by(BuyerCcRecipient.id)
+            .all()
+        )
         return jsonify({
             "success": True,
             "data": [r.to_dict() for r in recipients]
@@ -124,17 +139,18 @@ def get_buyer_cc_recipients():
 
 def add_buyer_cc_recipient():
     """POST /api/buyer/cc-recipients — Buyer adds a custom CC recipient."""
-    current_user = g.get("user")
-    buyer_id = current_user['user_id']
-
-    data = request.get_json()
-    email = (data.get('email') or '').strip().lower()
-    name = (data.get('name') or '').strip()
-
-    if not email or not EMAIL_REGEX.match(email):
-        return jsonify({"success": False, "error": "Valid email is required"}), 400
-
+    import traceback
     try:
+        current_user = g.get("user")
+        buyer_id = current_user['user_id']
+
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        name = (data.get('name') or '').strip()
+
+        if not email or not EMAIL_REGEX.match(email):
+            return jsonify({"success": False, "error": "Valid email is required"}), 400
+
         # Check if exists (including soft-deleted)
         existing = BuyerCcRecipient.query.filter_by(
             buyer_user_id=buyer_id,
@@ -162,8 +178,8 @@ def add_buyer_cc_recipient():
 
     except Exception as e:
         db.session.rollback()
-        log.error(f"Error adding buyer CC recipient: {e}")
-        return jsonify({"success": False, "error": "Failed to add CC recipient"}), 500
+        log.error(f"Error adding buyer CC recipient: {e}\n{traceback.format_exc()}")
+        return jsonify({"success": False, "error": "Failed to add CC recipient", "detail": str(e)}), 500
 
 
 def remove_buyer_cc_recipient(recipient_id):
