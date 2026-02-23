@@ -42,7 +42,7 @@ import {
 import { showSuccess, showError } from '@/utils/toastHelper';
 import { formatCurrency, formatDate, formatDateTime } from '@/utils/formatters';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import EvidenceLightbox from '@/components/ui/EvidenceLightbox';
+import EvidenceLightbox, { EvidenceThumbnailCard } from '@/components/ui/EvidenceLightbox';
 import {
   vendorInspectionService,
   VendorReturnRequest,
@@ -1267,40 +1267,34 @@ const DetailRow: React.FC<DetailRowProps> = ({
                     Inspection Evidence ({vrr.inspection_evidence.length})
                   </h4>
                   <div className="flex gap-2 overflow-x-auto pb-1">
-                    {vrr.inspection_evidence.map((ev: any, i: number) => {
-                      const isVideo = ev.file_type?.startsWith('video') || /\.(mp4|mov|webm)$/i.test(ev.file_name || '');
+                    {vrr.inspection_evidence.map((raw: any, i: number) => {
+                      const ev: { url: string; file_name?: string; file_type?: string } =
+                        typeof raw === 'string'
+                          ? { url: raw, file_name: raw.split('/').pop()?.split('?')[0] || '', file_type: 'image' }
+                          : (raw && raw.url ? raw : null);
+                      if (!ev) return null;
                       const label = ev.file_name
                         ? ev.file_name.length > 18 ? ev.file_name.slice(0, 15) + '…' : ev.file_name
                         : `Evidence ${i + 1}`;
                       return (
-                        <button
-                          key={i}
-                          type="button"
+                        <EvidenceThumbnailCard
+                          key={`${ev.url}-${i}`}
+                          ev={ev}
+                          index={i}
+                          label={label}
                           onClick={() => { setLightboxIndex(i); setLightboxOpen(true); }}
-                          title={`View ${ev.file_name || 'evidence'}`}
-                          className="flex-shrink-0 flex flex-col items-center justify-between w-24 h-24 border border-gray-200 rounded-xl bg-white hover:border-blue-400 hover:shadow-md transition-all group p-2 gap-1"
-                        >
-                          <div className={`flex-1 flex items-center justify-center w-full rounded-lg ${isVideo ? 'bg-gray-900' : 'bg-blue-50'}`}>
-                            {isVideo ? (
-                              <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z"/>
-                              </svg>
-                            ) : (
-                              <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3 12V6.75A2.25 2.25 0 015.25 4.5h13.5A2.25 2.25 0 0121 6.75V17.25A2.25 2.25 0 0118.75 19.5H5.25A2.25 2.25 0 013 17.25V12z"/>
-                              </svg>
-                            )}
-                          </div>
-                          <div className="w-full flex items-center justify-between gap-1">
-                            <span className="text-[10px] text-gray-500 truncate leading-tight">{label}</span>
-                            <Eye className="w-3 h-3 text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
-                          </div>
-                        </button>
+                        />
                       );
                     })}
                   </div>
                   <EvidenceLightbox
-                    evidence={vrr.inspection_evidence}
+                    evidence={vrr.inspection_evidence.filter((raw: any) =>
+                      typeof raw === 'string' ? !!raw : !!(raw && raw.url)
+                    ).map((raw: any) =>
+                      typeof raw === 'string'
+                        ? { url: raw, file_name: raw.split('/').pop()?.split('?')[0] || '', file_type: 'image' }
+                        : raw
+                    )}
                     isOpen={lightboxOpen}
                     onClose={() => setLightboxOpen(false)}
                     initialIndex={lightboxIndex}
@@ -1388,35 +1382,17 @@ const DetailRow: React.FC<DetailRowProps> = ({
                   </h4>
                   <div className="flex flex-wrap gap-3">
                     {vrr.refund_evidence.map((ev: any, idx: number) => {
-                      const isImage = ev.file_type?.startsWith('image');
+                      const label = ev.file_name
+                        ? ev.file_name.length > 18 ? ev.file_name.slice(0, 15) + '…' : ev.file_name
+                        : `Proof ${idx + 1}`;
                       return (
-                        <button
-                          key={idx}
-                          onClick={() => {
-                            setRefundLightboxIndex(idx);
-                            setRefundLightboxOpen(true);
-                          }}
-                          className="relative group w-20 h-20 rounded-lg border-2 border-gray-200 overflow-hidden hover:border-blue-400 transition-colors"
-                          title={ev.file_name}
-                        >
-                          {isImage ? (
-                            <img
-                              src={ev.url}
-                              alt={ev.file_name}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100 p-1">
-                              <FileText className="w-6 h-6 text-gray-400" />
-                              <span className="text-[9px] text-gray-500 mt-0.5 truncate w-full text-center">
-                                {ev.file_name?.split('.').pop()?.toUpperCase()}
-                              </span>
-                            </div>
-                          )}
-                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 flex items-center justify-center transition-all">
-                            <Eye className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                        </button>
+                        <EvidenceThumbnailCard
+                          key={`${ev.url}-${idx}`}
+                          ev={ev}
+                          index={idx}
+                          label={label}
+                          onClick={() => { setRefundLightboxIndex(idx); setRefundLightboxOpen(true); }}
+                        />
                       );
                     })}
                   </div>

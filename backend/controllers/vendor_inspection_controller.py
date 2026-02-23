@@ -109,6 +109,79 @@ def _enrich_vrr_rejected_value(rr, data):
                 data['total_rejected_value'] = round(total, 2)
 
 
+def _heal_evidence_from_storage(cr_id, expected_count, inspection_created_at):
+    """
+    Fallback: list files from Supabase Storage under inspections/{cr_id}/
+    and return the ones uploaded within 2 minutes before the inspection was created.
+    Used when evidence_urls contains only empty/broken objects.
+    """
+    try:
+        import os
+        from supabase import create_client
+        environment = os.environ.get('ENVIRONMENT', 'production')
+        supabase_url = os.environ.get('DEV_SUPABASE_URL' if environment == 'development' else 'SUPABASE_URL')
+        supabase_key = os.environ.get('DEV_SUPABASE_KEY' if environment == 'development' else 'SUPABASE_KEY')
+        if not supabase_url or not supabase_key:
+            return []
+
+        supabase = create_client(supabase_url, supabase_key)
+        BUCKET = 'file_upload'
+        files = supabase.storage.from_(BUCKET).list(f'inspections/{cr_id}') or []
+
+        candidate = []
+        for f in files:
+            name = f.get('name', '')
+            if not name:
+                continue
+            try:
+                # Filename format: YYYYMMDD_HHMMSS_uuid.ext
+                parts = name.split('_')
+                file_ts = datetime.strptime(f'{parts[0]}_{parts[1]}', '%Y%m%d_%H%M%S')
+                # Keep files uploaded up to 2 minutes before the inspection was created
+                delta = (inspection_created_at.replace(tzinfo=None) - file_ts).total_seconds()
+                if 0 <= delta <= 120:
+                    candidate.append((file_ts, name))
+            except (ValueError, IndexError):
+                continue
+
+        candidate.sort(key=lambda x: x[0])
+        selected = candidate[-expected_count:] if len(candidate) >= expected_count else candidate
+
+        base = f'{supabase_url}/storage/v1/object/public/{BUCKET}'
+        return [
+            {'url': f'{base}/inspections/{cr_id}/{name}', 'file_name': name, 'file_type': 'image'}
+            for _, name in selected
+        ]
+    except Exception as e:
+        log.warning(f'Failed to heal evidence from storage for CR {cr_id}: {e}')
+        return []
+
+
+def _normalize_evidence(raw, cr_id=None, inspection_created_at=None):
+    """
+    Normalize evidence items to {url, file_name, file_type} objects.
+    Handles both plain URL strings and dict objects.
+    If all items are empty/broken, auto-heals by listing files from Supabase storage.
+    """
+    valid = []
+    broken_count = 0
+
+    for item in (raw or []):
+        if isinstance(item, str) and item:
+            file_name = item.split('/')[-1].split('?')[0]
+            valid.append({'url': item, 'file_name': file_name, 'file_type': 'image'})
+        elif isinstance(item, dict) and item.get('url'):
+            valid.append(item)
+        else:
+            broken_count += 1
+
+    # If everything is broken and we have enough context, heal from storage
+    if broken_count > 0 and not valid and cr_id and inspection_created_at:
+        return _heal_evidence_from_storage(cr_id, broken_count, inspection_created_at)
+
+    return valid
+
+
 def _generate_return_request_number():
     """Generate sequential return request number: VRR-2026-001
     Uses MAX() aggregate to avoid row-level locking.
@@ -530,7 +603,7 @@ def submit_inspection(imr_id):
             materials_inspection=materials_inspection,
             overall_notes=data.get('overall_notes'),
             overall_rejection_category=data.get('overall_rejection_category'),
-            evidence_urls=data.get('evidence_urls', []),
+            evidence_urls=[e for e in data.get('evidence_urls', []) if isinstance(e, dict) and e.get('url')],
             iteration_number=iteration_number,
             created_by=current_user['user_id']
         )
@@ -1010,9 +1083,34 @@ def get_inspection_history():
             joinedload(VendorDeliveryInspection.po_child)
         ).order_by(VendorDeliveryInspection.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
 
+        # Parallelize evidence normalization — each broken record requires a
+        # Supabase Storage network call; running them concurrently cuts total
+        # latency from N×latency down to ~1×latency.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _fetch_evidence(insp):
+            return insp.id, _normalize_evidence(
+                insp.evidence_urls,
+                cr_id=insp.cr_id,
+                inspection_created_at=insp.created_at,
+            )
+
+        evidence_map = {}
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(_fetch_evidence, insp): insp for insp in inspections}
+            for future in as_completed(futures):
+                insp_id, normalized = future.result()
+                evidence_map[insp_id] = normalized
+
+        records = []
+        for insp in inspections:
+            data = insp.to_dict()
+            data['evidence_urls'] = evidence_map.get(insp.id, [])
+            records.append(data)
+
         return jsonify({
             "success": True,
-            "data": [i.to_dict() for i in inspections],
+            "data": records,
             "total": total,
             "page": page,
             "per_page": per_page
@@ -1597,11 +1695,31 @@ def get_return_requests():
             ).all()
             new_po_child_map = {pc.id: pc for pc in new_po_children}
 
+        # Parallel evidence normalization for VRRs that have inspections
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _fetch_vrr_evidence(rr):
+            if not rr.inspection:
+                return rr.id, []
+            return rr.id, _normalize_evidence(
+                rr.inspection.evidence_urls,
+                cr_id=rr.cr_id,
+                inspection_created_at=rr.inspection.created_at,
+            )
+
+        evidence_map = {}
+        vrrs_with_inspection = [rr for rr in requests if rr.inspection]
+        if vrrs_with_inspection:
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(_fetch_vrr_evidence, rr): rr for rr in vrrs_with_inspection}
+                for future in as_completed(futures):
+                    rr_id, normalized = future.result()
+                    evidence_map[rr_id] = normalized
+
         results = []
         for rr in requests:
             data = rr.to_dict()
-            if rr.inspection:
-                data['inspection_evidence'] = rr.inspection.evidence_urls or []
+            data['inspection_evidence'] = evidence_map.get(rr.id, [])
             # Include new POChild status for new_vendor VRRs
             if rr.new_lpo_id and rr.new_lpo_id in new_po_child_map:
                 new_pc = new_po_child_map[rr.new_lpo_id]
@@ -2173,13 +2291,34 @@ def get_pending_return_approvals():
             VendorReturnRequest.created_at.desc()
         ).offset((page - 1) * per_page).limit(per_page).all()
 
+        # Parallel evidence normalization
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _fetch_evidence_td(rr):
+            if not rr.inspection:
+                return rr.id, []
+            return rr.id, _normalize_evidence(
+                rr.inspection.evidence_urls,
+                cr_id=rr.cr_id,
+                inspection_created_at=rr.inspection.created_at,
+            )
+
+        evidence_map = {}
+        vrrs_with_insp = [rr for rr in requests if rr.inspection]
+        if vrrs_with_insp:
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(_fetch_evidence_td, rr): rr for rr in vrrs_with_insp}
+                for future in as_completed(futures):
+                    rr_id, normalized = future.result()
+                    evidence_map[rr_id] = normalized
+
         results = []
         for rr in requests:
             data = rr.to_dict()
 
             # Include inspection evidence
+            data['inspection_evidence'] = evidence_map.get(rr.id, [])
             if rr.inspection:
-                data['inspection_evidence'] = rr.inspection.evidence_urls or []
                 data['inspection_notes'] = rr.inspection.overall_notes
                 data['inspection_category'] = rr.inspection.overall_rejection_category
 
@@ -2253,11 +2392,32 @@ def get_all_td_return_requests():
             VendorReturnRequest.created_at.desc()
         ).offset((page - 1) * per_page).limit(per_page).all()
 
+        # Parallel evidence normalization
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _fetch_evidence_all(rr):
+            if not rr.inspection:
+                return rr.id, []
+            return rr.id, _normalize_evidence(
+                rr.inspection.evidence_urls,
+                cr_id=rr.cr_id,
+                inspection_created_at=rr.inspection.created_at,
+            )
+
+        evidence_map = {}
+        vrrs_with_insp = [rr for rr in requests_list if rr.inspection]
+        if vrrs_with_insp:
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(_fetch_evidence_all, rr): rr for rr in vrrs_with_insp}
+                for future in as_completed(futures):
+                    rr_id, normalized = future.result()
+                    evidence_map[rr_id] = normalized
+
         results = []
         for rr in requests_list:
             data = rr.to_dict()
+            data['inspection_evidence'] = evidence_map.get(rr.id, [])
             if rr.inspection:
-                data['inspection_evidence'] = rr.inspection.evidence_urls or []
                 data['inspection_notes'] = rr.inspection.overall_notes
                 data['inspection_category'] = rr.inspection.overall_rejection_category
 

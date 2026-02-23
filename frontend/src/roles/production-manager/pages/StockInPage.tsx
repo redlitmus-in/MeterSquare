@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ArrowDownCircle, Package, Search, FileText, ChevronDown, ChevronLeft, ChevronRight, X, ExternalLink, Truck, Download, CheckCircle, ClipboardCheck, ArrowLeft, AlertTriangle, Eye, RotateCcw } from 'lucide-react';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import EvidenceLightbox, { EvidenceItem } from '@/components/ui/EvidenceLightbox';
+import EvidenceLightbox, { EvidenceItem, EvidenceThumbnailCard } from '@/components/ui/EvidenceLightbox';
 import { inventoryService, InventoryMaterial, CustomUnit } from '../services/inventoryService';
 import { apiClient } from '@/api/config';
 import { PAGINATION } from '@/lib/constants';
@@ -1986,34 +1986,17 @@ const StockInPage: React.FC = () => {
                                     </p>
                                     <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-200">
                                       {record.evidence_urls.filter((e: any) => e?.url).map((ev: any, ei: number) => {
-                                        const isVideo = ev.file_type?.startsWith('video') || /\.(mp4|mov|webm)$/i.test(ev.file_name || '');
                                         const label = ev.file_name
                                           ? ev.file_name.length > 18 ? ev.file_name.slice(0, 15) + '…' : ev.file_name
                                           : `Evidence ${ei + 1}`;
                                         return (
-                                          <button
-                                            key={ei}
-                                            type="button"
+                                          <EvidenceThumbnailCard
+                                            key={`${ev.url}-${ei}`}
+                                            ev={ev}
+                                            index={ei}
+                                            label={label}
                                             onClick={() => { setHistoryLightboxEvidence(record.evidence_urls.filter((e: any) => e?.url)); setHistoryLightboxIndex(ei); setHistoryLightboxOpen(true); }}
-                                            title={`View ${ev.file_name || 'evidence'}`}
-                                            className="flex-shrink-0 flex flex-col items-center justify-between w-28 h-28 border border-gray-200 rounded-xl bg-white hover:border-blue-400 hover:shadow-md transition-all group p-2 gap-1"
-                                          >
-                                            <div className={`flex-1 flex items-center justify-center w-full rounded-lg ${isVideo ? 'bg-gray-900' : 'bg-blue-50'}`}>
-                                              {isVideo ? (
-                                                <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                                  <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z"/>
-                                                </svg>
-                                              ) : (
-                                                <svg className="w-7 h-7 text-blue-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                                                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3 12V6.75A2.25 2.25 0 015.25 4.5h13.5A2.25 2.25 0 0121 6.75V17.25A2.25 2.25 0 0118.75 19.5H5.25A2.25 2.25 0 013 17.25V12z"/>
-                                                </svg>
-                                              )}
-                                            </div>
-                                            <div className="w-full flex items-center justify-between gap-1 mt-1">
-                                              <span className="text-[10px] text-gray-500 truncate leading-tight">{label}</span>
-                                              <Eye className="w-3 h-3 text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
-                                            </div>
-                                          </button>
+                                          />
                                         );
                                       })}
                                     </div>

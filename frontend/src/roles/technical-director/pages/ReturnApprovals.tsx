@@ -39,6 +39,7 @@ import {
 import { showSuccess, showError } from '@/utils/toastHelper';
 import { formatCurrency, formatDate, formatDateTime } from '@/utils/formatters';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { EvidenceThumbnailCard } from '@/components/ui/EvidenceLightbox';
 import {
   vendorInspectionService,
   VendorReturnRequest,
@@ -596,32 +597,17 @@ const ApprovalDetailRow: React.FC<ApprovalDetailRowProps> = ({
                   </h4>
                   <div className="flex flex-wrap gap-3">
                     {evidence.map((ev, idx) => {
-                      const isImage = ev.file_type?.startsWith('image');
+                      const label = ev.file_name
+                        ? ev.file_name.length > 18 ? ev.file_name.slice(0, 15) + '…' : ev.file_name
+                        : `Evidence ${idx + 1}`;
                       return (
-                        <button
-                          key={idx}
-                          onClick={() => {
-                            setLightboxIndex(idx);
-                            setShowLightbox(true);
-                          }}
-                          className="relative group w-24 h-24 rounded-lg border-2 border-gray-200 overflow-hidden hover:border-blue-400 transition-colors"
-                          aria-label={`View evidence: ${ev.file_name}`}
-                        >
-                          {isImage ? (
-                            <img
-                              src={ev.url}
-                              alt={ev.file_name}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-gray-100">
-                              <FileText className="w-8 h-8 text-gray-400" />
-                            </div>
-                          )}
-                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center">
-                            <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                        </button>
+                        <EvidenceThumbnailCard
+                          key={`${ev.url}-${idx}`}
+                          ev={ev}
+                          index={idx}
+                          label={label}
+                          onClick={() => { setLightboxIndex(idx); setShowLightbox(true); }}
+                        />
                       );
                     })}
                   </div>
@@ -976,31 +962,17 @@ const ApprovalDetailRow: React.FC<ApprovalDetailRowProps> = ({
                   </h4>
                   <div className="flex flex-wrap gap-3">
                     {vrr.refund_evidence.map((ev: any, idx: number) => {
-                      const isImg = ev.file_type?.startsWith('image');
+                      const label = ev.file_name
+                        ? ev.file_name.length > 18 ? ev.file_name.slice(0, 15) + '…' : ev.file_name
+                        : `Proof ${idx + 1}`;
                       return (
-                        <button
-                          key={idx}
-                          onClick={() => {
-                            setRefundLightboxIndex(idx);
-                            setShowRefundLightbox(true);
-                          }}
-                          className="relative group w-24 h-24 rounded-lg border-2 border-gray-200 overflow-hidden hover:border-blue-400 transition-colors"
-                          aria-label={`View proof: ${ev.file_name}`}
-                        >
-                          {isImg ? (
-                            <img src={ev.url} alt={ev.file_name} className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100">
-                              <FileText className="w-8 h-8 text-gray-400" />
-                              <span className="text-[9px] text-gray-500 mt-0.5">
-                                {ev.file_name?.split('.').pop()?.toUpperCase()}
-                              </span>
-                            </div>
-                          )}
-                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center">
-                            <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                        </button>
+                        <EvidenceThumbnailCard
+                          key={`${ev.url}-${idx}`}
+                          ev={ev}
+                          index={idx}
+                          label={label}
+                          onClick={() => { setRefundLightboxIndex(idx); setShowRefundLightbox(true); }}
+                        />
                       );
                     })}
                   </div>
