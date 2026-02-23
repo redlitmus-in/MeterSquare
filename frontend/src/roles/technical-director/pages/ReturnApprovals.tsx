@@ -1107,13 +1107,15 @@ const ReturnApprovals: React.FC = () => {
     [pendingData],
   );
   const newVendorRequests = useMemo(
-    () => pendingData.filter((r) =>
-      r.status === 'new_vendor_selected' || r.status === 'new_vendor_pending'
+    () => allData.filter((r) =>
+      r.status === 'new_vendor_selected' ||
+      r.status === 'new_vendor_pending' ||
+      r.status === 'new_vendor_approved'
     ),
-    [pendingData],
+    [allData],
   );
 
-  // History from all-data endpoint (exclude pending statuses)
+  // History from all-data endpoint (exclude only active pending statuses)
   const historyRequests = useMemo(
     () =>
       allData.filter(
@@ -1128,6 +1130,11 @@ const ReturnApprovals: React.FC = () => {
   // History sub-tab filtering
   const filteredHistory = useMemo(() => {
     if (historySubTab === 'all') return historyRequests;
+    if (historySubTab === 'td_approved') {
+      return historyRequests.filter((r) =>
+        r.status === 'td_approved' || r.status === 'new_vendor_approved'
+      );
+    }
     if (historySubTab === 'return_in_progress') {
       return historyRequests.filter((r) =>
         r.status === 'return_in_progress' || r.status === 'returned_to_vendor' || r.status === 'replacement_pending'
@@ -1139,7 +1146,7 @@ const ReturnApprovals: React.FC = () => {
   // History sub-tab counts
   const historyCounts = useMemo(() => ({
     all: historyRequests.length,
-    td_approved: historyRequests.filter((r) => r.status === 'td_approved').length,
+    td_approved: historyRequests.filter((r) => r.status === 'td_approved' || r.status === 'new_vendor_approved').length,
     td_rejected: historyRequests.filter((r) => r.status === 'td_rejected').length,
     return_in_progress: historyRequests.filter(
       (r) => r.status === 'return_in_progress' || r.status === 'returned_to_vendor' || r.status === 'replacement_pending'

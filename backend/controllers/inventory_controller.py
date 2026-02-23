@@ -1758,6 +1758,14 @@ def get_sent_internal_requests():
         material_ids = set(req.inventory_material_id for req in requests if req.inventory_material_id)
         buyer_ids = set(req.request_buyer_id for req in requests if req.request_buyer_id)
 
+        # Batch load POChildren for VRR IMRs (to enrich quantity from rejected_qty)
+        po_child_ids = set(req.po_child_id for req in requests if req.po_child_id)
+        po_children_map = {}
+        if po_child_ids:
+            from models.po_child import POChild
+            po_children = POChild.query.filter(POChild.id.in_(po_child_ids)).all()
+            po_children_map = {pc.id: pc for pc in po_children}
+
         # Batch load projects (single query)
         projects_map = {}
         if project_ids:
@@ -1885,6 +1893,29 @@ def get_sent_internal_requests():
                     'unit': material.unit,
                     'unit_price': material.unit_price
                 }
+
+            # For VRR-created IMRs: enrich materials_data quantities from linked POChild
+            # (VRR rejected materials use 'rejected_qty'; the IMR stores quantity:0)
+            if req.po_child_id and req.po_child_id in po_children_map:
+                po_child = po_children_map[req.po_child_id]
+                if po_child.materials_data:
+                    pc_qty_lookup = {}
+                    for pc_mat in po_child.materials_data:
+                        name = (pc_mat.get('material_name') or '').lower().strip()
+                        pc_qty = pc_mat.get('quantity') or pc_mat.get('rejected_qty', 0)
+                        if name and pc_qty:
+                            pc_qty_lookup[name] = pc_qty
+                    if pc_qty_lookup:
+                        enriched = []
+                        for mat in (req_data.get('materials_data') or []):
+                            if (mat.get('quantity') or 0) == 0:
+                                lookup_name = (mat.get('material_name') or '').lower().strip()
+                                enriched_qty = pc_qty_lookup.get(lookup_name, 0)
+                                if enriched_qty:
+                                    mat = dict(mat)
+                                    mat['quantity'] = enriched_qty
+                            enriched.append(mat)
+                        req_data['materials_data'] = enriched
 
             # Add requester details from cache
             if req.request_buyer_id and req.request_buyer_id in users_map:

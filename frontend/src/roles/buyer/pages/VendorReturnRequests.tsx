@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
   Package,
   X,
-  Calendar,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -1057,6 +1057,7 @@ const DetailRow: React.FC<DetailRowProps> = ({
   onToggle,
   onRefresh,
 }) => {
+  const navigate = useNavigate();
   const [initiatingReturn, setInitiatingReturn] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
@@ -1093,6 +1094,14 @@ const DetailRow: React.FC<DetailRowProps> = ({
     vrr.status === 'td_approved' &&
     vrr.resolution_type === 'new_vendor' &&
     !vrr.new_vendor_id;
+
+  const NEW_PC_COMPLETED_STATUSES = ['routed_to_store', 'purchase_completed', 'completed'];
+  const newPcStatus = vrr.new_po_child_status;
+  const newPcAlreadyDone = newPcStatus ? NEW_PC_COMPLETED_STATUSES.includes(newPcStatus) : false;
+  const canGoToPurchaseOrders =
+    vrr.status === 'new_vendor_approved' &&
+    vrr.resolution_type === 'new_vendor' &&
+    !newPcAlreadyDone;
 
   const canConfirmRefund =
     (vrr.status === 'return_in_progress' || vrr.status === 'return_initiated') &&
@@ -1426,13 +1435,23 @@ const DetailRow: React.FC<DetailRowProps> = ({
                   <h4 className="text-sm font-semibold text-indigo-800 mb-2">
                     New Vendor
                   </h4>
-                  <div className="flex items-center gap-4 text-sm">
+                  <div className="flex items-center gap-4 text-sm flex-wrap">
                     <span className="font-medium text-indigo-900">
                       {vrr.new_vendor_name}
                     </span>
                     {vrr.new_vendor_status && (
                       <Badge variant="outline" className="bg-indigo-100 text-indigo-700 border-indigo-200 text-xs">
                         {vrr.new_vendor_status.replace(/_/g, ' ')}
+                      </Badge>
+                    )}
+                    {vrr.new_po_child_formatted_id && (
+                      <span className="text-xs text-indigo-600">
+                        PO: <span className="font-semibold">{vrr.new_po_child_formatted_id}</span>
+                      </span>
+                    )}
+                    {newPcAlreadyDone && (
+                      <Badge variant="outline" className="bg-green-100 text-green-700 border-green-200 text-xs">
+                        LPO Generated
                       </Badge>
                     )}
                   </div>
@@ -1493,6 +1512,31 @@ const DetailRow: React.FC<DetailRowProps> = ({
                     <Users className="w-4 h-4" />
                     Select New Vendor
                   </Button>
+                )}
+                {canGoToPurchaseOrders && (
+                  <Button
+                    onClick={() => navigate('/buyer/purchase-orders?tab=ongoing&subtab=vendor_approved')}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Generate LPO for New Vendor
+                  </Button>
+                )}
+                {vrr.status === 'new_vendor_approved' && vrr.resolution_type === 'new_vendor' && newPcAlreadyDone && (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
+                    <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
+                    <span className="font-medium">LPO Generated</span>
+                    {vrr.new_po_child_formatted_id && (
+                      <span className="text-xs text-green-600">({vrr.new_po_child_formatted_id})</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => navigate('/buyer/purchase-orders?tab=completed')}
+                      className="ml-auto text-xs text-green-700 underline hover:text-green-900"
+                    >
+                      View in Completed
+                    </button>
+                  </div>
                 )}
                 {canConfirmRefund && (
                   <Button

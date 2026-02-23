@@ -666,7 +666,7 @@ const PurchaseDetailsModal: React.FC<PurchaseDetailsModalProps> = ({
                                 <TableCell className="text-sm">{(material as any).brand || '-'}</TableCell>
                                 <TableCell className="text-sm">{(material as any).size || '-'}</TableCell>
                                 <TableCell className="text-sm">{(material as any).specification || '-'}</TableCell>
-                                <TableCell className="text-sm">{material.quantity}</TableCell>
+                                <TableCell className="text-sm">{material.quantity || (material as any).rejected_qty}</TableCell>
                                 <TableCell className="text-sm">{material.unit}</TableCell>
                                 <TableCell className={`text-sm ${isSentToStore ? 'text-purple-600' : ''}`}>
                                   {isSentToStore ? 'From Store' : formatCurrency(material.unit_price)}

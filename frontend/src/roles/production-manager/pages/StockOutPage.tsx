@@ -2017,7 +2017,8 @@ const StockOutPage: React.FC = () => {
                   const inventoryMatch = findInventoryMatch(mat.material_name, mat.brand, materialsViewModal.parentMaterialName);
                   const isInInventory = !!inventoryMatch;
                   const currentStock = inventoryMatch?.current_stock || 0;
-                  const hasEnoughStock = isInInventory && currentStock >= (mat.quantity || 0);
+                  const matQty = mat.quantity || mat.rejected_qty || 0;
+                  const hasEnoughStock = isInInventory && currentStock >= matQty;
 
                   return (
                     <div
@@ -2040,7 +2041,7 @@ const StockOutPage: React.FC = () => {
                         </div>
                         <div className="text-right">
                           <div className="text-sm font-bold text-cyan-600">
-                            {mat.quantity} {mat.unit || 'nos'}
+                            {mat.quantity || mat.rejected_qty || 0} {mat.unit || 'nos'}
                           </div>
                           {mat.unit_price > 0 && (
                             <div className="text-xs text-gray-500">
@@ -2070,7 +2071,7 @@ const StockOutPage: React.FC = () => {
                               <ArrowUpCircle className="w-3.5 h-3.5 text-yellow-500" />
                               <span className="text-yellow-600 font-medium">Low stock</span>
                             </div>
-                            <span className="text-gray-600">Stock: {currentStock} {inventoryMatch?.unit || mat.unit || 'nos'} (need {mat.quantity})</span>
+                            <span className="text-gray-600">Stock: {currentStock} {inventoryMatch?.unit || mat.unit || 'nos'} (need {matQty})</span>
                           </div>
                         )}
                       </div>

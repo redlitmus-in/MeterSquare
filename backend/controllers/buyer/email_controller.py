@@ -223,9 +223,13 @@ def preview_po_child_vendor_email(po_child_id):
         if po_child.materials_data:
             for material in po_child.materials_data:
                 mat_total = float(material.get('total_price', 0) or 0)
+                # VRR-created POChildren store quantity as 'rejected_qty'; regular ones use 'quantity'
+                quantity = material.get('quantity') or material.get('rejected_qty', 0)
                 materials_list.append({
                     'material_name': material.get('material_name', 'N/A'),
-                    'quantity': material.get('quantity', 0),
+                    'brand': material.get('brand', ''),
+                    'specification': material.get('specification', ''),
+                    'quantity': quantity,
                     'unit': material.get('unit', 'pcs'),
                     'unit_price': material.get('unit_price', 0),
                     'total_price': round(mat_total, 2)

@@ -140,6 +140,7 @@ const StockInPage: React.FC = () => {
     material_name: string; brand: string; size: string; unit: string;
     ordered_qty: number; accepted_qty: number; rejected_qty: number;
     rejection_category: string; rejection_notes: string;
+    unit_price?: number;
   }>>([]);
   const [vendorDriverName, setVendorDriverName] = useState('');
   const [vendorVehicleNumber, setVendorVehicleNumber] = useState('');
@@ -403,17 +404,37 @@ const StockInPage: React.FC = () => {
       const result = await vendorInspectionService.getInspectionDetails(imrId);
       const imrData = (result as any).data;
       setSelectedIMR(imrData);
-      const decisions = (imrData.materials_for_inspection || []).map((mat: any) => ({
-        material_name: mat.material_name || '',
-        brand: mat.brand || '',
-        size: mat.size || '',
-        unit: mat.unit || '',
-        ordered_qty: mat.ordered_qty || 0,
-        accepted_qty: mat.ordered_qty || 0,
-        rejected_qty: 0,
-        rejection_category: '',
-        rejection_notes: '',
-      }));
+
+      // Build a lookup from POChild materials for VRR-created IMRs that have quantity:0 stored
+      // (VRR rejected materials use 'rejected_qty' field, which wasn't saved to the IMR)
+      const poChildMats: any[] = imrData.po_child_details?.materials_data || imrData.po_child_details?.materials || [];
+      const poChildQtyLookup: Record<string, number> = {};
+      for (const pcMat of poChildMats) {
+        const name = (pcMat.material_name || '').toLowerCase().trim();
+        const qty = pcMat.quantity || pcMat.rejected_qty || 0;
+        if (name && qty) poChildQtyLookup[name] = qty;
+      }
+
+      const decisions = (imrData.materials_for_inspection || []).map((mat: any) => {
+        let orderedQty = mat.ordered_qty || 0;
+        // Fallback: enrich from POChild data when IMR stored qty=0 (VRR-created IMRs)
+        if (orderedQty === 0) {
+          const lookupName = (mat.material_name || '').toLowerCase().trim();
+          orderedQty = poChildQtyLookup[lookupName] || 0;
+        }
+        return {
+          material_name: mat.material_name || '',
+          brand: mat.brand || '',
+          size: mat.size || '',
+          unit: mat.unit || '',
+          ordered_qty: orderedQty,
+          accepted_qty: orderedQty,
+          rejected_qty: 0,
+          rejection_category: '',
+          rejection_notes: '',
+          unit_price: mat.unit_price ?? undefined,
+        };
+      });
       setMaterialDecisions(decisions);
       setVendorDriverName('');
       setVendorVehicleNumber('');
@@ -551,6 +572,7 @@ const StockInPage: React.FC = () => {
           rejected_qty: d.rejected_qty,
           rejection_category: d.rejection_category || undefined,
           rejection_notes: d.rejection_notes || undefined,
+          unit_price: d.unit_price ?? 0,
         })),
         overall_notes: inspectionOverallNotes || undefined,
         evidence_urls: uploadedEvidence.length > 0 ? uploadedEvidence : undefined,
@@ -1445,6 +1467,7 @@ const StockInPage: React.FC = () => {
                           <tr>
                             <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
                             <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase w-24">Ordered</th>
+                            <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase w-32">Amount (AED)</th>
                             <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase w-28">Accepted</th>
                             <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase w-20">Rejected</th>
                             <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Rejection Reason</th>
@@ -1462,6 +1485,20 @@ const StockInPage: React.FC = () => {
                                   )}
                                 </td>
                                 <td className="px-4 py-3 text-center text-gray-700">{mat.ordered_qty} {mat.unit}</td>
+                                <td className="px-4 py-3 text-right">
+                                  {mat.unit_price != null && mat.unit_price > 0 ? (
+                                    <div>
+                                      <div className="font-semibold text-gray-900">
+                                        {(mat.unit_price * mat.ordered_qty).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </div>
+                                      <div className="text-xs text-gray-400">
+                                        {mat.unit_price.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / unit
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-300 text-xs">—</span>
+                                  )}
+                                </td>
                                 <td className="px-4 py-3 text-center">
                                   <input
                                     type="number"
@@ -1511,6 +1548,43 @@ const StockInPage: React.FC = () => {
                             )
                           )}
                         </tbody>
+                        {(() => {
+                          const subtotal = materialDecisions.reduce((sum, mat) =>
+                            sum + ((mat.unit_price ?? 0) * mat.ordered_qty), 0);
+                          const hasAnyPrice = materialDecisions.some(m => m.unit_price != null && m.unit_price > 0);
+                          if (!hasAnyPrice) return null;
+
+                          const lpoCustom = (selectedIMR as any)?.lpo_customization;
+                          const vatPercent = lpoCustom?.vat_percent ?? 0;
+                          const vatAmount = lpoCustom?.vat_amount ?? 0;
+                          const grandTotal = subtotal + vatAmount;
+
+                          const fmt = (n: number) => n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                          return (
+                            <tfoot className="border-t-2 border-amber-200">
+                              <tr className="bg-amber-50">
+                                <td colSpan={2} className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Subtotal</td>
+                                <td className="px-4 py-2 text-right font-semibold text-gray-800">AED {fmt(subtotal)}</td>
+                                <td colSpan={4} />
+                              </tr>
+                              {vatAmount > 0 && (
+                                <tr className="bg-blue-50">
+                                  <td colSpan={2} className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">
+                                    VAT {vatPercent > 0 ? `(${vatPercent}%)` : ''}
+                                  </td>
+                                  <td className="px-4 py-2 text-right font-semibold text-blue-700">AED {fmt(vatAmount)}</td>
+                                  <td colSpan={4} />
+                                </tr>
+                              )}
+                              <tr className="bg-amber-100 border-t border-amber-300">
+                                <td colSpan={2} className="px-4 py-2.5 text-xs font-bold text-amber-900 uppercase">Grand Total</td>
+                                <td className="px-4 py-2.5 text-right font-bold text-amber-900">AED {fmt(grandTotal)}</td>
+                                <td colSpan={4} />
+                              </tr>
+                            </tfoot>
+                          );
+                        })()}
                       </table>
                     </div>
 

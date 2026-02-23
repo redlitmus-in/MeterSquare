@@ -1004,7 +1004,8 @@ def complete_po_child_purchase(po_child_id):
                         if not material_name:
                             material_name = material.get('sub_item_name', 'Unknown').strip()
 
-                        quantity = material.get('quantity', 0)
+                        # VRR-created POChildren store quantity as 'rejected_qty'; regular ones use 'quantity'
+                        quantity = material.get('quantity') or material.get('rejected_qty', 0)
                         log.info(f"  Material {idx+1}/{len(materials_to_route)}: {material_name} x {quantity}")
 
                         grouped_materials.append({
@@ -1513,7 +1514,8 @@ def get_rejected_po_children():
                 mat_name = material.get('material_name', '').lower().strip()
                 mat_name_original = material.get('material_name', '')
                 boq_price = boq_price_lookup.get(mat_name, 0)
-                quantity = material.get('quantity', 0)
+                # VRR-created POChildren store quantity as 'rejected_qty', regular POChildren use 'quantity'
+                quantity = material.get('quantity') or material.get('rejected_qty', 0)
 
                 # Check material_vendor_selections for negotiated price
                 selection = (material_vendor_selections.get(mat_name_original) or
@@ -1537,6 +1539,10 @@ def get_rejected_po_children():
                               material.get('vendor_price') or
                               material.get('unit_price') or
                               vendor_product_price or 0)
+
+                # Fill sub_item_name from BOQ if not already set (VRR materials don't carry it)
+                if not mat_copy.get('sub_item_name'):
+                    mat_copy['sub_item_name'] = boq_sub_item_lookup.get(mat_name, '')
 
                 # ALWAYS set BOQ price for reference
                 mat_copy['boq_unit_price'] = boq_price
@@ -1686,8 +1692,9 @@ def get_buyer_pending_po_children():
             if parent_cr and parent_cr.material_vendor_selections:
                 material_vendor_selections = parent_cr.material_vendor_selections
 
-            # Build BOQ price lookup
+            # Build BOQ price lookup and sub_item_name lookup
             boq_price_lookup = {}
+            boq_sub_item_lookup = {}
             boq_id_for_lookup = po_child.boq_id or (parent_cr.boq_id if parent_cr else None)
             if boq_id_for_lookup:
                 boq_details = BOQDetails.query.filter_by(boq_id=boq_id_for_lookup, is_deleted=False).first()
@@ -1695,10 +1702,13 @@ def get_buyer_pending_po_children():
                     boq_items = boq_details.boq_details.get('items', [])
                     for item in boq_items:
                         for sub_item in item.get('sub_items', []):
+                            sub_item_name = sub_item.get('sub_item_name', '')
                             for boq_mat in sub_item.get('materials', []):
                                 mat_name = boq_mat.get('material_name', '').lower().strip()
                                 if mat_name:
                                     boq_price_lookup[mat_name] = boq_mat.get('unit_price', 0)
+                                    if sub_item_name:
+                                        boq_sub_item_lookup[mat_name] = sub_item_name
 
             for material in po_materials:
                 mat_copy = dict(material)
@@ -1902,8 +1912,9 @@ def get_approved_po_children():
                     if vp.product_name:
                         vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
 
-            # Build BOQ price lookup
+            # Build BOQ price lookup and sub_item_name lookup
             boq_price_lookup = {}
+            boq_sub_item_lookup = {}
             boq_id_for_lookup = po_child.boq_id or (parent_cr.boq_id if parent_cr else None)
             if boq_id_for_lookup:
                 boq_details = BOQDetails.query.filter_by(boq_id=boq_id_for_lookup, is_deleted=False).first()
@@ -1911,17 +1922,21 @@ def get_approved_po_children():
                     boq_items = boq_details.boq_details.get('items', [])
                     for item in boq_items:
                         for sub_item in item.get('sub_items', []):
+                            sub_item_name = sub_item.get('sub_item_name', '')
                             for boq_mat in sub_item.get('materials', []):
                                 mat_name = boq_mat.get('material_name', '').lower().strip()
                                 if mat_name:
                                     boq_price_lookup[mat_name] = boq_mat.get('unit_price', 0)
+                                    if sub_item_name:
+                                        boq_sub_item_lookup[mat_name] = sub_item_name
 
             for material in po_materials:
                 mat_copy = dict(material)
                 mat_name = material.get('material_name', '').lower().strip()
                 mat_name_original = material.get('material_name', '')
                 boq_price = boq_price_lookup.get(mat_name, 0)
-                quantity = material.get('quantity', 0)
+                # VRR-created POChildren store quantity as 'rejected_qty', regular POChildren use 'quantity'
+                quantity = material.get('quantity') or material.get('rejected_qty', 0)
 
                 # Check material_vendor_selections for negotiated price
                 selection = (material_vendor_selections.get(mat_name_original) or
@@ -1945,6 +1960,10 @@ def get_approved_po_children():
                               material.get('vendor_price') or
                               material.get('unit_price') or
                               vendor_product_price or 0)
+
+                # Fill sub_item_name from BOQ if not already set (VRR materials don't carry it)
+                if not mat_copy.get('sub_item_name'):
+                    mat_copy['sub_item_name'] = boq_sub_item_lookup.get(mat_name, '')
 
                 # ALWAYS set BOQ price for reference
                 mat_copy['boq_unit_price'] = boq_price

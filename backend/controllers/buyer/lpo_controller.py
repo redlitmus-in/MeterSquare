@@ -186,7 +186,8 @@ def preview_lpo_pdf(cr_id):
 
             for material in po_child.materials_data:
                 mat_name = material.get('material_name', '')
-                quantity = material.get('quantity', 0)
+                # VRR-created POChildren store quantity as 'rejected_qty', regular POChildren use 'quantity'
+                quantity = material.get('quantity') or material.get('rejected_qty', 0)
 
                 # Get price from multiple sources (priority order)
                 stored_unit_price = float(material.get('unit_price', 0) or 0)
@@ -305,7 +306,7 @@ def preview_lpo_pdf(cr_id):
                             material['supplier_notes'] = vendor_selection.get('supplier_notes', material.get('supplier_notes', ''))
 
                             # Recalculate total with vendor rate
-                            qty = material.get('quantity', 0)
+                            qty = material.get('quantity') or material.get('rejected_qty', 0)
                             material['total_price'] = qty * vendor_rate
 
                             filtered_materials.append(material)
@@ -332,7 +333,7 @@ def preview_lpo_pdf(cr_id):
                 # Last resort: use 0 (will show as 0.00 in PDF)
                 rate = 0
 
-            qty = material.get('quantity', 0)
+            qty = material.get('quantity') or material.get('rejected_qty', 0)
             amount = float(qty) * float(rate)
             subtotal += amount
 

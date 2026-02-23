@@ -24,6 +24,7 @@ from models.inventory import (
 from models.change_request import ChangeRequest
 from models.po_child import POChild
 from models.vendor import Vendor
+from models.lpo_customization import LPOCustomization
 
 import logging
 
@@ -235,6 +236,7 @@ def get_pending_inspections():
                 imr_data['vendor_id'] = cr.selected_vendor_id
                 imr_data['vendor_name'] = cr.selected_vendor_name
                 imr_data['item_name'] = cr.item_name
+                imr_data['materials_total_cost'] = round(cr.materials_total_cost, 2) if cr.materials_total_cost else 0
 
                 # Check if this is from a POChild
                 if imr.po_child_id:
@@ -243,6 +245,7 @@ def get_pending_inspections():
                         imr_data['formatted_po_id'] = po_child.get_formatted_id()
                         imr_data['vendor_id'] = po_child.vendor_id
                         imr_data['vendor_name'] = po_child.vendor_name
+                        imr_data['materials_total_cost'] = round(po_child.materials_total_cost, 2) if po_child.materials_total_cost else 0
 
             # Get project name
             if cr and cr.project:
@@ -340,7 +343,8 @@ def get_inspection_details(imr_id):
                     # Handle grouped sub-items format
                     materials_list = item.get('materials', [item])
                     for mat in materials_list:
-                        qty = mat.get('quantity', 0)
+                        # VRR-created POChildren store quantity as 'rejected_qty'; regular ones use 'quantity'
+                        qty = mat.get('quantity') or mat.get('rejected_qty', 0)
                         materials_for_inspection.append({
                             'material_id': mat_index,
                             'material_name': mat.get('material_name', ''),
@@ -353,7 +357,67 @@ def get_inspection_details(imr_id):
                         })
                         mat_index += 1
 
+        # For VRR-created IMRs already stored with quantity=0: enrich from linked POChild
+        # (Old IMRs built before the rejected_qty fallback fix have quantity:0 in materials_data)
+        if po_child and po_child.materials_data and any(m['ordered_qty'] == 0 for m in materials_for_inspection):
+            po_child_qty_lookup = {}
+            for pc_mat in po_child.materials_data:
+                mat_name = (pc_mat.get('material_name') or '').lower().strip()
+                pc_qty = pc_mat.get('quantity') or pc_mat.get('rejected_qty', 0)
+                if mat_name and pc_qty:
+                    po_child_qty_lookup[mat_name] = pc_qty
+            for mat in materials_for_inspection:
+                if mat['ordered_qty'] == 0:
+                    lookup_name = mat['material_name'].lower().strip()
+                    pc_qty = po_child_qty_lookup.get(lookup_name, 0)
+                    if pc_qty:
+                        mat['quantity'] = pc_qty
+                        mat['ordered_qty'] = pc_qty
+
+        # Enrich unit_price from material_vendor_selections (negotiated_price takes priority)
+        if cr and cr.material_vendor_selections:
+            vendor_selections = cr.material_vendor_selections or {}
+            for mat in materials_for_inspection:
+                sel = vendor_selections.get(mat['material_name'], {})
+                negotiated = sel.get('negotiated_price') or 0
+                sel_unit_price = sel.get('unit_price') or 0
+                if negotiated and float(negotiated) > 0:
+                    mat['unit_price'] = float(negotiated)
+                elif sel_unit_price and float(sel_unit_price) > 0:
+                    mat['unit_price'] = float(sel_unit_price)
+
         imr_data['materials_for_inspection'] = materials_for_inspection
+
+        # Fetch LPO customization VAT (POChild-specific first, then CR-level fallback)
+        lpo_custom = None
+        if po_child:
+            lpo_custom = LPOCustomization.query.filter_by(
+                cr_id=imr.cr_id, po_child_id=po_child.id
+            ).first()
+        if not lpo_custom:
+            lpo_custom = LPOCustomization.query.filter_by(
+                cr_id=imr.cr_id, po_child_id=None
+            ).first()
+
+        if lpo_custom:
+            imr_data['lpo_customization'] = {
+                'vat_percent': float(lpo_custom.vat_percent or 5.0),
+                'vat_amount': float(lpo_custom.vat_amount or 0.0),
+            }
+        else:
+            imr_data['lpo_customization'] = None
+
+        # Compute subtotal, VAT, grand total from enriched materials
+        subtotal = sum(
+            (m.get('unit_price') or 0) * (m.get('ordered_qty') or 0)
+            for m in materials_for_inspection
+        )
+        vat_amount = float(lpo_custom.vat_amount or 0.0) if lpo_custom else 0.0
+        imr_data['computed_totals'] = {
+            'subtotal': round(subtotal, 2),
+            'vat_amount': round(vat_amount, 2),
+            'grand_total': round(subtotal + vat_amount, 2),
+        }
 
         # Get previous inspections for this CR (iteration history) with eager-loaded relationships
         from sqlalchemy.orm import joinedload as jl
@@ -794,16 +858,46 @@ def get_pending_stockin_inspections():
             stored_reference = first_mat.get('_stock_in_reference_number', '') or fallback_reference
             stored_transport_fee = first_mat.get('_stock_in_per_unit_transport_fee', 0)
 
+            # Build vendor_selections map for unit_price enrichment fallback
+            vendor_sels = {}
+            if insp.change_request and insp.change_request.material_vendor_selections:
+                vendor_sels = insp.change_request.material_vendor_selections or {}
+            # Also check POChild materials_data for prices
+            po_child_materials = {}
+            if insp.po_child and insp.po_child.materials_data:
+                for pc_mat in insp.po_child.materials_data:
+                    if isinstance(pc_mat, dict):
+                        for sub in pc_mat.get('materials', [pc_mat]):
+                            name = sub.get('material_name', '')
+                            if name and sub.get('unit_price'):
+                                po_child_materials[name] = float(sub['unit_price'])
+
             for mat in all_mats:
                 accepted_qty = mat.get('accepted_qty', 0)
                 if accepted_qty > 0:
+                    stored_price = mat.get('unit_price') or 0
+
+                    # Enrich unit_price if missing: check material_vendor_selections first
+                    if not stored_price:
+                        mat_name = mat.get('material_name', '')
+                        sel = vendor_sels.get(mat_name, {})
+                        negotiated = sel.get('negotiated_price') or 0
+                        sel_price = sel.get('unit_price') or 0
+                        if negotiated and float(negotiated) > 0:
+                            stored_price = float(negotiated)
+                        elif sel_price and float(sel_price) > 0:
+                            stored_price = float(sel_price)
+                        # Last fallback: POChild materials_data
+                        elif mat_name in po_child_materials:
+                            stored_price = po_child_materials[mat_name]
+
                     accepted.append({
                         'material_name': mat.get('material_name', ''),
                         'brand': mat.get('brand', ''),
                         'size': mat.get('size', ''),
                         'unit': mat.get('unit', ''),
                         'quantity': accepted_qty,
-                        'unit_price': mat.get('unit_price', 0),
+                        'unit_price': stored_price,
                         'driver_name': stored_driver,
                         'vehicle_number': stored_vehicle,
                         'reference_number': stored_reference,
@@ -1492,11 +1586,30 @@ def get_return_requests():
         total = query.count()
         requests = query.offset((page - 1) * per_page).limit(per_page).all()
 
+        # Batch-fetch new POChildren for new_vendor VRRs to get their current status
+        new_lpo_ids = [rr.new_lpo_id for rr in requests if rr.new_lpo_id]
+        new_po_child_map = {}
+        if new_lpo_ids:
+            from models.po_child import POChild
+            new_po_children = POChild.query.filter(
+                POChild.id.in_(new_lpo_ids),
+                POChild.is_deleted == False
+            ).all()
+            new_po_child_map = {pc.id: pc for pc in new_po_children}
+
         results = []
         for rr in requests:
             data = rr.to_dict()
             if rr.inspection:
                 data['inspection_evidence'] = rr.inspection.evidence_urls or []
+            # Include new POChild status for new_vendor VRRs
+            if rr.new_lpo_id and rr.new_lpo_id in new_po_child_map:
+                new_pc = new_po_child_map[rr.new_lpo_id]
+                data['new_po_child_status'] = new_pc.status
+                data['new_po_child_formatted_id'] = new_pc.get_formatted_id() if hasattr(new_pc, 'get_formatted_id') else str(new_pc.id)
+            else:
+                data['new_po_child_status'] = None
+                data['new_po_child_formatted_id'] = None
             results.append(data)
 
         return jsonify({

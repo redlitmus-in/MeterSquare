@@ -2305,8 +2305,8 @@ class BOQEmailService:
         for idx, material in enumerate(materials, 1):
             material_name = material.get('material_name', 'N/A')
             brand = material.get('brand', '-')
-            specification = material.get('specification', '-')
-            quantity = material.get('quantity') or 0
+            specification = material.get('specification', '')
+            quantity = material.get('quantity') or material.get('rejected_qty', 0)
             unit = material.get('unit', 'unit')
             supplier_notes = material.get('supplier_notes', '').strip()
 

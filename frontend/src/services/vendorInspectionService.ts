@@ -103,6 +103,8 @@ export interface VendorReturnRequest {
     status?: string;
   };
   new_lpo_id?: number;
+  new_po_child_status?: string;
+  new_po_child_formatted_id?: string;
   replacement_expected_date?: string;
   replacement_inspection_id?: number;
   replacement_imr_id?: number;

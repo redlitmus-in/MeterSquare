@@ -52,6 +52,13 @@ interface InspectionDetail {
   materials_for_inspection?: InspectionMaterial[];
   delivery_date?: string;
   notes?: string;
+  cr_details?: {
+    materials_total_cost?: number;
+    vendor_name?: string;
+  };
+  po_child_details?: {
+    materials_total_cost?: number;
+  };
 }
 
 interface InspectionMaterial {
@@ -178,13 +185,31 @@ const InspectionForm: React.FC<InspectionFormProps> = ({
       const data: InspectionDetail = raw?.data ?? raw;
       setDetails(data);
 
-      const materialsList = data.materials_for_inspection || data.materials || [];
+      // Build a lookup from POChild materials for VRR-created IMRs that have quantity:0 stored
+      const poChildMats: any[] = (data as any).po_child_details?.materials_data || (data as any).po_child_details?.materials || [];
+      const poChildQtyLookup: Record<string, number> = {};
+      for (const pcMat of poChildMats) {
+        const name = (pcMat.material_name || '').toLowerCase().trim();
+        const qty = pcMat.quantity || pcMat.rejected_qty || 0;
+        if (name && qty) poChildQtyLookup[name] = qty;
+      }
+
+      // Enrich ordered_qty for VRR materials where it was stored as 0
+      const materialsList = (data.materials_for_inspection || data.materials || []).map((mat: any) => {
+        let orderedQty = mat.ordered_qty ?? (mat as any).quantity ?? 0;
+        if (orderedQty === 0) {
+          const lookupName = (mat.material_name || '').toLowerCase().trim();
+          orderedQty = poChildQtyLookup[lookupName] || 0;
+        }
+        return { ...mat, ordered_qty: orderedQty };
+      });
+
       const initialEntries: Record<number, MaterialInspectionEntry> = {};
-      materialsList.forEach((mat, index) => {
+      materialsList.forEach((mat: any, index: number) => {
         const id = mat.material_id ?? index;
         initialEntries[id] = {
           material_id: id,
-          accepted_qty: mat.ordered_qty ?? (mat as any).quantity ?? 0,
+          accepted_qty: mat.ordered_qty,
           rejected_qty: 0,
           rejection_category: '',
           rejection_notes: '',
@@ -476,6 +501,15 @@ const InspectionForm: React.FC<InspectionFormProps> = ({
   const totalRejected = Object.values(entries).reduce((s, e) => s + e.rejected_qty, 0);
   const totalOrdered = details?.materials.reduce((s, m) => s + m.ordered_qty, 0) ?? 0;
 
+  // Total material cost: prefer API-provided value, fall back to summing unit_price * qty
+  const totalMaterialCost = (() => {
+    if (details?.po_child_details?.materials_total_cost) return details.po_child_details.materials_total_cost;
+    if (details?.cr_details?.materials_total_cost) return details.cr_details.materials_total_cost;
+    if (!details?.materials) return null;
+    const computed = details.materials.reduce((s, m) => s + (m.unit_price ?? 0) * m.ordered_qty, 0);
+    return computed > 0 ? computed : null;
+  })();
+
   const vendorName = details?.vendor?.company_name || details?.vendor?.name;
   const isStoreRoute = !vendorName || vendorName === 'Unknown Vendor' || vendorName === 'M2 Store';
   const overallStatus = computeOverallStatus();
@@ -619,6 +653,21 @@ const InspectionForm: React.FC<InspectionFormProps> = ({
                           </p>
                         </div>
                       </div>
+
+                      {/* Material Cost */}
+                      {totalMaterialCost != null && (
+                        <div className="flex items-center gap-3 bg-amber-50/60 rounded-xl px-4 py-3 border border-amber-100/60 sm:col-span-3">
+                          <div className="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                            <DollarSign className="w-4.5 h-4.5 text-amber-600" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-500">Total Material Cost</p>
+                            <p className="text-sm font-bold text-amber-900">
+                              AED {totalMaterialCost.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* ---- Acceptance Summary Strip ---- */}
@@ -694,6 +743,16 @@ const InspectionForm: React.FC<InspectionFormProps> = ({
                                     <p className="text-lg font-bold text-slate-800 leading-tight">
                                       {mat.ordered_qty}
                                     </p>
+                                    {mat.unit_price != null && mat.unit_price > 0 && (
+                                      <div className="mt-1 text-right">
+                                        <p className="text-[10px] text-gray-400">
+                                          AED {mat.unit_price.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / unit
+                                        </p>
+                                        <p className="text-xs font-semibold text-amber-700">
+                                          AED {(mat.unit_price * mat.ordered_qty).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </p>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               </div>
