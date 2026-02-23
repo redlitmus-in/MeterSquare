@@ -222,7 +222,8 @@
       "mcp__plugin_playwright_playwright__browser_type",
       "mcp__plugin_playwright_playwright__browser_evaluate",
       "Bash(ffprobe:*)",
-      "mcp__plugin_playwright_playwright__browser_close"
+      "mcp__plugin_playwright_playwright__browser_close",
+      "Bash(/tmp/find_methods.py:*)"
     ],
     "deny": [],
     "ask": []

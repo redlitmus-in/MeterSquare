@@ -60,6 +60,9 @@ class POChild(db.Model):
     vendor_whatsapp_sent = db.Column(db.Boolean, default=False)
     vendor_whatsapp_sent_at = db.Column(db.DateTime, nullable=True)
 
+    # LPO PDF storage (generated at TD approval, used for email attachment)
+    lpo_pdf_url = db.Column(db.Text, nullable=True)
+
     # Purchase completion
     purchase_completed_by_user_id = db.Column(db.Integer, nullable=True)
     purchase_completed_by_name = db.Column(db.String(255), nullable=True)
@@ -127,6 +130,7 @@ class POChild(db.Model):
             'vendor_approved_by_td_id': self.vendor_approved_by_td_id,
             'vendor_approved_by_td_name': self.vendor_approved_by_td_name,
             'vendor_approval_date': self.vendor_approval_date.isoformat() if self.vendor_approval_date else None,
+            'lpo_pdf_url': self.lpo_pdf_url,
             'vendor_email_sent': self.vendor_email_sent,
             'vendor_email_sent_date': self.vendor_email_sent_date.isoformat() if self.vendor_email_sent_date else None,
             'vendor_whatsapp_sent': self.vendor_whatsapp_sent,

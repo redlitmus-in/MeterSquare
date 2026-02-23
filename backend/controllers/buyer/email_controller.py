@@ -547,23 +547,34 @@ def send_vendor_email(cr_id, po_child_id=None):
             except Exception as e:
                 log.error(f"Error processing attachments for CR-{cr_id}: {str(e)}")
 
-        # ==================== GENERATE LPO PDF ====================
-        if include_lpo_pdf and lpo_data:
+        # ==================== ATTACH LPO PDF ====================
+        if include_lpo_pdf:
             try:
-                from utils.lpo_pdf_generator import LPOPDFGenerator
-                generator = LPOPDFGenerator()
-                pdf_bytes = generator.generate_lpo_pdf(lpo_data)
-
-                # Create filename: LPO-400.pdf or LPO-400.1.pdf
                 project_name_clean = project.project_name.replace(' ', '_')[:20] if project else 'Project'
                 lpo_filename = f"LPO-{formatted_id.replace('PO-', '')}-{project_name_clean}.pdf"
 
-                # Add LPO PDF to attachments
-                attachments.append((lpo_filename, pdf_bytes, 'application/pdf'))
-                log.info(f"✅ LPO PDF generated and attached: {lpo_filename}")
+                # Try pre-saved PDF from Supabase (generated at TD approval)
+                pdf_url = getattr(email_record, 'lpo_pdf_url', None)
+                if pdf_url:
+                    import requests as http_requests
+                    resp = http_requests.get(pdf_url, timeout=15)
+                    if resp.status_code == 200 and len(resp.content) > 0:
+                        attachments.append((lpo_filename, resp.content, 'application/pdf'))
+                        log.info(f"✅ LPO PDF attached from storage: {lpo_filename} ({len(resp.content)} bytes)")
+                    else:
+                        raise Exception(f"Download failed: HTTP {resp.status_code}, size={len(resp.content)}")
+                elif lpo_data:
+                    # Fallback: generate on-the-fly (for old CRs without pre-saved PDF)
+                    from utils.lpo_pdf_generator import LPOPDFGenerator
+                    generator = LPOPDFGenerator()
+                    pdf_bytes = generator.generate_lpo_pdf(lpo_data)
+                    attachments.append((lpo_filename, pdf_bytes, 'application/pdf'))
+                    log.info(f"✅ LPO PDF generated on-the-fly (fallback): {lpo_filename}")
+                else:
+                    log.warning(f"⚠️ No pre-saved PDF and no lpo_data for {formatted_id}")
             except Exception as e:
-                log.error(f"❌ Error generating LPO PDF for {formatted_id}: {str(e)}")
-                # Continue sending email even if LPO PDF generation fails
+                log.error(f"❌ Error attaching LPO PDF for {formatted_id}: {str(e)}")
+                # Continue sending email even if LPO PDF attachment fails
 
         # ==================== SEND EMAIL ====================
         from utils.boq_email_service import BOQEmailService

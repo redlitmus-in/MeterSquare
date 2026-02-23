@@ -1809,6 +1809,18 @@ def td_approve_vendor(cr_id):
 
         db.session.commit()
 
+        # Generate & save LPO PDF to Supabase storage (pre-generate at approval time)
+        try:
+            from utils.lpo_pdf_helper import generate_and_save_lpo_pdf
+            pdf_url = generate_and_save_lpo_pdf(cr_id=cr_id)
+            if pdf_url:
+                log.info(f"LPO PDF saved for CR-{cr_id}: {pdf_url}")
+            else:
+                log.warning(f"LPO PDF generation failed for CR-{cr_id}, will retry at email send")
+        except Exception as pdf_err:
+            log.error(f"LPO PDF generation error for CR-{cr_id}: {pdf_err}")
+            # Don't block approval — PDF can be generated later at email send
+
         # Send notification to buyer about vendor approval
         # Send to the buyer who selected the vendor, not necessarily the CR creator
         try:

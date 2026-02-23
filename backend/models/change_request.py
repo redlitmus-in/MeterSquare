@@ -114,6 +114,9 @@ class ChangeRequest(db.Model):
     vendor_email_sent_date = db.Column(db.DateTime, nullable=True)
     vendor_email_sent_by_user_id = db.Column(db.Integer, nullable=True)
 
+    # LPO PDF storage (generated at TD approval, used for email attachment)
+    lpo_pdf_url = db.Column(db.Text, nullable=True)
+
     # WhatsApp tracking
     vendor_whatsapp_sent = db.Column(db.Boolean, default=False)  # Track if PO WhatsApp sent to vendor
     vendor_whatsapp_sent_at = db.Column(db.DateTime, nullable=True)
@@ -347,6 +350,9 @@ class ChangeRequest(db.Model):
             'rejected_by_user_id': self.rejected_by_user_id,
             'rejected_by_name': self.rejected_by_name,
             'rejected_at_stage': self.rejected_at_stage,
+
+            # LPO PDF
+            'lpo_pdf_url': self.lpo_pdf_url,
 
             # Vendor Email/WhatsApp tracking
             'vendor_email_sent': self.vendor_email_sent,
