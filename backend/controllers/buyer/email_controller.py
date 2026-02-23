@@ -569,6 +569,7 @@ def send_vendor_email(cr_id, po_child_id=None):
         from utils.boq_email_service import BOQEmailService
         email_service = BOQEmailService()
         cc_email_list = [cc.get('email') for cc in cc_emails if cc.get('email')]
+        log.info(f"Email sending for {formatted_id}: TO={email_list}, CC={cc_email_list}")
 
         email_sent = email_service.send_vendor_purchase_order_async(
             email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments, cc_email_list
@@ -583,14 +584,18 @@ def send_vendor_email(cr_id, po_child_id=None):
             db.session.commit()
 
             recipient_count = len(email_list)
+            cc_count = len(cc_email_list)
             po_type = "POChild" if is_po_child else "Parent CR"
-            log.info(f"✅ Email sent for {formatted_id} ({po_type}) to {recipient_count} recipient(s)")
+            log.info(f"✅ Email sent for {formatted_id} ({po_type}) to {recipient_count} recipient(s)" +
+                     (f" + {cc_count} CC" if cc_count > 0 else ""))
 
+            cc_msg = f" + {cc_count} CC recipient(s)" if cc_count > 0 else ""
             return jsonify({
                 "success": True,
-                "message": f"Purchase order email sent to {recipient_count} recipient(s) successfully",
+                "message": f"Purchase order email sent to {recipient_count} recipient(s){cc_msg} successfully",
                 "formatted_id": formatted_id,
-                "is_po_child": is_po_child
+                "is_po_child": is_po_child,
+                "cc_count": cc_count
             }), 200
         else:
             log.error(f"❌ Failed to send email for {formatted_id}")

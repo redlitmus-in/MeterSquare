@@ -8,6 +8,7 @@ import { PAGINATION } from '@/lib/constants';
 import { showError, showWarning, showSuccess } from '@/utils/toastHelper';
 import UnifiedStockInModal from '../components/UnifiedStockInModal';
 import { vendorInspectionService, AcceptedMaterialForStockIn } from '@/services/vendorInspectionService';
+import { compressVideo } from '@/utils/videoCompressor';
 
 const isSafeUrl = (url: string) => /^https?:\/\//i.test(url);
 
@@ -452,7 +453,26 @@ const StockInPage: React.FC = () => {
     if (!files || !selectedIMR) return;
     const crId = selectedIMR.cr_id;
 
-    const newEntries = Array.from(files).map(file => {
+    // File size limits: video 50MB, PDF 10MB, image 2MB
+    const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
+    const MAX_PDF_SIZE = 10 * 1024 * 1024;
+    const MAX_IMAGE_SIZE = 2 * 1024 * 1024;
+
+    const validFiles: File[] = [];
+    for (const file of Array.from(files)) {
+      const isVideo = file.type.startsWith('video/');
+      const isPdf = file.type === 'application/pdf';
+      const maxSize = isVideo ? MAX_VIDEO_SIZE : isPdf ? MAX_PDF_SIZE : MAX_IMAGE_SIZE;
+      const maxLabel = isVideo ? '50MB' : isPdf ? '10MB' : '2MB';
+      if (file.size > maxSize) {
+        showError(`${file.name} exceeds ${maxLabel} limit (${(file.size / (1024 * 1024)).toFixed(1)}MB)`);
+        continue;
+      }
+      validFiles.push(file);
+    }
+    if (validFiles.length === 0) return;
+
+    const newEntries = validFiles.map(file => {
       const isVideo = file.type.startsWith('video/');
       const isPdf = file.type === 'application/pdf';
       const isImage = !isVideo && !isPdf;
@@ -464,11 +484,20 @@ const StockInPage: React.FC = () => {
     setEvidenceFiles(prev => [...prev, ...newEntries]);
     setUploadingEvidence(true);
 
-    // Upload each file
+    // Upload each file (compress large videos first)
     const uploadResults = await Promise.all(
       newEntries.map(async (entry, i) => {
         try {
-          const result = await vendorInspectionService.uploadInspectionEvidence(entry.file, crId);
+          let fileToUpload = entry.file;
+          // Compress videos over 10MB
+          if (entry.fileType === 'video' && entry.file.size > 10 * 1024 * 1024) {
+            try {
+              fileToUpload = await compressVideo(entry.file, { maxSizeMB: 50 });
+            } catch {
+              // If compression fails, upload original
+            }
+          }
+          const result = await vendorInspectionService.uploadInspectionEvidence(fileToUpload, crId);
           return { index: evidenceFiles.length + i, success: true, data: result };
         } catch (err) {
           return { index: evidenceFiles.length + i, success: false, error: err instanceof Error ? err.message : 'Upload failed' };
@@ -1721,7 +1750,7 @@ const StockInPage: React.FC = () => {
                             }`}>
                               <span className="text-3xl mb-1">📸</span>
                               <p className="text-sm font-medium text-gray-700">Upload photos, videos or documents</p>
-                              <p className="text-xs text-gray-400 mt-0.5">JPG, PNG, WebP, GIF, PDF · MP4, MOV, WebM · Max 50MB images / 200MB videos</p>
+                              <p className="text-xs text-gray-400 mt-0.5">Images: JPG, PNG, WebP, GIF (max 2MB) · PDF (max 10MB) · Videos: MP4, MOV, WebM (max 50MB)</p>
                               <input
                                 type="file"
                                 multiple

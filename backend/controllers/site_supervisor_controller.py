@@ -1540,7 +1540,7 @@ def assign_boq_to_buyer(boq_id):
         # Send email notification to buyer
         try:
             email_service = BOQEmailService()
-            email_service.send_assignment_notification(
+            email_service.send_boq_buyer_assignment_notification(
                 buyer_email=buyer.email,
                 buyer_name=buyer.full_name,
                 se_name=se_name,

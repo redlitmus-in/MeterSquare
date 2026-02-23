@@ -214,7 +214,15 @@
       "Bash(bash -c \"cd /home/development1/Desktop/MeterSquare/frontend && npm run lint 2>&1\")",
       "Bash(git -C /home/development1/Desktop/MeterSquare log --oneline --all -- \"frontend/.eslintrc*\" \"frontend/eslint.config*\")",
       "Bash(/home/development1/Desktop/MeterSquare/frontend/.eslintrc.cjs:*)",
-      "Bash(export:*)"
+      "Bash(export:*)",
+      "Bash(xxd:*)",
+      "Bash(ffmpeg:*)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_click",
+      "mcp__plugin_playwright_playwright__browser_type",
+      "mcp__plugin_playwright_playwright__browser_evaluate",
+      "Bash(ffprobe:*)",
+      "mcp__plugin_playwright_playwright__browser_close"
     ],
     "deny": [],
     "ask": []

@@ -2909,28 +2909,25 @@ const PurchaseOrders: React.FC = () => {
             setOpenWithWhatsAppPreview(false); // Reset WhatsApp preview state
           }}
           onEmailSent={async () => {
-            // Remove cache completely and refetch fresh data
-            removeQueries(['purchases']);
-            removeQueries(['pending-purchases']);
-            removeQueries(['buyer-pending-purchases']);
-            removeQueries(['buyer-approved-po-children']);
-            removeQueries(['buyer-pending-po-children']);
-            removeQueries(['dashboard']);
+            // Soft refresh: invalidate marks data stale and refetches in background
+            // UI keeps showing current data until fresh data arrives (no loading flash)
+            await Promise.all([
+              invalidateQueries(['purchases']),
+              invalidateQueries(['pending-purchases']),
+              invalidateQueries(['buyer-pending-purchases']),
+              invalidateQueries(['buyer-approved-po-children']),
+              invalidateQueries(['buyer-pending-po-children']),
+              invalidateQueries(['buyer-completed-purchases']),
+              invalidateQueries(['dashboard'])
+            ]);
 
-            // Longer delay to ensure backend has processed the change and database is updated
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            // Force refetch all tabs to ensure UI is updated
+            // Refetch active queries to ensure UI updates immediately
             await Promise.all([
               refetchPending(),
               refetchCompleted(),
-              refetchApprovedPOChildren()
+              refetchApprovedPOChildren(),
+              refetchPendingPOChildren()
             ]);
-
-            // Reset to first page and switch to Pending Approval > Store Requests tab
-            setPendingApprovalStoreRequestsPage(1);
-            setActiveTab('pending_approval');
-            setPendingApprovalSubTab('store_requests');
           }}
         />
       )}

@@ -3,6 +3,8 @@ BOQ Email Service - Professional email templates for Technical Directors
 """
 import smtplib
 import os
+import traceback
+from html import escape
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -64,19 +66,28 @@ class BOQEmailService:
             else:
                 to_emails = [recipient_email]
 
-            # Create message container
-            message = MIMEMultipart('related')
+            # Build MIME structure:
+            # multipart/mixed (top — holds attachments as visible files)
+            #   ├── multipart/related (HTML body + inline images like logo)
+            #   │     ├── multipart/alternative
+            #   │     │     └── text/html
+            #   │     └── image/png (inline logo)
+            #   └── application/pdf (attachment — visible to user)
+            message = MIMEMultipart('mixed')
             sender_name = "MeterSquare ERP"
             message["From"] = formataddr((str(Header(sender_name, 'utf-8')), self.sender_email))
             message["To"] = ", ".join(to_emails)
             message["Subject"] = subject
-            if cc_emails:
-                cc_list = cc_emails if isinstance(cc_emails, list) else [cc_emails]
+            cc_list = (cc_emails if isinstance(cc_emails, list) else [cc_emails]) if cc_emails else []
+            if cc_list:
                 message["Cc"] = ", ".join(cc_list)
 
-            # Create alternative part for HTML body
+            # Related part: holds HTML + inline images (logo)
+            msg_related = MIMEMultipart('related')
+
+            # Alternative part for HTML body
             msg_alternative = MIMEMultipart('alternative')
-            message.attach(msg_alternative)
+            msg_related.attach(msg_alternative)
             msg_alternative.attach(MIMEText(email_html, "html"))
 
             # Only attach logo if the email HTML actually references it (cid:logo)
@@ -95,7 +106,7 @@ class BOQEmailService:
                             logo_image = MIMEImage(logo_data, _subtype='png')
                             logo_image.add_header('Content-ID', '<logo>')
                             logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
-                            message.attach(logo_image)
+                            msg_related.attach(logo_image)
                             logo_attached = True
                             log.info(f"Logo attached from: {logo_path}")
                             break
@@ -104,7 +115,10 @@ class BOQEmailService:
                 except Exception as logo_err:
                     log.error(f"Error attaching logo: {logo_err}")
 
-            # Attach additional files (e.g. Excel, PDF)
+            # Attach the related part (HTML + logo) to the top-level mixed container
+            message.attach(msg_related)
+
+            # Attach additional files (e.g. LPO PDF, Excel) — these show as visible attachments
             if attachments:
                 for filename, file_data, mime_type in attachments:
                     main_type, sub_type = mime_type.split('/', 1) if '/' in mime_type else ('application', 'octet-stream')
@@ -120,17 +134,23 @@ class BOQEmailService:
                 all_recipients += cc_emails if isinstance(cc_emails, list) else [cc_emails]
 
             # Send via SMTP
+            refused = {}
             if self.use_tls:
                 with smtplib.SMTP(self.email_host, self.email_port) as server:
                     server.starttls()
                     server.login(self.sender_email, self.sender_password)
-                    server.sendmail(self.sender_email, all_recipients, message.as_string())
+                    refused = server.sendmail(self.sender_email, all_recipients, message.as_string())
             else:
                 with smtplib.SMTP_SSL(self.email_host, self.email_port) as server:
                     server.login(self.sender_email, self.sender_password)
-                    server.sendmail(self.sender_email, all_recipients, message.as_string())
+                    refused = server.sendmail(self.sender_email, all_recipients, message.as_string())
 
-            log.info(f"Email sent successfully to {', '.join(to_emails)}")
+            if refused:
+                log.warning(f"SMTP refused recipients: {refused}")
+
+            cc_list_str = ', '.join(cc_list) if cc_emails else ''
+            cc_info = f" + CC: {cc_list_str}" if cc_emails else ""
+            log.info(f"Email sent successfully to {', '.join(to_emails)}{cc_info} | Envelope: {all_recipients}")
             return True
 
         except Exception as e:
@@ -158,30 +178,6 @@ class BOQEmailService:
             return True
         except Exception as e:
             log.error(f"Failed to start async email thread: {e}")
-            return False
-
-    def send_td_vendor_rejection_notification(self, cr_id, project_name, td_name,
-                                               rejection_reason, vendor_name,
-                                               recipient_email, recipient_name):
-        """Send notification to buyer when TD rejects vendor selection."""
-        try:
-            subject = f"Vendor Selection Rejected - CR-{cr_id} | {project_name}"
-            reason_section = f"<p><strong>Rejection Reason:</strong><br>{rejection_reason}</p>" if rejection_reason else ""
-            email_body = f"""<div class="email-container"><div class="content">
-<h2>Vendor Selection Rejected</h2>
-<p>Dear {recipient_name},</p>
-<p><strong>{td_name}</strong> has rejected the vendor selection for CR-{cr_id} in project <strong>{project_name}</strong>.</p>
-<p><strong>Vendor:</strong> {vendor_name}</p>
-{reason_section}
-<p>Please log in to MeterSquare ERP to select a new vendor and resubmit.</p>
-<br>
-<p class="signature">Regards,<br><strong>{td_name}</strong><br>MeterSquare ERP</p>
-</div></div>"""
-            email_html = wrap_email_content(email_body)
-            return self.send_email(recipient_email, subject, email_html)
-
-        except Exception as e:
-            log.error(f"Error sending TD vendor rejection notification email: {e}")
             return False
 
     def generate_boq_approval_email(self, boq_data, project_data, items_summary, comments, estimator_name=None, pm_name=None):
@@ -2438,58 +2434,6 @@ class BOQEmailService:
 
         return wrap_email_content(email_body, show_erp_button=False)
 
-    def send_vendor_purchase_order(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body=None, attachments=None):
-        """
-        Send purchase order email to Vendor with embedded logo and attachments
-
-        Args:
-            vendor_email: Vendor's email address (string with comma-separated emails or list)
-            vendor_data: Dictionary containing vendor information
-            purchase_data: Dictionary containing purchase order details
-            buyer_data: Dictionary containing buyer contact information
-            project_data: Dictionary containing project information
-            custom_email_body: Optional custom HTML body for the email (complete HTML document)
-            attachments: Optional list of tuples (filename, file_data, mime_type)
-
-        Returns:
-            bool: True if email sent successfully, False otherwise
-        """
-        try:
-            # Use custom body if provided, otherwise generate default template
-            if custom_email_body:
-                # Custom body is already a complete HTML document from frontend
-                # Check if it's already wrapped (has <!DOCTYPE or <html> tag)
-                if '<!DOCTYPE' in custom_email_body or '<html' in custom_email_body:
-                    email_html = custom_email_body
-                else:
-                    # If not wrapped, wrap it (no ERP button for vendor emails)
-                    email_html = wrap_email_content(custom_email_body, show_erp_button=False)
-            else:
-                # Generate email content with embedded logo
-                email_html = self.generate_vendor_purchase_order_email(
-                    vendor_data, purchase_data, buyer_data, project_data
-                )
-
-            # Create subject
-            project_name = project_data.get('project_name', 'Project')
-            cr_id = purchase_data.get('cr_id', 'N/A')
-            subject = f"Purchase Order PO-{cr_id} - {project_name}"
-
-            # Log attachment info if present
-            if attachments:
-                log.info(f"Sending email with {len(attachments)} attachment(s)")
-
-            # Send email with attachments
-            success = self.send_email(vendor_email, subject, email_html, attachments)
-
-            if success:
-                return True
-            return False
-
-        except Exception as e:
-            log.error(f"Failed to send purchase order email: {e}")
-            return False
-
     def send_vendor_purchase_order_async(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body=None, attachments=None, cc_emails=None):
         """
         Send purchase order email to Vendor asynchronously (non-blocking)
@@ -2755,6 +2699,127 @@ class BOQEmailService:
         except Exception as e:
             log.error(f"[send_cr_rejection_notification] Error: {e}")
             import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_cr_approved_notification(self, cr_id, project_name, project_code, item_name,
+                                      approver_name, approver_role, recipient_email, recipient_name):
+        """
+        Send CR final approval email to the CR creator.
+
+        Args:
+            cr_id: Change request ID
+            project_name: Project name
+            project_code: Project code
+            item_name: BOQ item name or CR reference
+            approver_name: Name of the approver (TD)
+            approver_role: Role of the approver
+            recipient_email: CR creator's email address
+            recipient_name: CR creator's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"Purchase Request Approved - {escape(project_name)} (CR #{cr_id})"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Purchase Request Approved</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{escape(recipient_name)}</strong>,</p>
+        <p>Your purchase request has been <strong>approved</strong> by <strong>{escape(approver_name)}</strong>.</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{escape(project_name)}</span></p>
+            <p><span class="label">Project Code:</span> <span class="value">{escape(project_code)}</span></p>
+            <p><span class="label">CR Reference:</span> <span class="value">CR #{cr_id}</span></p>
+            <p><span class="label">Item:</span> <span class="value">{escape(item_name)}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Status:</strong> Your request has been approved and is now proceeding to the next stage.
+        </div>
+
+        <p>Please log in to MeterSquare ERP to view the updated status.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{escape(approver_name)}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_cr_approved_notification] Email sent to {recipient_email} for CR #{cr_id}")
+            else:
+                log.error(f"[send_cr_approved_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_cr_approved_notification] Error: {e}")
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_boq_buyer_assignment_notification(self, buyer_email, buyer_name, se_name,
+                                                boq_name, project_name):
+        """
+        Send email to Buyer when Site Engineer assigns a BOQ for purchasing.
+
+        Args:
+            buyer_email: Buyer's email address
+            buyer_name: Buyer's full name
+            se_name: Site Engineer's name who assigned
+            boq_name: Name of the BOQ
+            project_name: Project name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"BOQ Assigned for Purchase - {escape(project_name)}"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>BOQ Assigned for Purchase</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{escape(buyer_name)}</strong>,</p>
+        <p><strong>{escape(se_name)}</strong> has assigned a BOQ to you for procurement.</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{escape(project_name)}</span></p>
+            <p><span class="label">BOQ:</span> <span class="value">{escape(boq_name)}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Action Required:</strong> Please log in to review the materials and proceed with purchasing.
+        </div>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{escape(se_name)}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(buyer_email, subject, email_html)
+            if success:
+                log.info(f"[send_boq_buyer_assignment_notification] Email sent to {buyer_email} for BOQ '{boq_name}'")
+            else:
+                log.error(f"[send_boq_buyer_assignment_notification] Failed to send email to {buyer_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_boq_buyer_assignment_notification] Error: {e}")
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
 

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronLeft, ChevronRight, FileText, Eye, ExternalLink } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, FileText, Eye, ExternalLink, Loader2 } from 'lucide-react';
 
 export interface EvidenceItem {
   url: string;
@@ -13,6 +13,79 @@ interface EvidenceLightboxProps {
   isOpen: boolean;
   onClose: () => void;
   initialIndex?: number;
+}
+
+/**
+ * Small hook that fetches a remote video URL as a Blob and returns an
+ * object-URL the <video> element can play immediately — even when the
+ * remote MP4 has its moov atom at the end of the file.
+ */
+function useBlobVideo(url: string, enabled: boolean) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState(false);
+  const prevUrl = useRef('');
+
+  useEffect(() => {
+    if (!enabled || !url) return;
+    if (url === prevUrl.current && blobUrl) return;
+
+    prevUrl.current = url;
+    let cancelled = false;
+    let objectUrl = '';
+
+    setLoading(true);
+    setProgress(0);
+    setError(false);
+    setBlobUrl(null);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url);
+    xhr.responseType = 'blob';
+
+    xhr.onprogress = (e) => {
+      if (e.lengthComputable && !cancelled) {
+        setProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      if (cancelled) return;
+      if (xhr.status >= 200 && xhr.status < 400) {
+        // Ensure blob has correct MIME type for video playback
+        const responseBlob = xhr.response as Blob;
+        const mimeType = responseBlob.type || 'video/mp4';
+        const typedBlob = mimeType.startsWith('video/')
+          ? responseBlob
+          : new Blob([responseBlob], { type: 'video/mp4' });
+        objectUrl = URL.createObjectURL(typedBlob);
+        setBlobUrl(objectUrl);
+      } else {
+        setError(true);
+      }
+      setLoading(false);
+    };
+
+    xhr.onerror = () => {
+      if (!cancelled) { setError(true); setLoading(false); }
+    };
+
+    xhr.send();
+
+    return () => {
+      cancelled = true;
+      xhr.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url, enabled]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { if (blobUrl) URL.revokeObjectURL(blobUrl); };
+  }, [blobUrl]);
+
+  return { blobUrl, loading, progress, error };
 }
 
 const EvidenceLightbox: React.FC<EvidenceLightboxProps> = ({
@@ -35,7 +108,6 @@ const EvidenceLightbox: React.FC<EvidenceLightboxProps> = ({
   const fileType = current?.file_type || '';
   const isVideo = fileType.startsWith('video') || /\.(mp4|mov|webm|avi|mkv)(\?|$)/i.test(fileName) || /\.(mp4|mov|webm|avi|mkv)(\?|$)/i.test(fileUrl);
   const isPdf = fileType === 'application/pdf' || /\.pdf(\?|$)/i.test(fileName) || /\.pdf(\?|$)/i.test(fileUrl);
-  // Default to image if not video or PDF (most inspection evidence is photos)
   const isImage = !isVideo && !isPdf;
 
   return (
@@ -59,7 +131,7 @@ const EvidenceLightbox: React.FC<EvidenceLightboxProps> = ({
             <X className="w-6 h-6" />
           </button>
 
-          <div className="flex items-center justify-center bg-black rounded-xl overflow-hidden">
+          <div className="flex items-center justify-center bg-black rounded-xl overflow-hidden relative" style={{ minHeight: '240px' }}>
             {isImage && (
               <img
                 src={fileUrl}
@@ -68,11 +140,7 @@ const EvidenceLightbox: React.FC<EvidenceLightboxProps> = ({
               />
             )}
             {isVideo && (
-              <video
-                src={fileUrl}
-                controls
-                className="max-h-[80vh]"
-              />
+              <VideoPlayer url={fileUrl} />
             )}
             {isPdf && (
               <div className="p-12 text-center text-white">
@@ -122,6 +190,55 @@ const EvidenceLightbox: React.FC<EvidenceLightboxProps> = ({
         </motion.div>
       </div>
     </AnimatePresence>
+  );
+};
+
+/** Downloads the video as a blob then plays it — works for non-faststart MP4s */
+const VideoPlayer: React.FC<{ url: string }> = ({ url }) => {
+  const { blobUrl, loading, progress, error } = useBlobVideo(url, true);
+  const [playbackError, setPlaybackError] = useState(false);
+
+  if (error || playbackError) {
+    return (
+      <div className="p-12 text-center text-white">
+        <p className="text-red-400 mb-2">
+          {playbackError ? 'This video file is corrupted or uses an unsupported format' : 'Failed to load video'}
+        </p>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:text-blue-300 text-sm"
+        >
+          Try opening in new tab
+        </a>
+      </div>
+    );
+  }
+
+  if (loading || !blobUrl) {
+    return (
+      <div className="flex flex-col items-center justify-center p-16">
+        <Loader2 className="w-10 h-10 text-white animate-spin mb-3" />
+        <span className="text-white/70 text-sm">
+          Loading video{progress > 0 ? `... ${progress}%` : '...'}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <video
+      key={blobUrl}
+      src={blobUrl}
+      controls
+      autoPlay
+      muted
+      playsInline
+      className="max-h-[80vh] max-w-full"
+      style={{ minWidth: '320px' }}
+      onError={() => setPlaybackError(true)}
+    />
   );
 };
 

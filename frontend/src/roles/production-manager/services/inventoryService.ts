@@ -39,6 +39,7 @@ export interface InventoryTransaction {
   driver_name?: string;
   vehicle_number?: string;
   transport_fee?: number;
+  per_unit_transport_fee?: number;
   transport_notes?: string;
   delivery_batch_ref?: string;  // e.g., "DB-2026-001"
   created_at?: string;
@@ -641,6 +642,9 @@ class InventoryService {
       }
       if (transaction.transport_fee !== undefined && transaction.transport_fee !== null) {
         formData.append('transport_fee', transaction.transport_fee.toString());
+      }
+      if (transaction.per_unit_transport_fee !== undefined && transaction.per_unit_transport_fee !== null) {
+        formData.append('per_unit_transport_fee', transaction.per_unit_transport_fee.toString());
       }
       if (transaction.transport_notes) {
         formData.append('transport_notes', transaction.transport_notes);

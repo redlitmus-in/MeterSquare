@@ -109,6 +109,17 @@ def _enrich_vrr_rejected_value(rr, data):
                 data['total_rejected_value'] = round(total, 2)
 
 
+def _detect_file_type(ext):
+    """Return MIME type from file extension."""
+    type_map = {
+        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+        'webp': 'image/webp', 'gif': 'image/gif', 'pdf': 'application/pdf',
+        'mp4': 'video/mp4', 'mov': 'video/quicktime', 'webm': 'video/webm',
+        'avi': 'video/x-msvideo', 'mkv': 'video/x-matroska',
+    }
+    return type_map.get(ext, 'image/jpeg')
+
+
 def _heal_evidence_from_storage(cr_id, expected_count, inspection_created_at):
     """
     Fallback: list files from Supabase Storage under inspections/{cr_id}/
@@ -148,10 +159,12 @@ def _heal_evidence_from_storage(cr_id, expected_count, inspection_created_at):
         selected = candidate[-expected_count:] if len(candidate) >= expected_count else candidate
 
         base = f'{supabase_url}/storage/v1/object/public/{BUCKET}'
-        return [
-            {'url': f'{base}/inspections/{cr_id}/{name}', 'file_name': name, 'file_type': 'image'}
-            for _, name in selected
-        ]
+        results = []
+        for _, name in selected:
+            ext = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+            ft = _detect_file_type(ext)
+            results.append({'url': f'{base}/inspections/{cr_id}/{name}', 'file_name': name, 'file_type': ft})
+        return results
     except Exception as e:
         log.warning(f'Failed to heal evidence from storage for CR {cr_id}: {e}')
         return []
@@ -169,7 +182,8 @@ def _normalize_evidence(raw, cr_id=None, inspection_created_at=None):
     for item in (raw or []):
         if isinstance(item, str) and item:
             file_name = item.split('/')[-1].split('?')[0]
-            valid.append({'url': item, 'file_name': file_name, 'file_type': 'image'})
+            ext = file_name.rsplit('.', 1)[-1].lower() if '.' in file_name else ''
+            valid.append({'url': item, 'file_name': file_name, 'file_type': _detect_file_type(ext)})
         elif isinstance(item, dict) and item.get('url'):
             valid.append(item)
         else:
@@ -1199,16 +1213,47 @@ def upload_inspection_evidence():
         if ext not in allowed_extensions:
             return jsonify({"success": False, "error": f"File type '{ext}' not allowed. Allowed: {', '.join(allowed_extensions)}"}), 400
 
+        # File size limits per type: video 50MB, PDF 10MB, image 2MB
+        if ext in ('mp4', 'mov', 'webm'):
+            max_size = 50 * 1024 * 1024
+        elif ext == 'pdf':
+            max_size = 10 * 1024 * 1024
+        else:
+            max_size = 2 * 1024 * 1024
+        max_size_label = max_size // (1024 * 1024)
+
         # Early size check via Content-Length header (avoids reading huge files into memory)
-        max_size = 200 * 1024 * 1024 if ext in ('mp4', 'mov', 'webm') else 50 * 1024 * 1024
         content_length = request.content_length
         if content_length and content_length > max_size:
-            return jsonify({"success": False, "error": f"File too large. Max: {max_size // (1024*1024)}MB"}), 400
+            return jsonify({"success": False, "error": f"File too large. Max: {max_size_label}MB for {ext} files"}), 400
 
         # Read and validate actual file size
         file_content = file.read()
         if len(file_content) > max_size:
-            return jsonify({"success": False, "error": f"File too large. Max: {max_size // (1024*1024)}MB"}), 400
+            return jsonify({"success": False, "error": f"File too large. Max: {max_size_label}MB for {ext} files"}), 400
+
+        # For MP4/MOV: move moov atom to front (faststart) so browsers can stream immediately
+        if ext in ('mp4', 'mov'):
+            import tempfile
+            import subprocess
+            try:
+                with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as tmp_in:
+                    tmp_in.write(file_content)
+                    tmp_in_path = tmp_in.name
+                tmp_out_path = tmp_in_path + f'_faststart.{ext}'
+                result = subprocess.run(
+                    ['ffmpeg', '-i', tmp_in_path, '-c', 'copy', '-movflags', '+faststart', tmp_out_path, '-y'],
+                    capture_output=True, timeout=30
+                )
+                if result.returncode == 0:
+                    with open(tmp_out_path, 'rb') as f:
+                        file_content = f.read()
+                    log.info(f'Faststart applied to {ext} file for CR {cr_id}')
+                os.unlink(tmp_in_path)
+                if os.path.exists(tmp_out_path):
+                    os.unlink(tmp_out_path)
+            except Exception as e:
+                log.warning(f'Faststart failed, uploading original: {e}')
 
         # Generate unique path
         timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
@@ -1233,14 +1278,12 @@ def upload_inspection_evidence():
 
         public_url = f"{supabase_url}/storage/v1/object/public/{BUCKET}/{path}"
 
-        file_type = 'video' if ext in ('mp4', 'mov', 'webm') else 'image'
-
         return jsonify({
             "success": True,
             "data": {
                 "url": public_url,
                 "file_name": file.filename,
-                "file_type": f"{file_type}/{ext}",
+                "file_type": content_type,
                 "uploaded_at": datetime.utcnow().isoformat()
             }
         }), 200

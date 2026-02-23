@@ -22,6 +22,7 @@ import {
   Receipt,
 } from 'lucide-react';
 import { vendorInspectionService, type SubmitInspectionData, type StockInDetails } from '@/services/vendorInspectionService';
+import { compressVideo } from '@/utils/videoCompressor';
 import { showError, showWarning, showSuccess } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
@@ -102,8 +103,9 @@ const REJECTION_CATEGORIES = [
   'Other',
 ] as const;
 
-const MAX_IMAGE_SIZE_MB = 50;
-const MAX_VIDEO_SIZE_MB = 200;
+const MAX_IMAGE_SIZE_MB = 2;
+const MAX_PDF_SIZE_MB = 10;
+const MAX_VIDEO_SIZE_MB = 50;
 const MAX_FILE_SIZE_MB = MAX_IMAGE_SIZE_MB;
 const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/webm', 'application/pdf'];
 
@@ -316,7 +318,9 @@ const InspectionForm: React.FC<InspectionFormProps> = ({
         showWarning(`"${file.name}" is not a supported file type`);
         return;
       }
-      const maxSizeMB = file.type.startsWith('video/') ? MAX_VIDEO_SIZE_MB : MAX_IMAGE_SIZE_MB;
+      const isVideo = file.type.startsWith('video/');
+      const isPdf = file.type === 'application/pdf';
+      const maxSizeMB = isVideo ? MAX_VIDEO_SIZE_MB : isPdf ? MAX_PDF_SIZE_MB : MAX_IMAGE_SIZE_MB;
       if (file.size > maxSizeMB * 1024 * 1024) {
         showWarning(`"${file.name}" exceeds the ${maxSizeMB}MB size limit`);
         return;
@@ -362,7 +366,14 @@ const InspectionForm: React.FC<InspectionFormProps> = ({
       );
 
       try {
-        const response = await vendorInspectionService.uploadInspectionEvidence(uf.file, details!.cr_id);
+        // Compress large videos before uploading
+        let fileToUpload = uf.file;
+        if (uf.file.type.startsWith('video/') && uf.file.size > 10 * 1024 * 1024) {
+          try {
+            fileToUpload = await compressVideo(uf.file, { maxSizeMB: 50 });
+          } catch { /* upload original if compression fails */ }
+        }
+        const response = await vendorInspectionService.uploadInspectionEvidence(fileToUpload, details!.cr_id);
         const uploadResult = response as any;
         const url = uploadResult?.data?.url ?? uploadResult?.url ?? '';
         urls.push(url);
@@ -872,7 +883,7 @@ const InspectionForm: React.FC<InspectionFormProps> = ({
                           Upload photos, videos or documents
                         </p>
                         <p className="text-[10px] text-gray-400 mt-0.5">
-                          JPG, PNG, WebP, GIF, PDF · MP4, MOV, WebM · Max {MAX_FILE_SIZE_MB}MB images / {MAX_VIDEO_SIZE_MB}MB videos
+                          Images: JPG, PNG, WebP, GIF (max {MAX_IMAGE_SIZE_MB}MB) · PDF (max {MAX_PDF_SIZE_MB}MB) · Videos: MP4, MOV, WebM (max {MAX_VIDEO_SIZE_MB}MB)
                         </p>
                       </div>
 

@@ -36,7 +36,8 @@ import {
   ClipboardDocumentListIcon,
   BanknotesIcon,
   DocumentChartBarIcon,
-  ShieldCheckIcon
+  ShieldCheckIcon,
+  Cog6ToothIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -57,7 +58,8 @@ import {
   CalendarDaysIcon as CalendarDaysSolid,
   ClipboardDocumentListIcon as ClipboardDocumentListSolid,
   BanknotesIcon as BanknotesSolid,
-  ShieldCheckIcon as ShieldCheckSolid
+  ShieldCheckIcon as ShieldCheckSolid,
+  Cog6ToothIcon as Cog6ToothSolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
@@ -788,7 +790,23 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         href: buildPath('/signature-upload'),
         icon: PencilIcon,
         iconSolid: PencilSolid,
-        color: 'text-indigo-600'
+        color: 'text-indigo-600',
+        children: [
+          {
+            name: 'Signatures',
+            href: buildPath('/signature-upload'),
+            icon: PencilIcon,
+            iconSolid: PencilSolid,
+            color: 'text-indigo-500'
+          },
+          {
+            name: 'CC & Email Settings',
+            href: buildPath('/settings'),
+            icon: Cog6ToothIcon,
+            iconSolid: Cog6ToothSolid,
+            color: 'text-gray-500'
+          }
+        ]
       },
       {
         name: 'Payroll Processing',

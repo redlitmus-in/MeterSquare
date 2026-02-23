@@ -26,6 +26,7 @@ from routes.labour_routes import labour_routes
 from routes.raw_materials_routes import raw_materials_routes
 from routes.catalog_items_routes import catalog_items_routes
 from routes.vendor_inspection_routes import vendor_inspection_routes
+from routes.email_cc_routes import email_cc_routes
 
 # Import and register the routes from the route blueprints
 
@@ -58,3 +59,4 @@ def initialize_routes(app):
     app.register_blueprint(raw_materials_routes)
     app.register_blueprint(catalog_items_routes)
     app.register_blueprint(vendor_inspection_routes)
+    app.register_blueprint(email_cc_routes)

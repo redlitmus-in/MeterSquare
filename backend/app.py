@@ -133,15 +133,27 @@ def create_app():
         if environment == "production":
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
 
-        # Content Security Policy
-        response.headers['Content-Security-Policy'] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            "font-src 'self' data:; "
-            "connect-src 'self' https://msq.kol.tel wss://msq.kol.tel"
-        )
+        # Content Security Policy — environment-based (mirrors CORS config pattern)
+        if environment == "production":
+            response.headers['Content-Security-Policy'] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: https:; "
+                "font-src 'self' data:; "
+                "media-src 'self' https: blob:; "
+                "connect-src 'self' https://msq.kol.tel wss://msq.kol.tel https://msq.ath.cx wss://msq.ath.cx https://wgddnoiakkoskbbkbygw.supabase.co"
+            )
+        else:
+            response.headers['Content-Security-Policy'] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: https:; "
+                "font-src 'self' data:; "
+                "media-src 'self' https: blob:; "
+                "connect-src 'self' http://localhost:5173 ws://localhost:5173 http://127.0.0.1:5173 ws://127.0.0.1:5173 https://nbzpvqoeolqejmplmgus.supabase.co"
+            )
 
         # Referrer Policy
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'

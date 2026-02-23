@@ -10,6 +10,7 @@ import {
   ExternalLink,
   ChevronRight,
   Info,
+  Truck,
 } from 'lucide-react';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { inventoryService, InventoryMaterial, CustomUnit } from '../services/inventoryService';
@@ -110,6 +111,8 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
     unit_price: number;
     inventory_material_id: number;
     matched: boolean; // true = found in catalog
+    notes: string;
+    saved: boolean;
   }>>([]);
   const [batchDriver, setBatchDriver] = useState('');
   const [batchVehicle, setBatchVehicle] = useState('');
@@ -118,6 +121,9 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
   const [batchDeliveryNote, setBatchDeliveryNote] = useState<File | null>(null);
   const [savingBatch, setSavingBatch] = useState(false);
   const [batchConfirmModal, setBatchConfirmModal] = useState(false);
+  const [batchNotes, setBatchNotes] = useState('');
+  const [savingProgress, setSavingProgress] = useState<{current: number; total: number} | null>(null);
+  const [expandedNotes, setExpandedNotes] = useState<Set<number>>(new Set());
 
   // Initialise batch rows when prefillData + allMaterials are ready
   useEffect(() => {
@@ -138,6 +144,8 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
         unit_price: mat.unit_price ?? match?.unit_price ?? 0,
         inventory_material_id: match?.inventory_material_id ?? 0,
         matched: !!match,
+        notes: '',
+        saved: false,
       };
     }));
   }, [prefillData, allMaterials]);
@@ -161,48 +169,101 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
     setBatchConfirmModal(true);
   };
 
+  // Persist batch ref across retries so partial-failure retries use the same ref
+  const batchRefRef = useRef<string>('');
+
   const handleConfirmBatch = async () => {
     setBatchConfirmModal(false);
     setSavingBatch(true);
-    const matched = batchRows.filter((r) => r.matched);
+    // CRITICAL: Skip rows already saved in a previous partial attempt
+    const matched = batchRows.filter((r) => r.matched && !r.saved);
+    if (matched.length === 0) {
+      showSuccess('All materials already saved!');
+      onSaveComplete();
+      setSavingBatch(false);
+      return;
+    }
+    // Count all matched (including saved) for transport fee split
+    const allMatched = batchRows.filter((r) => r.matched);
+    const perMaterialFee = allMatched.length > 0 ? Math.round((batchTransportFee / allMatched.length) * 100) / 100 : 0;
+    // Handle rounding remainder so total transport fee is exact
+    const roundingRemainder = allMatched.length > 0
+      ? Math.round((batchTransportFee - perMaterialFee * allMatched.length) * 100) / 100
+      : 0;
     try {
-      // Generate a batch reference
-      const existingBatchRefs = purchaseTransactions
-        .map((t) => t.delivery_batch_ref)
-        .filter((r): r is string => !!r && r.startsWith('MSQ-IN-'));
-      const maxSeq = existingBatchRefs.reduce((max, ref) => {
-        const m = ref.match(/MSQ-IN-(\d+)/);
-        return m ? Math.max(max, parseInt(m[1])) : max;
-      }, 0);
-      const batchRef = `MSQ-IN-${String(maxSeq + 1).padStart(2, '0')}`;
+      // Generate a batch reference (only on first attempt, reuse on retry)
+      if (!batchRefRef.current) {
+        const existingBatchRefs = purchaseTransactions
+          .map((t) => t.delivery_batch_ref)
+          .filter((r): r is string => !!r && r.startsWith('MSQ-IN-'));
+        const maxSeq = existingBatchRefs.reduce((max, ref) => {
+          const m = ref.match(/MSQ-IN-(\d+)/);
+          return m ? Math.max(max, parseInt(m[1])) : max;
+        }, 0);
+        batchRefRef.current = `MSQ-IN-${String(maxSeq + 1).padStart(2, '0')}`;
+      }
+      const batchRef = batchRefRef.current;
+      const hasPreviouslySaved = batchRows.some(r => r.saved);
 
-      // Save only matched rows — first one carries the delivery note file
+      // Save only unsaved matched rows — first one carries the delivery note file
+      const savedIndices: number[] = [];
+
       for (let i = 0; i < matched.length; i++) {
         const row = matched[i];
-        const txn: PurchaseTransaction = {
-          inventory_material_id: row.inventory_material_id,
-          transaction_type: 'PURCHASE',
-          quantity: row.quantity,
-          unit_price: row.unit_price,
-          total_amount: row.quantity * row.unit_price,
-          driver_name: batchDriver,
-          vehicle_number: batchVehicle,
-          reference_number: batchReference,
-          per_unit_transport_fee: batchTransportFee,
-          transport_fee: batchTransportFee * row.quantity,
-          delivery_batch_ref: batchRef,
-        };
-        // Only first item uploads the file; subsequent ones send batchRef so backend links the note
-        await inventoryService.createTransactionWithFile(txn, i === 0 ? batchDeliveryNote : null);
+        const batchRowIndex = batchRows.findIndex(
+          (r) => r.inventory_material_id === row.inventory_material_id && r.material_name === row.material_name
+        );
+        // Assign rounding remainder to the last unsaved material
+        const isLastUnsaved = i === matched.length - 1;
+        const thisFee = isLastUnsaved ? perMaterialFee + roundingRemainder : perMaterialFee;
+
+        setSavingProgress({ current: i + 1, total: matched.length });
+        try {
+          const txn: PurchaseTransaction = {
+            inventory_material_id: row.inventory_material_id,
+            transaction_type: 'PURCHASE',
+            quantity: row.quantity,
+            unit_price: row.unit_price,
+            total_amount: row.quantity * row.unit_price,
+            driver_name: batchDriver,
+            vehicle_number: batchVehicle,
+            reference_number: batchReference,
+            per_unit_transport_fee: thisFee > 0 && row.quantity > 0 ? thisFee / row.quantity : 0,
+            transport_fee: thisFee,
+            notes: row.notes || batchNotes,
+            delivery_batch_ref: batchRef,
+          };
+          // First unsaved item uploads file; subsequent ones send batchRef so backend links the note
+          const isFirstUpload = i === 0 && !hasPreviouslySaved;
+          await inventoryService.createTransactionWithFile(txn, isFirstUpload ? batchDeliveryNote : null);
+          if (batchRowIndex >= 0) savedIndices.push(batchRowIndex);
+        } catch (rowErr) {
+          console.error(`Failed to save material "${row.material_name}":`, rowErr);
+          // Batch-update saved state for all rows saved so far in this loop
+          if (savedIndices.length > 0) {
+            const savedSet = new Set(savedIndices);
+            setBatchRows(prev => prev.map((r, idx) => savedSet.has(idx) ? { ...r, saved: true } : r));
+          }
+          showError(`Failed to save "${row.material_name}". Please retry the remaining materials.`);
+          return; // Stop processing — keep modal open for retry
+        }
       }
 
-      showSuccess(`Stock In recorded for ${matched.length} material${matched.length > 1 ? 's' : ''}!`);
+      // Batch-update all saved rows at once (single re-render)
+      if (savedIndices.length > 0) {
+        const savedSet = new Set(savedIndices);
+        setBatchRows(prev => prev.map((r, idx) => savedSet.has(idx) ? { ...r, saved: true } : r));
+      }
+
+      showSuccess(`Stock In recorded for ${allMatched.length} material${allMatched.length > 1 ? 's' : ''}!`);
+      batchRefRef.current = ''; // Reset for next batch
       onSaveComplete();
     } catch (err) {
       console.error('Batch stock-in error:', err);
       showError('Failed to save batch stock-in. Please try again.');
     } finally {
       setSavingBatch(false);
+      setSavingProgress(null);
     }
   };
 
@@ -243,6 +304,14 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
 
   // New Material Modal
   const [showNewMaterialModal, setShowNewMaterialModal] = useState(false);
+  // Track which unmatched batch row opened the modal (index into batchRows where matched===false)
+  const [pendingUnmatchedMaterial, setPendingUnmatchedMaterial] = useState<{
+    batchIndex: number;
+    material_name: string;
+    brand?: string;
+    size?: string;
+    unit?: string;
+  } | null>(null);
 
   // Confirmation modal
   const [confirmModal, setConfirmModal] = useState({
@@ -395,6 +464,39 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
     setShowMaterialDropdown(false);
   };
 
+  // Open NewMaterialModal for an unmatched batch row
+  const handleAddUnmatchedMaterial = (batchIndex: number) => {
+    const row = batchRows[batchIndex];
+    setPendingUnmatchedMaterial({
+      batchIndex,
+      material_name: row.material_name,
+      brand: prefillData?.materials[batchIndex]?.brand,
+      size: prefillData?.materials[batchIndex]?.size,
+      unit: row.unit,
+    });
+    setShowNewMaterialModal(true);
+  };
+
+  // After creating a material from the batch unmatched row, move it to matched
+  const handleBatchMaterialCreated = (material: InventoryMaterial) => {
+    onMaterialCreated(material);
+    if (pendingUnmatchedMaterial) {
+      const idx = pendingUnmatchedMaterial.batchIndex;
+      setBatchRows(prev => prev.map((row, i) =>
+        i === idx
+          ? {
+              ...row,
+              matched: true,
+              inventory_material_id: material.inventory_material_id ?? 0,
+              unit: material.unit || row.unit,
+            }
+          : row
+      ));
+      setPendingUnmatchedMaterial(null);
+    }
+    setShowNewMaterialModal(false);
+  };
+
   const handleQuantityChange = (quantity: number) => {
     const total = quantity * purchaseFormData.unit_price;
     setPurchaseFormData({ ...purchaseFormData, quantity, total_amount: total });
@@ -509,20 +611,42 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
   };
 
   const totalPrefill = prefillData?.materials.length ?? 0;
-  // Always use the regular single-material form — no batch mode
-  const isPrefillMode = false;
+  const isPrefillMode = !!(prefillData && prefillData.materials.length > 0);
 
-  // ── BATCH MODE (disabled — kept for reference) ──
+  // O(1) lookup map for material info (avoids O(N*M) .find() in render loop)
+  const materialMap = useMemo(() => {
+    const map = new Map<number, InventoryMaterial>();
+    allMaterials.forEach(m => {
+      if (m.inventory_material_id != null) map.set(m.inventory_material_id, m);
+    });
+    return map;
+  }, [allMaterials]);
+
+  // Derived batch values — memoized to avoid recalculation on every keystroke
+  const { matchedRows, unmatchedRows, batchTotal, allUnmatched, perMaterialTransport } = useMemo(() => {
+    const matched = batchRows.filter(r => r.matched);
+    const unmatched = batchRows
+      .map((r, i) => ({ ...r, originalIndex: i }))
+      .filter(r => !r.matched);
+    const total = matched.reduce((sum, r) => sum + r.quantity * r.unit_price, 0);
+    const perTransport = matched.length > 0
+      ? Math.round((batchTransportFee / matched.length) * 100) / 100 : 0;
+    return {
+      matchedRows: matched,
+      unmatchedRows: unmatched,
+      batchTotal: total,
+      allUnmatched: matched.length === 0,
+      perMaterialTransport: perTransport,
+    };
+  }, [batchRows, batchTransportFee]);
+
+  // ── BATCH MODE (multi-material single-page flow) ──
   if (isPrefillMode) {
-    const matchedRows = batchRows.filter(r => r.matched);
-    const unmatchedRows = batchRows.filter(r => !r.matched);
-    const batchTotal = matchedRows.reduce((sum, r) => sum + r.quantity * r.unit_price, 0);
-    const allUnmatched = matchedRows.length === 0;
 
     return (
       <>
         <div className="p-6 space-y-5">
-          {/* Header info */}
+          {/* Info banner */}
           <div className="flex items-start gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
             <Info className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
             <div>
@@ -535,163 +659,285 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
             </div>
           </div>
 
-          {/* Materials NOT in catalog — shown as a warning, excluded from stock-in */}
+          {/* Unmatched materials warning */}
           {unmatchedRows.length > 0 && (
             <div className="border border-amber-200 rounded-xl overflow-hidden">
               <div className="bg-amber-50 px-4 py-2.5 border-b border-amber-200 flex items-center gap-2">
                 <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Not in Inventory Catalog</span>
-                <span className="ml-auto text-xs text-amber-600">Add these via "Add Material" first, then re-open stock-in</span>
+                <span className="ml-auto text-xs text-amber-600">Add to catalog to include in stock-in</span>
               </div>
               <div className="divide-y divide-amber-100">
-                {unmatchedRows.map((row, i) => (
-                  <div key={i} className="px-4 py-3 flex items-center justify-between bg-white">
+                {unmatchedRows.map((row) => (
+                  <div key={row.originalIndex} className="px-4 py-3 flex items-center justify-between bg-white">
                     <div>
                       <p className="text-sm font-medium text-gray-700">{row.material_name}</p>
                       <p className="text-xs text-gray-400">{row.unit} · {row.quantity} accepted</p>
                     </div>
-                    <span className="text-xs text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5">Not in catalog</span>
+                    <button
+                      type="button"
+                      onClick={() => handleAddUnmatchedMaterial(row.originalIndex)}
+                      className="flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5 hover:bg-green-100 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Material
+                    </button>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Materials ready to stock-in */}
-          {matchedRows.length > 0 && (
-            <div className="border border-gray-200 rounded-xl overflow-hidden">
-              {unmatchedRows.length > 0 && (
-                <div className="bg-green-50 px-4 py-2 border-b border-gray-200">
-                  <span className="text-xs font-semibold text-green-800 uppercase tracking-wide">Ready for Stock-In</span>
-                </div>
-              )}
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-600 uppercase">Material</th>
-                    <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-600 uppercase w-28">Qty</th>
-                    <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-600 uppercase w-32">Unit Price (AED)</th>
-                    <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-600 uppercase w-28">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {batchRows.map((row, i) => !row.matched ? null : (
-                    <tr key={i} className="bg-white">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-gray-900">{row.material_name}</p>
-                        <p className="text-xs text-gray-400">{row.unit}</p>
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <input
-                          type="number" min={0.01} step="any"
-                          value={row.quantity || ''}
-                          onChange={(e) => setBatchRows(prev => prev.map((r, idx) =>
-                            idx !== i ? r : { ...r, quantity: parseFloat(e.target.value) || 0 }
-                          ))}
-                          className="w-24 text-center border border-gray-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-green-500"
-                        />
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <input
-                          type="number" min={0} step="0.01"
-                          value={row.unit_price || ''}
-                          onChange={(e) => setBatchRows(prev => prev.map((r, idx) =>
-                            idx !== i ? r : { ...r, unit_price: parseFloat(e.target.value) || 0 }
-                          ))}
-                          className="w-28 text-center border border-gray-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-green-500"
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-right text-sm font-medium text-gray-800">
-                        AED {(row.quantity * row.unit_price).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-gray-50 border-t border-gray-200">
-                  <tr>
-                    <td colSpan={3} className="px-4 py-2.5 text-sm font-semibold text-gray-700 text-right">Grand Total</td>
-                    <td className="px-4 py-2.5 text-right font-bold text-gray-900">AED {batchTotal.toFixed(2)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
-
-          {/* Delivery details + upload — only shown when there are matched materials to save */}
+          {/* All unmatched — show hint */}
           {allUnmatched && (
             <div className="text-center py-4 text-sm text-gray-500">
-              Add the missing materials to the inventory catalog first, then re-open stock-in from the inspection.
+              Add each material to the inventory catalog using the buttons above, then submit the stock-in.
             </div>
           )}
 
-          {/* Shared delivery details */}
-          {!allUnmatched && <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1 font-medium">Driver Name</label>
-              <input type="text" value={batchDriver} onChange={(e) => setBatchDriver(e.target.value)}
-                placeholder="Driver name" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1 font-medium">Vehicle Number</label>
-              <input type="text" value={batchVehicle} onChange={(e) => setBatchVehicle(e.target.value)}
-                placeholder="Vehicle number" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1 font-medium">Reference / PO Number</label>
-              <input type="text" value={batchReference} onChange={(e) => setBatchReference(e.target.value)}
-                placeholder="PO / invoice ref" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500" />
-            </div>
-          </div>}
+          {/* Shared Delivery Details card — above materials */}
+          {!allUnmatched && (
+            <div className="border border-gray-200 rounded-xl p-4 space-y-3 bg-gray-50/50">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Truck className="w-4 h-4 text-blue-600" />
+                Delivery Details
+              </h3>
 
-          {!allUnmatched && <div>
-            <label className="block text-xs text-gray-500 mb-1 font-medium">Transport Fee per Unit (AED)</label>
-            <input type="number" min={0} step="0.01" value={batchTransportFee || ''}
-              onChange={(e) => setBatchTransportFee(parseFloat(e.target.value) || 0)}
-              placeholder="0.00" className="w-40 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500" />
-          </div>}
-
-          {/* Delivery note upload */}
-          {!allUnmatched && <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              <FileText className="w-4 h-4 inline mr-1" />
-              Delivery Note from Vendor <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  if (file.size > 10 * 1024 * 1024) { alert('Max 10MB'); e.target.value = ''; return; }
-                  setBatchDeliveryNote(file);
-                }
-              }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
-            />
-            {batchDeliveryNote && (
-              <div className="mt-2 flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-3">
-                <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-green-600" />
-                  <span className="text-sm text-green-700 font-medium">{batchDeliveryNote.name}</span>
+              {/* Row 1: Reference, Driver, Vehicle */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1 font-medium">Reference / PO Number</label>
+                  <input type="text" value={batchReference} onChange={(e) => setBatchReference(e.target.value)}
+                    placeholder="PO / invoice ref" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500" />
                 </div>
-                <button type="button" onClick={() => setBatchDeliveryNote(null)} className="text-red-500 hover:text-red-700">
-                  <X className="w-4 h-4" />
-                </button>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1 font-medium">Driver Name</label>
+                  <input type="text" value={batchDriver} onChange={(e) => setBatchDriver(e.target.value)}
+                    placeholder="Driver name" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500" />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1 font-medium">Vehicle Number</label>
+                  <input type="text" value={batchVehicle} onChange={(e) => setBatchVehicle(e.target.value)}
+                    placeholder="Vehicle number" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500" />
+                </div>
               </div>
-            )}
-          </div>}
+
+              {/* Row 2: Transport Fee + General Notes */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1 font-medium">Transport Fee Total (AED)</label>
+                  <input type="number" min={0} step="0.01" value={batchTransportFee || ''}
+                    onChange={(e) => setBatchTransportFee(parseFloat(e.target.value) || 0)}
+                    placeholder="0.00" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs text-gray-500 mb-1 font-medium">General Notes</label>
+                  <textarea value={batchNotes} onChange={(e) => setBatchNotes(e.target.value)}
+                    placeholder="Optional notes for all materials..."
+                    rows={1}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 resize-none" />
+                </div>
+              </div>
+
+              {/* Row 3: Delivery Note upload */}
+              <div>
+                <label className="block text-xs text-gray-500 mb-1 font-medium">
+                  <FileText className="w-3.5 h-3.5 inline mr-1" />
+                  Delivery Note from Vendor <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const allowedTypes = [
+                        'application/pdf', 'image/jpeg', 'image/png',
+                        'application/msword',
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                      ];
+                      if (!allowedTypes.includes(file.type)) {
+                        showError('Only PDF, JPG, PNG, DOC, DOCX files are allowed.');
+                        e.target.value = '';
+                        return;
+                      }
+                      if (file.size > 10 * 1024 * 1024) { showError('Max file size is 10MB.'); e.target.value = ''; return; }
+                      setBatchDeliveryNote(file);
+                    }
+                  }}
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+                />
+                {batchDeliveryNote && (
+                  <div className="mt-2 flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-2.5">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-green-600" />
+                      <span className="text-sm text-green-700 font-medium">{batchDeliveryNote.name}</span>
+                    </div>
+                    <button type="button" onClick={() => setBatchDeliveryNote(null)} className="text-red-500 hover:text-red-700">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Materials section — card-based layout */}
+          {matchedRows.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <h3 className="text-sm font-semibold text-gray-900">Materials to Record</h3>
+                <span className="text-xs font-medium text-green-700 bg-green-100 rounded-full px-2 py-0.5">
+                  {matchedRows.length}
+                </span>
+              </div>
+
+              <div className="max-h-[40vh] overflow-y-auto space-y-3 pr-1" role="list" aria-label="Materials to record">
+                {batchRows.map((row, i) => {
+                  if (!row.matched) return null;
+                  const matInfo = materialMap.get(row.inventory_material_id);
+                  const rowTotal = row.quantity * row.unit_price;
+                  const isNotesExpanded = expandedNotes.has(i);
+
+                  return (
+                    <div key={`${row.inventory_material_id}-${row.material_name}`} role="listitem" className="border border-gray-200 rounded-xl overflow-hidden relative">
+                      {/* Saved overlay */}
+                      {row.saved && (
+                        <div className="absolute inset-0 bg-green-50/80 z-10 flex items-center justify-center rounded-xl" role="status" aria-live="polite">
+                          <div className="flex items-center gap-2 text-green-700">
+                            <CheckCircle className="w-5 h-5" />
+                            <span className="text-sm font-semibold">Saved</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Card header */}
+                      <div className="bg-gray-50 px-4 py-2.5 flex items-center justify-between border-b border-gray-200">
+                        <div className="flex items-center gap-2">
+                          <Package className="w-4 h-4 text-gray-500" />
+                          <span className="text-sm font-medium text-gray-900">{row.material_name}</span>
+                          {matInfo?.material_code && (
+                            <span className="text-xs font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                              {matInfo.material_code}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-medium text-gray-500 bg-white border border-gray-200 rounded-full px-2 py-0.5">
+                          {row.unit}
+                        </span>
+                      </div>
+
+                      {/* Card body */}
+                      <div className="px-4 py-3 space-y-2">
+                        {/* Info row */}
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <span>Stock: {matInfo?.current_stock ?? 0} {row.unit}</span>
+                          <span>Ref Price: {matInfo?.unit_price && matInfo.unit_price > 0 ? `AED ${matInfo.unit_price.toFixed(2)}` : 'N/A'}</span>
+                        </div>
+
+                        {/* Input row */}
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1">
+                            <label className="block text-xs text-gray-500 mb-1">Qty Received</label>
+                            <input
+                              type="number" min={0.01} step="any"
+                              value={row.quantity || ''}
+                              onChange={(e) => setBatchRows(prev => prev.map((r, idx) =>
+                                idx !== i ? r : { ...r, quantity: parseFloat(e.target.value) || 0 }
+                              ))}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-green-500"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <label className="block text-xs text-gray-500 mb-1">Unit Price AED</label>
+                            <input
+                              type="number" min={0} step="0.01"
+                              value={row.unit_price || ''}
+                              onChange={(e) => setBatchRows(prev => prev.map((r, idx) =>
+                                idx !== i ? r : { ...r, unit_price: parseFloat(e.target.value) || 0 }
+                              ))}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-green-500"
+                            />
+                          </div>
+                          <div className="w-28 text-right">
+                            <label className="block text-xs text-gray-500 mb-1">Total</label>
+                            <p className="text-sm font-bold text-gray-900 py-1.5">
+                              AED {rowTotal.toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Expandable notes */}
+                        <div>
+                          <button
+                            type="button"
+                            aria-expanded={isNotesExpanded}
+                            onClick={() => setExpandedNotes(prev => {
+                              const next = new Set(prev);
+                              if (next.has(i)) next.delete(i);
+                              else next.add(i);
+                              return next;
+                            })}
+                            className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
+                          >
+                            <ChevronRight className={`w-3 h-3 transition-transform ${isNotesExpanded ? 'rotate-90' : ''}`} />
+                            Add note
+                          </button>
+                          {isNotesExpanded && (
+                            <input
+                              type="text"
+                              value={row.notes}
+                              onChange={(e) => setBatchRows(prev => prev.map((r, idx) =>
+                                idx !== i ? r : { ...r, notes: e.target.value }
+                              ))}
+                              placeholder="Note for this material..."
+                              className="mt-1.5 w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-green-500"
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Summary bar */}
+          {matchedRows.length > 0 && (
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl px-4 py-3 flex items-center justify-between">
+              <span className="text-sm font-medium text-green-800">
+                {matchedRows.length} material{matchedRows.length !== 1 ? 's' : ''} ready
+              </span>
+              <span className="text-sm font-bold text-green-900">
+                Grand Total: AED {batchTotal.toFixed(2)}
+              </span>
+              {batchTransportFee > 0 && (
+                <span className="text-xs text-green-700">
+                  Transport: AED {perMaterialTransport.toFixed(2)} each
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
           <button onClick={onClose} disabled={savingBatch}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">
-            Close
+            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50">
+            Cancel
           </button>
           {!allUnmatched && (
             <button onClick={handleSaveBatch} disabled={savingBatch}
               className="flex items-center gap-2 px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50">
               {savingBatch ? (
-                <><ModernLoadingSpinners size="xxs" /><span>Saving...</span></>
+                <>
+                  <ModernLoadingSpinners size="xxs" />
+                  <span>
+                    {savingProgress
+                      ? `Saving... (${savingProgress.current} of ${savingProgress.total})`
+                      : 'Saving...'}
+                  </span>
+                </>
               ) : (
                 <><CheckCircle className="w-5 h-5" /><span>Confirm Stock In ({matchedRows.length} material{matchedRows.length !== 1 ? 's' : ''})</span></>
               )}
@@ -711,6 +957,21 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
             confirmColor="APPROVE"
           />
         )}
+
+        {/* New Material Modal (batch mode) */}
+        <NewMaterialModal
+          isOpen={showNewMaterialModal}
+          onClose={() => {
+            setShowNewMaterialModal(false);
+            setPendingUnmatchedMaterial(null);
+          }}
+          customUnits={customUnits}
+          onMaterialCreated={handleBatchMaterialCreated}
+          onCustomUnitCreated={onCustomUnitCreated}
+          defaultMaterialName={pendingUnmatchedMaterial?.material_name || ''}
+          defaultBrand={pendingUnmatchedMaterial?.brand || ''}
+          defaultSize={pendingUnmatchedMaterial?.size || ''}
+        />
       </>
     );
   }
@@ -1459,15 +1720,23 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
       {/* New Material Modal */}
       <NewMaterialModal
         isOpen={showNewMaterialModal}
-        onClose={() => setShowNewMaterialModal(false)}
-        customUnits={customUnits}
-        onMaterialCreated={(material) => {
-          onMaterialCreated(material);
-          handleSelectMaterialFromDropdown(material);
+        onClose={() => {
           setShowNewMaterialModal(false);
+          setPendingUnmatchedMaterial(null);
         }}
+        customUnits={customUnits}
+        onMaterialCreated={pendingUnmatchedMaterial
+          ? handleBatchMaterialCreated
+          : (material) => {
+              onMaterialCreated(material);
+              handleSelectMaterialFromDropdown(material);
+              setShowNewMaterialModal(false);
+            }
+        }
         onCustomUnitCreated={onCustomUnitCreated}
-        defaultMaterialName={materialSearchTerm}
+        defaultMaterialName={pendingUnmatchedMaterial?.material_name || materialSearchTerm}
+        defaultBrand={pendingUnmatchedMaterial?.brand || ''}
+        defaultSize={pendingUnmatchedMaterial?.size || ''}
       />
     </>
   );
