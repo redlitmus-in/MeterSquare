@@ -988,10 +988,11 @@ def get_all_change_requests():
         user_role = effective_role
 
         # Base query with eager loading to prevent N+1 queries
-        # ✅ PERFORMANCE FIX: Load related project and BOQ data upfront (300+ queries → 3)
+        # ✅ PERFORMANCE FIX: Load related project, BOQ, and vendor data upfront
         query = ChangeRequest.query.options(
             joinedload(ChangeRequest.project),
-            joinedload(ChangeRequest.boq)
+            joinedload(ChangeRequest.boq),
+            joinedload(ChangeRequest.vendor)
         ).filter_by(is_deleted=False)
 
         # Role-based filtering
@@ -1604,6 +1605,24 @@ def get_all_change_requests():
                     'suffix': pc.suffix,
                     'vendor_id': pc.vendor_id,
                     'vendor_name': pc.vendor_name,
+                    'vendor_email': pc.vendor.email if pc.vendor else None,
+                    'vendor_phone': pc.vendor.phone if pc.vendor else None,
+                    'vendor_phone_code': pc.vendor.phone_code if pc.vendor else None,
+                    'vendor_category': pc.vendor.category if pc.vendor else None,
+                    'vendor_details': {
+                        'company_name': pc.vendor.company_name,
+                        'contact_person_name': pc.vendor.contact_person_name,
+                        'email': pc.vendor.email,
+                        'phone_code': pc.vendor.phone_code,
+                        'phone': pc.vendor.phone,
+                        'category': pc.vendor.category,
+                        'street_address': pc.vendor.street_address,
+                        'city': pc.vendor.city,
+                        'state': pc.vendor.state,
+                        'pin_code': pc.vendor.pin_code,
+                        'gst_number': pc.vendor.gst_number,
+                        'country': pc.vendor.country,
+                    } if pc.vendor else None,
                     'status': pc.status,
                     'vendor_selection_status': pc.vendor_selection_status,
                     'materials_count': len(pc.materials_data) if pc.materials_data else 0,
@@ -1671,10 +1690,11 @@ def get_all_change_requests():
 def get_change_request_by_id(cr_id):
     """Get specific change request by ID with full details"""
     try:
-        # ✅ PERFORMANCE FIX: Eager load project and BOQ to prevent N+1 queries
+        # ✅ PERFORMANCE FIX: Eager load project, BOQ, and vendor to prevent N+1 queries
         change_request = ChangeRequest.query.options(
             joinedload(ChangeRequest.project),
-            joinedload(ChangeRequest.boq)
+            joinedload(ChangeRequest.boq),
+            joinedload(ChangeRequest.vendor)
         ).filter_by(cr_id=cr_id, is_deleted=False).first()
 
         if not change_request:
