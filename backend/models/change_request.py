@@ -379,5 +379,24 @@ class ChangeRequest(db.Model):
             'is_deleted': self.is_deleted
         }
 
+        # Include full vendor details if vendor relationship is loaded
+        if self.vendor:
+            result['vendor_details'] = {
+                'company_name': self.vendor.company_name,
+                'contact_person_name': self.vendor.contact_person_name,
+                'email': self.vendor.email,
+                'phone_code': self.vendor.phone_code,
+                'phone': self.vendor.phone,
+                'category': self.vendor.category,
+                'street_address': self.vendor.street_address,
+                'city': self.vendor.city,
+                'state': self.vendor.state,
+                'pin_code': self.vendor.pin_code,
+                'gst_number': self.vendor.gst_number,
+                'country': self.vendor.country,
+            }
+
+        return result
+
     def __repr__(self):
         return f"<ChangeRequest {self.cr_id} - BOQ:{self.boq_id} - Status:{self.status}>"
