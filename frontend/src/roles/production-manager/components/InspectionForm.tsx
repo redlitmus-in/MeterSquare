@@ -105,7 +105,7 @@ const REJECTION_CATEGORIES = [
 const MAX_IMAGE_SIZE_MB = 50;
 const MAX_VIDEO_SIZE_MB = 200;
 const MAX_FILE_SIZE_MB = MAX_IMAGE_SIZE_MB;
-const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/webm'];
+const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/webm', 'application/pdf'];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -869,10 +869,10 @@ const InspectionForm: React.FC<InspectionFormProps> = ({
                           <Upload className="w-5 h-5 text-gray-400 group-hover:text-indigo-500 transition-colors" />
                         </div>
                         <p className="text-sm font-medium text-gray-600 mt-2">
-                          Upload photos or videos
+                          Upload photos, videos or documents
                         </p>
                         <p className="text-[10px] text-gray-400 mt-0.5">
-                          JPEG, PNG, WebP, MP4, MOV — up to {MAX_FILE_SIZE_MB}MB each
+                          JPG, PNG, WebP, GIF, PDF · MP4, MOV, WebM · Max {MAX_FILE_SIZE_MB}MB images / {MAX_VIDEO_SIZE_MB}MB videos
                         </p>
                       </div>
 

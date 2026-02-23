@@ -454,8 +454,11 @@ const StockInPage: React.FC = () => {
 
     const newEntries = Array.from(files).map(file => {
       const isVideo = file.type.startsWith('video/');
-      const preview = isVideo ? '' : URL.createObjectURL(file);
-      return { file, preview, fileType: isVideo ? 'video' as const : 'image' as const, uploading: true };
+      const isPdf = file.type === 'application/pdf';
+      const isImage = !isVideo && !isPdf;
+      const preview = isImage ? URL.createObjectURL(file) : '';
+      const fileType = isVideo ? 'video' as const : 'image' as const;
+      return { file, preview, fileType, uploading: true };
     });
 
     setEvidenceFiles(prev => [...prev, ...newEntries]);
@@ -1654,8 +1657,13 @@ const StockInPage: React.FC = () => {
                             <div className="flex flex-wrap gap-2 mb-3">
                               {evidenceFiles.map((entry, idx) => (
                                 <div key={idx} className="relative w-20 h-20 rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
-                                  {entry.fileType === 'image' && entry.preview ? (
+                                  {entry.preview ? (
                                     <img src={entry.preview} alt={entry.file.name} className="w-full h-full object-cover" />
+                                  ) : entry.file.type === 'application/pdf' ? (
+                                    <div className="flex flex-col items-center justify-center text-red-400 text-xs p-1 text-center">
+                                      <span className="text-2xl">📄</span>
+                                      <span className="truncate w-full text-center">PDF</span>
+                                    </div>
                                   ) : (
                                     <div className="flex flex-col items-center justify-center text-gray-400 text-xs p-1 text-center">
                                       <span className="text-2xl">🎥</span>
@@ -1698,7 +1706,7 @@ const StockInPage: React.FC = () => {
                                 <input
                                   type="file"
                                   multiple
-                                  accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
+                                  accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,application/pdf"
                                   className="hidden"
                                   onChange={(e) => handleEvidenceFileSelect(e.target.files)}
                                 />
@@ -1712,12 +1720,12 @@ const StockInPage: React.FC = () => {
                               isRequired ? 'border-red-300 hover:border-red-400 hover:bg-red-100' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'
                             }`}>
                               <span className="text-3xl mb-1">📸</span>
-                              <p className="text-sm font-medium text-gray-700">Upload photos or videos</p>
-                              <p className="text-xs text-gray-400 mt-0.5">JPG, PNG, WebP, GIF · MP4, MOV, WebM · Max 50MB / 200MB</p>
+                              <p className="text-sm font-medium text-gray-700">Upload photos, videos or documents</p>
+                              <p className="text-xs text-gray-400 mt-0.5">JPG, PNG, WebP, GIF, PDF · MP4, MOV, WebM · Max 50MB images / 200MB videos</p>
                               <input
                                 type="file"
                                 multiple
-                                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
+                                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,application/pdf"
                                 className="hidden"
                                 onChange={(e) => handleEvidenceFileSelect(e.target.files)}
                               />

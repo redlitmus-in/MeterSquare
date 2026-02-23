@@ -2340,9 +2340,9 @@ class BOQEmailService:
         <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
 
             <!-- Header -->
-            <div style="background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
-                <div style="margin-bottom: 20px;">
-                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+            <div style="background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%); padding: 30px 30px 35px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="display: inline-block; background: #ffffff; border-radius: 10px; padding: 8px 18px; margin-bottom: 18px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 180px; height: auto; display: block;">
                 </div>
                 <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 5px 0; font-weight: 600;">Purchase Order — PO-{cr_id}</h1>
                 <p style="color: #bfdbfe; font-size: 14px; margin: 0;">{project_name}</p>

@@ -361,7 +361,8 @@ class VendorInspectionService {
         '/inventory/inspection/upload-evidence',
         formData,
       );
-      return response.data;
+      const res = response.data;
+      return res.data ?? res;
     } catch (error) {
       throw new Error(extractErrorMessage(error, 'Failed to upload inspection evidence'));
     }

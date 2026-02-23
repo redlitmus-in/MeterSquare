@@ -1656,6 +1656,7 @@ _MeterSquare Interiors LLC_`;
                           dangerouslySetInnerHTML={{
                             __html: DOMPurify.sanitize(
                               (editedEmailContent || emailPreview)
+                                .replace(/cid:logo/gi, '/assets/logo.png')
                                 .replace(/max-width:\s*800px/gi, 'max-width: 100%')
                                 .replace(/margin:\s*0\s+auto/gi, 'margin: 0')
                             )
