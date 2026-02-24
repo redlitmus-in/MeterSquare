@@ -290,6 +290,13 @@ def get_boq_planned_vs_actual(boq_id):
                 if att.attendance_id not in existing_att_ids:
                     attendance_records_all.append(att)
 
+            # Batch pre-fetch all Workers needed by attendance records (eliminates N+1 in loop below)
+            _att_worker_ids = list({att.worker_id for att in attendance_records_all if att.worker_id})
+            batch_attendance_workers = {
+                w.worker_id: w
+                for w in Worker.query.filter(Worker.worker_id.in_(_att_worker_ids)).all()
+            } if _att_worker_ids else {}
+
             # Group attendance by assignment_id (for records with assignment_id)
             attendance_by_assignment = defaultdict(list)
             # Also group by requisition_id (for records without assignment_id)
@@ -353,10 +360,8 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Process each attendance record directly
                 for attendance in req_attendance_records:
-                    # Get worker info
-                    worker = None
-                    if attendance.worker_id:
-                        worker = Worker.query.get(attendance.worker_id)
+                    # Get worker info (pre-fetched — no DB query)
+                    worker = batch_attendance_workers.get(attendance.worker_id) if attendance.worker_id else None
 
                     hours = Decimal(str(attendance.total_hours or 0))
                     cost = Decimal(str(attendance.total_cost or 0))
@@ -2656,13 +2661,20 @@ def get_all_purchase_comparision_projects():
             Project.is_deleted == False
         ).all()
 
+        # Batch pre-fetch BOQs for all projects in one query
+        _bt_proj_ids = [p.project_id for p in projects]
+        _bt_first_boq_by_proj = {}
+        if _bt_proj_ids:
+            for _b in BOQ.query.filter(
+                BOQ.project_id.in_(_bt_proj_ids),
+                BOQ.is_deleted == False
+            ).all():
+                if _b.project_id not in _bt_first_boq_by_proj:
+                    _bt_first_boq_by_proj[_b.project_id] = _b
+
         project_list = []
         for project in projects:
-            # Get BOQ for this project
-            boq = BOQ.query.filter_by(
-                project_id=project.project_id,
-                is_deleted=False
-            ).first()
+            boq = _bt_first_boq_by_proj.get(project.project_id)  # dict lookup — no DB call
 
             project_list.append({
                 'project_id': project.project_id,

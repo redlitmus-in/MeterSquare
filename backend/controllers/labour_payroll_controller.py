@@ -118,18 +118,34 @@ def get_attendance_to_lock():
 
         # Auto-create missing attendance records for departed workers
         if departed_arrivals:
+            # Batch pre-fetch existing attendance records to avoid per-arrival DB query
+            _da_keys = [(a.worker_id, a.project_id, a.arrival_date) for a in departed_arrivals]
+            _da_worker_ids = list({a.worker_id for a in departed_arrivals})
+            _da_project_ids = list({a.project_id for a in departed_arrivals})
+            _da_dates = list({a.arrival_date for a in departed_arrivals})
+
+            _existing_attendances = DailyAttendance.query.filter(
+                DailyAttendance.worker_id.in_(_da_worker_ids),
+                DailyAttendance.project_id.in_(_da_project_ids),
+                DailyAttendance.attendance_date.in_(_da_dates),
+                DailyAttendance.is_deleted == False
+            ).all()
+            # Key: (worker_id, project_id, attendance_date)
+            _existing_att_set = {(a.worker_id, a.project_id, a.attendance_date) for a in _existing_attendances}
+
+            # Batch pre-fetch all workers needed
+            _batch_payroll_workers = {
+                w.worker_id: w
+                for w in Worker.query.filter(Worker.worker_id.in_(_da_worker_ids)).all()
+            }
+
             for arrival in departed_arrivals:
-                # Check if attendance already exists
-                existing = DailyAttendance.query.filter_by(
-                    worker_id=arrival.worker_id,
-                    project_id=arrival.project_id,
-                    attendance_date=arrival.arrival_date,
-                    is_deleted=False
-                ).first()
+                # Use pre-fetched lookup instead of per-arrival DB query
+                existing = (arrival.worker_id, arrival.project_id, arrival.arrival_date) in _existing_att_set
 
                 if not existing and arrival.arrival_time and arrival.departure_time:
                     # Create attendance record
-                    worker = Worker.query.get(arrival.worker_id)
+                    worker = _batch_payroll_workers.get(arrival.worker_id)
                     if worker:
                         clock_in_dt = datetime.combine(
                             arrival.arrival_date,
@@ -1006,6 +1022,20 @@ def download_daily_schedule_pdf():
         # Group requisitions by project
         projects_data = {}
 
+        # Batch pre-fetch all workers across all requisitions — avoid N+1 (one query per requisition)
+        _all_worker_ids = list({
+            wid
+            for req in requisitions
+            if req.assigned_worker_ids
+            for wid in req.assigned_worker_ids
+        })
+        _workers_map = {
+            w.worker_id: w for w in Worker.query.filter(
+                Worker.worker_id.in_(_all_worker_ids),
+                Worker.is_deleted == False
+            ).all()
+        } if _all_worker_ids else {}
+
         for req in requisitions:
             project_id = req.project_id
             project_name = req.project.project_name if req.project else 'Unknown Project'
@@ -1018,13 +1048,10 @@ def download_daily_schedule_pdf():
                     'requisitions': []
                 }
 
-            # Get assigned workers with full details
+            # Get assigned workers with full details (pre-fetched — no DB call)
             assigned_workers = []
             if req.assigned_worker_ids:
-                workers = Worker.query.filter(
-                    Worker.worker_id.in_(req.assigned_worker_ids),
-                    Worker.is_deleted == False
-                ).all()
+                workers = [_workers_map[wid] for wid in req.assigned_worker_ids if wid in _workers_map]
 
                 assigned_workers = [{
                     'worker_id': w.worker_id,

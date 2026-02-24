@@ -217,21 +217,16 @@ def get_all_projects():
         # Paginate
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
 
-        # Helper function to get user details by IDs
+        # Helper function to get user details by IDs — batch query
         def get_user_details(user_ids):
             if not user_ids:
                 return []
             ids_list = user_ids if isinstance(user_ids, list) else [user_ids]
-            users = []
-            for uid in ids_list:
-                user = User.query.get(uid)
-                if user:
-                    users.append({
-                        'user_id': user.user_id,
-                        'full_name': user.full_name,
-                        'email': user.email
-                    })
-            return users
+            user_map = {u.user_id: u for u in User.query.filter(User.user_id.in_(ids_list)).all()}
+            return [
+                {'user_id': uid, 'full_name': user_map[uid].full_name, 'email': user_map[uid].email}
+                for uid in ids_list if uid in user_map
+            ]
 
         # Helper function to get Site Engineers from PM assignments (pm_assign_ss table)
         def get_site_engineers_from_pm_assignments(project_id, existing_se_ids):
@@ -247,9 +242,20 @@ def get_all_projects():
                 site_engineers = []
                 seen_ids = set(existing_se_ids)  # Avoid duplicates with formally assigned SE
 
+                # Batch pre-fetch users — avoid N+1 (one query per assignment)
+                _se_ids_to_fetch = list({
+                    a.assigned_to_se_id for a in assignments
+                    if a.assigned_to_se_id not in seen_ids
+                })
+                _users_map = {
+                    u.user_id: u for u in User.query.filter(
+                        User.user_id.in_(_se_ids_to_fetch)
+                    ).all()
+                } if _se_ids_to_fetch else {}
+
                 for assignment in assignments:
                     if assignment.assigned_to_se_id not in seen_ids:
-                        user = User.query.get(assignment.assigned_to_se_id)
+                        user = _users_map.get(assignment.assigned_to_se_id)
                         if user:
                             site_engineers.append({
                                 'user_id': user.user_id,
@@ -1580,10 +1586,34 @@ def get_pending_day_extensions(boq_id):
             Project.extension_status.in_(['day_request_send_td', 'day_edit_td'])
         ).all()
 
+        # ── Batch pre-fetch: BOQs for all pending projects ───────────────────────
+        _ext_proj_ids = [p.project_id for p in pending_projects]
+        _ext_all_boqs = BOQ.query.filter(
+            BOQ.project_id.in_(_ext_proj_ids),
+            BOQ.is_deleted == False
+        ).all() if _ext_proj_ids else []
+        # Group BOQs by project_id
+        _ext_boqs_by_proj = {}
+        for _b in _ext_all_boqs:
+            _ext_boqs_by_proj.setdefault(_b.project_id, []).append(_b)
+
+        # Batch pre-fetch: latest BOQHistory per BOQ for ALL BOQs
+        _ext_all_boq_ids = [_b.boq_id for _b in _ext_all_boqs]
+        # Fetch all relevant history rows sorted so we can pick latest per boq_id
+        _ext_all_hist_rows = BOQHistory.query.filter(
+            BOQHistory.boq_id.in_(_ext_all_boq_ids)
+        ).order_by(BOQHistory.action_date.desc()).all() if _ext_all_boq_ids else []
+        # Keep only the first (latest) history row per boq_id
+        _ext_hist_by_boq = {}
+        for _h in _ext_all_hist_rows:
+            if _h.boq_id not in _ext_hist_by_boq:
+                _ext_hist_by_boq[_h.boq_id] = _h
+        # ─────────────────────────────────────────────────────────────────────────
+
         pending_extensions = []
         for proj in pending_projects:
-            # Get all BOQs under this project
-            project_boqs = BOQ.query.filter_by(project_id=proj.project_id, is_deleted=False).all()
+            # Use pre-fetched BOQs (no DB call)
+            project_boqs = _ext_boqs_by_proj.get(proj.project_id, [])
 
             original_duration = proj.duration_days or 0
             is_edited = proj.extension_status == 'day_edit_td'
@@ -1596,7 +1626,7 @@ def get_pending_day_extensions(boq_id):
             # couldn't recover the true original. Look it up from BOQ history.
             if is_edited and original_requested == current_days and project_boqs:
                 for pboq in project_boqs:
-                    hist = BOQHistory.query.filter_by(boq_id=pboq.boq_id).order_by(BOQHistory.action_date.desc()).first()
+                    hist = _ext_hist_by_boq.get(pboq.boq_id)  # dict lookup — no DB call
                     if hist and hist.action and isinstance(hist.action, list):
                         for act in hist.action:
                             if act.get('type') == 'day_extension_requested':

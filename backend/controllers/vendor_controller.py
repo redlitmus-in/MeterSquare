@@ -147,9 +147,16 @@ def get_all_vendors():
 
         vendors_list = [vendor.to_dict() for vendor in paginated_vendors.items]
 
-        # Get statistics
-        total_active = Vendor.query.filter_by(status='active', is_deleted=False).count()
-        total_inactive = Vendor.query.filter_by(status='inactive', is_deleted=False).count()
+        # Get statistics — single GROUP BY query instead of 2 separate COUNTs
+        from sqlalchemy import func
+        _vendor_status_counts = dict(
+            db.session.query(Vendor.status, func.count(Vendor.vendor_id))
+            .filter(Vendor.is_deleted == False)
+            .group_by(Vendor.status)
+            .all()
+        )
+        total_active = _vendor_status_counts.get('active', 0)
+        total_inactive = _vendor_status_counts.get('inactive', 0)
 
         return jsonify({
             "success": True,
@@ -245,9 +252,16 @@ def get_all_vendors_with_products():
             vendor_data['products_count'] = len(vendor_data['products'])
             vendors_list.append(vendor_data)
 
-        # Get statistics
-        total_active = Vendor.query.filter_by(status='active', is_deleted=False).count()
-        total_inactive = Vendor.query.filter_by(status='inactive', is_deleted=False).count()
+        # Get statistics — single GROUP BY query instead of 2 separate COUNTs
+        from sqlalchemy import func
+        _status_counts = dict(
+            db.session.query(Vendor.status, func.count(Vendor.vendor_id))
+            .filter(Vendor.is_deleted == False)
+            .group_by(Vendor.status)
+            .all()
+        )
+        total_active = _status_counts.get('active', 0)
+        total_inactive = _status_counts.get('inactive', 0)
 
         return jsonify({
             "success": True,

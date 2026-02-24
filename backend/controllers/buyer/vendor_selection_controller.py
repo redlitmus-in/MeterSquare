@@ -497,6 +497,20 @@ def select_vendor_for_material(cr_id):
 
         # Process each material selection
         from models.vendor import Vendor
+
+        # Batch pre-fetch all vendors referenced in material_selections to avoid N+1 queries
+        _sel_vendor_ids = list({
+            sel.get('vendor_id') for sel in material_selections
+            if sel.get('vendor_id') is not None and sel.get('material_name') is not None
+        })
+        _vendor_map = {
+            v.vendor_id: v
+            for v in Vendor.query.filter(
+                Vendor.vendor_id.in_(_sel_vendor_ids),
+                Vendor.is_deleted == False
+            ).all()
+        } if _sel_vendor_ids else {}
+
         updated_materials = []
 
         for selection in material_selections:
@@ -519,7 +533,7 @@ def select_vendor_for_material(cr_id):
                 continue
 
             # Verify vendor exists and is active
-            vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+            vendor = _vendor_map.get(vendor_id)
             if not vendor:
                 return jsonify({"error": f"Vendor {vendor_id} not found"}), 404
 
@@ -1092,6 +1106,19 @@ def create_po_children(cr_id):
         # Multi-vendor / mixed routing / store routing: Create POChildren as before
         # ========================================================================
 
+        # Batch pre-fetch all vendors referenced in vendor_groups to avoid N+1 queries
+        _vg_vendor_ids = list({
+            vg.get('vendor_id') for vg in vendor_groups
+            if vg.get('vendor_id') is not None and vg.get('routing_type', 'vendor') == 'vendor'
+        })
+        _vg_vendor_map = {
+            v.vendor_id: v
+            for v in Vendor.query.filter(
+                Vendor.vendor_id.in_(_vg_vendor_ids),
+                Vendor.is_deleted == False
+            ).all()
+        } if _vg_vendor_ids else {}
+
         for vendor_group in vendor_groups:
             vendor_id = vendor_group.get('vendor_id')
             vendor_name = vendor_group.get('vendor_name')
@@ -1156,7 +1183,7 @@ def create_po_children(cr_id):
             vendor_product_prices = {}
 
             if routing_type == 'vendor':
-                vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+                vendor = _vg_vendor_map.get(vendor_id)
                 if not vendor:
                     return jsonify({"error": f"Vendor {vendor_id} not found"}), 404
 

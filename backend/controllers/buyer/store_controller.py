@@ -39,8 +39,15 @@ def _get_materials_in_active_po_children(cr_id):
 def get_store_items():
     """Get all available store items from inventory"""
     try:
-        # Query real inventory data from InventoryMaterial table
-        materials = InventoryMaterial.query.filter_by(is_active=True).all()
+        from flask import request as flask_request
+        page = flask_request.args.get('page', 1, type=int)
+        per_page = min(flask_request.args.get('per_page', 100, type=int), 500)
+
+        # Query real inventory data from InventoryMaterial table with pagination
+        paginated = InventoryMaterial.query.filter_by(is_active=True).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        materials = paginated.items
 
         store_items = []
         for material in materials:
@@ -63,7 +70,17 @@ def get_store_items():
                 }
             })
 
-        return jsonify(store_items), 200
+        return jsonify({
+            "items": store_items,
+            "pagination": {
+                "page": paginated.page,
+                "per_page": paginated.per_page,
+                "total": paginated.total,
+                "pages": paginated.pages,
+                "has_next": paginated.has_next,
+                "has_prev": paginated.has_prev
+            }
+        }), 200
 
     except Exception as e:
         log.error(f"Error getting store items: {str(e)}")
@@ -170,11 +187,18 @@ def get_projects_by_material(material_id):
         # Map cr_id to request status
         crs_with_active_requests = {req.cr_id: req.status for req in existing_requests}
 
+        # Batch pre-fetch all projects needed — eliminates N+1
+        _proj_ids = list({cr.project_id for cr in change_requests if cr.project_id})
+        batch_projects = {
+            p.project_id: p
+            for p in Project.query.filter(Project.project_id.in_(_proj_ids)).all()
+        } if _proj_ids else {}
+
         # Build project list with CR details
         projects_list = []
         for cr in change_requests:
-            # Get project info
-            project = Project.query.get(cr.project_id)
+            # Get project info (pre-fetched)
+            project = batch_projects.get(cr.project_id)
             if not project or project.is_deleted:
                 continue
 
@@ -256,6 +280,19 @@ def check_store_availability(cr_id):
         unavailable_materials = []
         already_sent_materials = []  # Materials already sent to store
 
+        # Batch pre-fetch all active inventory materials once to avoid N+1 ilike queries
+        _all_inventory_items = InventoryMaterial.query.filter(
+            InventoryMaterial.is_active == True
+        ).all()
+
+        def _find_inventory_by_name(name):
+            # Find first inventory item whose name contains 'name' (case-insensitive)
+            name_lower = name.lower()
+            for _item in _all_inventory_items:
+                if name_lower in (_item.material_name or '').lower():
+                    return _item
+            return None
+
         for mat in materials:
             mat_name = mat.get('material_name') or mat.get('name') or ''
             mat_qty = mat.get('quantity', 0)
@@ -274,11 +311,8 @@ def check_store_availability(cr_id):
                 })
                 continue
 
-            # Search in inventory by name
-            inventory_item = InventoryMaterial.query.filter(
-                InventoryMaterial.is_active == True,
-                InventoryMaterial.material_name.ilike(f'%{mat_name}%')
-            ).first()
+            # Search in inventory by name (uses pre-fetched list — no per-item DB query)
+            inventory_item = _find_inventory_by_name(mat_name)
 
             if inventory_item and inventory_item.current_stock >= mat_qty:
                 available_materials.append({
@@ -369,17 +403,27 @@ def complete_from_store(cr_id):
         grouped_materials = []
         routed_materials_to_add = {}
 
+        # Batch pre-fetch all active inventory materials once to avoid N+1 ilike queries
+        _route_inventory_items = InventoryMaterial.query.filter(
+            InventoryMaterial.is_active == True
+        ).all()
+
+        def _find_route_inventory_by_name(name):
+            # Find first inventory item whose name contains 'name' (case-insensitive)
+            name_lower = name.lower()
+            for _item in _route_inventory_items:
+                if name_lower in (_item.material_name or '').lower():
+                    return _item
+            return None
+
         # Check availability for all materials first
         for mat in materials:
             mat_name = mat.get('material_name') or mat.get('name') or ''
             mat_qty = mat.get('quantity', 0)
             mat_unit = mat.get('unit', 'pcs')
 
-            # Find in inventory
-            inventory_item = InventoryMaterial.query.filter(
-                InventoryMaterial.is_active == True,
-                InventoryMaterial.material_name.ilike(f'%{mat_name}%')
-            ).first()
+            # Find in inventory (uses pre-fetched list — no per-item DB query)
+            inventory_item = _find_route_inventory_by_name(mat_name)
 
             if not inventory_item:
                 return jsonify({"error": f"Material '{mat_name}' not found in store"}), 400

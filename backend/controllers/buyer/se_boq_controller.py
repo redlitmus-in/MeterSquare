@@ -32,17 +32,48 @@ def get_se_boq_assignments():
             BOQMaterialAssignment.is_deleted == False
         ).order_by(BOQMaterialAssignment.created_at.desc()).all()
 
+        # ── Batch pre-fetch to eliminate N+1 queries ──────────────────────────
+        _se_boq_ids  = list({a.boq_id     for a in assignments if a.boq_id})
+        _se_proj_ids = list({a.project_id  for a in assignments if a.project_id})
+
+        batch_se_boqs = {
+            b.boq_id: b
+            for b in BOQ.query.filter(BOQ.boq_id.in_(_se_boq_ids), BOQ.is_deleted == False).all()
+        } if _se_boq_ids else {}
+
+        batch_se_projects = {
+            p.project_id: p
+            for p in Project.query.filter(Project.project_id.in_(_se_proj_ids), Project.is_deleted == False).all()
+        } if _se_proj_ids else {}
+
+        batch_se_boq_details = {
+            bd.boq_id: bd
+            for bd in BOQDetails.query.filter(
+                BOQDetails.boq_id.in_(_se_boq_ids),
+                BOQDetails.is_deleted == False
+            ).all()
+        } if _se_boq_ids else {}
+
+        # Batch pre-fetch vendors — avoid N+1 (one query per assignment)
+        _se_vendor_ids = list({a.selected_vendor_id for a in assignments if a.selected_vendor_id})
+        batch_se_vendors = {
+            v.vendor_id: v for v in Vendor.query.filter(
+                Vendor.vendor_id.in_(_se_vendor_ids)
+            ).all()
+        } if _se_vendor_ids else {}
+        # ── End batch pre-fetch ────────────────────────────────────────────────
+
         assignments_list = []
         for assignment in assignments:
-            # Get BOQ and project details
-            boq = BOQ.query.filter_by(boq_id=assignment.boq_id, is_deleted=False).first()
-            project = Project.query.filter_by(project_id=assignment.project_id, is_deleted=False).first()
+            # Get BOQ and project details (pre-fetched)
+            boq = batch_se_boqs.get(assignment.boq_id)
+            project = batch_se_projects.get(assignment.project_id)
 
             if not boq or not project:
                 continue
 
-            # Get BOQ details for overhead calculation
-            boq_detail = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+            # Get BOQ details for overhead calculation (pre-fetched)
+            boq_detail = batch_se_boq_details.get(boq.boq_id)
 
             # Calculate overhead/miscellaneous from BOQ details
             overhead_allocated = 0.0
@@ -106,10 +137,10 @@ def get_se_boq_assignments():
                                     'total_price': material_total
                                 })
 
-            # Get vendor info if selected
+            # Get vendor info if selected (pre-fetched — no DB call)
             vendor_info = None
             if assignment.selected_vendor_id:
-                vendor = Vendor.query.filter_by(vendor_id=assignment.selected_vendor_id).first()
+                vendor = batch_se_vendors.get(assignment.selected_vendor_id)
                 if vendor:
                     vendor_info = {
                         'vendor_id': vendor.vendor_id,

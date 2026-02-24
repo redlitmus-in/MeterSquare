@@ -71,8 +71,17 @@ def create_pm():
         project_ids = data.get('project_ids', data.get('project_id', []))
         assigned_count = 0
         if project_ids:
+            # Batch fetch all projects once — reused in both the update loop and notification loop
+            batch_projects = {
+                p.project_id: p
+                for p in Project.query.filter(
+                    Project.project_id.in_(project_ids),
+                    Project.is_deleted == False
+                ).all()
+            }
+
             for proj_id in project_ids:
-                project = Project.query.filter_by(project_id=proj_id, is_deleted=False).first()
+                project = batch_projects.get(proj_id)
                 if project:
                     # Assign this PM to the project (convert to JSONB array format)
                     project.user_id = [new_user_id] if new_user_id else None
@@ -90,7 +99,7 @@ def create_pm():
                     assigner_name = current_user.get('full_name') or current_user.get('username') or 'Admin'
 
                     for proj_id in project_ids:
-                        project = Project.query.filter_by(project_id=proj_id, is_deleted=False).first()
+                        project = batch_projects.get(proj_id)  # Reuse already-fetched projects
                         if project:
                             notification_service.notify_pm_assigned_to_project(
                                 project_id=proj_id,
@@ -259,9 +268,17 @@ def update_pm(user_id):
             # First remove PM from all current projects
             Project.query.filter_by(user_id=user_id).update({"user_id": None})
 
+            # Batch pre-fetch all assigned projects in one query (reused for both update + notification)
+            _assigned_proj_ids = data["assigned_projects"]
+            _batch_assigned_projects = {
+                p.project_id: p for p in Project.query.filter(
+                    Project.project_id.in_(_assigned_proj_ids)
+                ).all()
+            } if _assigned_proj_ids else {}
+
             # Assign PM to new projects
-            for project_id in data["assigned_projects"]:
-                project = Project.query.filter_by(project_id=project_id).first()
+            for project_id in _assigned_proj_ids:
+                project = _batch_assigned_projects.get(project_id)  # dict lookup — no DB call
                 if project:
                     # Convert to JSONB array format
                     project.user_id = [user_id] if user_id else None
@@ -276,7 +293,7 @@ def update_pm(user_id):
                 assigner_name = current_user.get('full_name') or current_user.get('username') or 'Admin'
 
                 for project_id in data["assigned_projects"]:
-                    project = Project.query.filter_by(project_id=project_id, is_deleted=False).first()
+                    project = _batch_assigned_projects.get(project_id)  # reuse pre-fetched dict
                     if project:
                         notification_service.notify_pm_assigned_to_project(
                             project_id=project_id,
@@ -407,6 +424,19 @@ def assign_projects():
         td_name = current_user.get('full_name', 'Technical Director') if current_user else 'Technical Director'
         td_id = current_user.get('user_id') if current_user else None
 
+        # ── Batch pre-fetch latest BOQHistory per BOQ for all projects ───────────
+        _all_boq_ids_for_hist = [
+            b.boq_id for p in projects for b in p.boqs if not b.is_deleted
+        ]
+        _batch_boq_history = {}
+        if _all_boq_ids_for_hist:
+            for _h in BOQHistory.query.filter(
+                BOQHistory.boq_id.in_(_all_boq_ids_for_hist)
+            ).order_by(BOQHistory.action_date.desc()).all():
+                if _h.boq_id not in _batch_boq_history:  # keep only latest per boq
+                    _batch_boq_history[_h.boq_id] = _h
+        # ─────────────────────────────────────────────────────────────────────────
+
         assigned_projects = []
         projects_data_for_email = []
         boq_histories_updated = 0
@@ -440,12 +470,12 @@ def assign_projects():
                 pm_names_list = ", ".join([pm.full_name for pm in pm_users])
 
                 for boq in boqs:
-                    # Get existing BOQ history
+                    # Get existing BOQ history from pre-fetched dict (no DB call)
                     status = boq.status
                     boq.status = "approved"
                     db.session.add(boq)
                     db.session.commit()
-                    existing_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).first()
+                    existing_history = _batch_boq_history.get(boq.boq_id)
 
                     # Handle existing actions - ensure it's always a list
                     if existing_history:
@@ -1797,11 +1827,21 @@ def get_project_completion_details(project_id):
         ).all()
 
         # Build detailed response
+        # Batch pre-fetch PM and SE users — avoid N+1 (two queries per pair)
+        _pair_pm_ids = list({p.assigned_by_pm_id for p in assignment_pairs if p.assigned_by_pm_id})
+        _pair_se_ids = list({p.assigned_to_se_id for p in assignment_pairs if p.assigned_to_se_id})
+        _all_pair_user_ids = list(set(_pair_pm_ids + _pair_se_ids))
+        _pair_users_map = {
+            u.user_id: u for u in User.query.filter(
+                User.user_id.in_(_all_pair_user_ids)
+            ).all()
+        } if _all_pair_user_ids else {}
+
         details = []
         for pair in assignment_pairs:
-            # Get PM and SE user details
-            pm_user = User.query.get(pair.assigned_by_pm_id)
-            se_user = User.query.get(pair.assigned_to_se_id)
+            # Get PM and SE user details from pre-fetched map (no DB call)
+            pm_user = _pair_users_map.get(pair.assigned_by_pm_id)
+            se_user = _pair_users_map.get(pair.assigned_to_se_id)
 
             # Flatten and deduplicate item indices
             all_items = []
@@ -3067,12 +3107,19 @@ def get_pm_dashboard():
                 Project.is_deleted == False
             ).all()
 
+            # Batch pre-fetch all BOQs for all projects — avoid N+1 (one query per project)
+            _progress_project_ids = [p.project_id for p in projects_query]
+            _all_progress_boqs = BOQ.query.filter(
+                BOQ.project_id.in_(_progress_project_ids),
+                BOQ.is_deleted == False
+            ).all() if _progress_project_ids else []
+            _boqs_by_project = {}
+            for _b in _all_progress_boqs:
+                _boqs_by_project.setdefault(_b.project_id, []).append(_b)
+
             for project in projects_query:
-                # Calculate progress based on ALL BOQs in the project
-                project_boqs = BOQ.query.filter(
-                    BOQ.project_id == project.project_id,
-                    BOQ.is_deleted == False
-                ).all()
+                # Calculate progress based on ALL BOQs in the project (pre-fetched)
+                project_boqs = _boqs_by_project.get(project.project_id, [])
 
                 total_boqs = len(project_boqs)
                 if total_boqs > 0:

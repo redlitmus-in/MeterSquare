@@ -1467,6 +1467,20 @@ def get_all_change_requests():
             ).all()
             boq_details_map = {bd.boq_id: bd for bd in boq_details_list}
 
+        # PERFORMANCE: Batch pre-fetch all POChildren for all CRs to eliminate N+1
+        # Without this, one SQL query fires per CR in the loop below (~100ms each on Supabase)
+        _all_cr_ids_for_po = [cr.cr_id for cr in change_requests]
+        _batch_po_children_by_cr = {}
+        if _all_cr_ids_for_po:
+            _all_po_children = POChild.query.options(
+                joinedload(POChild.vendor)
+            ).filter(
+                POChild.parent_cr_id.in_(_all_cr_ids_for_po),
+                POChild.is_deleted == False
+            ).all()
+            for _pc in _all_po_children:
+                _batch_po_children_by_cr.setdefault(_pc.parent_cr_id, []).append(_pc)
+
         # Convert to dict with project and BOQ info
         result = []
         for cr in change_requests:
@@ -1590,13 +1604,9 @@ def get_all_change_requests():
             # Skip material lookup - master_material_id values like 'mat_198_1_2'
             # are not database IDs but sub_item identifiers
 
-            # Add POChildren data for this change request (for PM/SE/EST/MEP visibility) with eager loading
-            po_children = POChild.query.options(
-                joinedload(POChild.vendor)  # Eager load vendor relationship
-            ).filter_by(
-                parent_cr_id=cr.cr_id,
-                is_deleted=False
-            ).all()
+            # Add POChildren data for this change request (for PM/SE/EST/MEP visibility)
+            # Uses batch pre-fetched dict to avoid N+1 queries
+            po_children = _batch_po_children_by_cr.get(cr.cr_id, [])
 
             if po_children:
                 cr_dict['po_children'] = [{

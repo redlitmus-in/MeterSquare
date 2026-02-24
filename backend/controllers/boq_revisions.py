@@ -100,6 +100,17 @@ def get_projects_by_revision(revision_number):
 
         # Transform BOQ data for frontend
         boq_list = []
+
+        # Batch pre-fetch all BOQDetails to avoid N+1 queries
+        _boq_ids = [b.boq_id for b in boqs]
+        _boq_details_map = {
+            bd.boq_id: bd
+            for bd in BOQDetails.query.filter(
+                BOQDetails.boq_id.in_(_boq_ids),
+                BOQDetails.is_deleted == False
+            ).all()
+        } if _boq_ids else {}
+
         for boq in boqs:
             # Get project details
             project = boq.project
@@ -107,10 +118,7 @@ def get_projects_by_revision(revision_number):
                 continue
 
             # Get BOQ details
-            boq_details = BOQDetails.query.filter_by(
-                boq_id=boq.boq_id,
-                is_deleted=False
-            ).first()
+            boq_details = _boq_details_map.get(boq.boq_id)
 
             total_cost = 0
             item_count = 0
@@ -1197,6 +1205,16 @@ def send_td_client_boq_email(boq_id):
                 boq_for_notification = BOQ.query.get(boq_id)
                 revision_num = boq_for_notification.revision_number if boq_for_notification else 0
 
+                # Batch pre-fetch all TD user objects to avoid N+1 queries in the loop
+                _td_user_ids_for_email = [_uid for _uid, _uname, _uemail in cached_td_list]
+                from models.user import User as UserModel
+                _td_user_obj_map = {
+                    u.user_id: u
+                    for u in UserModel.query.filter(
+                        UserModel.user_id.in_(_td_user_ids_for_email)
+                    ).all()
+                } if _td_user_ids_for_email else {}
+
                 for td_user_id, td_full_name, td_email_addr in cached_td_list:
                     td_notif_sent = False
                     try:
@@ -1244,8 +1262,7 @@ def send_td_client_boq_email(boq_id):
 
                     # Send email only if this TD is offline
                     try:
-                        from models.user import User as UserModel
-                        td_user_obj = UserModel.query.filter_by(user_id=td_user_id).first()
+                        td_user_obj = _td_user_obj_map.get(td_user_id)
                         if td_user_obj:
                             td_status = str(td_user_obj.user_status).lower().strip() if td_user_obj.user_status else "unknown"
                             if td_status == "offline":

@@ -986,35 +986,28 @@ def get_td_dashboard_stats():
         performance_month_labels = []
         current_date = datetime.now()
 
-        # Get last 12 months of data
+        # Batch approach: fetch all BOQs in last 12 months, aggregate in Python
+        _perf_start = (current_date - timedelta(days=30 * 11)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        _all_perf_boqs = db.session.query(BOQ.created_at, BOQ.status).filter(
+            BOQ.is_deleted == False,
+            BOQ.created_at >= _perf_start
+        ).all()
+        _approved_statuses = {'Approved', 'approved', 'Revision_Approved', 'new_purchase_create', 'sent_for_review'}
+        # Build month → (total, approved) dict
+        _perf_by_month = {}  # key: (year, month)
+        for _b_date, _b_status in _all_perf_boqs:
+            if _b_date:
+                _key = (_b_date.year, _b_date.month)
+                _tot, _appr = _perf_by_month.get(_key, (0, 0))
+                _perf_by_month[_key] = (_tot + 1, _appr + (1 if _b_status in _approved_statuses else 0))
+
         for i in range(11, -1, -1):
-            # Calculate month start and end
             month_date = current_date - timedelta(days=30 * i)
             month_start = month_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-            # Get next month's start
-            if month_start.month == 12:
-                month_end = month_start.replace(year=month_start.year + 1, month=1)
-            else:
-                month_end = month_start.replace(month=month_start.month + 1)
-
-            # Add month label (e.g., "Jan", "Feb", etc.)
             performance_month_labels.append(month_start.strftime('%b'))
-
-            total_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
-                BOQ.is_deleted == False,
-                BOQ.created_at >= month_start,
-                BOQ.created_at < month_end
-            ).scalar() or 0
-
-            approved_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
-                BOQ.is_deleted == False,
-                BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'new_purchase_create', 'sent_for_review']),
-                BOQ.created_at >= month_start,
-                BOQ.created_at < month_end
-            ).scalar() or 0
-
-            success_rate = round((approved_boqs / total_boqs * 100), 0) if total_boqs > 0 else 0
+            _key = (month_start.year, month_start.month)
+            _tot, _appr = _perf_by_month.get(_key, (0, 0))
+            success_rate = round((_appr / _tot * 100), 0) if _tot > 0 else 0
             monthly_performance.append(success_rate)
 
         # ============ Revenue Growth (Quarterly) ============
@@ -1024,32 +1017,32 @@ def get_td_dashboard_stats():
             'previous_year': []
         }
 
+        # Batch approach: fetch approved BOQ revenue for 2-year range, aggregate in Python
+        _rev_start = datetime(current_year - 1, 1, 1)
+        _rev_end = datetime(current_year + 1, 1, 1)
+        _all_rev_rows = db.session.query(BOQ.created_at, BOQDetails.total_cost).join(
+            BOQ, BOQ.boq_id == BOQDetails.boq_id
+        ).filter(
+            BOQ.is_deleted == False,
+            BOQDetails.is_deleted == False,
+            BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review']),
+            BOQ.created_at >= _rev_start,
+            BOQ.created_at < _rev_end
+        ).all()
+        # Build (year, quarter) → sum dict
+        _rev_by_quarter = {}
+        for _r_date, _r_cost in _all_rev_rows:
+            if _r_date and _r_cost:
+                _q = (_r_date.month - 1) // 3 + 1
+                _qkey = (_r_date.year, _q)
+                _rev_by_quarter[_qkey] = _rev_by_quarter.get(_qkey, 0) + float(_r_cost)
+
         for year in [current_year - 1, current_year]:
             year_revenue = []
             for quarter in range(1, 5):
-                quarter_start_month = (quarter - 1) * 3 + 1
-                quarter_start = datetime(year, quarter_start_month, 1)
-                if quarter == 4:
-                    quarter_end = datetime(year + 1, 1, 1)
-                else:
-                    quarter_end = datetime(year, quarter_start_month + 3, 1)
-
-                revenue = db.session.query(
-                    func.sum(BOQDetails.total_cost)
-                ).join(
-                    BOQ, BOQ.boq_id == BOQDetails.boq_id
-                ).filter(
-                    BOQ.is_deleted == False,
-                    BOQDetails.is_deleted == False,
-                    BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review']),
-                    BOQ.created_at >= quarter_start,
-                    BOQ.created_at < quarter_end
-                ).scalar() or 0
-
-                # Convert to lakhs
-                revenue_lakhs = round(float(revenue) / 100000, 0) if revenue else 0
+                revenue = _rev_by_quarter.get((year, quarter), 0)
+                revenue_lakhs = round(revenue / 100000, 0) if revenue else 0
                 year_revenue.append(revenue_lakhs)
-
             if year == current_year - 1:
                 quarterly_revenue['previous_year'] = year_revenue
             else:
@@ -1088,23 +1081,26 @@ def get_td_dashboard_stats():
         monthly_revenue = []
         month_labels = []
 
+        # Batch approach: fetch all approved BOQ revenue in last 6 months, aggregate in Python
+        _rev6_start = (datetime.now().replace(day=1) - timedelta(days=30 * 5)).replace(hour=0, minute=0, second=0, microsecond=0)
+        _all_rev6_rows = db.session.query(BOQ.created_at, BOQDetails.total_cost).join(
+            BOQ, BOQ.boq_id == BOQDetails.boq_id
+        ).filter(
+            BOQ.is_deleted == False,
+            BOQDetails.is_deleted == False,
+            BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review']),
+            BOQ.created_at >= _rev6_start
+        ).all()
+        _rev6_by_month = {}
+        for _r_date, _r_cost in _all_rev6_rows:
+            if _r_date and _r_cost:
+                _rkey = (_r_date.year, _r_date.month)
+                _rev6_by_month[_rkey] = _rev6_by_month.get(_rkey, 0) + float(_r_cost)
+
         for i in range(5, -1, -1):  # Last 6 months
             month_start = datetime.now().replace(day=1) - timedelta(days=30*i)
-            month_end = (month_start + timedelta(days=32)).replace(day=1)
-
-            revenue = db.session.query(
-                func.sum(BOQDetails.total_cost)
-            ).join(
-                BOQ, BOQ.boq_id == BOQDetails.boq_id
-            ).filter(
-                BOQ.is_deleted == False,
-                BOQDetails.is_deleted == False,
-                BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review']),
-                BOQ.created_at >= month_start,
-                BOQ.created_at < month_end
-            ).scalar() or 0
-
-            # Convert to lakhs
+            month_start = month_start.replace(hour=0, minute=0, second=0, microsecond=0)
+            revenue = _rev6_by_month.get((month_start.year, month_start.month), 0)
             revenue_lakhs = round(float(revenue) / 100000, 0) if revenue else 0
             monthly_revenue.append(revenue_lakhs)
             month_labels.append(month_start.strftime('%b %Y'))
@@ -1119,27 +1115,37 @@ def get_td_dashboard_stats():
         disposal_month_labels = []
 
         current_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        _disp_start = current_month - relativedelta(months=5)
+        _disp_end = current_month + relativedelta(months=1)
+
+        # Batch fetch all asset/material disposals in the 6-month window, aggregate in Python
+        _asset_disp_rows = db.session.query(AssetDisposal.created_at).filter(
+            AssetDisposal.created_at >= _disp_start,
+            AssetDisposal.created_at < _disp_end
+        ).all()
+        _mat_disp_rows = db.session.query(MaterialReturn.created_at).filter(
+            MaterialReturn.created_at >= _disp_start,
+            MaterialReturn.created_at < _disp_end,
+            MaterialReturn.condition.in_(['Damaged', 'Defective'])
+        ).all()
+        _asset_disp_by_month = {}
+        for (_dt,) in _asset_disp_rows:
+            if _dt:
+                _k = (_dt.year, _dt.month)
+                _asset_disp_by_month[_k] = _asset_disp_by_month.get(_k, 0) + 1
+        _mat_disp_by_month = {}
+        for (_dt,) in _mat_disp_rows:
+            if _dt:
+                _k = (_dt.year, _dt.month)
+                _mat_disp_by_month[_k] = _mat_disp_by_month.get(_k, 0) + 1
+
         for i in range(5, -1, -1):  # Last 6 months
             month_start = current_month - relativedelta(months=i)
-            month_end = month_start + relativedelta(months=1)
-
-            # Count Asset Disposals for this month
-            asset_disposals = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
-                AssetDisposal.created_at >= month_start,
-                AssetDisposal.created_at < month_end
-            ).scalar() or 0
-
-            # Count Material Disposals (Damaged/Defective returns) for this month
-            material_disposals = db.session.query(func.count(MaterialReturn.return_id)).filter(
-                MaterialReturn.created_at >= month_start,
-                MaterialReturn.created_at < month_end,
-                MaterialReturn.condition.in_(['Damaged', 'Defective'])
-            ).scalar() or 0
-
+            _k = (month_start.year, month_start.month)
             disposal_trend.append({
                 'month': month_start.strftime('%b'),
-                'asset_disposals': asset_disposals,
-                'material_disposals': material_disposals
+                'asset_disposals': _asset_disp_by_month.get(_k, 0),
+                'material_disposals': _mat_disp_by_month.get(_k, 0)
             })
             disposal_month_labels.append(month_start.strftime('%b'))
 
@@ -1214,46 +1220,67 @@ def get_td_dashboard_stats():
             Project.status.in_(['In Progress', 'in_progress', 'ongoing', 'Ongoing'])
         ).order_by(Project.created_at.desc()).limit(10).all()
 
+        # ── Batch pre-fetch budget, BOQ counts, and PMs for all active projects ─
+        _td_active_proj_ids = [p.project_id for p in active_projects_query]
+
+        # Budget: SUM(total_cost) per project in one GROUP BY query
+        _td_budget_rows = db.session.query(
+            BOQ.project_id,
+            func.sum(BOQDetails.total_cost)
+        ).join(BOQDetails, BOQ.boq_id == BOQDetails.boq_id).filter(
+            BOQ.project_id.in_(_td_active_proj_ids),
+            BOQ.is_deleted == False,
+            BOQDetails.is_deleted == False
+        ).group_by(BOQ.project_id).all() if _td_active_proj_ids else []
+        _td_budget_map = {row[0]: (row[1] or 0) for row in _td_budget_rows}
+
+        # BOQ counts: total and approved per project in one pass
+        _td_boq_rows = db.session.query(
+            BOQ.project_id, BOQ.status
+        ).filter(
+            BOQ.project_id.in_(_td_active_proj_ids),
+            BOQ.is_deleted == False
+        ).all() if _td_active_proj_ids else []
+        _APPROVED_STATUSES = {'Approved', 'approved', 'new_purchase_create', 'sent_for_review'}
+        _td_total_boqs = {}
+        _td_approved_boqs = {}
+        for _row in _td_boq_rows:
+            _td_total_boqs[_row[0]] = _td_total_boqs.get(_row[0], 0) + 1
+            if _row[1] in _APPROVED_STATUSES:
+                _td_approved_boqs[_row[0]] = _td_approved_boqs.get(_row[0], 0) + 1
+
+        # PM users: batch all PM IDs across all projects
+        _all_pm_ids = list({
+            uid for p in active_projects_query
+            if p.user_id and isinstance(p.user_id, list)
+            for uid in p.user_id
+        })
+        _td_pm_map = {
+            u.user_id: u.full_name for u in User.query.filter(
+                User.user_id.in_(_all_pm_ids),
+                User.is_deleted == False
+            ).all()
+        } if _all_pm_ids else {}
+        # ─────────────────────────────────────────────────────────────────────────
+
         active_projects = []
         for project in active_projects_query:
-            # Get total budget from all BOQs
-            total_budget = db.session.query(
-                func.sum(BOQDetails.total_cost)
-            ).join(
-                BOQ, BOQ.boq_id == BOQDetails.boq_id
-            ).filter(
-                BOQ.project_id == project.project_id,
-                BOQ.is_deleted == False,
-                BOQDetails.is_deleted == False
-            ).scalar() or 0
+            total_budget = _td_budget_map.get(project.project_id, 0)
 
-            # Get project manager names from user_id JSONB array
+            # Get project manager names from pre-fetched dict
             pm_names = 'Unassigned'
             if project.user_id:
                 try:
-                    # user_id is a JSONB array of PM IDs
                     pm_ids = project.user_id if isinstance(project.user_id, list) else []
-                    if pm_ids:
-                        pms = User.query.filter(
-                            User.user_id.in_(pm_ids),
-                            User.is_deleted == False
-                        ).all()
-                        if pms:
-                            pm_names = ', '.join([pm.full_name for pm in pms])
+                    names = [_td_pm_map[uid] for uid in pm_ids if uid in _td_pm_map]
+                    if names:
+                        pm_names = ', '.join(names)
                 except Exception as pm_error:
                     log.warning(f"Error fetching PM names for project {project.project_id}: {str(pm_error)}")
 
-            # Calculate progress based on BOQ status (simplified metric)
-            total_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
-                BOQ.project_id == project.project_id,
-                BOQ.is_deleted == False
-            ).scalar() or 0
-
-            approved_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
-                BOQ.project_id == project.project_id,
-                BOQ.is_deleted == False,
-                BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review'])
-            ).scalar() or 0
+            # BOQ counts from pre-fetched dicts
+            total_boqs = _td_total_boqs.get(project.project_id, 0)
+            approved_boqs = _td_approved_boqs.get(project.project_id, 0)
 
             # Calculate progress as percentage of approved BOQs
             progress = int((approved_boqs / total_boqs * 100)) if total_boqs > 0 else 0

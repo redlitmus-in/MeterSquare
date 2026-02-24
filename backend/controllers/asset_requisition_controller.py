@@ -299,6 +299,14 @@ def create_asset_requisition():
 
         if items_data and isinstance(items_data, list) and len(items_data) > 0:
             # Multi-item request
+            # Batch pre-fetch all categories — avoid N+1 (one query per item)
+            _req_cat_ids = list({i.get('category_id') for i in items_data if i.get('category_id')})
+            _req_cats_map = {
+                c.category_id: c for c in ReturnableAssetCategory.query.filter(
+                    ReturnableAssetCategory.category_id.in_(_req_cat_ids)
+                ).all()
+            } if _req_cat_ids else {}
+
             for item in items_data:
                 item_category_id = item.get('category_id')
                 item_quantity = item.get('quantity', 1)
@@ -306,7 +314,7 @@ def create_asset_requisition():
                 if not item_category_id:
                     continue
 
-                category = ReturnableAssetCategory.query.get(item_category_id)
+                category = _req_cats_map.get(item_category_id)
                 if not category:
                     continue
 
@@ -671,6 +679,14 @@ def update_requisition(requisition_id):
         # Update items if provided
         if 'items' in data and isinstance(data['items'], list) and len(data['items']) > 0:
             validated_items = []
+            # Batch pre-fetch all categories — avoid N+1 (one query per item)
+            _upd_cat_ids = list({i.get('category_id') for i in data['items'] if i.get('category_id')})
+            _upd_cats_map = {
+                c.category_id: c for c in ReturnableAssetCategory.query.filter(
+                    ReturnableAssetCategory.category_id.in_(_upd_cat_ids)
+                ).all()
+            } if _upd_cat_ids else {}
+
             for item in data['items']:
                 item_category_id = item.get('category_id')
                 item_quantity = item.get('quantity', 1)
@@ -678,7 +694,7 @@ def update_requisition(requisition_id):
                 if not item_category_id:
                     continue
 
-                category = ReturnableAssetCategory.query.get(item_category_id)
+                category = _upd_cats_map.get(item_category_id)
                 if not category:
                     continue
 
@@ -1051,10 +1067,18 @@ def prod_mgr_approve_requisition(requisition_id):
 
         # Check stock availability for all items
         if requisition.items and len(requisition.items) > 0:
+            # Batch pre-fetch all categories for multi-item requisition
+            _req_cat_ids = [item.get('category_id') for item in requisition.items if item.get('category_id')]
+            _batch_req_cats = {
+                c.category_id: c for c in ReturnableAssetCategory.query.filter(
+                    ReturnableAssetCategory.category_id.in_(_req_cat_ids)
+                ).all()
+            } if _req_cat_ids else {}
+
             # Multi-item: check each item's stock
             insufficient_items = []
             for item in requisition.items:
-                cat = ReturnableAssetCategory.query.get(item.get('category_id'))
+                cat = _batch_req_cats.get(item.get('category_id'))
                 if cat:
                     available = cat.available_quantity or 0
                     requested = item.get('quantity', 1)
@@ -1339,10 +1363,18 @@ def dispatch_requisition(requisition_id):
             # Still validate sufficient stock exists, but don't deduct yet
             if requisition.items and len(requisition.items) > 0:
                 # Multi-item: validate stock availability
+                # Batch pre-fetch all categories — avoid N+1 (one query per item)
+                _disp_cat_ids = list({i.get('category_id') for i in requisition.items if i.get('category_id')})
+                _disp_cats_map = {
+                    c.category_id: c for c in ReturnableAssetCategory.query.filter(
+                        ReturnableAssetCategory.category_id.in_(_disp_cat_ids)
+                    ).all()
+                } if _disp_cat_ids else {}
+
                 insufficient_items = []
                 for item in requisition.items:
                     cat_id = item.get('category_id')
-                    category = ReturnableAssetCategory.query.get(cat_id)
+                    category = _disp_cats_map.get(cat_id)
                     if not category:
                         return jsonify({'success': False, 'error': f'Category {cat_id} not found'}), 404
 

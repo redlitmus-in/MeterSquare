@@ -164,13 +164,17 @@ def confirm_client_approval(boq_id):
                 except Exception as fallback_err:
                     log.error(f"[confirm_client_approval] Fallback also failed: {fallback_err}")
 
-        # Send email to offline TDs only
+        # Send email to offline TDs only — reuse the same role/user query from the fallback block above
         try:
             from models.role import Role as RoleModel
             boq_email_service = BOQEmailService()
-            td_role_obj = RoleModel.query.filter(RoleModel.role.ilike('%technical%director%')).first()
+            # Reuse td_role and td_users if already fetched; otherwise fetch now
+            if 'td_role' not in dir() or td_role is None:
+                td_role = RoleModel.query.filter(RoleModel.role.ilike('%technical%director%')).first()
+            td_role_obj = td_role
             if td_role_obj:
-                td_users = User.query.filter_by(role_id=td_role_obj.role_id, is_active=True, is_deleted=False).all()
+                if 'td_users' not in dir() or td_users is None:
+                    td_users = User.query.filter_by(role_id=td_role_obj.role_id, is_active=True, is_deleted=False).all()
                 for td in td_users:
                     td_status = str(td.user_status).lower().strip() if td.user_status else "unknown"
                     if td_status == "offline":
@@ -426,22 +430,29 @@ def get_boq_details_history(boq_id):
             except Exception as e:
                 log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
 
-            # Fetch sub_item images from database
+            # Batch-fetch sub_item images (single query for all sub_items)
             try:
                 items = enriched.get('items', [])
-                for item in items:
-                    if item.get('sub_items'):
-                        for sub_item in item['sub_items']:
-                            sub_item_id = sub_item.get('sub_item_id')
-                            if sub_item_id:
-                                # Fetch image from master_sub_items table
-                                master_sub_item = MasterSubItem.query.filter_by(
-                                    sub_item_id=sub_item_id,
-                                    is_deleted=False
-                                ).first()
-
-                                if master_sub_item and master_sub_item.sub_item_image:
-                                    sub_item['sub_item_image'] = master_sub_item.sub_item_image
+                _all_sids = [
+                    sub_item.get('sub_item_id')
+                    for item in items if item.get('sub_items')
+                    for sub_item in item['sub_items']
+                    if sub_item.get('sub_item_id')
+                ]
+                if _all_sids:
+                    _sid_map = {
+                        row.sub_item_id: row for row in MasterSubItem.query.filter(
+                            MasterSubItem.sub_item_id.in_(_all_sids),
+                            MasterSubItem.is_deleted == False
+                        ).all()
+                    }
+                    for item in items:
+                        for sub_item in item.get('sub_items', []):
+                            sid = sub_item.get('sub_item_id')
+                            if sid:
+                                db_row = _sid_map.get(sid)
+                                if db_row and db_row.sub_item_image:
+                                    sub_item['sub_item_image'] = db_row.sub_item_image
             except Exception as e:
                 log.error(f"Error fetching images for BOQ {boq_id}: {str(e)}")
 

@@ -305,6 +305,20 @@ def create_buyer_material_transfer():
 
         # Add delivery note items
         total_quantity = 0
+
+        # Batch pre-fetch InventoryMaterial records for all provided IDs to avoid N+1 queries
+        _provided_inv_ids = [
+            m.get('inventory_material_id') for m in materials
+            if m.get('inventory_material_id') is not None
+        ]
+        _inv_material_id_map = {
+            im.inventory_material_id: im
+            for im in InventoryMaterial.query.filter(
+                InventoryMaterial.inventory_material_id.in_(_provided_inv_ids),
+                InventoryMaterial.is_active == True
+            ).all()
+        } if _provided_inv_ids else {}
+
         for mat_data in materials:
             inventory_material_id = mat_data.get('inventory_material_id')
             material_name = mat_data.get('material_name', '').strip()
@@ -353,10 +367,7 @@ def create_buyer_material_transfer():
             # If inventory_material_id provided, validate it exists
             inv_material = None
             if inventory_material_id:
-                inv_material = InventoryMaterial.query.filter_by(
-                    inventory_material_id=inventory_material_id,
-                    is_active=True
-                ).first()
+                inv_material = _inv_material_id_map.get(inventory_material_id)
 
                 if not inv_material:
                     db.session.rollback()
@@ -515,23 +526,31 @@ def get_site_engineers_for_transfer():
         se_list = []
         from models.pm_assign_ss import PMAssignSS
 
-        for se in site_engineers:
-            # Count ONLY ONGOING projects assigned to this Site Engineer via PMAssignSS
-            # Exclude: 1) completed/draft projects, 2) PM confirmed completion assignments
-            project_count = (
-                db.session.query(Project.project_id)
-                .join(BOQ, Project.project_id == BOQ.project_id)
-                .join(PMAssignSS, BOQ.boq_id == PMAssignSS.boq_id)
-                .filter(
-                    PMAssignSS.assigned_to_se_id == se.user_id,
-                    PMAssignSS.is_deleted == False,
-                    PMAssignSS.pm_confirmed_completion != True,  # Exclude PM-confirmed completed assignments
-                    Project.is_deleted == False,
-                    ~Project.status.in_(['completed', 'Completed', 'draft', 'Draft'])  # Only active projects
+        # Batch: single GROUP BY query for project counts for ALL SEs
+        _se_ids = [se.user_id for se in site_engineers]
+        _se_proj_counts = {}
+        if _se_ids:
+            _count_rows = (
+                db.session.query(
+                    PMAssignSS.assigned_to_se_id,
+                    func.count(func.distinct(Project.project_id))
                 )
-                .distinct()
-                .count()
+                .join(BOQ, BOQ.boq_id == PMAssignSS.boq_id)
+                .join(Project, Project.project_id == BOQ.project_id)
+                .filter(
+                    PMAssignSS.assigned_to_se_id.in_(_se_ids),
+                    PMAssignSS.is_deleted == False,
+                    PMAssignSS.pm_confirmed_completion != True,
+                    Project.is_deleted == False,
+                    ~Project.status.in_(['completed', 'Completed', 'draft', 'Draft'])
+                )
+                .group_by(PMAssignSS.assigned_to_se_id)
+                .all()
             )
+            _se_proj_counts = {row[0]: row[1] for row in _count_rows}
+
+        for se in site_engineers:
+            project_count = _se_proj_counts.get(se.user_id, 0)
 
             se_data = {
                 'user_id': se.user_id,
@@ -652,13 +671,20 @@ def get_buyer_transfer_history():
 
         dns = dns_paginated.items
 
+        # Batch pre-fetch all projects for the current page of DNs to avoid N+1 queries
+        _dn_project_ids = list({dn.project_id for dn in dns if dn.project_id is not None})
+        _dn_project_map = {
+            p.project_id: p
+            for p in Project.query.filter(
+                Project.project_id.in_(_dn_project_ids),
+                Project.is_deleted == False
+            ).all()
+        } if _dn_project_ids else {}
+
         transfer_history = []
         for dn in dns:
             # Get project details
-            project = Project.query.filter_by(
-                project_id=dn.project_id,
-                is_deleted=False
-            ).first()
+            project = _dn_project_map.get(dn.project_id)
 
             # Determine destination type from delivery_from
             destination_type = 'store' if 'Store' in dn.delivery_from else 'site'

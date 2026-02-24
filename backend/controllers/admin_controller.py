@@ -1537,17 +1537,24 @@ def get_top_performers():
                 User.is_deleted == False
             ).all()
 
+            # ── Single query: unnest JSONB array, GROUP BY pm_id ─────────────────
+            # Replaces N per-PM scalar queries with one aggregate query
+            _pm_count_rows = db.session.execute(text(
+                """
+                SELECT pm_id::int AS pm_id, COUNT(*) AS project_count
+                FROM projects,
+                     jsonb_array_elements_text(user_id) AS pm_id
+                WHERE is_deleted = FALSE
+                  AND user_id IS NOT NULL
+                GROUP BY pm_id
+                """
+            )).fetchall()
+            _pm_counts_map = {row[0]: row[1] for row in _pm_count_rows}
+            # ─────────────────────────────────────────────────────────────────────
+
             pm_project_counts = []
             for pm in pms:
-                # Count projects where this PM's user_id is in the JSONB array
-                # Using raw SQL for JSONB array containment check
-                project_count = db.session.query(func.count(Project.project_id)).filter(
-                    Project.is_deleted == False,
-                    Project.user_id.isnot(None),
-                    # Check if the PM's user_id is contained in the JSONB array
-                    text(f"user_id @> '[{pm.user_id}]'::jsonb")
-                ).scalar() or 0
-
+                project_count = _pm_counts_map.get(pm.user_id, 0)
                 if project_count > 0:
                     pm_project_counts.append({
                         "user_id": pm.user_id,

@@ -975,6 +975,31 @@ def get_mep_dashboard():
             BOQ.is_deleted == False
         ).all()
 
+        # ── Batch pre-fetch: BOQDetails and Projects for all BOQs ───────────────
+        _mep_boq_ids = [b.boq_id for b in boqs]
+        _mep_batch_boq_details = {
+            bd.boq_id: bd for bd in BOQDetails.query.filter(
+                BOQDetails.boq_id.in_(_mep_boq_ids),
+                BOQDetails.is_deleted == False
+            ).all()
+        } if _mep_boq_ids else {}
+        _mep_batch_projects = {
+            p.project_id: p for p in Project.query.filter(
+                Project.project_id.in_(project_ids)
+            ).all()
+        } if project_ids else {}
+
+        # Batch pre-fetch PMAssignSS assignments for all BOQs — avoid N+1 per loop
+        _mep_all_assignments = PMAssignSS.query.filter(
+            PMAssignSS.boq_id.in_(_mep_boq_ids),
+            PMAssignSS.is_deleted == False
+        ).all() if _mep_boq_ids else []
+        # boq_id -> set of assigned_by_pm_id values (for admin check)
+        _mep_assign_by_boq = {}
+        for _a in _mep_all_assignments:
+            _mep_assign_by_boq.setdefault(_a.boq_id, set()).add(_a.assigned_by_pm_id)
+        # ─────────────────────────────────────────────────────────────────────────
+
         # Calculate statistics
         total_boq_items = 0
         total_materials = 0
@@ -996,11 +1021,8 @@ def get_mep_dashboard():
         }
 
         for boq in boqs:
-            # Get BOQ details
-            boq_details = BOQDetails.query.filter_by(
-                boq_id=boq.boq_id,
-                is_deleted=False
-            ).first()
+            # Get BOQ details from pre-fetched dict (no DB call)
+            boq_details = _mep_batch_boq_details.get(boq.boq_id)
 
             if boq_details:
                 boq_cost = float(boq_details.total_cost or 0)
@@ -1011,30 +1033,23 @@ def get_mep_dashboard():
 
             # Categorize BOQ into tabs (MUST MATCH the tab endpoint logic)
             status = boq.status.lower() if boq.status else ''
-            project = Project.query.get(boq.project_id)
+            project = _mep_batch_projects.get(boq.project_id)  # dict lookup — no DB call
 
-            # Check if there are assignments for this BOQ
+            # Check if there are assignments for this BOQ — use pre-fetched dict (no DB call)
             # For MEP dashboard, we check if ANY MEP has made assignments (not PM assignments)
             # IMPORTANT: Check original_role first to handle admin viewing as MEP correctly
+            _boq_assigners = _mep_assign_by_boq.get(boq.boq_id, set())
             if original_role == 'admin':
                 # Admin viewing MEP dashboard: Check if ANY MEP has made assignments
                 # Get all MEP user IDs for this project
                 project_mep_ids = project.mep_supervisor_id if project and project.mep_supervisor_id else []
                 if project_mep_ids:
-                    has_assignment = PMAssignSS.query.filter(
-                        PMAssignSS.boq_id == boq.boq_id,
-                        PMAssignSS.assigned_by_pm_id.in_(project_mep_ids),
-                        PMAssignSS.is_deleted == False
-                    ).first() is not None
+                    has_assignment = bool(_boq_assigners & set(project_mep_ids))
                 else:
                     has_assignment = False
             elif user_role in MEP_ROLES:
                 # Actual MEP user: Check if THIS MEP has made assignments
-                has_assignment = PMAssignSS.query.filter(
-                    PMAssignSS.boq_id == boq.boq_id,
-                    PMAssignSS.assigned_by_pm_id == mep_user_id_int,
-                    PMAssignSS.is_deleted == False
-                ).first() is not None
+                has_assignment = mep_user_id_int in _boq_assigners
             else:
                 # Other roles: No assignment check
                 has_assignment = False
@@ -1096,7 +1111,7 @@ def get_mep_dashboard():
 
         recent_activities = []
         for boq in recent_boqs:
-            project = Project.query.get(boq.project_id)
+            project = _mep_batch_projects.get(boq.project_id)  # dict lookup — no DB call
             recent_activities.append({
                 "boq_id": boq.boq_id,
                 "boq_name": boq.boq_name,
@@ -1232,10 +1247,7 @@ def get_mep_dashboard():
         # Top 5 High Budget Projects - Calculate from BOQ details
         project_budgets = {}
         for boq in boqs:
-            boq_details = BOQDetails.query.filter_by(
-                boq_id=boq.boq_id,
-                is_deleted=False
-            ).first()
+            boq_details = _mep_batch_boq_details.get(boq.boq_id)  # dict lookup — no DB call
 
             if boq_details and boq_details.boq_details:
                 boq_json = boq_details.boq_details if isinstance(boq_details.boq_details, dict) else {}

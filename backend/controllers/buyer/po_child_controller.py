@@ -55,7 +55,8 @@ def update_po_child_prices(po_child_id):
 
         # Get the POChild with eager loading
         po_child = POChild.query.options(
-            joinedload(POChild.vendor)
+            joinedload(POChild.vendor),
+            joinedload(POChild.parent_cr)
         ).filter_by(id=po_child_id, is_deleted=False).first()
         if not po_child:
             return jsonify({"error": "Purchase order not found"}), 404
@@ -1169,7 +1170,8 @@ def get_pending_po_children():
         # Get all POChild records pending TD approval with eager loading
         # FIX: Exclude store-routed POChildren - they bypass TD approval entirely
         pending_po_children = POChild.query.options(
-            joinedload(POChild.vendor)  # Eager load vendor relationship
+            joinedload(POChild.vendor),
+            joinedload(POChild.parent_cr)
         ).filter(
             POChild.vendor_selection_status == 'pending_td_approval',
             POChild.routing_type != 'store',  # Store routing bypasses TD
@@ -1179,24 +1181,67 @@ def get_pending_po_children():
             POChild.created_at.desc()
         ).all()
 
+        # ── Batch pre-fetch to eliminate N+1 queries ──────────────────────────
+        # Collect all IDs needed across the entire result set
+        all_parent_cr_ids = list({pc.parent_cr_id for pc in pending_po_children if pc.parent_cr_id})
+        all_direct_project_ids = list({pc.project_id for pc in pending_po_children if pc.project_id})
+        all_direct_boq_ids = list({pc.boq_id for pc in pending_po_children if pc.boq_id})
+        all_vendor_ids = list({pc.vendor_id for pc in pending_po_children if pc.vendor_id})
+
+        # Single batch query for each related model
+        batch_crs = {cr.cr_id: cr for cr in ChangeRequest.query.filter(
+            ChangeRequest.cr_id.in_(all_parent_cr_ids)
+        ).all()} if all_parent_cr_ids else {}
+
+        # Collect project/boq IDs that come from parent CRs (fallback path)
+        all_cr_project_ids = list({cr.project_id for cr in batch_crs.values() if cr.project_id})
+        all_cr_boq_ids = list({cr.boq_id for cr in batch_crs.values() if cr.boq_id})
+
+        all_project_ids = list(set(all_direct_project_ids + all_cr_project_ids))
+        all_boq_ids = list(set(all_direct_boq_ids + all_cr_boq_ids))
+
+        batch_projects = {p.project_id: p for p in Project.query.filter(
+            Project.project_id.in_(all_project_ids)
+        ).all()} if all_project_ids else {}
+
+        batch_boqs = {b.boq_id: b for b in BOQ.query.filter(
+            BOQ.boq_id.in_(all_boq_ids)
+        ).all()} if all_boq_ids else {}
+
+        batch_boq_details = {bd.boq_id: bd for bd in BOQDetails.query.filter(
+            BOQDetails.boq_id.in_(all_boq_ids),
+            BOQDetails.is_deleted == False
+        ).order_by(BOQDetails.boq_detail_id.asc()).all()} if all_boq_ids else {}
+
+        from models.vendor import VendorProduct
+        raw_vendor_products = VendorProduct.query.filter(
+            VendorProduct.vendor_id.in_(all_vendor_ids),
+            VendorProduct.is_deleted == False
+        ).all() if all_vendor_ids else []
+        # Group by vendor_id for easy lookup inside loop
+        batch_vendor_products = {}
+        for vp in raw_vendor_products:
+            batch_vendor_products.setdefault(vp.vendor_id, []).append(vp)
+        # ── End batch pre-fetch ────────────────────────────────────────────────
+
         result = []
         for po_child in pending_po_children:
             # Get parent CR
-            parent_cr = ChangeRequest.query.get(po_child.parent_cr_id) if po_child.parent_cr_id else None
+            parent_cr = batch_crs.get(po_child.parent_cr_id) if po_child.parent_cr_id else None
 
             # Get project details
             project = None
             if po_child.project_id:
-                project = Project.query.get(po_child.project_id)
+                project = batch_projects.get(po_child.project_id)
             elif parent_cr:
-                project = Project.query.get(parent_cr.project_id)
+                project = batch_projects.get(parent_cr.project_id)
 
             # Get BOQ details
             boq = None
             if po_child.boq_id:
-                boq = BOQ.query.get(po_child.boq_id)
+                boq = batch_boqs.get(po_child.boq_id)
             elif parent_cr and parent_cr.boq_id:
-                boq = BOQ.query.get(parent_cr.boq_id)
+                boq = batch_boqs.get(parent_cr.boq_id)
 
             # Enrich materials with BOQ prices for comparison
             enriched_materials = []
@@ -1216,11 +1261,7 @@ def get_pending_po_children():
             # Get vendor product prices as fallback
             vendor_product_prices = {}
             if po_child.vendor_id:
-                from models.vendor import VendorProduct
-                vendor_products = VendorProduct.query.filter_by(
-                    vendor_id=po_child.vendor_id,
-                    is_deleted=False
-                ).all()
+                vendor_products = batch_vendor_products.get(po_child.vendor_id, [])
                 for vp in vendor_products:
                     if vp.product_name:
                         vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
@@ -1232,7 +1273,7 @@ def get_pending_po_children():
             # First, try to get prices from BOQ details (most accurate)
             boq_id = po_child.boq_id or (parent_cr.boq_id if parent_cr else None)
             if boq_id:
-                boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+                boq_details = batch_boq_details.get(boq_id)
                 if boq_details and boq_details.boq_details:
                     boq_items = boq_details.boq_details.get('items', [])
                     for item in boq_items:
@@ -1405,8 +1446,6 @@ def get_pending_po_children():
                 'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
                 'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None,
                 # ✅ Include parent CR's material_vendor_selections for vendor comparison display
-                'material_vendor_selections': material_vendor_selections,
-
                 # ✅ Frontend compatibility fields (ChangeRequestDetailsModal expects these)
                 'selected_vendor_id': po_child.vendor_id,  # Frontend checks for this field
                 'selected_vendor_name': po_child.vendor_name,  # Frontend displays this
@@ -1454,7 +1493,8 @@ def get_rejected_po_children():
 
         # Get all POChild records rejected by TD with eager loading
         rejected_po_children = POChild.query.options(
-            joinedload(POChild.vendor)  # Eager load vendor relationship
+            joinedload(POChild.vendor),
+            joinedload(POChild.parent_cr)
         ).filter(
             or_(
                 POChild.vendor_selection_status == 'td_rejected',
@@ -1467,24 +1507,63 @@ def get_rejected_po_children():
             POChild.created_at.desc()
         ).all()
 
+        # ── Batch pre-fetch to eliminate N+1 queries ──────────────────────────
+        all_parent_cr_ids = list({pc.parent_cr_id for pc in rejected_po_children if pc.parent_cr_id})
+        all_direct_project_ids = list({pc.project_id for pc in rejected_po_children if pc.project_id})
+        all_direct_boq_ids = list({pc.boq_id for pc in rejected_po_children if pc.boq_id})
+        all_vendor_ids = list({pc.vendor_id for pc in rejected_po_children if pc.vendor_id})
+
+        batch_crs = {cr.cr_id: cr for cr in ChangeRequest.query.filter(
+            ChangeRequest.cr_id.in_(all_parent_cr_ids)
+        ).all()} if all_parent_cr_ids else {}
+
+        all_cr_project_ids = list({cr.project_id for cr in batch_crs.values() if cr.project_id})
+        all_cr_boq_ids = list({cr.boq_id for cr in batch_crs.values() if cr.boq_id})
+
+        all_project_ids = list(set(all_direct_project_ids + all_cr_project_ids))
+        all_boq_ids = list(set(all_direct_boq_ids + all_cr_boq_ids))
+
+        batch_projects = {p.project_id: p for p in Project.query.filter(
+            Project.project_id.in_(all_project_ids)
+        ).all()} if all_project_ids else {}
+
+        batch_boqs = {b.boq_id: b for b in BOQ.query.filter(
+            BOQ.boq_id.in_(all_boq_ids)
+        ).all()} if all_boq_ids else {}
+
+        batch_boq_details = {bd.boq_id: bd for bd in BOQDetails.query.filter(
+            BOQDetails.boq_id.in_(all_boq_ids),
+            BOQDetails.is_deleted == False
+        ).order_by(BOQDetails.boq_detail_id.asc()).all()} if all_boq_ids else {}
+
+        from models.vendor import VendorProduct
+        raw_vendor_products = VendorProduct.query.filter(
+            VendorProduct.vendor_id.in_(all_vendor_ids),
+            VendorProduct.is_deleted == False
+        ).all() if all_vendor_ids else []
+        batch_vendor_products = {}
+        for vp in raw_vendor_products:
+            batch_vendor_products.setdefault(vp.vendor_id, []).append(vp)
+        # ── End batch pre-fetch ────────────────────────────────────────────────
+
         result = []
         for po_child in rejected_po_children:
             # Get parent CR
-            parent_cr = ChangeRequest.query.get(po_child.parent_cr_id) if po_child.parent_cr_id else None
+            parent_cr = batch_crs.get(po_child.parent_cr_id) if po_child.parent_cr_id else None
 
             # Get project details
             project = None
             if po_child.project_id:
-                project = Project.query.get(po_child.project_id)
+                project = batch_projects.get(po_child.project_id)
             elif parent_cr:
-                project = Project.query.get(parent_cr.project_id)
+                project = batch_projects.get(parent_cr.project_id)
 
             # Get BOQ details
             boq = None
             if po_child.boq_id:
-                boq = BOQ.query.get(po_child.boq_id)
+                boq = batch_boqs.get(po_child.boq_id)
             elif parent_cr and parent_cr.boq_id:
-                boq = BOQ.query.get(parent_cr.boq_id)
+                boq = batch_boqs.get(parent_cr.boq_id)
 
             # Enrich materials with prices from BOQ AND negotiated prices
             enriched_materials = []
@@ -1498,28 +1577,27 @@ def get_rejected_po_children():
             # Get vendor product prices as fallback
             vendor_product_prices = {}
             if po_child.vendor_id:
-                from models.vendor import VendorProduct
-                vendor_products = VendorProduct.query.filter_by(
-                    vendor_id=po_child.vendor_id,
-                    is_deleted=False
-                ).all()
+                vendor_products = batch_vendor_products.get(po_child.vendor_id, [])
                 for vp in vendor_products:
                     if vp.product_name:
                         vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
 
-            # Build BOQ price lookup
+            # Build BOQ price lookup (uses batch_boq_details — no per-item DB call)
             boq_price_lookup = {}
+            boq_sub_item_lookup = {}
             boq_id = po_child.boq_id or (parent_cr.boq_id if parent_cr else None)
             if boq_id:
-                boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+                boq_details = batch_boq_details.get(boq_id)
                 if boq_details and boq_details.boq_details:
                     boq_items = boq_details.boq_details.get('items', [])
                     for item in boq_items:
                         for sub_item in item.get('sub_items', []):
+                            sub_item_name = sub_item.get('sub_item_name', '')
                             for boq_mat in sub_item.get('materials', []):
                                 mat_name = boq_mat.get('material_name', '').lower().strip()
                                 if mat_name:
                                     boq_price_lookup[mat_name] = boq_mat.get('unit_price', 0)
+                                    boq_sub_item_lookup[mat_name] = sub_item_name
 
             for material in po_materials:
                 mat_copy = dict(material)
@@ -1600,9 +1678,6 @@ def get_rejected_po_children():
                 'boq_name': boq.boq_name if boq else None,
                 'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
                 'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None,
-                # ✅ Include parent CR's material_vendor_selections for vendor comparison display
-                'material_vendor_selections': material_vendor_selections,
-
                 # ✅ Frontend compatibility fields (ChangeRequestDetailsModal expects these)
                 'selected_vendor_id': po_child.vendor_id,
                 'selected_vendor_name': po_child.vendor_name,
@@ -1654,7 +1729,8 @@ def get_buyer_pending_po_children():
         # Store routing bypasses TD approval entirely (goes directly to PM via internal request)
         if is_admin_viewing:
             pending_po_children = POChild.query.options(
-                joinedload(POChild.vendor)  # Eager load vendor relationship
+                joinedload(POChild.vendor),
+                joinedload(POChild.parent_cr)
             ).filter(
                 POChild.vendor_selection_status == 'pending_td_approval',
                 POChild.routing_type != 'store',  # Exclude store-routed POChildren
@@ -1665,7 +1741,8 @@ def get_buyer_pending_po_children():
             ).all()
         else:
             pending_po_children = POChild.query.options(
-                joinedload(POChild.vendor)  # Eager load vendor relationship
+                joinedload(POChild.vendor),
+                joinedload(POChild.parent_cr)
             ).join(
                 ChangeRequest, POChild.parent_cr_id == ChangeRequest.cr_id
             ).filter(
@@ -1679,21 +1756,50 @@ def get_buyer_pending_po_children():
             ).all()
 
 
+        # ── Batch pre-fetch to eliminate N+1 queries ──────────────────────────
+        all_parent_cr_ids = list({pc.parent_cr_id for pc in pending_po_children if pc.parent_cr_id})
+        all_direct_project_ids = list({pc.project_id for pc in pending_po_children if pc.project_id})
+        all_direct_boq_ids = list({pc.boq_id for pc in pending_po_children if pc.boq_id})
+
+        batch_crs = {cr.cr_id: cr for cr in ChangeRequest.query.filter(
+            ChangeRequest.cr_id.in_(all_parent_cr_ids)
+        ).all()} if all_parent_cr_ids else {}
+
+        all_cr_project_ids = list({cr.project_id for cr in batch_crs.values() if cr.project_id})
+        all_cr_boq_ids = list({cr.boq_id for cr in batch_crs.values() if cr.boq_id})
+
+        all_project_ids = list(set(all_direct_project_ids + all_cr_project_ids))
+        all_boq_ids = list(set(all_direct_boq_ids + all_cr_boq_ids))
+
+        batch_projects = {p.project_id: p for p in Project.query.filter(
+            Project.project_id.in_(all_project_ids)
+        ).all()} if all_project_ids else {}
+
+        batch_boqs = {b.boq_id: b for b in BOQ.query.filter(
+            BOQ.boq_id.in_(all_boq_ids)
+        ).all()} if all_boq_ids else {}
+
+        batch_boq_details = {bd.boq_id: bd for bd in BOQDetails.query.filter(
+            BOQDetails.boq_id.in_(all_boq_ids),
+            BOQDetails.is_deleted == False
+        ).order_by(BOQDetails.boq_detail_id.asc()).all()} if all_boq_ids else {}
+        # ── End batch pre-fetch ────────────────────────────────────────────────
+
         result = []
         for po_child in pending_po_children:
-            parent_cr = ChangeRequest.query.get(po_child.parent_cr_id) if po_child.parent_cr_id else None
+            parent_cr = batch_crs.get(po_child.parent_cr_id) if po_child.parent_cr_id else None
 
             project = None
             if po_child.project_id:
-                project = Project.query.get(po_child.project_id)
+                project = batch_projects.get(po_child.project_id)
             elif parent_cr:
-                project = Project.query.get(parent_cr.project_id)
+                project = batch_projects.get(parent_cr.project_id)
 
             boq = None
             if po_child.boq_id:
-                boq = BOQ.query.get(po_child.boq_id)
+                boq = batch_boqs.get(po_child.boq_id)
             elif parent_cr and parent_cr.boq_id:
-                boq = BOQ.query.get(parent_cr.boq_id)
+                boq = batch_boqs.get(parent_cr.boq_id)
 
             # Enrich materials with prices from BOQ
             enriched_materials = []
@@ -1709,7 +1815,7 @@ def get_buyer_pending_po_children():
             boq_sub_item_lookup = {}
             boq_id_for_lookup = po_child.boq_id or (parent_cr.boq_id if parent_cr else None)
             if boq_id_for_lookup:
-                boq_details = BOQDetails.query.filter_by(boq_id=boq_id_for_lookup, is_deleted=False).first()
+                boq_details = batch_boq_details.get(boq_id_for_lookup)
                 if boq_details and boq_details.boq_details:
                     boq_items = boq_details.boq_details.get('items', [])
                     for item in boq_items:
@@ -1778,8 +1884,6 @@ def get_buyer_pending_po_children():
                 'boq_name': boq.boq_name if boq else None,
                 'item_name': po_child.item_name or (parent_cr.item_name if parent_cr else None),
                 'parent_cr_formatted_id': f"PO-{parent_cr.cr_id}" if parent_cr else None,
-                # ✅ Include parent CR's material_vendor_selections for vendor comparison display
-                'material_vendor_selections': material_vendor_selections,
 
                 # ✅ Frontend compatibility fields (ChangeRequestDetailsModal expects these)
                 'selected_vendor_id': po_child.vendor_id,
@@ -1843,7 +1947,8 @@ def get_approved_po_children():
         # Get all POChild records that are ready for buyer action (not yet completed) with eager loading
         # Include: vendor-approved POChildren AND store-routed POChildren (pending PM approval)
         approved_po_children = POChild.query.options(
-            joinedload(POChild.vendor)  # Eager load vendor relationship
+            joinedload(POChild.vendor),      # Eager load vendor (avoids lazy-load in to_dict)
+            joinedload(POChild.parent_cr)    # Eager load parent_cr (avoids lazy-load in to_dict)
         ).filter(
             db.or_(
                 # Vendor routing: TD approved, not yet completed or routed to store
@@ -1865,10 +1970,57 @@ def get_approved_po_children():
 
         log.info(f"Found {len(approved_po_children)} approved PO children in database")
 
+        # ── Batch pre-fetch to eliminate N+1 queries ──────────────────────────
+        all_parent_cr_ids = list({pc.parent_cr_id for pc in approved_po_children if pc.parent_cr_id})
+        all_direct_project_ids = list({pc.project_id for pc in approved_po_children if pc.project_id})
+        all_direct_boq_ids = list({pc.boq_id for pc in approved_po_children if pc.boq_id})
+        all_vendor_ids = list({pc.vendor_id for pc in approved_po_children if pc.vendor_id})
+
+        # Single batch query for each related model
+        batch_crs = {cr.cr_id: cr for cr in ChangeRequest.query.filter(
+            ChangeRequest.cr_id.in_(all_parent_cr_ids)
+        ).all()} if all_parent_cr_ids else {}
+
+        # Collect project/boq IDs that come from parent CRs (fallback path)
+        all_cr_project_ids = list({cr.project_id for cr in batch_crs.values() if cr.project_id})
+        all_cr_boq_ids = list({cr.boq_id for cr in batch_crs.values() if cr.boq_id})
+
+        all_project_ids = list(set(all_direct_project_ids + all_cr_project_ids))
+        all_boq_ids = list(set(all_direct_boq_ids + all_cr_boq_ids))
+
+        batch_projects = {p.project_id: p for p in Project.query.filter(
+            Project.project_id.in_(all_project_ids)
+        ).all()} if all_project_ids else {}
+
+        batch_boqs = {b.boq_id: b for b in BOQ.query.filter(
+            BOQ.boq_id.in_(all_boq_ids)
+        ).all()} if all_boq_ids else {}
+
+        batch_boq_details = {bd.boq_id: bd for bd in BOQDetails.query.filter(
+            BOQDetails.boq_id.in_(all_boq_ids),
+            BOQDetails.is_deleted == False
+        ).order_by(BOQDetails.boq_detail_id.asc()).all()} if all_boq_ids else {}
+
+        # Batch vendor lookup (replaces Vendor.query.filter_by inside loop)
+        batch_vendors = {v.vendor_id: v for v in Vendor.query.filter(
+            Vendor.vendor_id.in_(all_vendor_ids),
+            Vendor.is_deleted == False
+        ).all()} if all_vendor_ids else {}
+
+        from models.vendor import VendorProduct
+        raw_vendor_products = VendorProduct.query.filter(
+            VendorProduct.vendor_id.in_(all_vendor_ids),
+            VendorProduct.is_deleted == False
+        ).all() if all_vendor_ids else []
+        batch_vendor_products = {}
+        for vp in raw_vendor_products:
+            batch_vendor_products.setdefault(vp.vendor_id, []).append(vp)
+        # ── End batch pre-fetch ────────────────────────────────────────────────
+
         result = []
         for po_child in approved_po_children:
             # Get parent CR to check buyer assignment
-            parent_cr = ChangeRequest.query.get(po_child.parent_cr_id)
+            parent_cr = batch_crs.get(po_child.parent_cr_id)
 
             # Skip store POChildren whose parent CR has been store-rejected
             # (handles legacy data where po_child_id wasn't linked on the IMR)
@@ -1883,22 +2035,22 @@ def get_approved_po_children():
             # Get project details
             project = None
             if po_child.project_id:
-                project = Project.query.get(po_child.project_id)
+                project = batch_projects.get(po_child.project_id)
             elif parent_cr:
-                project = Project.query.get(parent_cr.project_id)
+                project = batch_projects.get(parent_cr.project_id)
 
             # Get BOQ details
             boq = None
             if po_child.boq_id:
-                boq = BOQ.query.get(po_child.boq_id)
+                boq = batch_boqs.get(po_child.boq_id)
             elif parent_cr and parent_cr.boq_id:
-                boq = BOQ.query.get(parent_cr.boq_id)
+                boq = batch_boqs.get(parent_cr.boq_id)
 
             # Get vendor details for phone/email
             vendor_phone = None
             vendor_email = None
             if po_child.vendor_id:
-                vendor = Vendor.query.filter_by(vendor_id=po_child.vendor_id, is_deleted=False).first()
+                vendor = batch_vendors.get(po_child.vendor_id)
                 if vendor:
                     vendor_phone = vendor.phone
                     vendor_email = vendor.email
@@ -1915,11 +2067,7 @@ def get_approved_po_children():
             # Get vendor product prices as fallback
             vendor_product_prices = {}
             if po_child.vendor_id:
-                from models.vendor import VendorProduct
-                vendor_products = VendorProduct.query.filter_by(
-                    vendor_id=po_child.vendor_id,
-                    is_deleted=False
-                ).all()
+                vendor_products = batch_vendor_products.get(po_child.vendor_id, [])
                 for vp in vendor_products:
                     if vp.product_name:
                         vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
@@ -1929,7 +2077,7 @@ def get_approved_po_children():
             boq_sub_item_lookup = {}
             boq_id_for_lookup = po_child.boq_id or (parent_cr.boq_id if parent_cr else None)
             if boq_id_for_lookup:
-                boq_details = BOQDetails.query.filter_by(boq_id=boq_id_for_lookup, is_deleted=False).first()
+                boq_details = batch_boq_details.get(boq_id_for_lookup)
                 if boq_details and boq_details.boq_details:
                     boq_items = boq_details.boq_details.get('items', [])
                     for item in boq_items:

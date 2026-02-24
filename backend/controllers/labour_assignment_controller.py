@@ -144,16 +144,23 @@ def get_available_workers():
                 LabourRequisition.assignment_status == 'assigned'
             ).all()
 
+            # Batch pre-fetch all LabourArrival records for these requisitions on this date
+            _req_ids_on_date = [req.requisition_id for req in requisitions_on_date]
+            _batch_arrivals = {}  # key: (requisition_id, worker_id)
+            if _req_ids_on_date:
+                _arrival_rows = LabourArrival.query.filter(
+                    LabourArrival.requisition_id.in_(_req_ids_on_date),
+                    LabourArrival.arrival_date == target_date,
+                    LabourArrival.is_deleted == False
+                ).all()
+                for _a in _arrival_rows:
+                    _batch_arrivals[(_a.requisition_id, _a.worker_id)] = _a
+
             for req in requisitions_on_date:
                 if req.assigned_worker_ids:
                     for worker_id in req.assigned_worker_ids:
-                        # Check if worker has departed from this assignment
-                        arrival = LabourArrival.query.filter_by(
-                            requisition_id=req.requisition_id,
-                            worker_id=worker_id,
-                            arrival_date=target_date,
-                            is_deleted=False
-                        ).first()
+                        # Use pre-fetched arrival record (no DB query)
+                        arrival = _batch_arrivals.get((req.requisition_id, worker_id))
 
                         # If target requisition has time range, check for time overlap
                         is_unavailable = False
@@ -250,6 +257,24 @@ def assign_workers_to_requisition(requisition_id):
             # Check for existing assignments on the target date
             conflicting_workers = []
 
+            # Batch pre-fetch all arrival records for this date and these workers upfront
+            _assign_arrival_cache = {}  # key: (requisition_id, worker_id)
+            _existing_req_ids_for_date = db.session.query(LabourRequisition.requisition_id).filter(
+                LabourRequisition.required_date == target_date,
+                LabourRequisition.is_deleted == False,
+                LabourRequisition.assignment_status == 'assigned',
+                LabourRequisition.requisition_id != requisition_id
+            ).all()
+            _existing_req_id_list = [r.requisition_id for r in _existing_req_ids_for_date]
+            if _existing_req_id_list:
+                _batch_assign_arrivals = LabourArrival.query.filter(
+                    LabourArrival.requisition_id.in_(_existing_req_id_list),
+                    LabourArrival.arrival_date == target_date,
+                    LabourArrival.is_deleted == False
+                ).all()
+                for _a in _batch_assign_arrivals:
+                    _assign_arrival_cache[(_a.requisition_id, _a.worker_id)] = _a
+
             for worker_id in worker_ids:
                 # Find all requisitions this worker is assigned to on the target date
                 existing_requisitions = db.session.query(LabourRequisition).filter(
@@ -265,13 +290,8 @@ def assign_workers_to_requisition(requisition_id):
                     has_active_assignment = False
 
                     for existing_req in existing_requisitions:
-                        # Check arrival record to see if worker has departed
-                        arrival = LabourArrival.query.filter_by(
-                            requisition_id=existing_req.requisition_id,
-                            worker_id=worker_id,
-                            arrival_date=target_date,
-                            is_deleted=False
-                        ).first()
+                        # Use pre-fetched arrival record (no DB query)
+                        arrival = _assign_arrival_cache.get((existing_req.requisition_id, worker_id))
 
                         # Check if times overlap when both requisitions have start/end times
                         if requisition.start_time and requisition.end_time and existing_req.start_time and existing_req.end_time:
@@ -303,6 +323,18 @@ def assign_workers_to_requisition(requisition_id):
                     "error": f"Cannot assign workers - they are already working on another requisition:\n\n• {worker_details}\n\nThey must clock out first before being assigned to a new requisition."
                 }), 400
 
+        # Batch pre-fetch all existing arrival records for this requisition + workers
+        _assign_worker_ids = [w.worker_id for w in workers]
+        _existing_arrivals_map = {
+            a.worker_id: a
+            for a in LabourArrival.query.filter_by(
+                requisition_id=requisition.requisition_id,
+                arrival_date=requisition.required_date
+            ).filter(
+                LabourArrival.worker_id.in_(_assign_worker_ids)
+            ).all()
+        } if _assign_worker_ids else {}
+
         # Create worker assignments
         for worker in workers:
             assignment = WorkerAssignment(
@@ -320,11 +352,7 @@ def assign_workers_to_requisition(requisition_id):
             db.session.add(assignment)
 
             # Create arrival record only if it doesn't already exist
-            existing_arrival = LabourArrival.query.filter_by(
-                requisition_id=requisition.requisition_id,
-                worker_id=worker.worker_id,
-                arrival_date=requisition.required_date
-            ).first()
+            existing_arrival = _existing_arrivals_map.get(worker.worker_id)
 
             if not existing_arrival:
                 arrival = LabourArrival(
@@ -536,6 +564,13 @@ def retain_workers_for_next_day(requisition_id):
         available_workers = []
 
         if target_date <= today and start_time and end_time:
+            # Batch pre-fetch all workers upfront to avoid per-worker DB query
+            _reassign_worker_ids = original_req.assigned_worker_ids or []
+            _batch_reassign_workers = {
+                w.worker_id: w
+                for w in Worker.query.filter(Worker.worker_id.in_(_reassign_worker_ids)).all()
+            } if _reassign_worker_ids else {}
+
             # Only check conflicts for today/past dates with time specified
             for worker_id in original_req.assigned_worker_ids:
                 # Find existing assignments on target date
@@ -579,7 +614,7 @@ def retain_workers_for_next_day(requisition_id):
                             }
                             break
 
-                worker = Worker.query.get(worker_id)
+                worker = _batch_reassign_workers.get(worker_id)
                 if has_conflict:
                     unavailable_workers.append({
                         'worker_id': worker_id,
@@ -613,9 +648,15 @@ def retain_workers_for_next_day(requisition_id):
         new_req_code = LabourRequisition.generate_requisition_code()
 
         # Build preferred workers notes with available workers
+        # Fetch any workers not already in the batch (e.g. if target_date was in the future)
+        _missing_ids = [wid for wid in available_workers if wid not in _batch_reassign_workers]
+        if _missing_ids:
+            for w in Worker.query.filter(Worker.worker_id.in_(_missing_ids)).all():
+                _batch_reassign_workers[w.worker_id] = w
+
         worker_names = []
         for worker_id in available_workers:
-            worker = Worker.query.get(worker_id)
+            worker = _batch_reassign_workers.get(worker_id)
             if worker:
                 worker_names.append(f"{worker.full_name} ({worker.worker_code})")
 

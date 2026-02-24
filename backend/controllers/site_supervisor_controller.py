@@ -45,10 +45,17 @@ def create_sitesupervisor():
         project_ids = data.get('project_ids', data.get('project_id', []))
         assigned_count = 0
         if project_ids:
+            # Batch fetch all projects in one query
+            batch_create_ss_projects = {
+                p.project_id: p
+                for p in Project.query.filter(
+                    Project.project_id.in_(project_ids),
+                    Project.is_deleted == False
+                ).all()
+            }
             for proj_id in project_ids:
-                project = Project.query.filter_by(project_id=proj_id, is_deleted=False).first()
+                project = batch_create_ss_projects.get(proj_id)
                 if project:
-                    # Assign this sitesupervisor to the project (one sitesupervisor per project, but sitesupervisor can have multiple projects)
                     project.site_supervisor_id = new_user_id
                     project.last_modified_at = datetime.utcnow()
                     db.session.add(project)
@@ -273,9 +280,18 @@ def update_sitesupervisor(site_supervisor_id):
             Project.query.filter_by(site_supervisor_id=site_supervisor_id).update({"site_supervisor_id": None})
             db.session.commit()  # commit after unassigning to ensure DB update
 
+            # Batch pre-fetch all new projects in one query
+            _new_proj_ids = data["assigned_projects"]
+            _batch_new_projects = {
+                p.project_id: p for p in Project.query.filter(
+                    Project.project_id.in_(_new_proj_ids),
+                    Project.is_deleted == False
+                ).all()
+            } if _new_proj_ids else {}
+
             # Assign new projects
-            for project_id in data["assigned_projects"]:
-                project = Project.query.filter_by(project_id=project_id, is_deleted=False).first()
+            for project_id in _new_proj_ids:
+                project = _batch_new_projects.get(project_id)  # dict lookup — no DB call
                 if project:
                     project.site_supervisor_id = site_supervisor_id
 
@@ -1209,28 +1225,57 @@ def get_my_assigned_items():
             is_deleted=False
         ).all()
 
+        # ── Batch pre-fetch all related records before loop ───────────────────
+        _assign_boq_ids  = list({a.boq_id         for a in assignments if a.boq_id})
+        _assign_proj_ids = list({a.project_id      for a in assignments if a.project_id})
+        _assign_pm_ids   = list({a.assigned_by_pm_id for a in assignments if a.assigned_by_pm_id})
+
+        batch_ss_boqs = {
+            b.boq_id: b
+            for b in BOQ.query.filter(BOQ.boq_id.in_(_assign_boq_ids), BOQ.is_deleted == False).all()
+        } if _assign_boq_ids else {}
+
+        batch_ss_projects = {
+            p.project_id: p
+            for p in Project.query.filter(Project.project_id.in_(_assign_proj_ids), Project.is_deleted == False).all()
+        } if _assign_proj_ids else {}
+
+        batch_ss_pm_users = {
+            u.user_id: u
+            for u in User.query.filter(User.user_id.in_(_assign_pm_ids)).all()
+        } if _assign_pm_ids else {}
+
+        batch_ss_boq_details = {
+            bd.boq_id: bd
+            for bd in BOQDetails.query.filter(
+                BOQDetails.boq_id.in_(_assign_boq_ids),
+                BOQDetails.is_deleted == False
+            ).all()
+        } if _assign_boq_ids else {}
+        # ── End batch pre-fetch ────────────────────────────────────────────────
+
         my_items = []
         grouped_by_pm = {}
         grouped_by_project = {}
         total_items_count = 0
 
         for assignment in assignments:
-            # Get BOQ
-            boq = BOQ.query.filter_by(boq_id=assignment.boq_id, is_deleted=False).first()
+            # Get BOQ (pre-fetched)
+            boq = batch_ss_boqs.get(assignment.boq_id)
             if not boq:
                 continue
 
-            # Get project
-            project = Project.query.filter_by(project_id=assignment.project_id, is_deleted=False).first()
+            # Get project (pre-fetched)
+            project = batch_ss_projects.get(assignment.project_id)
             if not project:
                 continue
 
-            # Get PM details
-            pm_user = User.query.get(assignment.assigned_by_pm_id)
+            # Get PM details (pre-fetched)
+            pm_user = batch_ss_pm_users.get(assignment.assigned_by_pm_id)
             pm_name = pm_user.full_name if pm_user else 'Unknown'
 
-            # Get BOQ details to fetch full item information
-            boq_details = BOQDetails.query.filter_by(boq_id=boq.boq_id, is_deleted=False).first()
+            # Get BOQ details (pre-fetched)
+            boq_details = batch_ss_boq_details.get(boq.boq_id)
             items = boq_details.boq_details.get('items', []) if boq_details and boq_details.boq_details else []
 
             # Process each assigned item index

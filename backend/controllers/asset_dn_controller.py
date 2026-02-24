@@ -350,6 +350,20 @@ def create_delivery_note():
         db.session.add(adn)
         db.session.flush()
 
+        # ── Batch pre-fetch: ReturnableAssetItems for individual-tracking items ──
+        _adn_individual_item_ids = [
+            item_d.get('asset_item_id') for item_d in data['items']
+            if item_d.get('asset_item_id')
+        ]
+        _adn_batch_asset_items = {
+            ai.asset_item_id: ai for ai in ReturnableAssetItem.query.filter(
+                ReturnableAssetItem.asset_item_id.in_(_adn_individual_item_ids)
+            ).all()
+        } if _adn_individual_item_ids else {}
+        # Note: ReturnableAssetCategory uses with_for_update() (pessimistic lock)
+        # and must remain per-item to prevent concurrent stock modification.
+        # ─────────────────────────────────────────────────────────────────────────
+
         # Process items
         for item_data in data['items']:
             category = ReturnableAssetCategory.query.with_for_update().get(item_data['category_id'])
@@ -387,7 +401,7 @@ def create_delivery_note():
                         'error': f'Asset item ID required for individual tracking ({category.category_name})'
                     }), 400
 
-                asset_item = ReturnableAssetItem.query.get(asset_item_id)
+                asset_item = _adn_batch_asset_items.get(asset_item_id)  # dict lookup — no DB call
                 if not asset_item or asset_item.current_status != 'available':
                     db.session.rollback()
                     return jsonify({
@@ -511,6 +525,14 @@ def dispatch_delivery_note(adn_id):
         if adn.status not in ['DRAFT', 'ISSUED']:
             return jsonify({'success': False, 'error': f'Cannot dispatch. Current status: {adn.status}'}), 400
 
+        # Batch pre-fetch individual asset items (category uses with_for_update lock, must stay per-item)
+        _dispatch_item_ids = [item.asset_item_id for item in adn.items if item.asset_item_id]
+        _batch_dispatch_items = {
+            ai.asset_item_id: ai for ai in ReturnableAssetItem.query.filter(
+                ReturnableAssetItem.asset_item_id.in_(_dispatch_item_ids)
+            ).all()
+        } if _dispatch_item_ids else {}
+
         # Process each item - deduct from inventory
         for item in adn.items:
             category = ReturnableAssetCategory.query.with_for_update().get(item.category_id)
@@ -526,7 +548,7 @@ def dispatch_delivery_note(adn_id):
                 category.available_quantity = (category.available_quantity or 0) - item.quantity
 
             else:  # individual tracking
-                asset_item = ReturnableAssetItem.query.get(item.asset_item_id)
+                asset_item = _batch_dispatch_items.get(item.asset_item_id)  # dict lookup — no DB call
                 if asset_item:
                     asset_item.current_status = 'dispatched'
                     asset_item.current_project_id = adn.project_id
@@ -628,6 +650,17 @@ def create_return_note():
         db.session.add(ardn)
         db.session.flush()
 
+        # Batch pre-fetch original ADN items — avoid N+1 (one query per item)
+        _orig_adn_item_ids = [
+            d['original_adn_item_id'] for d in data['items']
+            if d.get('original_adn_item_id')
+        ]
+        _orig_adn_items_map = {
+            i.item_id: i for i in AssetDeliveryNoteItem.query.filter(
+                AssetDeliveryNoteItem.item_id.in_(_orig_adn_item_ids)
+            ).all()
+        } if _orig_adn_item_ids else {}
+
         # Process items
         for item_data in data['items']:
             ardn_item = AssetReturnDeliveryNoteItem(
@@ -646,7 +679,7 @@ def create_return_note():
 
             # Update quantity_returned on original ADN item so it disappears from SE view
             if item_data.get('original_adn_item_id'):
-                original_item = AssetDeliveryNoteItem.query.get(item_data['original_adn_item_id'])
+                original_item = _orig_adn_items_map.get(item_data['original_adn_item_id'])
                 if original_item:
                     current_returned = original_item.quantity_returned or 0
                     return_qty = item_data.get('quantity', 1)
@@ -1073,9 +1106,40 @@ def process_return_note(ardn_id):
 
         # Process each item
         items_data = data.get('items', [])
+        # Batch pre-fetch all return items for this ARDN
+        _ardn_item_ids = [d['return_item_id'] for d in items_data if 'return_item_id' in d]
+        _batch_ardn_items = {
+            i.return_item_id: i for i in AssetReturnDeliveryNoteItem.query.filter(
+                AssetReturnDeliveryNoteItem.return_item_id.in_(_ardn_item_ids),
+                AssetReturnDeliveryNoteItem.ardn_id == ardn_id
+            ).all()
+        } if _ardn_item_ids else {}
+
+        # Batch pre-fetch ReturnableAssetItems — avoid N+1 per item (return_to_stock / send_to_repair / dispose branches)
+        _asset_item_ids_for_proc = list({
+            d.get('asset_item_id') for d in items_data if d.get('asset_item_id')
+        } | {
+            i.asset_item_id for i in _batch_ardn_items.values() if i.asset_item_id
+        })
+        _proc_asset_items_map = {
+            ai.item_id: ai for ai in ReturnableAssetItem.query.filter(
+                ReturnableAssetItem.item_id.in_(_asset_item_ids_for_proc)
+            ).all()
+        } if _asset_item_ids_for_proc else {}
+
+        # Batch pre-fetch original ADN items for process_return_note update — avoid N+1
+        _proc_orig_adn_item_ids = list({
+            i.original_adn_item_id for i in _batch_ardn_items.values() if i.original_adn_item_id
+        })
+        _proc_orig_adn_items_map = {
+            ai.item_id: ai for ai in AssetDeliveryNoteItem.query.filter(
+                AssetDeliveryNoteItem.item_id.in_(_proc_orig_adn_item_ids)
+            ).all()
+        } if _proc_orig_adn_item_ids else {}
+
         for item_data in items_data:
-            ardn_item = AssetReturnDeliveryNoteItem.query.get(item_data['return_item_id'])
-            if not ardn_item or ardn_item.ardn_id != ardn_id:
+            ardn_item = _batch_ardn_items.get(item_data['return_item_id'])  # dict lookup — no DB call
+            if not ardn_item:
                 continue
 
             # Update PM verification
@@ -1094,7 +1158,7 @@ def process_return_note(ardn_id):
                 if category.tracking_mode == 'quantity':
                     category.available_quantity = (category.available_quantity or 0) + ardn_item.quantity
                 else:
-                    asset_item = ReturnableAssetItem.query.get(ardn_item.asset_item_id)
+                    asset_item = _proc_asset_items_map.get(ardn_item.asset_item_id)
                     if asset_item:
                         asset_item.current_status = 'available'
                         asset_item.current_project_id = None
@@ -1118,7 +1182,7 @@ def process_return_note(ardn_id):
 
                 # Update item status if individual
                 if category.tracking_mode == 'individual' and ardn_item.asset_item_id:
-                    asset_item = ReturnableAssetItem.query.get(ardn_item.asset_item_id)
+                    asset_item = _proc_asset_items_map.get(ardn_item.asset_item_id)
                     if asset_item:
                         asset_item.current_status = 'maintenance'
                         asset_item.current_project_id = None
@@ -1174,14 +1238,14 @@ def process_return_note(ardn_id):
 
                 # Update individual asset item status if applicable
                 if category.tracking_mode == 'individual' and ardn_item.asset_item_id:
-                    asset_item = ReturnableAssetItem.query.get(ardn_item.asset_item_id)
+                    asset_item = _proc_asset_items_map.get(ardn_item.asset_item_id)
                     if asset_item:
                         asset_item.current_status = 'pending_disposal'
                         asset_item.current_project_id = None
 
-            # Update original ADN item if linked
+            # Update original ADN item if linked (pre-fetched — no DB call)
             if ardn_item.original_adn_item_id:
-                adn_item = AssetDeliveryNoteItem.query.get(ardn_item.original_adn_item_id)
+                adn_item = _proc_orig_adn_items_map.get(ardn_item.original_adn_item_id)
                 if adn_item:
                     adn_item.quantity_returned = (adn_item.quantity_returned or 0) + ardn_item.quantity
                     if adn_item.quantity_returned >= adn_item.quantity:

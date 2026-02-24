@@ -225,17 +225,26 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
     """
     master_sub_item_ids = []
 
+    # Batch pre-fetch all MasterSubItems by name to avoid N+1
+    _sub_item_names_lower = [
+        s.get("sub_item_name", "").strip().lower()
+        for s in sub_items if s.get("sub_item_name", "").strip()
+    ]
+    _batch_sub_items_by_name = {}
+    if _sub_item_names_lower:
+        for _msi in MasterSubItem.query.filter(
+            db.func.lower(MasterSubItem.sub_item_name).in_(_sub_item_names_lower),
+            MasterSubItem.is_deleted == False
+        ).all():
+            _batch_sub_items_by_name.setdefault(_msi.sub_item_name.lower(), _msi)
+
     for sub_item in sub_items:
         sub_item_name = sub_item.get("sub_item_name", "").strip()
         if not sub_item_name:
             continue
 
-        # Check if master sub-item already exists GLOBALLY by name (case-insensitive)
-        # This prevents duplicate sub-item names across the entire system
-        master_sub_item = MasterSubItem.query.filter(
-            db.func.lower(MasterSubItem.sub_item_name) == sub_item_name.lower(),
-            MasterSubItem.is_deleted == False
-        ).first()
+        # Check if master sub-item already exists GLOBALLY by name (use pre-fetched batch)
+        master_sub_item = _batch_sub_items_by_name.get(sub_item_name.lower())
 
         if not master_sub_item:
             # Create new master sub-item (only if name doesn't exist globally)
@@ -991,6 +1000,15 @@ def create_boq():
         if preliminaries and preliminaries.get('items'):
             preliminary_items = preliminaries.get('items', [])
 
+            # Batch pre-fetch PreliminaryMaster records for all non-custom prelim_ids
+            from models.preliminary_master import PreliminaryMaster
+            _prelim_ids = [item.get('prelim_id') for item in preliminary_items if item.get('prelim_id') and not item.get('isCustom', False)]
+            _batch_prelim_masters = {
+                pm.prelim_id: pm for pm in PreliminaryMaster.query.filter(
+                    PreliminaryMaster.prelim_id.in_(_prelim_ids)
+                ).all()
+            } if _prelim_ids else {}
+
             for item in preliminary_items:
                 prelim_id = item.get('prelim_id')
                 is_checked = item.get('checked', False) or item.get('selected', False)
@@ -1000,9 +1018,8 @@ def create_boq():
                 if prelim_id and not is_custom:
                     description = item.get('description', '')
                     if description:
-                        # Check if description was changed from master
-                        from models.preliminary_master import PreliminaryMaster
-                        master_prelim = PreliminaryMaster.query.get(prelim_id)
+                        # Check if description was changed from master (use pre-fetched batch)
+                        master_prelim = _batch_prelim_masters.get(prelim_id)
                         if master_prelim and master_prelim.description != description:
                             # Update the master preliminary description
                             master_prelim.description = description
@@ -1483,29 +1500,58 @@ def get_boq(boq_id):
         from models.boq import MasterSubItem, MasterItem
         ids_were_recovered = False
 
-        for item in existing_purchase_items + new_add_purchase_items:
+        _all_items_for_img = existing_purchase_items + new_add_purchase_items
+
+        # Batch pre-fetch: collect all known sub_item_ids
+        _img_sub_item_ids = [
+            sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")
+            for item in _all_items_for_img
+            for sub_item in item.get("sub_items", [])
+            if sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")
+        ]
+        _batch_img_sub_items = {
+            si.sub_item_id: si for si in MasterSubItem.query.filter(
+                MasterSubItem.sub_item_id.in_(_img_sub_item_ids)
+            ).all()
+        } if _img_sub_item_ids else {}
+
+        # Batch pre-fetch: collect item_names for the fallback path (missing IDs)
+        _img_item_names_fallback = list({
+            item.get("item_name")
+            for item in _all_items_for_img
+            for sub_item in item.get("sub_items", [])
+            if not (sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")) and item.get("item_name")
+        })
+        _batch_img_master_items = {
+            mi.item_name: mi for mi in MasterItem.query.filter(
+                MasterItem.item_name.in_(_img_item_names_fallback)
+            ).all()
+        } if _img_item_names_fallback else {}
+        # Pre-fetch fallback sub-items by (item_id, sub_item_name)
+        _fallback_item_ids = [mi.item_id for mi in _batch_img_master_items.values()]
+        _batch_fallback_sub_items = {}
+        if _fallback_item_ids:
+            for _si in MasterSubItem.query.filter(MasterSubItem.item_id.in_(_fallback_item_ids)).all():
+                _batch_fallback_sub_items[(_si.item_id, _si.sub_item_name)] = _si
+
+        for item in _all_items_for_img:
             sub_items = item.get("sub_items", [])
             for sub_item in sub_items:
                 sub_item_id = sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")
                 master_sub_item = None
 
                 if sub_item_id:
-                    # Query database for sub_item_image using ID
-                    master_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id).first()
+                    # Use pre-fetched batch (no DB call)
+                    master_sub_item = _batch_img_sub_items.get(sub_item_id)
                 else:
-                    # Fallback: Try to find by item_name and sub_item_name (for BOQs that lost their IDs)
+                    # Fallback: Try to find by item_name and sub_item_name
                     item_name = item.get("item_name")
                     sub_item_name = sub_item.get("sub_item_name")
 
                     if item_name and sub_item_name:
-                        # First find the master item
-                        master_item = MasterItem.query.filter_by(item_name=item_name).first()
+                        master_item = _batch_img_master_items.get(item_name)
                         if master_item:
-                            # Then find the sub-item by item_id and sub_item_name
-                            master_sub_item = MasterSubItem.query.filter_by(
-                                item_id=master_item.item_id,
-                                sub_item_name=sub_item_name
-                            ).first()
+                            master_sub_item = _batch_fallback_sub_items.get((master_item.item_id, sub_item_name))
 
                             # If found, add the ID back to the JSON for future use
                             if master_sub_item:
@@ -2442,6 +2488,14 @@ def update_boq(boq_id):
             preliminary_selections_saved = 0
             custom_preliminaries_created = 0
 
+            # Batch pre-fetch PreliminaryMaster records for all non-custom items
+            _upd_prelim_ids = [item.get('prelim_id') for item in preliminary_items if item.get('prelim_id') and not item.get('isCustom', False)]
+            _batch_upd_prelim_masters = {
+                pm.prelim_id: pm for pm in PreliminaryMaster.query.filter(
+                    PreliminaryMaster.prelim_id.in_(_upd_prelim_ids)
+                ).all()
+            } if _upd_prelim_ids else {}
+
             for item in preliminary_items:
                 prelim_id = item.get('prelim_id')
                 is_checked = item.get('checked', False) or item.get('selected', False)
@@ -2451,8 +2505,8 @@ def update_boq(boq_id):
                 if prelim_id and not is_custom:
                     description = item.get('description', '')
                     if description:
-                        # Check if description was changed from master
-                        master_prelim = PreliminaryMaster.query.get(prelim_id)
+                        # Check if description was changed from master (use pre-fetched batch)
+                        master_prelim = _batch_upd_prelim_masters.get(prelim_id)
                         if master_prelim and master_prelim.description != description:
                             # Update the master preliminary description
                             master_prelim.description = description
@@ -3231,6 +3285,42 @@ def revision_boq(boq_id):
             # Apply BOQ-level discount to get final total
             final_boq_cost = combined_subtotal - boq_discount_amount if boq_discount_amount > 0 else combined_subtotal
 
+            # ── Batch pre-fetch existing MasterItems by name ──────────────────────
+            _boq_item_names = [
+                d.get("item_name") for d in boq_items
+                if d.get("has_sub_items") and d.get("item_name")
+            ]
+            _batch_master_items = {}
+            if _boq_item_names:
+                for _mi in MasterItem.query.filter(MasterItem.item_name.in_(_boq_item_names)).all():
+                    _batch_master_items[_mi.item_name] = _mi
+
+            # ── Batch pre-fetch existing MasterMaterials and MasterLabour by name ─
+            _all_mat_names = [
+                mat.get("material_name")
+                for d in boq_items if d.get("has_sub_items")
+                for si in d.get("sub_items", [])
+                for mat in si.get("materials", [])
+                if mat.get("material_name")
+            ]
+            _batch_master_materials_by_name = {}
+            if _all_mat_names:
+                for _mm in MasterMaterial.query.filter(MasterMaterial.material_name.in_(_all_mat_names)).all():
+                    _batch_master_materials_by_name.setdefault(_mm.material_name, _mm)
+
+            _all_labour_roles = [
+                lab.get("labour_role")
+                for d in boq_items if d.get("has_sub_items")
+                for si in d.get("sub_items", [])
+                for lab in si.get("labour", [])
+                if lab.get("labour_role")
+            ]
+            _batch_master_labour_by_role = {}
+            if _all_labour_roles:
+                for _ml in MasterLabour.query.filter(MasterLabour.labour_role.in_(_all_labour_roles)).all():
+                    _batch_master_labour_by_role.setdefault(_ml.labour_role, _ml)
+            # ─────────────────────────────────────────────────────────────────────
+
             # Store new items, sub-items, and materials to master tables
             for item_data in boq_items:
                 # Check if item has sub_items structure
@@ -3238,7 +3328,7 @@ def revision_boq(boq_id):
                     # NEW FORMAT: Item with sub_items
                     # 1. Store/Update Item in boq_items table
                     item_name = item_data.get("item_name")
-                    existing_item = MasterItem.query.filter_by(item_name=item_name).first()
+                    existing_item = _batch_master_items.get(item_name)  # dict lookup — no DB call
 
                     if not existing_item:
                         new_item = MasterItem(
@@ -3313,10 +3403,8 @@ def revision_boq(boq_id):
                         for material_data in sub_item_data.get("materials", []):
                             material_name = material_data.get("material_name")
 
-                            # Check if material already exists
-                            existing_material = MasterMaterial.query.filter_by(
-                                material_name=material_name
-                            ).first()
+                            # Check if material already exists (use pre-fetched batch)
+                            existing_material = _batch_master_materials_by_name.get(material_name) if material_name else None
 
                             if not existing_material:
                                 new_material = MasterMaterial(
@@ -3350,10 +3438,8 @@ def revision_boq(boq_id):
                         for labour_data_item in sub_item_data.get("labour", []):
                             labour_role = labour_data_item.get("labour_role")
 
-                            # Check if labour already exists
-                            existing_labour = MasterLabour.query.filter_by(
-                                labour_role=labour_role
-                            ).first()
+                            # Check if labour already exists (use pre-fetched batch)
+                            existing_labour = _batch_master_labour_by_role.get(labour_role) if labour_role else None
 
                             if not existing_labour:
                                 new_labour = MasterLabour(
@@ -4977,13 +5063,26 @@ def get_sub_item(item_id):
             is_deleted=False
         ).all()
 
+        # Batch pre-fetch all materials and labour for all sub-items in one query each
+        _sub_ids = [s.sub_item_id for s in boq_sub_items]
+        _batch_materials_by_sub = {}
+        _batch_labour_by_sub = {}
+        if _sub_ids:
+            for _m in MasterMaterial.query.filter(
+                MasterMaterial.sub_item_id.in_(_sub_ids),
+                MasterMaterial.is_active == True
+            ).all():
+                _batch_materials_by_sub.setdefault(_m.sub_item_id, []).append(_m)
+            for _l in MasterLabour.query.filter(
+                MasterLabour.sub_item_id.in_(_sub_ids),
+                MasterLabour.is_active == True
+            ).all():
+                _batch_labour_by_sub.setdefault(_l.sub_item_id, []).append(_l)
+
         sub_item_details = []
         for sub_item in boq_sub_items:
-            # Get materials for this sub-item
-            materials = MasterMaterial.query.filter_by(
-                sub_item_id=sub_item.sub_item_id,
-                is_active=True
-            ).all()
+            # Use pre-fetched materials (no DB call)
+            materials = _batch_materials_by_sub.get(sub_item.sub_item_id, [])
 
             material_list = []
             for material in materials:
@@ -5001,11 +5100,8 @@ def get_sub_item(item_id):
                     "is_active": material.is_active
                 })
 
-            # Get labour for this sub-item
-            labours = MasterLabour.query.filter_by(
-                sub_item_id=sub_item.sub_item_id,
-                is_active=True
-            ).all()
+            # Get labour for this sub-item (use pre-fetched batch)
+            labours = _batch_labour_by_sub.get(sub_item.sub_item_id, [])
 
             labour_list = []
             for labour in labours:
@@ -5078,14 +5174,23 @@ def get_sub_item(item_id):
             MaterialPurchaseTracking.is_from_change_request == True
         ).all()
 
+        # Batch pre-fetch CR materials (only those not already in all_materials_dict)
+        _cr_mat_ids = [
+            cm.master_material_id for cm in cr_materials
+            if cm.master_material_id and cm.master_material_id not in all_materials_dict
+        ]
+        _batch_cr_materials = {}
+        if _cr_mat_ids:
+            for _mm in MasterMaterial.query.filter(
+                MasterMaterial.material_id.in_(_cr_mat_ids),
+                MasterMaterial.is_active == True
+            ).all():
+                _batch_cr_materials[_mm.material_id] = _mm
+
         for cr_mat in cr_materials:
             mat_id = cr_mat.master_material_id
             if mat_id and mat_id not in all_materials_dict:
-                # Fetch the full material details from boq_material
-                master_material = MasterMaterial.query.filter_by(
-                    material_id=mat_id,
-                    is_active=True
-                ).first()
+                master_material = _batch_cr_materials.get(mat_id)  # dict lookup — no DB call
 
                 if master_material:
                     all_materials_dict[mat_id] = {

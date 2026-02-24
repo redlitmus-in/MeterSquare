@@ -255,6 +255,48 @@ def get_buyer_pending_purchases():
         pending_purchases = []
         total_cost = 0
 
+        # ── Batch pre-fetch to eliminate N+1 queries ──────────────────────────
+        # Collect all unique IDs needed across the entire page of CRs
+        all_cr_ids_pending = [cr.cr_id for cr in change_requests]
+
+        # Batch fetch all vendor-selector Users (replaces User.query.get() inside loop)
+        from models.user import User
+        _selector_user_ids = list({
+            cr.vendor_selected_by_buyer_id
+            for cr in change_requests
+            if cr.vendor_selected_by_buyer_id
+        })
+        batch_selector_users = {
+            u.user_id: u
+            for u in User.query.filter(User.user_id.in_(_selector_user_ids)).all()
+        } if _selector_user_ids else {}
+
+        # Batch fetch LPOCustomization for all CRs (replaces per-CR filter_by inside loop)
+        from models.lpo_customization import LPOCustomization
+        batch_lpo_by_cr = {
+            lpo.cr_id: lpo
+            for lpo in LPOCustomization.query.filter(
+                LPOCustomization.cr_id.in_(all_cr_ids_pending),
+                LPOCustomization.po_child_id == None
+            ).all()
+        } if all_cr_ids_pending else {}
+
+        # Batch fetch all MVS vendors (replaces per-CR VendorModel.query.filter inside loop)
+        from models.vendor import Vendor as VendorModel
+        _all_mvs_vendor_ids = set()
+        for cr in change_requests:
+            if cr.material_vendor_selections:
+                for sel in cr.material_vendor_selections.values():
+                    if isinstance(sel, dict) and sel.get('vendor_id'):
+                        _all_mvs_vendor_ids.add(sel['vendor_id'])
+        batch_mvs_vendors = {
+            v.vendor_id: v
+            for v in VendorModel.query.filter(
+                VendorModel.vendor_id.in_(list(_all_mvs_vendor_ids)),
+                VendorModel.is_deleted == False
+            ).all()
+        } if _all_mvs_vendor_ids else {}
+        # ── End batch pre-fetch ────────────────────────────────────────────────
         for cr in change_requests:
             # ✅ PERFORMANCE: Use preloaded relationships instead of separate queries
             # Get project details (already loaded via joinedload)
@@ -285,20 +327,18 @@ def get_buyer_pending_purchases():
             # This ensures deleted vendors are removed and vendor names are up-to-date
             validated_material_vendor_selections = {}
             if cr.material_vendor_selections:
-                from models.vendor import Vendor as VendorModel
                 # Get all unique vendor IDs from selections
                 mvs_vendor_ids = set()
                 for selection in cr.material_vendor_selections.values():
                     if isinstance(selection, dict) and selection.get('vendor_id'):
                         mvs_vendor_ids.add(selection.get('vendor_id'))
 
-                # Fetch all referenced vendors in one query
+                # Use pre-fetched batch (already filtered active/non-deleted)
                 active_mvs_vendors = {
-                    v.vendor_id: v for v in VendorModel.query.filter(
-                        VendorModel.vendor_id.in_(mvs_vendor_ids),
-                        VendorModel.is_deleted == False
-                    ).all()
-                } if mvs_vendor_ids else {}
+                    vid: batch_mvs_vendors[vid]
+                    for vid in mvs_vendor_ids
+                    if vid in batch_mvs_vendors
+                }
 
                 # Validate each selection
                 for material_name, selection in cr.material_vendor_selections.items():
@@ -350,8 +390,7 @@ def get_buyer_pending_purchases():
                     vendor_email = vendor.email or ""
                 # Get who selected the vendor
                 if cr.vendor_selected_by_buyer_id:
-                    from models.user import User
-                    selector = User.query.get(cr.vendor_selected_by_buyer_id)
+                    selector = batch_selector_users.get(cr.vendor_selected_by_buyer_id)
                     if selector:
                         vendor_details['selected_by_name'] = selector.full_name
 
@@ -444,7 +483,6 @@ def get_buyer_pending_purchases():
             # ✅ FIX: Check if all materials are handled by POChildren
             # Only hide parent if POChildren exist AND handle all unrouted materials
             # Don't hide if vendor selections are in parent CR (not POChildren)
-            routed_materials = cr.routed_materials or {}
             total_materials_count = len(cr.materials_data or cr.sub_items_data or [])
             routed_count = len(routed_materials)
 
@@ -544,10 +582,9 @@ def get_buyer_pending_purchases():
                 "vat_amount": cr_total * 0.05  # Default, will be updated below
             })
 
-            # Get VAT data from LPO customization for this purchase
+            # Get VAT data from LPO customization for this purchase (pre-fetched)
             try:
-                from models.lpo_customization import LPOCustomization
-                lpo_customization = LPOCustomization.query.filter_by(cr_id=cr.cr_id, po_child_id=None).first()
+                lpo_customization = batch_lpo_by_cr.get(cr.cr_id)
                 if lpo_customization and lpo_customization.vat_percent is not None:
                     vat_percent = float(lpo_customization.vat_percent)
                     pending_purchases[-1]["vat_percent"] = vat_percent
@@ -670,6 +707,30 @@ def get_buyer_completed_purchases():
 
         completed_purchases = []
         total_cost = 0
+
+        # ── Batch pre-fetch to eliminate N+1 queries in CR loop ───────────────
+        _cr_ids_completed = [cr.cr_id for cr in change_requests]
+
+        from models.user import User
+        _selector_user_ids_c = list({
+            cr.vendor_selected_by_buyer_id
+            for cr in change_requests
+            if cr.vendor_selected_by_buyer_id
+        })
+        batch_selector_users_c = {
+            u.user_id: u
+            for u in User.query.filter(User.user_id.in_(_selector_user_ids_c)).all()
+        } if _selector_user_ids_c else {}
+
+        from models.lpo_customization import LPOCustomization
+        batch_lpo_by_cr_c = {
+            lpo.cr_id: lpo
+            for lpo in LPOCustomization.query.filter(
+                LPOCustomization.cr_id.in_(_cr_ids_completed),
+                LPOCustomization.po_child_id == None
+            ).all()
+        } if _cr_ids_completed else {}
+        # ── End batch pre-fetch ────────────────────────────────────────────────
 
         for cr in change_requests:
             # ✅ PERFORMANCE: Use preloaded relationships
@@ -814,8 +875,7 @@ def get_buyer_completed_purchases():
                     vendor_email = vendor.email or ""
                 # Get who selected the vendor
                 if cr.vendor_selected_by_buyer_id:
-                    from models.user import User
-                    selector = User.query.get(cr.vendor_selected_by_buyer_id)
+                    selector = batch_selector_users_c.get(cr.vendor_selected_by_buyer_id)
                     if selector:
                         vendor_details['selected_by_name'] = selector.full_name
 
@@ -852,11 +912,10 @@ def get_buyer_completed_purchases():
                 "vendor_phone": vendor_details['phone'],
                 "vendor_phone_code": vendor_details['phone_code'],
                 "vendor_contact_person": vendor_details['contact_person'],
-                "vendor_email": vendor_details['email'],
                 "vendor_category": vendor_details['category'],
                 "vendor_street_address": vendor_details['street_address'],
                 "vendor_city": vendor_details['city'],
-"vendor_state": vendor_details['state'],
+                "vendor_state": vendor_details['state'],
                 "vendor_country": vendor_details['country'],
                 "vendor_gst_number": vendor_details['gst_number'],
                 "vendor_selected_by_name": vendor_details['selected_by_name'],
@@ -866,17 +925,16 @@ def get_buyer_completed_purchases():
                 "vendor_selection_date": cr.vendor_selection_date.isoformat() if cr.vendor_selection_date else None,
                 "vendor_selection_status": cr.vendor_selection_status,
                 "vendor_trn": vendor_trn,
-                "vendor_email": vendor_email,
+                "vendor_email": vendor_email,  # Overrides vendor_details['email'] — local var takes precedence
                 "vendor_selection_pending_td_approval": vendor_selection_pending_td_approval,
                 # VAT data
                 "vat_percent": 5.0,  # Default
                 "vat_amount": cr_total * 0.05  # Default
             })
 
-            # Get VAT data from LPO customization for this purchase
+            # Get VAT data from LPO customization for this purchase (pre-fetched)
             try:
-                from models.lpo_customization import LPOCustomization
-                lpo_customization = LPOCustomization.query.filter_by(cr_id=cr.cr_id, po_child_id=None).first()
+                lpo_customization = batch_lpo_by_cr_c.get(cr.cr_id)
                 if lpo_customization and lpo_customization.vat_percent is not None:
                     vat_percent = float(lpo_customization.vat_percent)
                     completed_purchases[-1]["vat_percent"] = vat_percent
@@ -920,36 +978,80 @@ def get_buyer_completed_purchases():
                 POChild.created_at.desc()
             ).all()
 
+        # ── Batch pre-fetch for POChild loop to eliminate N+1 queries ─────────
+        _poc_all_proj_ids = list({
+            pc.parent_cr.project_id
+            for pc in completed_po_children
+            if pc.parent_cr and pc.parent_cr.project_id
+        })
+        _poc_all_boq_ids = list({
+            bid
+            for pc in completed_po_children
+            for bid in [pc.boq_id, pc.parent_cr.boq_id if pc.parent_cr else None]
+            if bid
+        })
+        _poc_vendor_ids = list({pc.vendor_id for pc in completed_po_children if pc.vendor_id})
+        _poc_parent_cr_ids = list({
+            pc.parent_cr.cr_id
+            for pc in completed_po_children
+            if pc.parent_cr
+        })
+        _poc_po_child_ids = [pc.id for pc in completed_po_children]
+
+        batch_poc_projects = {
+            p.project_id: p
+            for p in Project.query.filter(Project.project_id.in_(_poc_all_proj_ids)).all()
+        } if _poc_all_proj_ids else {}
+
+        batch_poc_boqs = {
+            b.boq_id: b
+            for b in BOQ.query.filter(BOQ.boq_id.in_(_poc_all_boq_ids)).all()
+        } if _poc_all_boq_ids else {}
+
+        batch_poc_vendors = {
+            v.vendor_id: v
+            for v in Vendor.query.filter(
+                Vendor.vendor_id.in_(_poc_vendor_ids),
+                Vendor.is_deleted == False
+            ).all()
+        } if _poc_vendor_ids else {}
+
+        # Single LPO query covering both specific (cr_id, po_child_id) and CR-level (po_child_id=None)
+        from models.lpo_customization import LPOCustomization
+        _poc_lpo_rows = LPOCustomization.query.filter(
+            LPOCustomization.cr_id.in_(_poc_parent_cr_ids)
+        ).all() if _poc_parent_cr_ids else []
+        batch_poc_lpo_specific = {}   # key: (cr_id, po_child_id)
+        batch_poc_lpo_cr = {}         # key: cr_id  — po_child_id IS NULL fallback
+        for _lpo in _poc_lpo_rows:
+            if _lpo.po_child_id is None:
+                batch_poc_lpo_cr[_lpo.cr_id] = _lpo
+            else:
+                batch_poc_lpo_specific[(_lpo.cr_id, _lpo.po_child_id)] = _lpo
+        # ── End batch pre-fetch ────────────────────────────────────────────────
+
         completed_po_children_list = []
         for po_child in completed_po_children:
             parent_cr = po_child.parent_cr  # Use preloaded relationship
-            project = Project.query.get(parent_cr.project_id) if parent_cr else None
-            boq = BOQ.query.get(po_child.boq_id) if po_child.boq_id else (BOQ.query.get(parent_cr.boq_id) if parent_cr and parent_cr.boq_id else None)
+            project = batch_poc_projects.get(parent_cr.project_id) if parent_cr else None
+            boq = batch_poc_boqs.get(po_child.boq_id) if po_child.boq_id else (batch_poc_boqs.get(parent_cr.boq_id) if parent_cr and parent_cr.boq_id else None)
 
             # Get vendor details
-            vendor = None
-            if po_child.vendor_id:
-                from models.vendor import Vendor
-                vendor = Vendor.query.get(po_child.vendor_id)
+            vendor = batch_poc_vendors.get(po_child.vendor_id) if po_child.vendor_id else None
 
             po_child_total = po_child.materials_total_cost or 0
             total_cost += po_child_total
 
-            # Get VAT data for PO Child
+            # Get VAT data for PO Child (pre-fetched — no DB queries)
             vat_percent = 5.0  # Default
             vat_amount = po_child_total * 0.05  # Default
             try:
-                from models.lpo_customization import LPOCustomization
-                lpo_customization = LPOCustomization.query.filter_by(
-                    cr_id=parent_cr.cr_id if parent_cr else None,
-                    po_child_id=po_child.id
-                ).first()
-                if not lpo_customization and parent_cr:
-                    # Fall back to CR-level customization
-                    lpo_customization = LPOCustomization.query.filter_by(cr_id=parent_cr.cr_id, po_child_id=None).first()
+                cr_id_for_lpo = parent_cr.cr_id if parent_cr else None
+                lpo_customization = batch_poc_lpo_specific.get((cr_id_for_lpo, po_child.id))
+                if not lpo_customization and cr_id_for_lpo:
+                    lpo_customization = batch_poc_lpo_cr.get(cr_id_for_lpo)
                 if lpo_customization and lpo_customization.vat_percent is not None:
                     vat_percent = float(lpo_customization.vat_percent)
-                    # Always recalculate VAT based on current subtotal (stored vat_amount may be stale)
                     vat_amount = po_child_total * vat_percent / 100
             except Exception:
                 pass  # Keep defaults
@@ -1072,18 +1174,39 @@ def get_buyer_rejected_purchases():
 
             change_requests = paginated_result.items
 
+        # ── Batch pre-fetch for rejected CR loop to eliminate N+1 queries ──────
+        _rej_cr_ids = [cr.cr_id for cr in change_requests]
+
+        # Pre-fetch store-rejected POChildren to avoid per-CR query inside loop
+        _store_rejected_cr_ids = [cr.cr_id for cr in change_requests if cr.store_request_status == 'store_rejected']
+        _cr_ids_with_store_po_child = set()
+        if _store_rejected_cr_ids:
+            _store_poc_rows = POChild.query.filter(
+                POChild.parent_cr_id.in_(_store_rejected_cr_ids),
+                POChild.routing_type == 'store',
+                POChild.is_deleted == False
+            ).with_entities(POChild.parent_cr_id).all()
+            _cr_ids_with_store_po_child = {row.parent_cr_id for row in _store_poc_rows}
+
+        # Pre-fetch vendor-selector Users
+        _rej_selector_ids = list({
+            cr.vendor_selected_by_buyer_id
+            for cr in change_requests
+            if cr.vendor_selected_by_buyer_id
+        })
+        batch_rej_selector_users = {
+            u.user_id: u
+            for u in User.query.filter(User.user_id.in_(_rej_selector_ids)).all()
+        } if _rej_selector_ids else {}
+        # ── End batch pre-fetch ────────────────────────────────────────────────
+
         rejected_purchases = []
 
         for cr in change_requests:
             # Skip parent CRs that have store POChildren — the POChild handles rejection display
             # This prevents duplicates: parent CR + POChild both showing in Rejected tab
             if cr.store_request_status == 'store_rejected':
-                store_po_child = POChild.query.filter_by(
-                    parent_cr_id=cr.cr_id,
-                    routing_type='store',
-                    is_deleted=False
-                ).first()
-                if store_po_child:
+                if cr.cr_id in _cr_ids_with_store_po_child:
                     continue  # POChild will show in td_rejected_po_children instead
 
             # ✅ PERFORMANCE: Use preloaded relationships
@@ -1180,10 +1303,9 @@ def get_buyer_rejected_purchases():
                     vendor_state = vendor.state
                     vendor_country = vendor.country
                     vendor_gst_number = vendor.gst_number
-                # Get who selected the vendor
+                # Get who selected the vendor (pre-fetched)
                 if cr.vendor_selected_by_buyer_id:
-                    from models.user import User
-                    selector = User.query.filter_by(user_id=cr.vendor_selected_by_buyer_id).first()
+                    selector = batch_rej_selector_users.get(cr.vendor_selected_by_buyer_id)
                     if selector:
                         vendor_selected_by_name = selector.full_name
 
@@ -1293,11 +1415,24 @@ def get_buyer_rejected_purchases():
                     POChild.created_at.desc()
                 ).all()
 
+            # ── Batch pre-fetch for rejected POChild loop ─────────────────────
+            _rej_poc_proj_ids = list({poc.project_id for poc in po_children if poc.project_id})
+            _rej_poc_boq_ids = list({poc.boq_id for poc in po_children if poc.boq_id})
+            batch_rej_poc_projects = {
+                p.project_id: p
+                for p in Project.query.filter(Project.project_id.in_(_rej_poc_proj_ids)).all()
+            } if _rej_poc_proj_ids else {}
+            batch_rej_poc_boqs = {
+                b.boq_id: b
+                for b in BOQ.query.filter(BOQ.boq_id.in_(_rej_poc_boq_ids)).all()
+            } if _rej_poc_boq_ids else {}
+            # ── End batch pre-fetch ────────────────────────────────────────────
+
             for poc in po_children:
                 # Get parent CR for project/boq info (use preloaded relationship)
                 parent_cr = poc.parent_cr
-                project = Project.query.get(poc.project_id) if poc.project_id else None
-                boq = BOQ.query.filter_by(boq_id=poc.boq_id).first() if poc.boq_id else None
+                project = batch_rej_poc_projects.get(poc.project_id) if poc.project_id else None
+                boq = batch_rej_poc_boqs.get(poc.boq_id) if poc.boq_id else None
 
                 is_store_rejection = (
                     poc.status == 'store_rejected'
@@ -1449,6 +1584,24 @@ def complete_purchase():
         new_materials_added = []
         sub_items_data = cr.sub_items_data or cr.materials_data or []
 
+        # Pre-collect all material names to batch-check existence (eliminates N+1)
+        _all_material_names = []
+        for _si in sub_items_data:
+            if isinstance(_si, dict):
+                _mats = _si.get('materials', []) or [_si]
+                for _m in _mats:
+                    _nm = _m.get('material_name', '').strip()
+                    if _nm:
+                        _all_material_names.append(_nm)
+
+        _existing_material_names = set()
+        if _all_material_names:
+            _existing_rows = MasterMaterial.query.filter(
+                MasterMaterial.material_name.in_(_all_material_names),
+                MasterMaterial.is_active == True
+            ).with_entities(MasterMaterial.material_name).all()
+            _existing_material_names = {row.material_name for row in _existing_rows}
+
         for sub_item in sub_items_data:
             if isinstance(sub_item, dict):
                 # Check if this sub-item has materials
@@ -1465,14 +1618,8 @@ def complete_purchase():
                     if not material_name:
                         continue
 
-                    # Check if material already exists in MasterMaterial
-                    existing_material = MasterMaterial.query.filter_by(
-                        material_name=material_name,
-                        is_active=True
-                    ).first()
-
-                    # Only add if it's a NEW material
-                    if not existing_material:
+                    # Only add if it's a NEW material (uses pre-fetched set)
+                    if material_name not in _existing_material_names:
                         # Get sub_item_id and ensure it's an integer
                         # Priority: material data > sub_item data > change request column
                         raw_sub_item_id = material.get('sub_item_id') or sub_item.get('sub_item_id') or cr.sub_item_id

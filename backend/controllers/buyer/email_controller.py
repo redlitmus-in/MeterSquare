@@ -581,6 +581,32 @@ def send_vendor_email(cr_id, po_child_id=None):
         email_service = BOQEmailService()
 
         # Build CC email list — if stored email is missing, try to resolve by name from users table
+        # Pre-collect names that need resolution (no email stored)
+        _cc_names_to_resolve = [
+            (cc.get('name') or '').strip()
+            for cc in cc_emails
+            if not (cc.get('email') or '').strip() and (cc.get('name') or '').strip()
+        ]
+        # Single OR query for all unresolved names at once
+        _cc_resolved_map = {}
+        if _cc_names_to_resolve:
+            from sqlalchemy import or_ as _or
+            _cc_filters = [
+                _or(User.full_name.ilike(n), User.email.ilike(f"{n}@%"))
+                for n in _cc_names_to_resolve
+            ]
+            for _u in User.query.filter(
+                User.is_deleted == False,
+                User.email.isnot(None),
+                User.email != '',
+                _or(*_cc_filters)
+            ).all():
+                # Map matched user back to name (best-effort: full_name match takes priority)
+                for n in _cc_names_to_resolve:
+                    if (_u.full_name or '').lower() == n.lower() or (_u.email or '').lower().startswith(f"{n.lower()}@"):
+                        if n not in _cc_resolved_map:
+                            _cc_resolved_map[n] = _u.email
+
         cc_email_list = []
         for cc in cc_emails:
             email = (cc.get('email') or '').strip()
@@ -589,18 +615,10 @@ def send_vendor_email(cr_id, po_child_id=None):
             else:
                 name = (cc.get('name') or '').strip()
                 if name:
-                    resolved = User.query.filter(
-                        User.is_deleted == False,
-                        User.email.isnot(None),
-                        User.email != '',
-                        or_(
-                            User.full_name.ilike(name),
-                            User.email.ilike(f"{name}@%")
-                        )
-                    ).first()
-                    if resolved and resolved.email:
-                        cc_email_list.append(resolved.email)
-                        log.info(f"CC email resolved by name '{name}' → {resolved.email}")
+                    resolved_email = _cc_resolved_map.get(name)
+                    if resolved_email:
+                        cc_email_list.append(resolved_email)
+                        log.info(f"CC email resolved by name '{name}' → {resolved_email}")
                     else:
                         log.warning(f"CC recipient '{name}' has no email — skipping")
 
@@ -761,10 +779,19 @@ def send_vendor_whatsapp(cr_id):
             ).all()
 
             if po_children:
+                # Batch pre-fetch vendors for all po_children — avoid N+1 (one query per child)
+                _pc_vendor_ids = list({pc.vendor_id for pc in po_children if pc.vendor_id})
+                _pc_vendors_map = {
+                    v.vendor_id: v for v in Vendor.query.filter(
+                        Vendor.vendor_id.in_(_pc_vendor_ids),
+                        Vendor.is_deleted == False
+                    ).all()
+                } if _pc_vendor_ids else {}
+
                 # Find the POChild that matches the vendor phone
                 for pc in po_children:
                     if pc.vendor_id:
-                        v = Vendor.query.filter_by(vendor_id=pc.vendor_id, is_deleted=False).first()
+                        v = _pc_vendors_map.get(pc.vendor_id)
                         if v and v.phone == vendor_phone:
                             po_child = pc
                             vendor_id = pc.vendor_id

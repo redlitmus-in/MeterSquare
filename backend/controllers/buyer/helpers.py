@@ -215,17 +215,16 @@ def process_materials_with_negotiated_prices(cr, boq_details=None):
         if isinstance(selection, dict) and selection.get('vendor_id'):
             vendor_ids.add(selection.get('vendor_id'))
 
-    # Lookup vendor product prices for all selected vendors
+    # Lookup vendor product prices for all selected vendors — single batch query
     vendor_product_prices = {}  # {vendor_id: {material_name.lower(): price}}
-    for vendor_id in vendor_ids:
-        vendor_products = VendorProduct.query.filter_by(
-            vendor_id=vendor_id,
-            is_deleted=False
+    if vendor_ids:
+        all_vendor_products = VendorProduct.query.filter(
+            VendorProduct.vendor_id.in_(list(vendor_ids)),
+            VendorProduct.is_deleted == False
         ).all()
-        vendor_product_prices[vendor_id] = {}
-        for vp in vendor_products:
+        for vp in all_vendor_products:
             if vp.product_name:
-                vendor_product_prices[vendor_id][vp.product_name.lower().strip()] = float(vp.unit_price or 0)
+                vendor_product_prices.setdefault(vp.vendor_id, {})[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
 
     # Build BOQ material price lookup for enrichment
     # Two lookups: by material_id and by material_name (for when IDs don't match)

@@ -130,29 +130,28 @@ def preview_lpo_pdf(cr_id):
                 db.session.rollback()
                 log.warning(f"Could not create table: {str(create_error)}")
 
-        # Get vendor details - priority: POChild vendor > vendor_id param > CR's selected vendor > auto-detect from material_vendor_selections
-        vendor = None
+        # Get vendor details — resolve vendor_id from in-memory data first, then do at most ONE query
+        # Priority: POChild vendor > vendor_id param > CR's selected vendor > auto-detect from material_vendor_selections
+        _resolved_vendor_id = None
         if po_child and po_child.vendor_id:
-            vendor = Vendor.query.filter_by(vendor_id=po_child.vendor_id, is_deleted=False).first()
+            _resolved_vendor_id = po_child.vendor_id
         elif vendor_id:
-            # Use vendor_id from query param (for pre-POChild preview)
-            vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+            _resolved_vendor_id = vendor_id
         elif cr.selected_vendor_id:
-            vendor = Vendor.query.filter_by(vendor_id=cr.selected_vendor_id, is_deleted=False).first()
-        else:
-            # Auto-detect vendor from material_vendor_selections (for regular LPO with all materials to one vendor)
-            if cr.material_vendor_selections and isinstance(cr.material_vendor_selections, dict):
-                # Get unique vendor IDs from all materials
-                vendor_ids_in_selections = set()
-                for mat_name, selection in cr.material_vendor_selections.items():
-                    if isinstance(selection, dict) and selection.get('vendor_id'):
-                        vendor_ids_in_selections.add(selection.get('vendor_id'))
+            _resolved_vendor_id = cr.selected_vendor_id
+        elif cr.material_vendor_selections and isinstance(cr.material_vendor_selections, dict):
+            _vendor_ids_in_sel = {
+                sel['vendor_id']
+                for sel in cr.material_vendor_selections.values()
+                if isinstance(sel, dict) and sel.get('vendor_id')
+            }
+            if len(_vendor_ids_in_sel) == 1:
+                _resolved_vendor_id = list(_vendor_ids_in_sel)[0]
+                vendor_id = _resolved_vendor_id  # Set for later use
 
-                # If all materials go to the same vendor, use that vendor
-                if len(vendor_ids_in_selections) == 1:
-                    auto_detected_vendor_id = list(vendor_ids_in_selections)[0]
-                    vendor = Vendor.query.filter_by(vendor_id=auto_detected_vendor_id, is_deleted=False).first()
-                    vendor_id = auto_detected_vendor_id  # Set vendor_id for later use
+        vendor = None
+        if _resolved_vendor_id:
+            vendor = Vendor.query.filter_by(vendor_id=_resolved_vendor_id, is_deleted=False).first()
 
         # Get project details
         project = Project.query.get(cr.project_id)
