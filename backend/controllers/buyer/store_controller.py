@@ -70,17 +70,7 @@ def get_store_items():
                 }
             })
 
-        return jsonify({
-            "items": store_items,
-            "pagination": {
-                "page": paginated.page,
-                "per_page": paginated.per_page,
-                "total": paginated.total,
-                "pages": paginated.pages,
-                "has_next": paginated.has_next,
-                "has_prev": paginated.has_prev
-            }
-        }), 200
+        return jsonify(store_items), 200
 
     except Exception as e:
         log.error(f"Error getting store items: {str(e)}")

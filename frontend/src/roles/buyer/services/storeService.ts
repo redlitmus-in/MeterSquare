@@ -44,7 +44,7 @@ class StoreService {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
       });
-      return response.data.items ?? response.data;
+      return response.data;
     } catch (error) {
       const axiosError = error as AxiosError;
       console.error('Error fetching store items:', axiosError);
