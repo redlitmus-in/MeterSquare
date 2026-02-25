@@ -248,7 +248,7 @@ const StockStatus: React.FC = () => {
               <div>
                 <p className="text-sm font-medium text-gray-600">Total Stock Value</p>
                 <p className="mt-2 text-2xl font-bold text-gray-900">
-                  ₹{(totalValue / 100000).toFixed(1)}L
+                  AED {(totalValue / 100000).toFixed(1)}L
                 </p>
               </div>
               <div className="p-3 bg-blue-100 rounded-full">

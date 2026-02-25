@@ -1,10 +1,8 @@
 // Inventory Management Constants
 // Centralized constants to avoid hardcoding values across components
 
-export const PAGINATION = {
-  DEFAULT_PAGE_SIZE: 10,
-  PAGE_SIZE_OPTIONS: [10, 25, 50, 100]
-} as const;
+// Re-export PAGINATION from main constants for backward compatibility
+export { PAGINATION } from './constants';
 
 export const INVENTORY_DEFAULTS = {
   CURRENCY: 'AED',

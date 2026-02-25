@@ -299,6 +299,14 @@ def create_asset_requisition():
 
         if items_data and isinstance(items_data, list) and len(items_data) > 0:
             # Multi-item request
+            # Batch pre-fetch all categories — avoid N+1 (one query per item)
+            _req_cat_ids = list({i.get('category_id') for i in items_data if i.get('category_id')})
+            _req_cats_map = {
+                c.category_id: c for c in ReturnableAssetCategory.query.filter(
+                    ReturnableAssetCategory.category_id.in_(_req_cat_ids)
+                ).all()
+            } if _req_cat_ids else {}
+
             for item in items_data:
                 item_category_id = item.get('category_id')
                 item_quantity = item.get('quantity', 1)
@@ -306,7 +314,7 @@ def create_asset_requisition():
                 if not item_category_id:
                     continue
 
-                category = ReturnableAssetCategory.query.get(item_category_id)
+                category = _req_cats_map.get(item_category_id)
                 if not category:
                     continue
 
@@ -394,9 +402,11 @@ def create_asset_requisition():
 
 
 def get_my_requisitions():
-    """SE gets their own requisitions"""
+    """SE gets their own requisitions
+    Admin sees ALL requisitions for oversight purposes"""
     try:
         user_id = g.user.get('user_id')
+        user_role = g.user.get('role', '').lower()
         if not user_id:
             return jsonify({'success': False, 'error': 'User not authenticated'}), 401
 
@@ -409,9 +419,16 @@ def get_my_requisitions():
             joinedload(AssetRequisition.category),
             joinedload(AssetRequisition.asset_item)
         ).filter(
-            AssetRequisition.requested_by_user_id == user_id,
             AssetRequisition.is_deleted == False
         )
+
+        # Admin sees ALL requisitions (for oversight when viewing as another role)
+        if user_role == 'admin':
+            current_app.logger.info(f"Admin {user_id} viewing all asset requisitions")
+            # No user filtering - admin sees everything
+        else:
+            # Regular users only see their own requisitions
+            query = query.filter(AssetRequisition.requested_by_user_id == user_id)
 
         if status_filter and status_filter != 'all':
             query = query.filter(AssetRequisition.status == status_filter)
@@ -662,6 +679,14 @@ def update_requisition(requisition_id):
         # Update items if provided
         if 'items' in data and isinstance(data['items'], list) and len(data['items']) > 0:
             validated_items = []
+            # Batch pre-fetch all categories — avoid N+1 (one query per item)
+            _upd_cat_ids = list({i.get('category_id') for i in data['items'] if i.get('category_id')})
+            _upd_cats_map = {
+                c.category_id: c for c in ReturnableAssetCategory.query.filter(
+                    ReturnableAssetCategory.category_id.in_(_upd_cat_ids)
+                ).all()
+            } if _upd_cat_ids else {}
+
             for item in data['items']:
                 item_category_id = item.get('category_id')
                 item_quantity = item.get('quantity', 1)
@@ -669,7 +694,7 @@ def update_requisition(requisition_id):
                 if not item_category_id:
                     continue
 
-                category = ReturnableAssetCategory.query.get(item_category_id)
+                category = _upd_cats_map.get(item_category_id)
                 if not category:
                     continue
 
@@ -717,43 +742,13 @@ def update_requisition(requisition_id):
 # ==================== PM ENDPOINTS ====================
 
 def get_pm_pending_requisitions():
-    """PM gets requisitions pending their approval - only from their assigned Site Engineers"""
+    """PM gets requisitions pending their approval - only from their assigned Site Engineers
+    Admin sees ALL requisitions for oversight purposes"""
     try:
         user_id = g.user.get('user_id')
+        user_role = g.user.get('role', '').lower()
         if not user_id:
             return jsonify({'success': False, 'error': 'User not authenticated'}), 401
-
-        # Get projects and Site Engineers assigned to this PM
-        from models.pm_assign_ss import PMAssignSS
-
-        project_ids = []
-        assigned_ss_ids = []
-
-        # Get PM assignments - find projects and SS assigned to this PM
-        pm_assignments = PMAssignSS.query.filter(
-            or_(
-                PMAssignSS.pm_ids == user_id,
-                PMAssignSS.assigned_by_pm_id == user_id
-            ),
-            PMAssignSS.is_deleted == False
-        ).all()
-
-        # Collect project IDs and SS IDs from assignments
-        for assignment in pm_assignments:
-            if assignment.project_id and assignment.project_id not in project_ids:
-                project_ids.append(assignment.project_id)
-
-            # Collect all SS IDs assigned to this PM
-            if assignment.ss_ids:
-                for ss_id in assignment.ss_ids:
-                    if ss_id not in assigned_ss_ids:
-                        assigned_ss_ids.append(ss_id)
-
-            # Also include assigned_to_se_id (single SE assignment)
-            if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in assigned_ss_ids:
-                assigned_ss_ids.append(assignment.assigned_to_se_id)
-
-        current_app.logger.info(f"PM {user_id} - Project IDs: {project_ids}, SS IDs: {assigned_ss_ids}")
 
         status_filter = request.args.get('status', 'pending_pm')
 
@@ -765,28 +760,65 @@ def get_pm_pending_requisitions():
             AssetRequisition.is_deleted == False
         )
 
-        # CRITICAL FIX: Filter by both projects AND assigned Site Engineers
-        # Only show requisitions from SS assigned to this PM
-        if project_ids and assigned_ss_ids:
-            query = query.filter(
-                and_(
-                    AssetRequisition.project_id.in_(project_ids),
-                    AssetRequisition.requested_by_user_id.in_(assigned_ss_ids)
-                )
-            )
-        elif project_ids:
-            # Fallback: if no SS assignments found, filter by project only
-            query = query.filter(AssetRequisition.project_id.in_(project_ids))
-        elif assigned_ss_ids:
-            # Edge case: filter by SS only
-            query = query.filter(AssetRequisition.requested_by_user_id.in_(assigned_ss_ids))
+        # Admin sees ALL requisitions (for oversight when viewing as PM role)
+        if user_role == 'admin':
+            current_app.logger.info(f"Admin {user_id} viewing all PM requisitions")
+            # No project/user filtering for admin - they see everything
         else:
-            # No assignments found - return empty list
-            return jsonify({
-                'success': True,
-                'data': [],
-                'total': 0
-            }), 200
+            # Regular PM logic - filter by their assigned projects/Site Engineers
+            from models.pm_assign_ss import PMAssignSS
+
+            project_ids = []
+            assigned_ss_ids = []
+
+            # Get PM assignments - find projects and SS assigned to this PM
+            pm_assignments = PMAssignSS.query.filter(
+                or_(
+                    PMAssignSS.pm_ids == user_id,
+                    PMAssignSS.assigned_by_pm_id == user_id
+                ),
+                PMAssignSS.is_deleted == False
+            ).all()
+
+            # Collect project IDs and SS IDs from assignments
+            for assignment in pm_assignments:
+                if assignment.project_id and assignment.project_id not in project_ids:
+                    project_ids.append(assignment.project_id)
+
+                # Collect all SS IDs assigned to this PM
+                if assignment.ss_ids:
+                    for ss_id in assignment.ss_ids:
+                        if ss_id not in assigned_ss_ids:
+                            assigned_ss_ids.append(ss_id)
+
+                # Also include assigned_to_se_id (single SE assignment)
+                if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in assigned_ss_ids:
+                    assigned_ss_ids.append(assignment.assigned_to_se_id)
+
+            current_app.logger.info(f"PM {user_id} - Project IDs: {project_ids}, SS IDs: {assigned_ss_ids}")
+
+            # CRITICAL FIX: Filter by both projects AND assigned Site Engineers
+            # Only show requisitions from SS assigned to this PM
+            if project_ids and assigned_ss_ids:
+                query = query.filter(
+                    and_(
+                        AssetRequisition.project_id.in_(project_ids),
+                        AssetRequisition.requested_by_user_id.in_(assigned_ss_ids)
+                    )
+                )
+            elif project_ids:
+                # Fallback: if no SS assignments found, filter by project only
+                query = query.filter(AssetRequisition.project_id.in_(project_ids))
+            elif assigned_ss_ids:
+                # Edge case: filter by SS only
+                query = query.filter(AssetRequisition.requested_by_user_id.in_(assigned_ss_ids))
+            else:
+                # No assignments found - return empty list
+                return jsonify({
+                    'success': True,
+                    'data': [],
+                    'total': 0
+                }), 200
 
         if status_filter == 'pending':
             query = query.filter(AssetRequisition.status == RequisitionStatus.PENDING_PM)
@@ -1035,10 +1067,18 @@ def prod_mgr_approve_requisition(requisition_id):
 
         # Check stock availability for all items
         if requisition.items and len(requisition.items) > 0:
+            # Batch pre-fetch all categories for multi-item requisition
+            _req_cat_ids = [item.get('category_id') for item in requisition.items if item.get('category_id')]
+            _batch_req_cats = {
+                c.category_id: c for c in ReturnableAssetCategory.query.filter(
+                    ReturnableAssetCategory.category_id.in_(_req_cat_ids)
+                ).all()
+            } if _req_cat_ids else {}
+
             # Multi-item: check each item's stock
             insufficient_items = []
             for item in requisition.items:
-                cat = ReturnableAssetCategory.query.get(item.get('category_id'))
+                cat = _batch_req_cats.get(item.get('category_id'))
                 if cat:
                     available = cat.available_quantity or 0
                     requested = item.get('quantity', 1)
@@ -1323,10 +1363,18 @@ def dispatch_requisition(requisition_id):
             # Still validate sufficient stock exists, but don't deduct yet
             if requisition.items and len(requisition.items) > 0:
                 # Multi-item: validate stock availability
+                # Batch pre-fetch all categories — avoid N+1 (one query per item)
+                _disp_cat_ids = list({i.get('category_id') for i in requisition.items if i.get('category_id')})
+                _disp_cats_map = {
+                    c.category_id: c for c in ReturnableAssetCategory.query.filter(
+                        ReturnableAssetCategory.category_id.in_(_disp_cat_ids)
+                    ).all()
+                } if _disp_cat_ids else {}
+
                 insufficient_items = []
                 for item in requisition.items:
                     cat_id = item.get('category_id')
-                    category = ReturnableAssetCategory.query.get(cat_id)
+                    category = _disp_cats_map.get(cat_id)
                     if not category:
                         return jsonify({'success': False, 'error': f'Category {cat_id} not found'}), 404
 

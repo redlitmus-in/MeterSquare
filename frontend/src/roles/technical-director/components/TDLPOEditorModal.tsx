@@ -455,7 +455,8 @@ const TDLPOEditorModal: React.FC<TDLPOEditorModalProps> = ({
                           min="0"
                           max="100"
                           step="0.5"
-                          value={lpoData.totals.vat_percent}
+                          value={lpoData.totals.vat_percent || ''}
+                          placeholder="0"
                           onChange={(e) => {
                             if (isReadOnly) return;
                             const newVatPercent = parseFloat(e.target.value) || 0;

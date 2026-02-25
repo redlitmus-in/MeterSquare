@@ -3,9 +3,12 @@ BOQ Email Service - Professional email templates for Technical Directors
 """
 import smtplib
 import os
+import traceback
+from html import escape
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
+from email.mime.image import MIMEImage
 from email import encoders
 from email.header import Header
 from email.utils import formataddr
@@ -22,6 +25,13 @@ EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "465"))
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
 
+# Frontend URL (environment-specific)
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+if ENVIRONMENT == "production":
+    FRONTEND_URL = os.getenv("PROD_FRONTEND_URL", "https://msq.kol.tel")
+else:
+    FRONTEND_URL = os.getenv("DEV_FRONTEND_URL", "http://localhost:3000")
+
 
 class BOQEmailService:
     """Service for sending BOQ-related emails to Technical Directors"""
@@ -33,471 +43,315 @@ class BOQEmailService:
         self.email_port = EMAIL_PORT
         self.use_tls = EMAIL_USE_TLS
 
-    def send_email(self, recipient_email, subject, html_content, attachments=None, cc_emails=None):
+    def send_email(self, recipient_email, subject, email_html, attachments=None, cc_emails=None):
         """
-        Send email using SMTP
+        Send an email via SMTP.
 
         Args:
-            recipient_email: Email address of recipient (string) or list of emails
+            recipient_email: Email address (string, comma-separated string, or list)
             subject: Email subject
-            html_content: HTML formatted email content
-            attachments: List of tuples (filename, file_data, mime_type)
-            cc_emails: List of CC email addresses (optional)
+            email_html: HTML email body
+            attachments: Optional list of tuples (filename, file_data, mime_type)
+            cc_emails: Optional list of CC email addresses
 
         Returns:
-            bool: True if email sent successfully, False otherwise
+            bool: True if sent successfully, False otherwise
         """
         try:
-            # Validate email configuration
-            if not self.sender_email or not self.sender_password:
-                error_msg = "Email configuration missing: SENDER_EMAIL or SENDER_EMAIL_PASSWORD not set in environment"
-                raise ValueError(error_msg)
-
-            # Handle multiple recipients - convert string to list if needed
-            if isinstance(recipient_email, str):
-                # Split comma-separated emails and clean them
-                recipient_list = [email.strip() for email in recipient_email.split(',') if email.strip()]
-            elif isinstance(recipient_email, list):
-                recipient_list = [email.strip() for email in recipient_email if email.strip()]
+            # Normalize recipient email(s)
+            if isinstance(recipient_email, list):
+                to_emails = [e.strip() for e in recipient_email if e and e.strip()]
+            elif isinstance(recipient_email, str) and ',' in recipient_email:
+                to_emails = [e.strip() for e in recipient_email.split(',') if e.strip()]
             else:
-                recipient_list = [str(recipient_email).strip()]
+                to_emails = [recipient_email]
 
-            if not recipient_list:
-                raise ValueError("No valid recipient email addresses provided")
-
-            # Handle CC emails
-            cc_list = []
-            if cc_emails:
-                if isinstance(cc_emails, str):
-                    cc_list = [email.strip() for email in cc_emails.split(',') if email.strip()]
-                elif isinstance(cc_emails, list):
-                    cc_list = [email.strip() for email in cc_emails if email.strip()]
-
-            # Create message
+            # Build MIME structure:
+            # multipart/mixed (top — holds attachments as visible files)
+            #   ├── multipart/related (HTML body + inline images like logo)
+            #   │     ├── multipart/alternative
+            #   │     │     └── text/html
+            #   │     └── image/png (inline logo)
+            #   └── application/pdf (attachment — visible to user)
             message = MIMEMultipart('mixed')
             sender_name = "MeterSquare ERP"
             message["From"] = formataddr((str(Header(sender_name, 'utf-8')), self.sender_email))
-            # For multiple recipients, join with comma for the To header
-            message["To"] = ", ".join(recipient_list)
+            message["To"] = ", ".join(to_emails)
             message["Subject"] = subject
-
-            # Add CC header if CC emails exist
+            cc_list = (cc_emails if isinstance(cc_emails, list) else [cc_emails]) if cc_emails else []
             if cc_list:
                 message["Cc"] = ", ".join(cc_list)
 
-            # Attach HTML body
-            html_part = MIMEText(html_content, "html", "utf-8")
-            message.attach(html_part)
+            # Related part: holds HTML + inline images (logo)
+            msg_related = MIMEMultipart('related')
 
-            # Attach files if provided
+            # Alternative part for HTML body
+            msg_alternative = MIMEMultipart('alternative')
+            msg_related.attach(msg_alternative)
+            msg_alternative.attach(MIMEText(email_html, "html"))
+
+            # Only attach logo if the email HTML actually references it (cid:logo)
+            if 'cid:logo' in email_html:
+                try:
+                    possible_logo_paths = [
+                        os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logo.png'),
+                        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logo.png'),
+                        os.path.join(os.getcwd(), 'logo.png'),
+                    ]
+                    logo_attached = False
+                    for logo_path in possible_logo_paths:
+                        if os.path.exists(logo_path):
+                            with open(logo_path, 'rb') as f:
+                                logo_data = f.read()
+                            logo_image = MIMEImage(logo_data, _subtype='png')
+                            logo_image.add_header('Content-ID', '<logo>')
+                            logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
+                            msg_related.attach(logo_image)
+                            logo_attached = True
+                            log.info(f"Logo attached from: {logo_path}")
+                            break
+                    if not logo_attached:
+                        log.warning("Logo file not found, sending email without logo")
+                except Exception as logo_err:
+                    log.error(f"Error attaching logo: {logo_err}")
+
+            # Attach the related part (HTML + logo) to the top-level mixed container
+            message.attach(msg_related)
+
+            # Attach additional files (e.g. LPO PDF, Excel) — these show as visible attachments
             if attachments:
                 for filename, file_data, mime_type in attachments:
-                    part = MIMEBase(*mime_type.split('/'))
-                    part.set_payload(file_data)
-                    encoders.encode_base64(part)
-                    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
-                    message.attach(part)
+                    main_type, sub_type = mime_type.split('/', 1) if '/' in mime_type else ('application', 'octet-stream')
+                    attachment_part = MIMEBase(main_type, sub_type)
+                    attachment_part.set_payload(file_data)
+                    encoders.encode_base64(attachment_part)
+                    attachment_part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    message.attach(attachment_part)
 
-            # Combine all recipients (To + CC) for actual sending
-            all_recipients = recipient_list + cc_list
+            # Build full recipient list (To + CC)
+            all_recipients = list(to_emails)
+            if cc_emails:
+                all_recipients += cc_emails if isinstance(cc_emails, list) else [cc_emails]
 
-            # Send email
-            try:
-                if self.use_tls:
-                    with smtplib.SMTP(self.email_host, self.email_port, timeout=30) as server:
-                        server.starttls()
-                        server.login(self.sender_email, self.sender_password)
-                        # Send to all recipients (To + CC) in one call
-                        server.sendmail(self.sender_email, all_recipients, message.as_string())
-                else:
-                    # For SSL (like Gmail on port 465)
-                    with smtplib.SMTP_SSL(self.email_host, self.email_port, timeout=30) as server:
-                        server.login(self.sender_email, self.sender_password)
-                        # Send to all recipients (To + CC) in one call
-                        server.sendmail(self.sender_email, all_recipients, message.as_string())
+            # Send via SMTP
+            refused = {}
+            if self.use_tls:
+                with smtplib.SMTP(self.email_host, self.email_port) as server:
+                    server.starttls()
+                    server.login(self.sender_email, self.sender_password)
+                    refused = server.sendmail(self.sender_email, all_recipients, message.as_string())
+            else:
+                with smtplib.SMTP_SSL(self.email_host, self.email_port) as server:
+                    server.login(self.sender_email, self.sender_password)
+                    refused = server.sendmail(self.sender_email, all_recipients, message.as_string())
 
-                cc_info = f" + {len(cc_list)} CC" if cc_list else ""
-                log.info(f"Email sent successfully to {len(recipient_list)} recipient(s){cc_info}: {', '.join(recipient_list)}")
-                if cc_list:
-                    log.info(f"CC recipients: {', '.join(cc_list)}")
-                return True
+            if refused:
+                log.warning(f"SMTP refused recipients: {refused}")
 
-            except smtplib.SMTPAuthenticationError as e:
-                log.error(f"SMTP Authentication failed: {e}")
-                raise
-            except smtplib.SMTPException as e:
-                log.error(f"SMTP error occurred: {e}")
-                raise
-            except Exception as e:
-                log.error(f"Unexpected error during email send: {e}")
-                raise
-
-        except Exception as e:
-            log.error(f"Failed to send BOQ email to {recipient_email}: {e}")
-            import traceback
-            log.error(f"Traceback: {traceback.format_exc()}")
-            return False
-
-    def send_email_async(self, recipient_email, subject, html_content, attachments=None, cc_emails=None):
-        """
-        Send email asynchronously using background thread queue
-        ✅ PERFORMANCE FIX: Non-blocking email sending (15s → 0.1s response time)
-
-        Args:
-            recipient_email: Email address of recipient (string) or list of emails
-            subject: Email subject
-            html_content: HTML formatted email content
-            attachments: List of tuples (filename, file_data, mime_type)
-            cc_emails: List of CC email addresses (optional)
-
-        Returns:
-            bool: True if email queued successfully (doesn't wait for send)
-        """
-        try:
-            import threading
-            import queue
-
-            # Create email data package
-            email_data = {
-                'recipient_email': recipient_email,
-                'subject': subject,
-                'html_content': html_content,
-                'attachments': attachments,
-                'cc_emails': cc_emails,
-                'sender_email': self.sender_email,
-                'sender_password': self.sender_password,
-                'email_host': self.email_host,
-                'email_port': self.email_port,
-                'use_tls': self.use_tls
-            }
-
-            # Send to background thread for processing
-            def send_in_background():
-                try:
-                    self.send_email(
-                        recipient_email=email_data['recipient_email'],
-                        subject=email_data['subject'],
-                        html_content=email_data['html_content'],
-                        attachments=email_data['attachments'],
-                        cc_emails=email_data['cc_emails']
-                    )
-                except Exception as e:
-                    log.error(f"Background email send failed: {e}")
-
-            # Start background thread
-            thread = threading.Thread(target=send_in_background, daemon=True)
-            thread.start()
-
-            log.info(f"Email queued for async sending to {recipient_email}")
+            cc_list_str = ', '.join(cc_list) if cc_emails else ''
+            cc_info = f" + CC: {cc_list_str}" if cc_emails else ""
+            log.info(f"Email sent successfully to {', '.join(to_emails)}{cc_info} | Envelope: {all_recipients}")
             return True
 
         except Exception as e:
-            log.error(f"Failed to queue email: {e}")
+            log.error(f"Failed to send email to {recipient_email}: {e}")
+            import traceback
+            log.error(traceback.format_exc())
             return False
 
-    def generate_boq_review_email(self, boq_data, project_data, items_summary):
+    def send_email_async(self, recipient_email, subject, email_html, attachments=None, cc_emails=None):
         """
-        Generate professional BOQ review request email for Technical Director
+        Send email asynchronously in a background thread (non-blocking).
+
+        Returns:
+            bool: True if the email thread was started successfully
+        """
+        try:
+            import threading
+            thread = threading.Thread(
+                target=self.send_email,
+                args=(recipient_email, subject, email_html, attachments, cc_emails),
+                daemon=True
+            )
+            thread.start()
+            log.info(f"Email queued for async sending to {recipient_email}")
+            return True
+        except Exception as e:
+            log.error(f"Failed to start async email thread: {e}")
+            return False
+
+    def generate_boq_approval_email(self, boq_data, project_data, items_summary, comments, estimator_name=None, pm_name=None):
+        """
+        Generate PROFESSIONAL BOQ approval email for Project Manager
 
         Args:
             boq_data: Dictionary containing BOQ information
             project_data: Dictionary containing project information
             items_summary: Dictionary containing items summary
+            comments: Approval comments from Estimator
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager's full name (optional)
 
         Returns:
             str: HTML formatted email content
         """
         boq_id = boq_data.get('boq_id', 'N/A')
         boq_name = boq_data.get('boq_name', 'N/A')
-        status = boq_data.get('status', 'Draft')
         created_by = boq_data.get('created_by', 'System')
-        created_at = boq_data.get('created_at', 'N/A')
 
         project_name = project_data.get('project_name', 'N/A')
         client = project_data.get('client', 'N/A')
         location = project_data.get('location', 'N/A')
+        project_code = project_data.get('project_code', 'N/A')
 
-        total_items = items_summary.get('total_items', 0)
-        total_materials = items_summary.get('total_materials', 0)
-        total_labour = items_summary.get('total_labour', 0)
-        total_material_cost = items_summary.get('total_material_cost', 0)
-        total_labour_cost = items_summary.get('total_labour_cost', 0)
         total_cost = items_summary.get('total_cost', 0)
-        estimated_selling_price = items_summary.get('estimatedSellingPrice', 0)
+        formatted_cost = f"₹{total_cost:,.2f}" if total_cost else "₹0.00"
 
-        # Generate items table
-        items = items_summary.get('items', [])
-        items_table_rows = ""
-        for idx, item in enumerate(items, 1):
-            item_name = item.get('item_name', 'N/A')
-            base_cost = item.get('base_cost', 0)
-            overhead_percentage = item.get('overhead_percentage', 0)
-            overhead_amount = item.get('overhead_amount', 0)
-            profit_margin_percentage = item.get('profit_margin_percentage', 0)
-            profit_margin_amount = item.get('profit_margin_amount', 0)
-            selling_price = item.get('selling_price', 0)
+        # Use actual names or fallback
+        estimator_display = estimator_name if estimator_name else "Estimator"
+        pm_display = pm_name if pm_name else "Project Manager"
 
-            items_table_rows += f"""
-                <tr>
-                    <td>{idx}</td>
-                    <td>{item_name}</td>
-                    <td>AED {base_cost:,.2f}</td>
-                    <td>{overhead_percentage}%</td>
-                    <td>AED {overhead_amount:,.2f}</td>
-                    <td>{profit_margin_percentage}%</td>
-                    <td>AED {profit_margin_amount:,.2f}</td>
-                    <td><strong>AED {selling_price:,.2f}</strong></td>
-                </tr>
-            """
-
-        # Build email HTML
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header">
-                <h1>BILL OF QUANTITIES (BOQ)</h1>
-                <h2>Review Request</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Light Blue -->
+            <div style="background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Submitted for Approval</h1>
+                <p style="color: #dbeafe; font-size: 14px; margin: 0;">Please Review and Approve</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear Technical Director,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    A new Bill of Quantities (BOQ) has been prepared and is ready for your review and approval.
-                    Please find the detailed cost estimation and breakdown below.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{pm_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    A Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been submitted for your review and approval.
+                    Please review the details below and take appropriate action.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Information</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Status:</span> <span class="status-badge status-pending">{status}</span></p>
-                    <p><span class="label">Created By:</span> <span class="value">{created_by}</span></p>
-                    <p><span class="label">Created Date:</span> <span class="value">{created_at}</span></p>
+                <!-- Status Badge -->
+                <div style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-left: 4px solid #22c55e; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <div style="display: flex; align-items: center;">
+                        <span style="background: #22c55e; color: white; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                            Pending Review
+                        </span>
+                        <span style="margin-left: 12px; color: #166534; font-size: 13px; font-weight: 500;">
+                            Awaiting your approval
+                        </span>
+                    </div>
                 </div>
 
-                <!-- Project Information -->
-                <h2>Project Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
-                </div>
+                <!-- Project Details Card (Combined BOQ + Project Info) -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
 
-                <!-- Cost Summary -->
-                <h2>Cost Summary</h2>
-                <div class="info-box">
-                    <p><span class="label">Total Items:</span> <span class="value">{total_items}</span></p>
-                    <p><span class="label">Total Materials:</span> <span class="value">{total_materials}</span></p>
-                    <p><span class="label">Total Labour:</span> <span class="value">{total_labour}</span></p>
-                    <p><span class="label">Material Cost:</span> <span class="value">AED {total_material_cost:,.2f}</span></p>
-                    <p><span class="label">Labour Cost:</span> <span class="value">AED {total_labour_cost:,.2f}</span></p>
-                    <p><span class="label">Base Cost:</span> <span class="value">AED {(total_material_cost + total_labour_cost):,.2f}</span></p>
-                </div>
-
-                <div class="total-cost">
-                    <span class="label">Estimated Selling Price:</span>
-                    <span class="amount">AED {estimated_selling_price:,.2f}</span>
-                </div>
-
-                <!-- Items Breakdown -->
-                <h2>Items Breakdown</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Item Name</th>
-                                <th>Base Cost</th>
-                                <th>Overhead %</th>
-                                <th>Overhead Amt</th>
-                                <th>Profit %</th>
-                                <th>Profit Amt</th>
-                                <th>Selling Price</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {items_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #3b82f6; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Comments Section (if provided) -->
+                {f'''
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-left: 4px solid #3b82f6; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #1e40af; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        💬 Comments from Estimator
+                    </h3>
+                    <p style="color: #1e40af; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {comments}
+                    </p>
+                </div>
+                ''' if comments and comments.strip() else ''}
 
                 <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong> Please review the BOQ details and approve or provide feedback
-                    for necessary revisions. Your timely review will help us proceed with the project planning.
-                </div>
-
-                <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Warm Regards,</strong></p>
-                    <p>{created_by}</p>
-                    <p>MeterSquare ERP System</p>
-                </div>
-            </div>
-
-            <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
-            </div>
-        </div>
-        """
-
-        return wrap_email_content(email_body)
-
-    def send_boq_to_technical_director(self, boq_data, project_data, items_summary, td_email):
-        """
-        Send BOQ review email to Technical Director
-
-        Args:
-            boq_data: Dictionary containing BOQ information
-            project_data: Dictionary containing project information
-            items_summary: Dictionary containing items summary
-            td_email: Technical Director's email address
-
-        Returns:
-            bool: True if email sent successfully, False otherwise
-        """
-        try:
-            # Generate email content
-            email_html = self.generate_boq_review_email(boq_data, project_data, items_summary)
-
-            # Create subject
-            boq_name = boq_data.get('boq_name', 'BOQ')
-            project_name = project_data.get('project_name', 'Project')
-            subject = f"BOQ Review Required - {boq_name} ({project_name})"
-
-            # Send email
-            return self.send_email(td_email, subject, email_html)
-
-        except Exception as e:
-            log.error(f"Error sending BOQ to Technical Director: {e}")
-            return False
-
-    def generate_boq_approval_email(self, boq_data, project_data, items_summary, comments):
-        """
-        Generate BOQ approval email for Project Manager
-
-        Args:
-            boq_data: Dictionary containing BOQ information
-            project_data: Dictionary containing project information
-            items_summary: Dictionary containing items summary
-            comments: Approval comments from TD
-
-        Returns:
-            str: HTML formatted email content
-        """
-        boq_id = boq_data.get('boq_id', 'N/A')
-        boq_name = boq_data.get('boq_name', 'N/A')
-        created_by = boq_data.get('created_by', 'System')
-
-        project_name = project_data.get('project_name', 'N/A')
-        client = project_data.get('client', 'N/A')
-        location = project_data.get('location', 'N/A')
-
-        total_cost = items_summary.get('total_cost', 0)
-        estimated_selling_price = items_summary.get('estimatedSellingPrice', 0)
-
-        email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
-                <h1>BOQ APPROVED ✓</h1>
-                <h2>Ready for Project Execution</h2>
-            </div>
-
-            <!-- Content -->
-            <div class="content">
-                <p>Dear Project Manager,</p>
-
-                <p>
-                    Great news! The Bill of Quantities (BOQ) for <strong>{project_name}</strong> has been
-                    <span style="color: #10b981; font-weight: bold;">APPROVED</span> by the Technical Director.
-                    You can now proceed with project planning and execution.
-                </p>
-
-                <div class="divider"></div>
-
-                <!-- BOQ Information -->
-                <h2>BOQ Information</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #d1fae5; color: #065f46; border: 1px solid #10b981;">APPROVED</span></p>
-                    <p><span class="label">Prepared By:</span> <span class="value">{created_by}</span></p>
-                </div>
-
-                <!-- Project Information -->
-                <h2>Project Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
-                </div>
-
-                <!-- Cost Summary -->
-                <div class="total-cost" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
-                    <span class="label">Approved Budget:</span>
-                    <span class="amount" style="color: #065f46;">AED {estimated_selling_price:,.2f}</span>
-                </div>
-
-                <!-- TD Comments -->
-                {f'''
-                <h2>Technical Director's Comments</h2>
-                <div class="alert" style="background-color: #d1fae5; border-left: 4px solid #10b981;">
-                    <p style="color: #065f46; margin: 0;">{comments}</p>
-                </div>
-                ''' if comments else ''}
-
-                <div class="divider"></div>
-
-                <!-- Next Steps -->
-                <div class="alert alert-info">
-                    <strong>Next Steps:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review the approved BOQ in the system</li>
-                        <li>Assign Site Engineers to the project</li>
-                        <li>Begin procurement planning</li>
-                        <li>Set up project timeline and milestones</li>
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #93c5fd; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #1e40af; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #1e40af; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Review the BOQ details and cost estimates</li>
+                        <li style="margin-bottom: 6px;">Verify all line items and calculations</li>
+                        <li style="margin-bottom: 6px;">Approve or request revisions as needed</li>
+                        <li style="margin-bottom: 6px;">Log in to MeterSquare ERP to take action</li>
                     </ul>
                 </div>
 
+                <!-- CTA Button -->
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{FRONTEND_URL}/boq-management" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);">
+                        Open MeterSquare ERP →
+                    </a>
+                </div>
+
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Warm Regards,</strong></p>
-                    <p>Technical Director</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{estimator_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Estimator</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
 
         return wrap_email_content(email_body)
 
-    def generate_boq_rejection_email(self, boq_data, project_data, items_summary, rejection_reason):
+    def generate_boq_rejection_email(self, boq_data, project_data, items_summary, rejection_reason, estimator_name=None, pm_name=None, approver_role=None):
         """
-        Generate BOQ rejection email for Estimator
+        Generate PROFESSIONAL BOQ rejection email for Estimator
 
         Args:
             boq_data: Dictionary containing BOQ information
             project_data: Dictionary containing project information
             items_summary: Dictionary containing items summary
-            rejection_reason: Reason for rejection from TD
+            rejection_reason: Reason for rejection from PM/TD
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager/Technical Director's full name (optional)
+            approver_role: Role of approver - "Project Manager" or "Technical Director" (default: "Project Manager")
 
         Returns:
             str: HTML formatted email content
@@ -509,84 +363,131 @@ class BOQEmailService:
         project_name = project_data.get('project_name', 'N/A')
         client = project_data.get('client', 'N/A')
         location = project_data.get('location', 'N/A')
+        project_code = project_data.get('project_code', 'N/A')
 
         total_cost = items_summary.get('total_cost', 0)
+        formatted_cost = f"₹{total_cost:,.2f}" if total_cost else "₹0.00"
+
+        # Use actual names or fallback
+        estimator_display = estimator_name if estimator_name else "Estimator"
+        pm_display = pm_name if pm_name else "Project Manager"
+        role_display = approver_role if approver_role else "Project Manager"
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
-                <h1>BOQ REVISION REQUIRED</h1>
-                <h2>Review & Resubmit</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by {role_display}</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear Estimator,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    The Bill of Quantities (BOQ) for <strong>{project_name}</strong> requires revision.
-                    The Technical Director has reviewed the BOQ and has requested changes before approval.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the {role_display}.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Information</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #fee2e2; color: #991b1b; border: 1px solid #ef4444;">REJECTED</span></p>
-                    <p><span class="label">Prepared By:</span> <span class="value">{created_by}</span></p>
-                </div>
+                <!-- Project Details Card (Combined BOQ + Project Info) -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
 
-                <!-- Project Information -->
-                <h2>Project Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
+                    </table>
                 </div>
 
                 <!-- Rejection Reason -->
-                <h2>Reason for Revision</h2>
-                <div class="alert" style="background-color: #fee2e2; border-left: 4px solid #ef4444;">
-                    <p style="color: #991b1b; margin: 0; font-weight: 500;">{rejection_reason if rejection_reason else 'Please review and revise the BOQ as per Technical Director feedback.'}</p>
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
                 </div>
 
-                <div class="divider"></div>
-
                 <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review the feedback provided above</li>
-                        <li>Make necessary revisions to the BOQ</li>
-                        <li>Update cost estimates and calculations</li>
-                        <li>Resubmit the BOQ for approval</li>
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
                     </ul>
                 </div>
 
+                <!-- CTA Button -->
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{FRONTEND_URL}/boq-management" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px rgba(220, 38, 38, 0.2);">
+                        Open MeterSquare ERP →
+                    </a>
+                </div>
+
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Warm Regards,</strong></p>
-                    <p>Technical Director</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
 
         return wrap_email_content(email_body)
 
-    def send_boq_approval_to_pm(self, boq_data, project_data, items_summary, pm_email, comments=None):
+    def send_boq_approval_to_pm(self, boq_data, project_data, items_summary, pm_email, comments=None, estimator_name=None, pm_name=None):
         """
         Send BOQ approval email to Project Manager
 
@@ -596,27 +497,113 @@ class BOQEmailService:
             items_summary: Dictionary containing items summary
             pm_email: Project Manager's email address
             comments: Optional approval comments
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager's full name (optional)
 
         Returns:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content
-            email_html = self.generate_boq_approval_email(boq_data, project_data, items_summary, comments)
-
-            # Create subject
             boq_name = boq_data.get('boq_name', 'BOQ')
             project_name = project_data.get('project_name', 'Project')
-            subject = f"✓ BOQ Approved - {boq_name} ({project_name})"
+            sender_name = estimator_name or 'Estimator'
+            recipient_name = pm_name or 'Project Manager'
 
-            # Send email
+            subject = f"BOQ Submitted for Approval - {boq_name} ({project_name})"
+
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>BOQ Submitted for Approval</h2>
+<p>Dear {recipient_name},</p>
+<p><strong>{boq_name}</strong> has been submitted for your review and approval.</p>
+<p>Please log in to MeterSquare ERP to review and take appropriate action.</p>
+<br>
+<p class="signature">Regards,<br><strong>{sender_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
             return self.send_email(pm_email, subject, email_html)
 
         except Exception as e:
             log.error(f"Error sending BOQ approval to PM: {e}")
             return False
 
-    def send_boq_rejection_to_estimator(self, boq_data, project_data, items_summary, estimator_email, rejection_reason=None):
+    def send_boq_to_technical_director(self, boq_data, project_data, items_summary, td_email, td_name=None, sender_name=None):
+        """
+        Send Client Revision BOQ email to Technical Director for review.
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            items_summary: Dictionary containing items summary
+            td_email: Technical Director's email address
+            td_name: Technical Director's full name (optional)
+            sender_name: Sender's full name (optional)
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            boq_name = boq_data.get('boq_name', 'BOQ')
+            project_name = project_data.get('project_name', 'Project')
+            recipient_name = td_name or 'Technical Director'
+            from_name = sender_name or 'MeterSquare Team'
+
+            subject = f"Client Revision BOQ - Review Required | {boq_name} ({project_name})"
+
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>Client Revision BOQ — Review Required</h2>
+<p>Dear {recipient_name},</p>
+<p>A Client Revision BOQ has been submitted for your review and approval.</p>
+<p>BOQ <strong>{boq_name}</strong> requires your final review before proceeding.</p>
+<p>Please log in to MeterSquare ERP to review the revision and take appropriate action.</p>
+<br>
+<p class="signature">Regards,<br><strong>{from_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
+            return self.send_email(td_email, subject, email_html)
+
+        except Exception as e:
+            log.error(f"Error sending Client Revision BOQ to TD: {e}")
+            return False
+
+    def send_client_confirmed_to_td(self, boq_id, boq_name, project_name, estimator_name, client_name, td_email, td_name=None):
+        """
+        Send client approval confirmation email to Technical Director.
+
+        Args:
+            boq_id: BOQ ID
+            boq_name: Name of the BOQ
+            project_name: Name of the project
+            estimator_name: Estimator who confirmed the client approval
+            client_name: Client who approved the BOQ
+            td_email: Technical Director's email address
+            td_name: Technical Director's full name (optional)
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            recipient_name = td_name or 'Technical Director'
+            client_display = client_name or 'the client'
+
+            subject = f"Client BOQ Approved — {boq_name} ({project_name})"
+
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>Client BOQ Approved</h2>
+<p>Dear {recipient_name},</p>
+<p><strong>{client_display}</strong> has approved <strong>{boq_name}</strong>.</p>
+<p>This confirmation was recorded by <strong>{estimator_name}</strong>.</p>
+<p>Please log in to MeterSquare ERP to proceed with the next steps.</p>
+<br>
+<p class="signature">Regards,<br><strong>{estimator_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
+            return self.send_email(td_email, subject, email_html)
+
+        except Exception as e:
+            log.error(f"Error sending client approval confirmation to TD: {e}")
+            return False
+
+    def send_boq_rejection_to_estimator(self, boq_data, project_data, items_summary, estimator_email, rejection_reason=None, estimator_name=None, pm_name=None, approver_role=None, is_client_revision=False):
         """
         Send BOQ rejection email to Estimator
 
@@ -626,24 +613,247 @@ class BOQEmailService:
             items_summary: Dictionary containing items summary
             estimator_email: Estimator's email address
             rejection_reason: Reason for rejection
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager/Technical Director's full name (optional)
+            approver_role: Role of approver - "Project Manager" or "Technical Director" (default: "Project Manager")
+            is_client_revision: True if this rejection is for a client revision BOQ
 
         Returns:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content
-            email_html = self.generate_boq_rejection_email(boq_data, project_data, items_summary, rejection_reason)
-
-            # Create subject
             boq_name = boq_data.get('boq_name', 'BOQ')
             project_name = project_data.get('project_name', 'Project')
-            subject = f"⚠ BOQ Revision Required - {boq_name} ({project_name})"
+            role_label = "TD" if approver_role == "Technical Director" else "PM"
+            approver_name = pm_name or role_label
+            recipient_name = estimator_name or 'Estimator'
 
-            # Send email
+            heading = f"Client BOQ Rejected by {role_label}" if is_client_revision else f"BOQ Rejected by {role_label}"
+            subject = f"{heading} - {boq_name} ({project_name})"
+
+            reason_section = f"""
+<p><strong>Rejection Reason:</strong><br>
+{rejection_reason}</p>
+""" if rejection_reason else ""
+
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>{heading}</h2>
+<p>Dear {recipient_name},</p>
+<p><strong>{boq_name}</strong> has been reviewed and rejected by {approver_name}.</p>
+{reason_section}
+<p>Please log in to MeterSquare ERP to revise and resubmit the BOQ.</p>
+<br>
+<p class="signature">Regards,<br><strong>{approver_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
+
             return self.send_email(estimator_email, subject, email_html)
 
         except Exception as e:
             log.error(f"Error sending BOQ rejection to Estimator: {e}")
+            return False
+
+    def generate_boq_approval_confirmation_to_estimator(self, boq_data, project_data, items_summary, comments, estimator_name=None, pm_name=None, approver_role=None):
+        """
+        Generate BOQ APPROVAL CONFIRMATION email for Estimator (PM/TD approved the BOQ)
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            items_summary: Dictionary containing items summary
+            comments: Optional comments from PM/TD
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager/Technical Director's full name (optional)
+            approver_role: Role of approver - "Project Manager" or "Technical Director" (default: "Project Manager")
+
+        Returns:
+            str: HTML formatted email content
+        """
+        boq_id = boq_data.get('boq_id', 'N/A')
+        boq_name = boq_data.get('boq_name', 'N/A')
+
+        project_name = project_data.get('project_name', 'N/A')
+        client = project_data.get('client', 'N/A')
+        location = project_data.get('location', 'N/A')
+        project_code = project_data.get('project_code', 'N/A')
+
+        # Use actual names or fallback
+        estimator_display = estimator_name if estimator_name else "Estimator"
+        pm_display = pm_name if pm_name else "Project Manager"
+        role_display = approver_role if approver_role else "Project Manager"
+
+        email_body = f"""
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Green (Success) -->
+            <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Approved by {role_display}</h1>
+                <p style="color: #d1fae5; font-size: 14px; margin: 0;">Your BOQ has been approved!</p>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Great news! Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed and <strong style="color: #059669;">approved</strong> by the {role_display}.
+                </p>
+
+                <!-- Success Badge -->
+                <div style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-left: 4px solid #10b981; padding: 16px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <div style="display: flex; align-items: center;">
+                        <span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                            ✓ Approved
+                        </span>
+                        <span style="margin-left: 12px; color: #065f46; font-size: 13px; font-weight: 500;">
+                            Ready to proceed to next phase
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Project Details Card (Combined BOQ + Project Info) -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #10b981; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                {f'''
+                <!-- PM Comments Section (if provided) -->
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-left: 4px solid #3b82f6; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #1e40af; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        💬 Comments
+                    </h3>
+                    <p style="color: #1e40af; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {comments}
+                    </p>
+                </div>
+                ''' if comments and comments.strip() else ''}
+
+                <!-- Next Steps -->
+                <div style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 1px solid #86efac; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #065f46; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 What's Next
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #065f46; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Your BOQ has been approved and is moving forward</li>
+                        <li style="margin-bottom: 6px;">No further action required from your end</li>
+                        <li style="margin-bottom: 6px;">You'll be notified of any updates</li>
+                    </ul>
+                </div>
+
+                <!-- CTA Button -->
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{FRONTEND_URL}/boq-management" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2);">
+                        Open MeterSquare ERP →
+                    </a>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
+            </div>
+        </div>
+        """
+
+        return wrap_email_content(email_body)
+
+    def send_boq_approval_confirmation_to_estimator(self, boq_data, project_data, items_summary, estimator_email, comments=None, estimator_name=None, pm_name=None, approver_role=None):
+        """
+        Send BOQ approval confirmation email to Estimator
+
+        Args:
+            boq_data: Dictionary containing BOQ information
+            project_data: Dictionary containing project information
+            items_summary: Dictionary containing items summary
+            estimator_email: Estimator's email address
+            comments: Optional comments from PM/TD
+            estimator_name: Estimator's full name (optional)
+            pm_name: Project Manager/Technical Director's full name (optional)
+            approver_role: Role of approver - "Project Manager" or "Technical Director" (default: "Project Manager")
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            boq_name = boq_data.get('boq_name', 'BOQ')
+            project_name = project_data.get('project_name', 'Project')
+            role_label = approver_role or "Project Manager"
+            approver_name = pm_name or role_label
+            recipient_name = estimator_name or 'Estimator'
+
+            subject = f"BOQ Approved by PM - {boq_name} ({project_name})"
+
+            comments_section = f"""
+<p><strong>Comments:</strong><br>
+{comments}</p>
+""" if comments else ""
+
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>BOQ Approved by {role_label}</h2>
+<p>Dear {recipient_name},</p>
+<p><strong>{boq_name}</strong> has been reviewed and approved by {approver_name}.</p>
+{comments_section}
+<p>Please log in to MeterSquare ERP for next steps.</p>
+<br>
+<p class="signature">Regards,<br><strong>{approver_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
+            return self.send_email(estimator_email, subject, email_html)
+
+        except Exception as e:
+            log.error(f"Error sending BOQ approval confirmation to Estimator: {e}")
             return False
 
     def generate_boq_client_email(self, boq_data, project_data, message, total_value, item_count):
@@ -669,7 +879,7 @@ class BOQEmailService:
         <div class="email-container">
             <!-- Header with Logo -->
             <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); text-align: center;">
-                <img src="{LOGO_URL}" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
+                <img src="cid:logo" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
                 <h1>Bill of Quantities</h1>
                 <h2>{project_name}</h2>
             </div>
@@ -722,7 +932,7 @@ class BOQEmailService:
         </div>
         """
 
-        return wrap_email_content(email_body)
+        return wrap_email_content(email_body, show_erp_button=False)
 
     def generate_custom_client_email(self, boq_data, project_data, custom_body):
         """
@@ -745,7 +955,7 @@ class BOQEmailService:
         <div class="email-container" style="background: #ffffff;">
             <!-- Header with Logo -->
             <div style="background: #ffffff; text-align: center; padding: 25px; border-bottom: 2px solid #e5e7eb;">
-                <img src="{LOGO_URL}" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
+                <img src="cid:logo" alt="MeterSquare Logo" style="max-width: 200px; height: auto; margin: 0 auto 20px; display: block;">
             </div>
 
             <!-- Content -->
@@ -764,7 +974,7 @@ class BOQEmailService:
         </div>
         """
 
-        return wrap_email_content(email_body)
+        return wrap_email_content(email_body, show_erp_button=False)
 
     def send_boq_to_client(self, boq_data, project_data, client_email, message, total_value, item_count, excel_file=None, pdf_file=None, custom_email_body=None):
         """
@@ -815,75 +1025,83 @@ class BOQEmailService:
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    def generate_pm_assignment_email(self, pm_name, td_name, projects_data):
+    def generate_pm_assignment_email(self, pm_name, td_name, projects_data, sender_role=None):
         """
         Generate email for Project Manager assignment notification
 
         Args:
             pm_name: Project Manager name
-            td_name: Technical Director name
+            td_name: Sender's name (Technical Director or Estimator)
             projects_data: List of dictionaries containing project information
+            sender_role: Sender's actual role (e.g., "Technical Director", "Estimator")
 
         Returns:
             str: HTML formatted email content
         """
-        # Build projects table
+        # Format sender role for display
+        if not sender_role:
+            sender_role = "Technical Director"  # Default for backward compatibility
+
+        # Convert role to title case for display (e.g., "estimator" -> "Estimator")
+        sender_role_display = sender_role.replace('_', ' ').title()
+        # Build projects table with clean styling
         projects_table_rows = ""
         for idx, project in enumerate(projects_data, 1):
             project_name = project.get('project_name', 'N/A')
             client = project.get('client', 'N/A')
             location = project.get('location', 'N/A')
-            status = project.get('status', 'Active')
-
+            row_bg = '#f9fafb' if idx % 2 == 0 else '#ffffff'
             projects_table_rows += f"""
-                <tr>
-                    <td>{idx}</td>
-                    <td><strong>{project_name}</strong></td>
-                    <td>{client}</td>
-                    <td>{location}</td>
-                    <td><span class="status-badge status-approved">{status}</span></td>
+                <tr style="background: {row_bg};">
+                    <td style="padding: 10px 12px; color: #64748b; font-size: 13px; border-bottom: 1px solid #e2e8f0;">{idx}</td>
+                    <td style="padding: 10px 12px; color: #1e293b; font-size: 13px; font-weight: 600; border-bottom: 1px solid #e2e8f0;">{project_name}</td>
+                    <td style="padding: 10px 12px; color: #475569; font-size: 13px; border-bottom: 1px solid #e2e8f0;">{client}</td>
+                    <td style="padding: 10px 12px; color: #475569; font-size: 13px; border-bottom: 1px solid #e2e8f0;">{location}</td>
                 </tr>
             """
 
         email_body = f"""
-        <div class="email-container">
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
             <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
-                <h1>PROJECT ASSIGNMENT</h1>
-                <h2>You Have Been Assigned as Project Manager</h2>
+            <div style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 5px 0; font-weight: 600;">Project Assignment</h1>
+                <p style="color: #bfdbfe; font-size: 14px; margin: 0;">You have been assigned as Project Manager</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{pm_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    You have been assigned as the <strong>Project Manager</strong> for the following project(s) by
-                    <strong>{td_name}</strong>. Please review the project details and begin planning for execution.
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{pm_name}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    You have been assigned as <strong style="color: #1e293b;">Project Manager</strong> for the following project(s) by <strong style="color: #1e293b;">{td_name}</strong> ({sender_role_display}). Please review the project details and begin planning for execution.
+                </p>
 
-                <!-- Assignment Details -->
-                <h2>Assignment Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Assigned By:</span> <span class="value">{td_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Technical Director</span></p>
-                    <p><span class="label">Total Projects:</span> <span class="value">{len(projects_data)}</span></p>
-                    <p><span class="label">Assignment Status:</span> <span class="status-badge status-approved">ACTIVE</span></p>
+                <!-- Assignment Badge -->
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-left: 4px solid #3b82f6; padding: 14px 18px; border-radius: 8px; margin-bottom: 25px;">
+                    <span style="background: #3b82f6; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ✓ Assigned — {len(projects_data)} Project(s)
+                    </span>
                 </div>
 
-                <!-- Projects Table -->
-                <h2>Assigned Projects</h2>
-                <div class="table-container">
-                    <table>
+                <!-- Assigned Projects Table -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin-bottom: 20px;">
+                    <div style="padding: 14px 16px; border-bottom: 1px solid #e2e8f0;">
+                        <h3 style="color: #1e293b; font-size: 15px; font-weight: 600; margin: 0;">🏗️ Assigned Projects</h3>
+                    </div>
+                    <table style="width: 100%; border-collapse: collapse;">
                         <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Project Name</th>
-                                <th>Client</th>
-                                <th>Location</th>
-                                <th>Status</th>
+                            <tr style="background: #f1f5f9;">
+                                <th style="padding: 10px 12px; color: #64748b; font-size: 12px; font-weight: 600; text-align: left; border-bottom: 1px solid #e2e8f0;">#</th>
+                                <th style="padding: 10px 12px; color: #64748b; font-size: 12px; font-weight: 600; text-align: left; border-bottom: 1px solid #e2e8f0;">Project Name</th>
+                                <th style="padding: 10px 12px; color: #64748b; font-size: 12px; font-weight: 600; text-align: left; border-bottom: 1px solid #e2e8f0;">Client</th>
+                                <th style="padding: 10px 12px; color: #64748b; font-size: 12px; font-weight: 600; text-align: left; border-bottom: 1px solid #e2e8f0;">Location</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -892,89 +1110,89 @@ class BOQEmailService:
                     </table>
                 </div>
 
-                <div class="divider"></div>
-
-                <!-- Next Steps -->
-                <div class="alert alert-success">
-                    <strong>Your Responsibilities:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
+                <!-- Responsibilities -->
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #93c5fd; border-radius: 10px; padding: 18px 20px; margin-bottom: 25px;">
+                    <h3 style="color: #1e40af; font-size: 14px; font-weight: 700; margin: 0 0 10px 0;">📋 Your Responsibilities</h3>
+                    <ul style="margin: 0; padding-left: 18px; color: #1e40af; font-size: 13px; line-height: 1.9;">
                         <li>Review the BOQ and project requirements</li>
                         <li>Assign Site Engineers to the project(s)</li>
                         <li>Create project timeline and milestones</li>
                         <li>Coordinate with procurement team for materials</li>
                         <li>Monitor project progress and update reports</li>
-                        <li>Ensure quality standards and compliance</li>
                     </ul>
                 </div>
 
-                <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong> Please log in to the MeterSquare ERP system to access
-                    detailed project information, BOQ documents, and begin your project planning activities.
+                <!-- CTA Button -->
+                <div style="text-align: center; margin: 28px 0;">
+                    <a href="{FRONTEND_URL}" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); color: white; padding: 13px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.2);">
+                        Open MeterSquare ERP →
+                    </a>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{td_name}</p>
-                    <p>Technical Director</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 700; margin: 0 0 2px 0;">{td_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">{sender_role_display}</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 22px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated email notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2025 MeterSquare. All rights reserved.</p>
             </div>
         </div>
         """
 
         return wrap_email_content(email_body)
 
-    def send_pm_assignment_notification(self, pm_email, pm_name, td_name, projects_data):
+    def send_pm_assignment_notification(self, pm_email, pm_name, td_name, projects_data, sender_role=None):
         """
         Send Project Manager assignment notification email
 
         Args:
             pm_email: Project Manager's email address
             pm_name: Project Manager's name
-            td_name: Technical Director's name
+            td_name: Sender's name (Technical Director or Estimator)
             projects_data: List of project dictionaries with details
+            sender_role: Sender's actual role (e.g., "Technical Director", "Estimator")
 
         Returns:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content
-            email_html = self.generate_pm_assignment_email(pm_name, td_name, projects_data)
-
-            # Create subject
             project_count = len(projects_data)
             project_names = ", ".join([p.get('project_name', 'Project') for p in projects_data[:2]])
             if project_count > 2:
                 project_names += f" and {project_count - 2} more"
-
-            subject = f"🎯 Project Assignment - You are now PM for {project_names}"
-
-            # Send email
+            subject = f"Project Assignment - You are now PM for {project_names}"
+            projects_list = "".join([f"<li>{p.get('project_name','')}</li>" for p in projects_data])
+            sender_display = sender_role or "Technical Director"
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>Project Assignment</h2>
+<p>Dear {pm_name},</p>
+<p>You have been assigned as Project Manager for the following project(s) by <strong>{td_name}</strong> ({sender_display}):</p>
+<ul>{projects_list}</ul>
+<p>Please log in to MeterSquare ERP to view your assigned projects.</p>
+<br>
+<p class="signature">Regards,<br><strong>{td_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
             success = self.send_email(pm_email, subject, email_html)
-
             if success:
                 log.info(f"PM assignment email sent successfully to {pm_email}")
             else:
                 log.error(f"Failed to send PM assignment email to {pm_email}")
-
             return success
-
         except Exception as e:
             log.error(f"Error sending PM assignment email: {e}")
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    def send_pm_assignment_notification_async(self, pm_email, pm_name, td_name, projects_data):
+    def send_pm_assignment_notification_async(self, pm_email, pm_name, td_name, projects_data, sender_role=None):
         """
         Send Project Manager assignment notification email asynchronously (non-blocking)
         ✅ PERFORMANCE FIX: Non-blocking email sending (15s → 0.1s response time)
@@ -982,34 +1200,37 @@ class BOQEmailService:
         Args:
             pm_email: Project Manager's email address
             pm_name: Project Manager's name
-            td_name: Technical Director's name
+            td_name: Sender's name (Technical Director or Estimator)
             projects_data: List of project dictionaries with details
+            sender_role: Sender's actual role (e.g., "Technical Director", "Estimator")
 
         Returns:
             bool: True if email queued successfully (doesn't wait for send)
         """
         try:
-            # Generate email content
-            email_html = self.generate_pm_assignment_email(pm_name, td_name, projects_data)
-
-            # Create subject
             project_count = len(projects_data)
             project_names = ", ".join([p.get('project_name', 'Project') for p in projects_data[:2]])
             if project_count > 2:
                 project_names += f" and {project_count - 2} more"
-
-            subject = f"🎯 Project Assignment - You are now PM for {project_names}"
-
-            # Send email asynchronously (non-blocking)
+            subject = f"Project Assignment - You are now PM for {project_names}"
+            projects_list = "".join([f"<li>{p.get('project_name','')}</li>" for p in projects_data])
+            sender_display = sender_role or "Technical Director"
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>Project Assignment</h2>
+<p>Dear {pm_name},</p>
+<p>You have been assigned as Project Manager for the following project(s) by <strong>{td_name}</strong> ({sender_display}):</p>
+<ul>{projects_list}</ul>
+<p>Please log in to MeterSquare ERP to view your assigned projects.</p>
+<br>
+<p class="signature">Regards,<br><strong>{td_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
             success = self.send_email_async(pm_email, subject, email_html)
-
             if success:
                 log.info(f"PM assignment email queued for async sending to {pm_email}")
             else:
                 log.error(f"Failed to queue PM assignment email to {pm_email}")
-
             return success
-
         except Exception as e:
             log.error(f"Error queuing PM assignment email: {e}")
             import traceback
@@ -1047,88 +1268,120 @@ class BOQEmailService:
             """
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
-                <h1>SITE ASSIGNMENT</h1>
-                <h2>You Have Been Assigned as Site Engineer</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{se_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    You have been assigned as the <strong>Site Engineer</strong> for the following project(s) by
-                    <strong>{pm_name}</strong>. Please review the project details and prepare for on-site execution.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- Assignment Details -->
-                <h2>Assignment Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Assigned By:</span> <span class="value">{pm_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Project Manager</span></p>
-                    <p><span class="label">Total Projects:</span> <span class="value">{len(projects_data)}</span></p>
-                    <p><span class="label">Assignment Status:</span> <span class="status-badge" style="background-color: #d1fae5; color: #065f46;">ACTIVE</span></p>
-                </div>
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
 
-                <!-- Projects Table -->
-                <h2>Assigned Projects</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Project Name</th>
-                                <th>Client</th>
-                                <th>Location</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {projects_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
 
-                <!-- Next Steps -->
-                <div class="alert" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
-                    <strong>Your Responsibilities:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review project BOQ and technical specifications</li>
-                        <li>Coordinate with Project Manager for site requirements</li>
-                        <li>Ensure on-site safety protocols are followed</li>
-                        <li>Monitor daily progress and workforce management</li>
-                        <li>Submit daily progress reports and updates</li>
-                        <li>Manage material inventory and quality checks</li>
-                        <li>Report any issues or delays immediately</li>
-                    </ul>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
                 </div>
 
                 <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong> Please log in to the MeterSquare ERP system to access
-                    detailed project information, BOQ documents, and begin your site preparation activities.
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
+                    </ul>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{pm_name}</p>
-                    <p>Project Manager</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -1149,27 +1402,28 @@ class BOQEmailService:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content
-            email_html = self.generate_se_assignment_email(se_name, pm_name, projects_data)
-
-            # Create subject
             project_count = len(projects_data)
             project_names = ", ".join([p.get('project_name', 'Project') for p in projects_data[:2]])
             if project_count > 2:
                 project_names += f" and {project_count - 2} more"
-
-            subject = f"🏗️ Site Assignment - You are now Site Engineer for {project_names}"
-
-            # Send email
+            subject = f"Site Assignment - You are now Site Engineer for {project_names}"
+            projects_list = "".join([f"<li>{p.get('project_name','')}</li>" for p in projects_data])
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>Site Assignment</h2>
+<p>Dear {se_name},</p>
+<p>You have been assigned as Site Engineer for the following project(s) by <strong>{pm_name}</strong>:</p>
+<ul>{projects_list}</ul>
+<p>Please log in to MeterSquare ERP to view your assigned projects.</p>
+<br>
+<p class="signature">Regards,<br><strong>{pm_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
             success = self.send_email(se_email, subject, email_html)
-
             if success:
                 log.info(f"SE assignment email sent successfully to {se_email}")
             else:
                 log.error(f"Failed to send SE assignment email to {se_email}")
-
             return success
-
         except Exception as e:
             log.error(f"Error sending SE assignment email: {e}")
             import traceback
@@ -1218,102 +1472,120 @@ class BOQEmailService:
             """
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
-                <h1>NEW PURCHASE ADDED</h1>
-                <h2>Additional Items Required for Project</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{estimator_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    The Project Manager <strong>{pm_name}</strong> has added new purchase items to the BOQ.
-                    These additional items are required for the project execution. Please review the details below.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Details</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Location:</span> <span class="value">{location}</span></p>
-                </div>
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
 
-                <!-- Purchase Details -->
-                <h2>New Purchase Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Added By:</span> <span class="value">{pm_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Project Manager</span></p>
-                    <p><span class="label">Total New Items:</span> <span class="value">{len(new_items_data)}</span></p>
-                </div>
-
-                <!-- Items Table -->
-                <h2>New Items Added</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Item Name</th>
-                                <th>Materials</th>
-                                <th>Labour</th>
-                                <th>Selling Price</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {items_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <!-- Total Value -->
-                <div class="total-cost">
-                    <span class="label">Total Value Added:</span>
-                    <span class="amount">AED {total_value_added:,.2f}</span>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
+                </div>
 
                 <!-- Action Required -->
-                <div class="alert" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-left: 4px solid #f59e0b;">
-                    <strong>Action Required:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review the newly added items and their costs</li>
-                        <li>Verify material specifications and quantities</li>
-                        <li>Confirm labour requirements are accurate</li>
-                        <li>Update project budget calculations if needed</li>
-                        <li>Coordinate with procurement for material availability</li>
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
                     </ul>
                 </div>
 
-                <!-- Info Note -->
-                <div class="alert alert-info">
-                    <strong>Note:</strong> These items have been added to meet additional project requirements
-                    identified during execution. Please log in to the MeterSquare ERP system to view complete
-                    details including material specifications and labour breakdowns.
-                </div>
-
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{pm_name}</p>
-                    <p>Project Manager</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -1336,26 +1608,27 @@ class BOQEmailService:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content
-            email_html = self.generate_new_purchase_notification_email(
-                estimator_name, pm_name, boq_data, project_data, new_items_data
-            )
-
-            # Create subject
             project_name = project_data.get('project_name', 'Project')
+            boq_name = boq_data.get('boq_name', 'BOQ')
             items_count = len(new_items_data)
-            subject = f"🛒 New Purchase Added - {items_count} item(s) added to {project_name}"
-
-            # Send email
+            subject = f"New Purchase Added - {items_count} item(s) added to {project_name}"
+            items_list = "".join([f"<li>{i.get('item_name','Item')}</li>" for i in new_items_data])
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>New Purchase Added</h2>
+<p>Dear {estimator_name},</p>
+<p><strong>{pm_name}</strong> has added <strong>{items_count} new item(s)</strong> to <strong>{boq_name}</strong>.</p>
+<ul>{items_list}</ul>
+<p>Please log in to MeterSquare ERP to review the new purchase items.</p>
+<br>
+<p class="signature">Regards,<br><strong>{pm_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
             success = self.send_email(estimator_email, subject, email_html)
-
             if success:
                 log.info(f"New purchase notification email sent successfully to {estimator_email}")
             else:
                 log.error(f"Failed to send new purchase notification email to {estimator_email}")
-
             return success
-
         except Exception as e:
             log.error(f"Error sending new purchase notification email: {e}")
             import traceback
@@ -1404,95 +1677,120 @@ class BOQEmailService:
             """
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
-                <h1>NEW PURCHASE APPROVED ✓</h1>
-                <h2>Ready for Procurement</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{recipient_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    Great news! The new purchase items you requested have been <span style="color: #10b981; font-weight: bold;">APPROVED</span>
-                    by <strong>{estimator_name}</strong> (Estimator). You can now proceed with procurement and project execution.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Details</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #d1fae5; color: #065f46; border: 1px solid #10b981;">APPROVED</span></p>
-                </div>
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
 
-                <!-- Approval Details -->
-                <h2>Approval Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Approved By:</span> <span class="value">{estimator_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Estimator</span></p>
-                    <p><span class="label">Total Items Approved:</span> <span class="value">{len(new_items_data)}</span></p>
-                </div>
-
-                <!-- Items Table -->
-                <h2>Approved Items</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Item Name</th>
-                                <th>Materials</th>
-                                <th>Labour</th>
-                                <th>Selling Price</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {items_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <!-- Total Amount -->
-                <div class="total-cost" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981;">
-                    <span class="label">Total Approved Amount:</span>
-                    <span class="amount" style="color: #065f46;">AED {total_amount:,.2f}</span>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
+                </div>
 
-                <!-- Next Steps -->
-                <div class="alert" style="background-color: #d1fae5; border-left: 4px solid #10b981;">
-                    <strong>Next Steps:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review the approved items in the system</li>
-                        <li>Initiate procurement process for materials</li>
-                        <li>Coordinate with procurement team</li>
-                        <li>Update project timeline if needed</li>
-                        <li>Monitor budget allocation</li>
+                <!-- Action Required -->
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
                     </ul>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{estimator_name}</p>
-                    <p>Estimator</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -1542,100 +1840,120 @@ class BOQEmailService:
             """
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
-                <h1>NEW PURCHASE REJECTED</h1>
-                <h2>Revision Required</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{recipient_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    The new purchase items you requested have been <span style="color: #ef4444; font-weight: bold;">REJECTED</span>
-                    by <strong>{estimator_name}</strong> (Estimator). Please review the feedback and make necessary revisions.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- BOQ Information -->
-                <h2>BOQ Details</h2>
-                <div class="info-box">
-                    <p><span class="label">BOQ ID:</span> <span class="value">#{boq_id}</span></p>
-                    <p><span class="label">BOQ Name:</span> <span class="value">{boq_name}</span></p>
-                    <p><span class="label">Project Name:</span> <span class="value">{project_name}</span></p>
-                    <p><span class="label">Client:</span> <span class="value">{client}</span></p>
-                    <p><span class="label">Status:</span> <span class="status-badge" style="background-color: #fee2e2; color: #991b1b; border: 1px solid #ef4444;">REJECTED</span></p>
-                </div>
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
 
-                <!-- Rejection Details -->
-                <h2>Rejection Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Rejected By:</span> <span class="value">{estimator_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Estimator</span></p>
-                    <p><span class="label">Total Items Rejected:</span> <span class="value">{len(new_items_data)}</span></p>
-                </div>
-
-                <!-- Rejection Reason -->
-                <h2>Reason for Rejection</h2>
-                <div class="alert" style="background-color: #fee2e2; border-left: 4px solid #ef4444;">
-                    <p style="color: #991b1b; margin: 0; font-weight: 500;">{rejection_reason if rejection_reason else 'Please review and revise the purchase items as per Estimator feedback.'}</p>
-                </div>
-
-                <!-- Items Table -->
-                <h2>Rejected Items</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Item Name</th>
-                                <th>Materials</th>
-                                <th>Labour</th>
-                                <th>Selling Price</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {items_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <!-- Total Amount -->
-                <div class="total-cost" style="background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-left: 4px solid #ef4444;">
-                    <span class="label">Total Rejected Amount:</span>
-                    <span class="amount" style="color: #991b1b;">AED {total_amount:,.2f}</span>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
+
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
+                </div>
 
                 <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review the rejection feedback carefully</li>
-                        <li>Revise item specifications and costs</li>
-                        <li>Consult with Estimator if needed</li>
-                        <li>Resubmit the purchase request after revision</li>
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
                     </ul>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{estimator_name}</p>
-                    <p>Estimator</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -1660,26 +1978,27 @@ class BOQEmailService:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content
-            email_html = self.generate_new_purchase_approval_email(
-                recipient_name, recipient_role, estimator_name, boq_data, project_data, new_items_data, total_amount
-            )
-
-            # Create subject
             project_name = project_data.get('project_name', 'Project')
+            boq_name = boq_data.get('boq_name', 'BOQ')
             items_count = len(new_items_data)
-            subject = f"✓ New Purchase Approved - {items_count} item(s) for {project_name}"
-
-            # Send email
+            subject = f"New Purchase Approved - {items_count} item(s) for {project_name}"
+            items_list = "".join([f"<li>{i.get('item_name','Item')}</li>" for i in new_items_data])
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>New Purchase Approved</h2>
+<p>Dear {recipient_name},</p>
+<p><strong>{estimator_name}</strong> has approved <strong>{items_count} new item(s)</strong> for <strong>{boq_name}</strong>.</p>
+<ul>{items_list}</ul>
+<p>Please log in to MeterSquare ERP for next steps.</p>
+<br>
+<p class="signature">Regards,<br><strong>{estimator_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
-
             if success:
                 log.info(f"New purchase approval email sent successfully to {recipient_email}")
             else:
                 log.error(f"Failed to send new purchase approval email to {recipient_email}")
-
             return success
-
         except Exception as e:
             log.error(f"Error sending new purchase approval email: {e}")
             import traceback
@@ -1705,26 +2024,29 @@ class BOQEmailService:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content
-            email_html = self.generate_new_purchase_rejection_email(
-                recipient_name, recipient_role, estimator_name, boq_data, project_data, new_items_data, rejection_reason, total_amount
-            )
-
-            # Create subject
             project_name = project_data.get('project_name', 'Project')
+            boq_name = boq_data.get('boq_name', 'BOQ')
             items_count = len(new_items_data)
-            subject = f"⚠ New Purchase Rejected - {items_count} item(s) for {project_name}"
-
-            # Send email
+            subject = f"New Purchase Rejected - {items_count} item(s) for {project_name}"
+            items_list = "".join([f"<li>{i.get('item_name','Item')}</li>" for i in new_items_data])
+            reason_section = f"<p><strong>Rejection Reason:</strong><br>{rejection_reason}</p>" if rejection_reason else ""
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>New Purchase Rejected</h2>
+<p>Dear {recipient_name},</p>
+<p><strong>{estimator_name}</strong> has rejected <strong>{items_count} item(s)</strong> for <strong>{boq_name}</strong>.</p>
+<ul>{items_list}</ul>
+{reason_section}
+<p>Please log in to MeterSquare ERP to review and resubmit.</p>
+<br>
+<p class="signature">Regards,<br><strong>{estimator_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
-
             if success:
                 log.info(f"New purchase rejection email sent successfully to {recipient_email}")
             else:
                 log.error(f"Failed to send new purchase rejection email to {recipient_email}")
-
             return success
-
         except Exception as e:
             log.error(f"Error sending new purchase rejection email: {e}")
             import traceback
@@ -1762,88 +2084,120 @@ class BOQEmailService:
             """
 
         email_body = f"""
-        <div class="email-container">
-            <!-- Header -->
-            <div class="header" style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);">
-                <h1>PROCUREMENT ASSIGNMENT</h1>
-                <h2>You Have Been Assigned as Buyer</h2>
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Logo Header with Lighter Red -->
+            <div style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+                <!-- MeterSquare Logo -->
+                <div style="margin-bottom: 20px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 240px; height: auto;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 28px; margin: 15px 0 5px 0; font-weight: 600;">BOQ Rejected by Project Manager</h1>
+                <p style="color: #fee2e2; font-size: 14px; margin: 0;">Please Review and Resubmit</p>
             </div>
 
-            <!-- Content -->
-            <div class="content">
-                <p>Dear <strong>{buyer_name}</strong>,</p>
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
 
-                <p>
-                    You have been assigned as the <strong>Buyer</strong> for the following project(s) by
-                    <strong>{pm_name}</strong>. You are responsible for procuring all materials for these projects.
+                <!-- Greeting -->
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Dear <strong style="color: #1e293b;">{estimator_display}</strong>,
                 </p>
 
-                <div class="divider"></div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 25px 0;">
+                    Your Bill of Quantities (BOQ) for project <strong style="color: #1e293b;">{project_name}</strong> has been reviewed by the Project Manager.
+                    Please review the feedback below and make the necessary revisions before resubmitting.
+                </p>
 
-                <!-- Assignment Details -->
-                <h2>Assignment Details</h2>
-                <div class="info-box">
-                    <p><span class="label">Assigned By:</span> <span class="value">{pm_name}</span></p>
-                    <p><span class="label">Role:</span> <span class="value">Project Manager</span></p>
-                    <p><span class="label">Total Projects:</span> <span class="value">{len(projects_data)}</span></p>
-                    <p><span class="label">Assignment Status:</span> <span class="status-badge" style="background-color: #fed7aa; color: #9a3412;">ACTIVE</span></p>
-                </div>
+                <!-- BOQ Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        📋 BOQ Information
+                    </h3>
 
-                <!-- Projects Table -->
-                <h2>Assigned Projects</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Project Name</th>
-                                <th>Client</th>
-                                <th>Location</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {projects_table_rows}
-                        </tbody>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">BOQ ID:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{boq_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">BOQ Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{boq_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Project Code:</td>
+                            <td style="padding: 8px 0; color: #dc2626; font-size: 13px; font-weight: 600;">{project_code}</td>
+                        </tr>
                     </table>
                 </div>
 
-                <div class="divider"></div>
+                <!-- Project Details Card -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;">
+                        🏗️ Project Details
+                    </h3>
 
-                <!-- Next Steps -->
-                <div class="alert" style="background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%); border-left: 4px solid #f97316;">
-                    <strong>Your Responsibilities:</strong>
-                    <ul style="margin: 10px 0; padding-left: 20px;">
-                        <li>Review project BOQ and material specifications</li>
-                        <li>Procure all materials from approved vendors</li>
-                        <li>Track material deliveries and quality</li>
-                        <li>Manage purchase orders and vendor relations</li>
-                        <li>Ensure timely availability of materials on site</li>
-                        <li>Coordinate with Project Manager for material needs</li>
-                        <li>Process approved change requests for additional materials</li>
-                    </ul>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px; width: 35%;">Project Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b; font-size: 13px;">Location:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Rejection Reason -->
+                <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; padding: 18px 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <h3 style="color: #92400e; font-size: 14px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Reason for Revision
+                    </h3>
+                    <p style="color: #78350f; font-size: 14px; line-height: 1.6; margin: 0; font-weight: 500;">
+                        {rejection_reason if rejection_reason and rejection_reason.strip() else 'Please review and revise the BOQ as per Project Manager feedback.'}
+                    </p>
                 </div>
 
                 <!-- Action Required -->
-                <div class="alert alert-info">
-                    <strong>Action Required:</strong> Please log in to the MeterSquare ERP system to access
-                    project BOQ materials, approved vendors list, and begin material procurement activities.
+                <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 10px; padding: 20px; margin-bottom: 25px;">
+                    <h3 style="color: #dc2626; font-size: 15px; font-weight: 700; margin: 0 0 12px 0;">
+                        📝 Next Steps
+                    </h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #991b1b; font-size: 13px; line-height: 1.8;">
+                        <li style="margin-bottom: 6px;">Make necessary revisions to the BOQ items</li>
+                        <li style="margin-bottom: 6px;">Update cost estimates and calculations accordingly</li>
+                        <li style="margin-bottom: 6px;">Resubmit the revised BOQ for approval</li>
+                    </ul>
                 </div>
 
                 <!-- Signature -->
-                <div class="signature">
-                    <p><strong>Best Regards,</strong></p>
-                    <p>{pm_name}</p>
-                    <p>Project Manager</p>
-                    <p>MeterSquare ERP System</p>
+                <div style="border-top: 2px solid #e2e8f0; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 8px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 15px; font-weight: 700; margin: 0 0 4px 0;">{pm_display}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 4px 0;">Project Manager</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div class="footer">
-                <p><strong>MeterSquare ERP - Construction Management System</strong></p>
-                <p>This is an automated email notification. Please do not reply to this email.</p>
-                <p>© 2025 MeterSquare. All rights reserved.</p>
+            <div style="background: #f8fafc; padding: 25px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #1e293b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">
+                    MeterSquare ERP
+                </p>
+                <p style="color: #64748b; font-size: 11px; margin: 0 0 8px 0;">
+                    Construction Management System
+                </p>
+                <p style="color: #94a3b8; font-size: 10px; margin: 0;">
+                    This is an automated email notification. Please do not reply to this email.
+                </p>
+                <p style="color: #475569; font-size: 11px; margin: 8px 0 0 0; font-weight: 500;">
+                    © 2025 MeterSquare. All rights reserved.
+                </p>
             </div>
         </div>
         """
@@ -1864,27 +2218,28 @@ class BOQEmailService:
             bool: True if email sent successfully, False otherwise
         """
         try:
-            # Generate email content
-            email_html = self.generate_buyer_assignment_email(buyer_name, pm_name, projects_data)
-
-            # Create subject
             project_count = len(projects_data)
             project_names = ", ".join([p.get('project_name', 'Project') for p in projects_data[:2]])
             if project_count > 2:
                 project_names += f" and {project_count - 2} more"
-
-            subject = f"🛒 Procurement Assignment - You are now Buyer for {project_names}"
-
-            # Send email
+            subject = f"Procurement Assignment - You are now Buyer for {project_names}"
+            projects_list = "".join([f"<li>{p.get('project_name','')}</li>" for p in projects_data])
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>Procurement Assignment</h2>
+<p>Dear {buyer_name},</p>
+<p>You have been assigned as Buyer for the following project(s) by <strong>{pm_name}</strong>:</p>
+<ul>{projects_list}</ul>
+<p>Please log in to MeterSquare ERP to view your assigned projects.</p>
+<br>
+<p class="signature">Regards,<br><strong>{pm_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
             success = self.send_email(buyer_email, subject, email_html)
-
             if success:
                 log.info(f"Buyer assignment email sent successfully to {buyer_email}")
             else:
                 log.error(f"Failed to send Buyer assignment email to {buyer_email}")
-
             return success
-
         except Exception as e:
             log.error(f"Error sending Buyer assignment email: {e}")
             import traceback
@@ -1892,21 +2247,23 @@ class BOQEmailService:
             return False
 
     def send_estimator_assignment_notification(self, to_email, to_name, from_name, projects_data):
-        subject = f"New BOQ Assigned for Estimation"
-        body = f"""
-        Dear {to_name},
-
-        You have been assigned a BOQ for estimation by {from_name}.
-
-        Project Details:
-        {projects_data}
-
-        Please log in to the system to proceed.
-
-        Regards,
-        BOQ Management System
-        """
-        return self.send_email(to_email, subject, body)
+        try:
+            subject = "New BOQ Assigned for Estimation"
+            projects_list = "".join([f"<li>{p.get('project_name', str(p))}</li>" for p in projects_data]) if isinstance(projects_data, list) else f"<p>{projects_data}</p>"
+            email_body = f"""<div class="email-container"><div class="content">
+<h2>New BOQ Assigned for Estimation</h2>
+<p>Dear {to_name},</p>
+<p>You have been assigned a BOQ for estimation by <strong>{from_name}</strong>.</p>
+<ul>{projects_list}</ul>
+<p>Please log in to MeterSquare ERP to proceed.</p>
+<br>
+<p class="signature">Regards,<br><strong>{from_name}</strong><br>MeterSquare ERP</p>
+</div></div>"""
+            email_html = wrap_email_content(email_body)
+            return self.send_email(to_email, subject, email_html)
+        except Exception as e:
+            log.error(f"Error sending estimator assignment notification: {e}")
+            return False
 
     def generate_vendor_purchase_order_email(self, vendor_data, purchase_data, buyer_data, project_data):
         """
@@ -1936,27 +2293,16 @@ class BOQEmailService:
         materials = purchase_data.get('materials', [])
         total_cost = purchase_data.get('total_cost') or 0
 
-        # Convert logo to base64 for inline embedding
-        logo_data_uri = LOGO_URL  # Default to URL
-        try:
-            import base64
-            logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logo.png')
-            if os.path.exists(logo_path):
-                with open(logo_path, 'rb') as f:
-                    logo_bytes = f.read()
-                    logo_base64 = base64.b64encode(logo_bytes).decode('utf-8')
-                    logo_data_uri = f"data:image/png;base64,{logo_base64}"
-                    log.info(f"Logo converted to base64 for email embedding")
-        except Exception as e:
-            log.warning(f"Could not convert logo to base64, using URL fallback: {e}")
+        # Use CID reference for logo (attached in send_email method)
+        logo_src = "cid:logo"
 
         # Build materials table
         materials_table_rows = ""
         for idx, material in enumerate(materials, 1):
             material_name = material.get('material_name', 'N/A')
             brand = material.get('brand', '-')
-            specification = material.get('specification', '-')
-            quantity = material.get('quantity') or 0
+            specification = material.get('specification', '')
+            quantity = material.get('quantity') or material.get('rejected_qty', 0)
             unit = material.get('unit', 'unit')
             supplier_notes = material.get('supplier_notes', '').strip()
 
@@ -1983,161 +2329,110 @@ class BOQEmailService:
                 </tr>
                 """
 
+        # Format greeting — use contact person if available, else company name
+        greeting_name = vendor_contact if vendor_contact else vendor_name
+
         email_body = f"""
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f0f9ff; padding: 20px; font-family: Arial, Helvetica, sans-serif;">
-            <tr>
-                <td align="center">
-                    <table width="650" cellpadding="0" cellspacing="0" border="0" style="background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 5px 15px rgba(59, 130, 246, 0.2); border: 2px solid #3b82f6;">
-                        <!-- Header with Logo -->
+        <div style="max-width: 650px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%); padding: 30px 30px 35px; text-align: center; border-radius: 12px 12px 0 0;">
+                <div style="display: inline-block; background: #ffffff; border-radius: 10px; padding: 8px 18px; margin-bottom: 18px;">
+                    <img src="cid:logo" alt="MeterSquare" style="max-width: 180px; height: auto; display: block;">
+                </div>
+                <h1 style="color: #ffffff; font-size: 26px; margin: 12px 0 5px 0; font-weight: 600;">Purchase Order — PO-{cr_id}</h1>
+                <p style="color: #bfdbfe; font-size: 14px; margin: 0;">{project_name}</p>
+            </div>
+
+            <!-- Main Content -->
+            <div style="background: #ffffff; padding: 35px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+
+                <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px 0;">
+                    Dear <strong style="color: #1e293b;">{greeting_name}</strong>,
+                </p>
+
+                <p style="color: #475569; font-size: 14px; line-height: 1.7; margin: 0 0 22px 0;">
+                    We are pleased to issue this Purchase Order to <strong style="color: #1e293b;">{vendor_name}</strong>
+                    for the project <strong style="color: #1e293b;">{project_name}</strong>.
+                    Please review the order details below and arrange delivery accordingly.
+                </p>
+
+                <!-- Order Details Card -->
+                <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-left: 4px solid #1d4ed8; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse;">
                         <tr>
-                            <td style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); padding: 30px 25px; text-align: center;">
-                                <img src="{logo_data_uri}" alt="MeterSquare Logo" style="max-width: 180px; height: auto; margin: 0 auto 20px; display: block;">
-                                <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px;">PURCHASE ORDER</h1>
-                                <h2 style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; font-weight: normal;">Material Request for Project</h2>
-                            </td>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px; width: 40%;">PO Reference:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">PO-{cr_id}</td>
                         </tr>
-
-                        <!-- Content -->
                         <tr>
-                            <td style="padding: 30px; background: #ffffff;">
-                                <p style="color: #000000; font-size: 14px; line-height: 1.8; margin: 0 0 20px 0;">
-                                    Dear <strong>{vendor_contact if vendor_contact else vendor_name}</strong>,
-                                </p>
-
-                                <p style="color: #000000; font-size: 14px; line-height: 1.8; margin: 0 0 20px 0;">
-                                    We are pleased to place a purchase order with <strong>{vendor_name}</strong> for the materials
-                                    listed below. This order is for our ongoing project and requires your prompt attention.
-                                </p>
-
-                                <div style="height: 2px; background: linear-gradient(90deg, transparent, #3b82f6, transparent); margin: 25px 0;"></div>
-
-                                <!-- Buyer Contact Information -->
-                                <h2 style="color: #000000; font-size: 20px; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #3b82f6;">Contact Person</h2>
-                                <table width="100%" cellpadding="10" cellspacing="0" border="0" style="background: #f0f9ff; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold; width: 30%;">Procurement Name:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{buyer_name}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="color: #000000; font-size: 14px; font-weight: bold;">Email:</td>
-                                        <td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{buyer_email}</td>
-                                    </tr>
-                                    {f'<tr><td style="color: #000000; font-size: 14px; font-weight: bold;">Phone:</td><td style="color: #3b82f6; font-size: 14px; font-weight: 500;">{buyer_phone}</td></tr>' if buyer_phone != 'N/A' else ''}
-                                </table>
-
-                                <!-- Important Instructions -->
-                                <table width="100%" cellpadding="15" cellspacing="0" border="0" style="background-color: #dbeafe; border-left: 4px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
-                                    <tr>
-                                        <td>
-                                            <p style="color: #000000; font-size: 14px; font-weight: bold; margin: 0 0 10px 0;">Important Instructions:</p>
-                                            <ul style="color: #000000; font-size: 14px; margin: 10px 0; padding-left: 20px; line-height: 1.8;">
-                                                <li>Please confirm receipt of this purchase order</li>
-                                                <li>Provide delivery timeline and availability confirmation</li>
-                                                <li>Ensure all materials meet the specified quality standards</li>
-                                                <li>Include all necessary certifications and documentation</li>
-                                                <li>Contact the buyer for any clarifications or concerns</li>
-                                            </ul>
-                                        </td>
-                                    </tr>
-                                </table>
-
-                                <!-- Delivery Requirements -->
-                                <table width="100%" cellpadding="15" cellspacing="0" border="0" style="background-color: #f0f9ff; border: 1px solid #3b82f6; margin: 20px 0; border-radius: 5px;">
-                                    <tr>
-                                        <td>
-                                            <p style="color: #000000; font-size: 14px; font-weight: bold; margin: 0 0 10px 0;">Delivery Requirements:</p>
-                                            <ul style="color: #000000; font-size: 14px; margin: 10px 0; padding-left: 20px; line-height: 1.8;">
-                                                <li>Materials should be delivered to the project site: <strong>{location}</strong></li>
-                                                <li>Please coordinate delivery schedule with the buyer</li>
-                                                <li>Proper packaging and labeling is required</li>
-                                                <li>Invoice should reference PO Number: <strong>PO-{cr_id}</strong></li>
-                                            </ul>
-                                        </td>
-                                    </tr>
-                                </table>
-
-                                <!-- Signature -->
-                                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #3b82f6;">
-                                    <tr>
-                                        <td>
-                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;"><strong style="color: #3b82f6; font-size: 16px;">Best Regards,</strong></p>
-                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;">{buyer_name}</p>
-                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;">Procurement Department</p>
-                                            <p style="color: #000000; font-size: 14px; margin: 5px 0;">MeterSquare ERP System</p>
-                                        </td>
-                                    </tr>
-                                </table>
-                            </td>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Project:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{project_name}</td>
                         </tr>
-
-                        <!-- Footer -->
                         <tr>
-                            <td style="background: linear-gradient(135deg, #f0f9ff 0%, #dbeafe 100%); padding: 25px; text-align: center; border-top: 2px solid #3b82f6;">
-                                <p style="color: #000000; font-size: 13px; font-weight: bold; margin: 5px 0;">MeterSquare ERP - Construction Management System</p>
-                                <p style="color: #000000; font-size: 13px; margin: 5px 0;">For any queries regarding this purchase order, please contact {buyer_email}</p>
-                                <p style="color: #000000; font-size: 13px; margin: 5px 0;">© 2025 MeterSquare. All rights reserved.</p>
-                            </td>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Client:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{client}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 5px 0; color: #64748b; font-size: 13px;">Site Location:</td>
+                            <td style="padding: 5px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{location}</td>
                         </tr>
                     </table>
-                </td>
-            </tr>
-        </table>
+                </div>
+
+                <!-- Materials Table -->
+                <h3 style="color: #1e293b; font-size: 15px; font-weight: 600; margin: 0 0 12px 0;">Order Items</h3>
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #3b82f6; border-radius: 8px; overflow: hidden;">
+                    <thead>
+                        <tr style="background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);">
+                            <th style="padding: 10px; color: #ffffff; font-size: 12px; text-align: left; font-weight: 600;">#</th>
+                            <th style="padding: 10px; color: #ffffff; font-size: 12px; text-align: left; font-weight: 600;">Material</th>
+                            <th style="padding: 10px; color: #ffffff; font-size: 12px; text-align: left; font-weight: 600;">Brand</th>
+                            <th style="padding: 10px; color: #ffffff; font-size: 12px; text-align: left; font-weight: 600;">Specification</th>
+                            <th style="padding: 10px; color: #ffffff; font-size: 12px; text-align: left; font-weight: 600;">Quantity</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {materials_table_rows}
+                    </tbody>
+                </table>
+
+                <!-- Contact -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 18px; margin-bottom: 22px;">
+                    <p style="color: #64748b; font-size: 13px; font-weight: 600; margin: 0 0 8px 0;">Procurement Contact</p>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 3px 0; color: #64748b; font-size: 13px; width: 30%;">Name:</td>
+                            <td style="padding: 3px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{buyer_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 3px 0; color: #64748b; font-size: 13px;">Email:</td>
+                            <td style="padding: 3px 0; color: #1e293b; font-size: 13px;">{buyer_email}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 3px 0; color: #64748b; font-size: 13px;">Phone:</td>
+                            <td style="padding: 3px 0; color: #1e293b; font-size: 13px;">{buyer_phone}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Signature -->
+                <div style="border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 10px;">
+                    <p style="color: #475569; font-size: 13px; margin: 0 0 4px 0;">Best regards,</p>
+                    <p style="color: #1e293b; font-size: 14px; font-weight: 600; margin: 0 0 2px 0;">{buyer_name}</p>
+                    <p style="color: #64748b; font-size: 12px; margin: 0 0 2px 0;">Procurement Team</p>
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">MeterSquare ERP System</p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f8fafc; padding: 20px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">This is an automated notification. Please do not reply to this email.</p>
+                <p style="color: #475569; font-size: 11px; margin: 6px 0 0 0;">© 2026 MeterSquare. All rights reserved.</p>
+            </div>
+        </div>
         """
 
-        return wrap_email_content(email_body)
-
-    def send_vendor_purchase_order(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body=None, attachments=None):
-        """
-        Send purchase order email to Vendor with embedded logo and attachments
-
-        Args:
-            vendor_email: Vendor's email address (string with comma-separated emails or list)
-            vendor_data: Dictionary containing vendor information
-            purchase_data: Dictionary containing purchase order details
-            buyer_data: Dictionary containing buyer contact information
-            project_data: Dictionary containing project information
-            custom_email_body: Optional custom HTML body for the email (complete HTML document)
-            attachments: Optional list of tuples (filename, file_data, mime_type)
-
-        Returns:
-            bool: True if email sent successfully, False otherwise
-        """
-        try:
-            # Use custom body if provided, otherwise generate default template
-            if custom_email_body:
-                # Custom body is already a complete HTML document from frontend
-                # Check if it's already wrapped (has <!DOCTYPE or <html> tag)
-                if '<!DOCTYPE' in custom_email_body or '<html' in custom_email_body:
-                    email_html = custom_email_body
-                else:
-                    # If not wrapped, wrap it
-                    email_html = wrap_email_content(custom_email_body)
-            else:
-                # Generate email content with embedded logo
-                email_html = self.generate_vendor_purchase_order_email(
-                    vendor_data, purchase_data, buyer_data, project_data
-                )
-
-            # Create subject
-            project_name = project_data.get('project_name', 'Project')
-            cr_id = purchase_data.get('cr_id', 'N/A')
-            subject = f"Purchase Order PO-{cr_id} - {project_name}"
-
-            # Log attachment info if present
-            if attachments:
-                log.info(f"Sending email with {len(attachments)} attachment(s)")
-
-            # Send email with attachments
-            success = self.send_email(vendor_email, subject, email_html, attachments)
-
-            if success:
-                log.info(f"Purchase order email sent successfully to vendor(s)")
-                return True
-            return False
-
-        except Exception as e:
-            log.error(f"Failed to send purchase order email: {e}")
-            return False
+        return wrap_email_content(email_body, show_erp_button=False)
 
     def send_vendor_purchase_order_async(self, vendor_email, vendor_data, purchase_data, buyer_data, project_data, custom_email_body=None, attachments=None, cc_emails=None):
         """
@@ -2163,7 +2458,7 @@ class BOQEmailService:
                 if '<!DOCTYPE' in custom_email_body or '<html' in custom_email_body:
                     email_html = custom_email_body
                 else:
-                    email_html = wrap_email_content(custom_email_body)
+                    email_html = wrap_email_content(custom_email_body, show_erp_button=False)
             else:
                 email_html = self.generate_vendor_purchase_order_email(
                     vendor_data, purchase_data, buyer_data, project_data
@@ -2194,6 +2489,972 @@ class BOQEmailService:
 
         except Exception as e:
             log.error(f"Error sending purchase order to vendor: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+
+    def send_se_items_assigned_notification(self, boq_name, project_name, pm_name, se_email, se_name, items_count, assigned_items):
+        """
+        Send email to Site Engineer when BOQ items are assigned to them by PM.
+
+        Args:
+            boq_name: Name of the BOQ
+            project_name: Name of the project
+            pm_name: Project Manager's name
+            se_email: Site Engineer's email address
+            se_name: Site Engineer's name
+            items_count: Number of items assigned
+            assigned_items: List of dicts with {index, item_code, description}
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            subject = f"BOQ Items Assigned - {project_name} ({items_count} item{'s' if items_count != 1 else ''})"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>BOQ Items Assigned</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{se_name}</strong>,</p>
+        <p><strong>{pm_name}</strong> has assigned <strong>{items_count} BOQ item{'s' if items_count != 1 else ''}</strong> to you for the following project:</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+        </div>
+
+        <p>Please log in to MeterSquare ERP to review your assigned BOQ items and begin site work.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{pm_name}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(se_email, subject, email_html)
+            if success:
+                log.info(f"[send_se_items_assigned_notification] Email sent to {se_email} for {items_count} item(s)")
+            else:
+                log.error(f"[send_se_items_assigned_notification] Failed to send email to {se_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_se_items_assigned_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_cr_review_notification(self, cr_id, project_name, project_code, item_name,
+                                     sender_name, sender_role, recipient_email, recipient_name,
+                                     recipient_role, context=None):
+        """
+        Send purchase/change request notification email to the next reviewer.
+
+        Contexts:
+            None      - SS/SE sent CR to PM for review
+            'forwarded' - PM/MEP forwarded CR to Estimator or next role
+            'purchase'  - Estimator approved, CR routed to Buyer for purchase
+
+        Args:
+            cr_id: Change request ID
+            project_name: Project name
+            project_code: Project code
+            item_name: BOQ item name or CR reference
+            sender_name: Name of the person who sent/routed
+            sender_role: Role of the sender
+            recipient_email: Recipient email address
+            recipient_name: Recipient's full name
+            recipient_role: Recipient's role
+            context: Optional string ('forwarded', 'purchase', or None)
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            # --- Determine subject and action text based on context ---
+            if context == 'purchase':
+                subject = f"Purchase Request Assigned - {project_name} (CR #{cr_id})"
+                heading = "Purchase Request Assigned"
+                action_line = f"A purchase request has been approved and assigned to you by <strong>{sender_name}</strong>."
+                action_label = "Action Required"
+                action_text = "Please review the purchase request and proceed with procurement."
+            elif context == 'forwarded':
+                subject = f"Change Request Forwarded - {project_name} (CR #{cr_id})"
+                heading = "Change Request Forwarded"
+                action_line = f"A change request has been forwarded to you by <strong>{sender_name}</strong> for review."
+                action_label = "Action Required"
+                action_text = "Please review the change request and take the appropriate action."
+            else:
+                # Default: SS/SE → PM
+                subject = f"New Purchase Request - {project_name} (CR #{cr_id})"
+                heading = "New Purchase Request"
+                action_line = f"<strong>{sender_name}</strong> has submitted a purchase request for your review."
+                action_label = "Action Required"
+                action_text = "Please review the request and approve or reject it."
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>{heading}</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p>{action_line}</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">CR Reference:</span> <span class="value">CR #{cr_id}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>{action_label}:</strong> {action_text}
+        </div>
+
+        <p>Please log in to MeterSquare ERP to view and action this request.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{sender_name}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_cr_review_notification] Email sent to {recipient_email} for CR #{cr_id} (context={context})")
+            else:
+                log.error(f"[send_cr_review_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_cr_review_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_cr_rejection_notification(self, cr_id, project_name, item_name,
+                                        rejection_reason, rejected_by_name, rejected_by_role,
+                                        recipient_email, recipient_name):
+        """
+        Send purchase request rejection email to the CR creator (SS/SE).
+
+        Args:
+            cr_id: Change request ID
+            project_name: Project name
+            item_name: BOQ item name or CR reference
+            rejection_reason: Reason provided by the rejector
+            rejected_by_name: Name of the person who rejected
+            rejected_by_role: Role of the rejector
+            recipient_email: Creator's email address
+            recipient_name: Creator's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"Purchase Request Rejected - {project_name} (CR #{cr_id})"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Purchase Request Rejected</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p>Your purchase request has been <strong>rejected</strong> by <strong>{rejected_by_name}</strong>.</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">CR Reference:</span> <span class="value">CR #{cr_id}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Rejection Reason:</strong> {rejection_reason}
+        </div>
+
+        <p>Please log in to MeterSquare ERP to review the rejection and resubmit if needed.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{rejected_by_name}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_cr_rejection_notification] Email sent to {recipient_email} for CR #{cr_id}")
+            else:
+                log.error(f"[send_cr_rejection_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_cr_rejection_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_cr_approved_notification(self, cr_id, project_name, project_code, item_name,
+                                      approver_name, approver_role, recipient_email, recipient_name):
+        """
+        Send CR final approval email to the CR creator.
+
+        Args:
+            cr_id: Change request ID
+            project_name: Project name
+            project_code: Project code
+            item_name: BOQ item name or CR reference
+            approver_name: Name of the approver (TD)
+            approver_role: Role of the approver
+            recipient_email: CR creator's email address
+            recipient_name: CR creator's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"Purchase Request Approved - {escape(project_name)} (CR #{cr_id})"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Purchase Request Approved</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{escape(recipient_name)}</strong>,</p>
+        <p>Your purchase request has been <strong>approved</strong> by <strong>{escape(approver_name)}</strong>.</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{escape(project_name)}</span></p>
+            <p><span class="label">Project Code:</span> <span class="value">{escape(project_code)}</span></p>
+            <p><span class="label">CR Reference:</span> <span class="value">CR #{cr_id}</span></p>
+            <p><span class="label">Item:</span> <span class="value">{escape(item_name)}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Status:</strong> Your request has been approved and is now proceeding to the next stage.
+        </div>
+
+        <p>Please log in to MeterSquare ERP to view the updated status.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{escape(approver_name)}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_cr_approved_notification] Email sent to {recipient_email} for CR #{cr_id}")
+            else:
+                log.error(f"[send_cr_approved_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_cr_approved_notification] Error: {e}")
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_boq_buyer_assignment_notification(self, buyer_email, buyer_name, se_name,
+                                                boq_name, project_name):
+        """
+        Send email to Buyer when Site Engineer assigns a BOQ for purchasing.
+
+        Args:
+            buyer_email: Buyer's email address
+            buyer_name: Buyer's full name
+            se_name: Site Engineer's name who assigned
+            boq_name: Name of the BOQ
+            project_name: Project name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"BOQ Assigned for Purchase - {escape(project_name)}"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>BOQ Assigned for Purchase</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{escape(buyer_name)}</strong>,</p>
+        <p><strong>{escape(se_name)}</strong> has assigned a BOQ to you for procurement.</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{escape(project_name)}</span></p>
+            <p><span class="label">BOQ:</span> <span class="value">{escape(boq_name)}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Action Required:</strong> Please log in to review the materials and proceed with purchasing.
+        </div>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{escape(se_name)}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(buyer_email, subject, email_html)
+            if success:
+                log.info(f"[send_boq_buyer_assignment_notification] Email sent to {buyer_email} for BOQ '{boq_name}'")
+            else:
+                log.error(f"[send_boq_buyer_assignment_notification] Failed to send email to {buyer_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_boq_buyer_assignment_notification] Error: {e}")
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_vendor_selection_notification(self, cr_id, project_name, buyer_name, buyer_role,
+                                            recipient_email, recipient_name, materials_count,
+                                            material_names, vendor_name, all_submitted):
+        """
+        Send vendor selection notification email to Technical Director when buyer selects vendor(s).
+
+        Args:
+            cr_id: Change request ID
+            project_name: Project name
+            buyer_name: Name of the buyer who selected the vendor
+            buyer_role: Role of the buyer
+            recipient_email: TD's email address
+            recipient_name: TD's full name
+            materials_count: Number of materials with vendor selected
+            material_names: Comma-separated material names string
+            vendor_name: Primary selected vendor name
+            all_submitted: True if all materials have vendor selected (ready for approval)
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            if all_submitted:
+                subject = f"Vendor Selected - {project_name} (CR #{cr_id})"
+                heading = "Vendor Selected"
+                status_line = f"<strong>{buyer_name}</strong> has completed vendor selection for all materials in this purchase order. It is now ready for your approval."
+                action_text = "Please review the vendor selections and approve or reject the purchase order."
+            else:
+                subject = f"Vendor Selected - {project_name} (CR #{cr_id})"
+                heading = "Vendor Selected"
+                status_line = f"<strong>{buyer_name}</strong> has selected vendor(s) for <strong>{materials_count}</strong> material(s) in this purchase order."
+                action_text = "Please review the vendor selections when all materials have been submitted."
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>{heading}</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p>{status_line}</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">CR Reference:</span> <span class="value">CR #{cr_id}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Action Required:</strong> {action_text}
+        </div>
+
+        <p>Please log in to MeterSquare ERP to review and approve the vendor selection.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{buyer_name}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_vendor_selection_notification] Email sent to {recipient_email} for CR #{cr_id}")
+            else:
+                log.error(f"[send_vendor_selection_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_vendor_selection_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_td_vendor_rejection_notification(self, cr_id, project_name, td_name,
+                                               recipient_email, recipient_name,
+                                               vendor_name, item_name, rejection_reason):
+        """
+        Send vendor rejection email to Buyer when TD rejects vendor selection.
+
+        Args:
+            cr_id: Change request ID
+            project_name: Project name
+            td_name: Technical Director's name
+            recipient_email: Buyer's email address
+            recipient_name: Buyer's full name
+            vendor_name: The vendor that was rejected
+            item_name: BOQ item or materials request name
+            rejection_reason: Reason provided by TD
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"Vendor Selection Rejected - {project_name} (CR #{cr_id})"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Vendor Selection Rejected</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{td_name}</strong> has rejected the vendor selection for the following purchase order. Please select a new vendor and resubmit.</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">CR Reference:</span> <span class="value">CR #{cr_id}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Rejection Reason:</strong> {rejection_reason}
+        </div>
+
+        <p>Please log in to MeterSquare ERP to select a new vendor and resubmit for approval.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{td_name}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_td_vendor_rejection_notification] Email sent to {recipient_email} for CR #{cr_id}")
+            else:
+                log.error(f"[send_td_vendor_rejection_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_td_vendor_rejection_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_td_vendor_approval_notification(self, cr_id, project_name, td_name,
+                                              recipient_email, recipient_name,
+                                              vendor_name, item_name):
+        """
+        Send vendor approval email to Buyer when TD approves vendor selection.
+
+        Args:
+            cr_id: Change request ID
+            project_name: Project name
+            td_name: Technical Director's name
+            recipient_email: Buyer's email address
+            recipient_name: Buyer's full name
+            vendor_name: The approved vendor name
+            item_name: BOQ item or materials request name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"Vendor Selection Approved - {project_name} (CR #{cr_id})"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Vendor Selection Approved</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{td_name}</strong> has approved the vendor selection for the following purchase order. You may now proceed with the purchase.</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">CR Reference:</span> <span class="value">CR #{cr_id}</span></p>
+        </div>
+
+        <div class="alert alert-success">
+            <strong>Approved:</strong> Please proceed with completing the purchase on MeterSquare ERP.
+        </div>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{td_name}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_td_vendor_approval_notification] Email sent to {recipient_email} for CR #{cr_id}")
+            else:
+                log.error(f"[send_td_vendor_approval_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_td_vendor_approval_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_inspection_result_notification(self, cr_ref, project_name, pm_name,
+                                             recipient_email, recipient_name,
+                                             decision, accepted_count, rejected_count):
+        """
+        Send vendor delivery inspection result email to Buyer/Procurement.
+
+        Args:
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            pm_name: Production Manager who performed the inspection
+            recipient_email: Buyer's email address
+            recipient_name: Buyer's full name
+            decision: 'fully_approved' | 'partially_approved' | 'fully_rejected'
+            accepted_count: Number of material lines accepted
+            rejected_count: Number of material lines rejected
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            if decision == 'fully_approved':
+                subject = f"Delivery Fully Approved - {cr_ref}"
+                heading = "Delivery Fully Approved"
+                intro = (f"<strong>{pm_name}</strong> has completed the quality inspection for "
+                         f"<strong>{cr_ref}</strong>. All materials have been accepted into the M2 Store.")
+                alert_class = "alert-success"
+                alert_body = f"<strong>Result:</strong> All {accepted_count} material line(s) accepted. Materials are now in inventory and will be dispatched to site."
+            elif decision == 'partially_approved':
+                subject = f"Delivery Partially Approved - {cr_ref}"
+                heading = "Delivery Partially Approved"
+                intro = (f"<strong>{pm_name}</strong> has completed the quality inspection for "
+                         f"<strong>{cr_ref}</strong>. Some materials were rejected and need to be returned to the vendor.")
+                alert_class = "alert-info"
+                alert_body = (f"<strong>Result:</strong> {accepted_count} material line(s) accepted, "
+                              f"{rejected_count} material line(s) rejected. "
+                              f"Please log in to create a return request for the rejected items.")
+            else:  # fully_rejected
+                subject = f"Delivery Fully Rejected - {cr_ref}"
+                heading = "Delivery Fully Rejected"
+                intro = (f"<strong>{pm_name}</strong> has completed the quality inspection for "
+                         f"<strong>{cr_ref}</strong>. All materials have been rejected and must be returned to the vendor.")
+                alert_class = "alert-danger"
+                alert_body = (f"<strong>Result:</strong> All {rejected_count} material line(s) rejected. "
+                              f"Please log in to create a return request for all items.")
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>{heading}</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p>{intro}</p>
+
+        <div class="info-box">
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">Reference:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Inspected By:</span> <span class="value">{pm_name}</span></p>
+        </div>
+
+        <div class="alert {alert_class}">
+            {alert_body}
+        </div>
+
+        <p>Please log in to MeterSquare ERP to review the inspection details and take the necessary action.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>MeterSquare ERP</strong>
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_inspection_result_notification] Email sent to {recipient_email} for {cr_ref} ({decision})")
+            else:
+                log.error(f"[send_inspection_result_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_inspection_result_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_return_request_td_notification(self, vrr_number, cr_ref, project_name,
+                                             buyer_name, resolution_type, total_value,
+                                             recipient_email, recipient_name):
+        """
+        Send return request email to TD when buyer creates a new return request.
+
+        Args:
+            vrr_number: Return request number e.g. "VRR-2026-001"
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            buyer_name: Buyer who created the request
+            resolution_type: 'refund' | 'replacement' | 'new_vendor'
+            total_value: Total rejected value (float)
+            recipient_email: TD's email address
+            recipient_name: TD's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            resolution_labels = {
+                'refund': 'Refund',
+                'replacement': 'Replacement from same vendor',
+                'new_vendor': 'New vendor selection required',
+            }
+            resolution_label = resolution_labels.get(resolution_type, resolution_type.replace('_', ' ').title())
+
+            subject = f"Return Request Pending Approval - {vrr_number}"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Return Request Pending Your Approval</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{buyer_name}</strong> has submitted a vendor return request that requires your approval.</p>
+
+        <div class="info-box">
+            <p><span class="label">Return Request:</span> <span class="value">{vrr_number}</span></p>
+            <p><span class="label">Purchase Order:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">Resolution Type:</span> <span class="value">{resolution_label}</span></p>
+            <p><span class="label">Total Rejected Value:</span> <span class="value">AED {total_value:,.2f}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Action Required:</strong> Please log in to MeterSquare ERP to review and approve or reject this return request.
+        </div>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>MeterSquare ERP</strong>
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_return_request_td_notification] Email sent to {recipient_email} for {vrr_number}")
+            else:
+                log.error(f"[send_return_request_td_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_return_request_td_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_return_request_approved_buyer_notification(self, vrr_number, cr_ref, project_name,
+                                                         td_name, resolution_type,
+                                                         recipient_email, recipient_name,
+                                                         new_vendor_name=None, new_po_ref=None):
+        """
+        Send return request approval email to Buyer when TD approves.
+
+        Args:
+            vrr_number: Return request number e.g. "VRR-2026-001"
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            td_name: Technical Director's name
+            resolution_type: 'refund' | 'replacement' | 'new_vendor'
+            recipient_email: Buyer's email address
+            recipient_name: Buyer's full name
+            new_vendor_name: (new_vendor only) Approved vendor name
+            new_po_ref: (new_vendor only) New PO child reference
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            resolution_labels = {
+                'refund': 'Refund',
+                'replacement': 'Replacement from same vendor',
+                'new_vendor': 'New vendor selection',
+            }
+            resolution_label = resolution_labels.get(resolution_type, resolution_type.replace('_', ' ').title())
+
+            subject = f"Return Request Approved - {vrr_number}"
+
+            if resolution_type == 'new_vendor' and new_vendor_name:
+                action_detail = f"""
+        <div class="alert alert-success">
+            <strong>Approved:</strong> Vendor <strong>{new_vendor_name}</strong> has been approved.
+            New Purchase Order <strong>{new_po_ref or 'N/A'}</strong> has been created. Please proceed with LPO generation.
+        </div>"""
+            else:
+                action_detail = f"""
+        <div class="alert alert-success">
+            <strong>Approved:</strong> Please log in to MeterSquare ERP to proceed with the {resolution_label.lower()}.
+        </div>"""
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Return Request Approved</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{td_name}</strong> has approved your vendor return request.</p>
+
+        <div class="info-box">
+            <p><span class="label">Return Request:</span> <span class="value">{vrr_number}</span></p>
+            <p><span class="label">Purchase Order:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">Resolution Type:</span> <span class="value">{resolution_label}</span></p>
+        </div>
+        {action_detail}
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{td_name}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_return_request_approved_buyer_notification] Email sent to {recipient_email} for {vrr_number}")
+            else:
+                log.error(f"[send_return_request_approved_buyer_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_return_request_approved_buyer_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_return_request_rejected_buyer_notification(self, vrr_number, cr_ref, project_name,
+                                                          td_name, rejection_reason,
+                                                          recipient_email, recipient_name):
+        """
+        Send return request rejection email to Buyer when TD rejects.
+
+        Args:
+            vrr_number: Return request number e.g. "VRR-2026-001"
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            td_name: Technical Director's name
+            rejection_reason: Reason for rejection
+            recipient_email: Buyer's email address
+            recipient_name: Buyer's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"Return Request Rejected - {vrr_number}"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Return Request Rejected</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{td_name}</strong> has rejected your vendor return request.</p>
+
+        <div class="info-box">
+            <p><span class="label">Return Request:</span> <span class="value">{vrr_number}</span></p>
+            <p><span class="label">Purchase Order:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+        </div>
+
+        <div class="alert alert-danger">
+            <strong>Rejection Reason:</strong> {rejection_reason or 'No reason provided'}
+        </div>
+
+        <p>Please log in to MeterSquare ERP to review the rejection and take the necessary action.</p>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>{td_name}</strong><br>
+            MeterSquare ERP
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_return_request_rejected_buyer_notification] Email sent to {recipient_email} for {vrr_number}")
+            else:
+                log.error(f"[send_return_request_rejected_buyer_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_return_request_rejected_buyer_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_return_initiated_pm_notification(self, vrr_number, cr_ref, project_name,
+                                               buyer_name, resolution_type,
+                                               recipient_email, recipient_name):
+        """
+        Send email to Production Manager when buyer initiates a vendor return.
+
+        Args:
+            vrr_number: Return request number e.g. "VRR-2026-001"
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            buyer_name: Buyer who initiated the return
+            resolution_type: 'refund' | 'replacement' | 'new_vendor'
+            recipient_email: PM's email address
+            recipient_name: PM's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            resolution_labels = {
+                'refund': 'Refund',
+                'replacement': 'Replacement from same vendor',
+                'new_vendor': 'New vendor selection',
+            }
+            resolution_label = resolution_labels.get(resolution_type, resolution_type.replace('_', ' ').title())
+
+            subject = f"Materials Being Returned to Vendor - {vrr_number}"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Materials Being Returned to Vendor</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{buyer_name}</strong> has initiated a vendor return. Please prepare to receive the returned materials at the M2 Store once the vendor confirms collection.</p>
+
+        <div class="info-box">
+            <p><span class="label">Return Request:</span> <span class="value">{vrr_number}</span></p>
+            <p><span class="label">Purchase Order:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">Resolution Type:</span> <span class="value">{resolution_label}</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Action Required:</strong> Please log in to MeterSquare ERP to track the return and confirm receipt once materials arrive at the store.
+        </div>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>MeterSquare ERP</strong>
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_return_initiated_pm_notification] Email sent to {recipient_email} for {vrr_number}")
+            else:
+                log.error(f"[send_return_initiated_pm_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_return_initiated_pm_notification] Error: {e}")
+            import traceback
+            log.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
+    def send_replacement_arrival_pm_notification(self, vrr_number, cr_ref, project_name,
+                                                  buyer_name, materials_count,
+                                                  recipient_email, recipient_name):
+        """
+        Send email to Production Manager when buyer confirms replacement materials
+        have arrived at the M2 Store and are ready for inspection.
+
+        Args:
+            vrr_number: Return request number e.g. "VRR-2026-001"
+            cr_ref: Formatted CR reference e.g. "PO-24"
+            project_name: Project name
+            buyer_name: Buyer who confirmed replacement arrival
+            materials_count: Number of replacement material lines
+            recipient_email: PM's email address
+            recipient_name: PM's full name
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        try:
+            subject = f"Replacement Materials Ready for Inspection - {vrr_number}"
+
+            email_body = f"""
+<div class="email-container">
+    <div class="header">
+        <h2>Replacement Materials Ready for Inspection</h2>
+    </div>
+    <div class="content">
+        <p>Dear <strong>{recipient_name}</strong>,</p>
+        <p><strong>{buyer_name}</strong> has confirmed that replacement materials have arrived at the M2 Store and are ready for quality inspection.</p>
+
+        <div class="info-box">
+            <p><span class="label">Return Request:</span> <span class="value">{vrr_number}</span></p>
+            <p><span class="label">Purchase Order:</span> <span class="value">{cr_ref}</span></p>
+            <p><span class="label">Project:</span> <span class="value">{project_name}</span></p>
+            <p><span class="label">Materials:</span> <span class="value">{materials_count} line(s) to inspect</span></p>
+        </div>
+
+        <div class="alert alert-info">
+            <strong>Action Required:</strong> Please log in to MeterSquare ERP and go to Stock In → Vendor Deliveries to inspect the replacement materials.
+        </div>
+
+        <div class="signature">
+            Regards,<br>
+            <strong>MeterSquare ERP</strong>
+        </div>
+    </div>
+</div>"""
+
+            email_html = wrap_email_content(email_body)
+            success = self.send_email(recipient_email, subject, email_html)
+            if success:
+                log.info(f"[send_replacement_arrival_pm_notification] Email sent to {recipient_email} for {vrr_number}")
+            else:
+                log.error(f"[send_replacement_arrival_pm_notification] Failed to send email to {recipient_email}")
+            return success
+
+        except Exception as e:
+            log.error(f"[send_replacement_arrival_pm_notification] Error: {e}")
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
             return False

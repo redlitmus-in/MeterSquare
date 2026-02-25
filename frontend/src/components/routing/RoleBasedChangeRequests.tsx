@@ -1,5 +1,5 @@
-import React, { lazy, Suspense } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { lazy, Suspense, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { useAdminViewStore } from '@/store/adminViewStore';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -13,11 +13,48 @@ const RoleBasedChangeRequests: React.FC = () => {
   const { user } = useAuthStore();
   const { viewingAsRole } = useAdminViewStore();
   const location = useLocation();
+  const navigate = useNavigate();
   const userRole = (user as any)?.role || '';
   const userRoleLower = userRole.toLowerCase();
 
   // Check if we're on extra-material route
   const isExtraMaterial = location.pathname.includes('extra-material');
+
+  // ✅ FIX: Redirect buyer/procurement from change-requests OR extra-material to purchase-orders
+  // Buyer/Procurement should NEVER access /change-requests or /extra-material, always use /purchase-orders
+  const isBuyerOrProcurement = userRoleLower === 'buyer' || userRoleLower === 'procurement';
+  const isOnChangeRequests = location.pathname.includes('/change-requests') && !isExtraMaterial;
+  const needsRedirect = isBuyerOrProcurement && (isOnChangeRequests || isExtraMaterial);
+
+  // If buyer/procurement is on change-requests OR extra-material, redirect immediately (before rendering)
+  useEffect(() => {
+    if (needsRedirect) {
+      console.log('[RoleBasedChangeRequests] Redirecting buyer/procurement to purchase-orders');
+      // Preserve query parameters (cr_id, tab, etc.)
+      const searchParams = new URLSearchParams(location.search);
+
+      // Map tabs: requested -> pending, accepted -> approved
+      const currentTab = searchParams.get('tab');
+      if (currentTab === 'requested') {
+        searchParams.set('tab', 'pending');
+      } else if (currentTab === 'accepted') {
+        searchParams.set('tab', 'approved');
+      }
+
+      const queryString = searchParams.toString();
+      const targetUrl = `/buyer/purchase-orders${queryString ? `?${queryString}` : ''}`;
+      navigate(targetUrl, { replace: true });
+    }
+  }, [needsRedirect, location.search, navigate]);
+
+  // Show loading state while redirecting (prevent flash of "Access Denied")
+  if (needsRedirect) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <ModernLoadingSpinners variant="pulse" color="blue" />
+      </div>
+    );
+  }
 
   // Check if admin is viewing as another role
   const isAdmin = userRoleLower === 'admin';

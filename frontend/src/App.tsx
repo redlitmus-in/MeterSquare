@@ -46,6 +46,7 @@ const CreativeErrorPage = lazy(() => import('@/components/ui/CreativeErrorPage')
 
 // Lazy load role hubs - Direct import for better code splitting
 const ProjectManagerHub = lazy(() => import('@/roles/project-manager/pages/ProjectManagerHub'));
+const MEPDashboard = lazy(() => import('@/roles/mep/pages/MEPDashboard'));
 // const EstimationHub = lazy(() => import('@/roles/estimation/pages/EstimationHub'));
 const EstimatorHub = lazy(() => import('@/roles/estimator/pages/EstimatorHub'));
 const TechnicalDirectorHub = lazy(() => import('@/roles/technical-director/pages/TechnicalDirectorHub'));
@@ -74,15 +75,16 @@ const SiteAssets = lazy(() => import('@/roles/site-engineer/pages/SiteAssets'));
 const MaterialReceipts = lazy(() => import('@/roles/site-engineer/pages/MaterialReceipts'));
 
 // Buyer Pages
-const BuyerDashboard = lazy(() => import('@/roles/buyer/pages/Dashboard'));
 const MaterialsToPurchase = lazy(() => import('@/roles/buyer/pages/MaterialsToPurchase'));
 const PurchaseOrders = lazy(() => import('@/roles/buyer/pages/PurchaseOrders'));
 const VendorManagement = lazy(() => import('@/roles/buyer/pages/VendorManagement'));
 const VendorDetails = lazy(() => import('@/roles/buyer/pages/VendorDetails'));
 const BuyerStore = lazy(() => import('@/roles/buyer/pages/Store'));
+const MaterialTransfer = lazy(() => import('@/roles/buyer/pages/MaterialTransfer'));
+const RawMaterialsCatalog = lazy(() => import('@/roles/buyer/pages/RawMaterialsCatalog'));
 
 // Production Manager Pages - M2 Store Management
-const M2StoreDashboard = lazy(() => import('@/roles/production-manager/pages/M2StoreDashboard'));
+const ProductionManagerDashboard = lazy(() => import('@/roles/production-manager/pages/ProductionManagerDashboard'));
 const M2StoreLanding = lazy(() => import('@/roles/production-manager/pages/M2StoreLanding'));
 const MaterialsManagement = lazy(() => import('@/roles/production-manager/pages/MaterialsManagement'));
 const ReceiveStock = lazy(() => import('@/roles/production-manager/pages/ReceiveStock'));
@@ -98,6 +100,9 @@ const ReceiveReturns = lazy(() => import('@/roles/production-manager/pages/Recei
 const RepairManagement = lazy(() => import('@/roles/production-manager/pages/RepairManagement'));
 const AssetRepairManagement = lazy(() => import('@/roles/production-manager/pages/AssetRepairManagement'));
 const MaterialDisposalPage = lazy(() => import('@/roles/production-manager/pages/MaterialDisposalPage'));
+const RejectedDeliveries = lazy(() => import('@/roles/buyer/pages/RejectedDeliveries'));
+const VendorReturnRequests = lazy(() => import('@/roles/buyer/pages/VendorReturnRequests'));
+const ReturnApprovals = lazy(() => import('@/roles/technical-director/pages/ReturnApprovals'));
 const AssetDisposalPage = lazy(() => import('@/roles/production-manager/pages/AssetDisposalPage'));
 
 // Admin Pages - Mix of custom admin pages and role pages
@@ -106,6 +111,7 @@ const AdminRoleManagement = lazy(() => import('@/pages/admin/RoleManagement'));
 const AdminBOQManagement = lazy(() => import('@/pages/admin/BOQManagement'));
 const AdminSettings = lazy(() => import('@/pages/admin/Settings'));
 const AdminSignatureUpload = lazy(() => import('@/pages/admin/SignatureUpload'));
+const AdminSecurityDashboard = lazy(() => import('@/pages/admin/SecurityDashboard'));
 const AdminMyProjects = lazy(() => import('@/pages/admin/AdminMyProjects'));
 const AdminSEProjects = lazy(() => import('@/pages/admin/AdminSEProjects'));
 
@@ -159,9 +165,13 @@ const RoleSpecificProcurementHub: React.FC = () => {
 
   const userRoleLower = userRole.toLowerCase();
 
-  // Check if user is Project Manager OR MEP Supervisor (both share same procurement hub)
-  if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' || userRoleLower === 'projectmanager' ||
-      userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor') {
+  // Check if user is MEP Supervisor - use MEPDashboard
+  if (userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor') {
+    return <MEPDashboard />;
+  }
+
+  // Check if user is Project Manager
+  if (userRoleLower === 'project manager' || userRoleLower === 'project_manager' || userRoleLower === 'projectmanager') {
     return <ProjectManagerHub />;
   }
 
@@ -426,12 +436,15 @@ const RoleSpecificPurchaseOrders: React.FC = () => {
                              roleId === 'technicalDirector' ||
                              roleIdLower === 'technical_director';
 
-  // TD gets their own dedicated page (ChangeRequestsPage with Vendor Approvals tab), Buyer/Admin get the buyer page
-  if (isTechnicalDirector && !isAdmin) {
+  // TD gets their own dedicated page (ChangeRequestsPage with Vendor Approvals tab)
+  // This includes Admin viewing as TD
+  if (isTechnicalDirector) {
     return <ChangeRequestsPage />;
   }
 
-  if (isBuyer || isAdmin) {
+  // Buyer gets the buyer purchase orders page
+  // Admin without viewingAsRole also gets the buyer page (default admin view)
+  if (isBuyer || (isAdmin && !viewingAsRole)) {
     return <PurchaseOrders />;
   }
 
@@ -496,14 +509,13 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   const token = localStorage.getItem('access_token');
 
   useEffect(() => {
-    // Check token validity when component mounts - but don't block rendering
-    if (token && !isAuthenticated && !user) {
-      // Try to get current user but don't await - it will update state when ready
+    // Refresh user data when component mounts to ensure state is fresh
+    if (token && !user) {
       getCurrentUser().catch(() => {
         // Token is invalid, getCurrentUser will handle cleanup
       });
     }
-  }, [token, isAuthenticated, user, getCurrentUser]);
+  }, [token, user, getCurrentUser]);
 
   // Quick check - if no token, redirect immediately
   if (!token) {
@@ -574,6 +586,53 @@ const ProjectManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children
                  roleId?.toString().toLowerCase() === 'admin';
 
   if (!isProjectManager && !isMEP && !isTechnicalDirector && !isAdmin) {
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+// PM Only Route - Excludes MEP (for Labour routes that are PM-specific)
+// MEP does NOT deal with labour requisitions - those go to the assigned PM
+const PMOnlyRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, getRoleDashboard } = useAuthStore();
+
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+  const roleId = user?.role_id;
+  const roleIdLower = typeof roleId === 'string' ? roleId.toLowerCase() : '';
+
+  // Check if MEP - redirect to dashboard
+  const isMEP = userRole === 'MEP' ||
+                userRole === 'MEP Manager' ||
+                userRoleLower === 'mep' ||
+                userRoleLower === 'mep supervisor' ||
+                userRoleLower === 'mep_supervisor' ||
+                roleId === UserRole.MEP ||
+                roleId === 'mep' ||
+                roleIdLower === 'mep';
+
+  // If MEP, redirect to their dashboard (they don't have access to labour routes)
+  if (isMEP) {
+    return <Navigate to={getRoleDashboard()} replace />;
+  }
+
+  // Allow Project Manager and Admin only
+  const isProjectManager = userRole === 'Project Manager' ||
+                          userRoleLower === 'project manager' ||
+                          userRoleLower === 'project_manager' ||
+                          userRoleLower === 'projectmanager' ||
+                          roleId === UserRole.PROJECT_MANAGER ||
+                          roleId === 'projectManager' ||
+                          roleIdLower === 'project_manager';
+
+  const isAdmin = userRole === 'Admin' ||
+                 userRoleLower === 'admin' ||
+                 roleId === 'admin' ||
+                 roleIdLower === 'admin' ||
+                 roleId?.toString().toLowerCase() === 'admin';
+
+  if (!isProjectManager && !isAdmin) {
     return <Navigate to="/403" replace />;
   }
 
@@ -700,6 +759,33 @@ const ProductionManagerRoute: React.FC<{ children: React.ReactNode }> = ({ child
   return <>{children}</>;
 };
 
+// Labour Requisition Route - For SE and PM (both can create requisitions)
+const LabourRequisitionRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuthStore();
+  const userRole = (user as any)?.role || '';
+  const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
+
+  // Allow Site Engineer, Project Manager, MEP, Technical Director, and Admin
+  const isAuthorized =
+    userRoleLower === 'site engineer' ||
+    userRoleLower === 'siteengineer' ||
+    userRoleLower === 'site_engineer' ||
+    userRoleLower === 'project manager' ||
+    userRoleLower === 'projectmanager' ||
+    userRoleLower === 'project_manager' ||
+    userRoleLower === 'mep' ||
+    userRoleLower === 'mep manager' ||
+    userRoleLower === 'technical director' ||
+    userRoleLower === 'technicaldirector' ||
+    userRoleLower === 'admin';
+
+  if (!isAuthorized) {
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
 // Admin Only Route Component
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuthStore();
@@ -798,10 +884,10 @@ function App() {
         setIsEnvironmentValid(success);
 
         if (success) {
-          // Check for existing session on app load - don't wait for it
+          // Check for existing session on app load
           const token = localStorage.getItem('access_token');
-          if (token && !isAuthenticated) {
-            // Fire and forget - don't await
+          if (token) {
+            // Always refresh user data in background to ensure fresh state
             getCurrentUser().catch(() => {
               if (import.meta.env.DEV) {
                 console.log('Token validation failed, cleaning up...');
@@ -934,6 +1020,26 @@ function App() {
             <Route path="materials" element={<RoleSpecificMaterials />} />
             <Route path="purchase-orders" element={<RoleSpecificPurchaseOrders />} />
             <Route path="store" element={<RoleSpecificStore />} />
+            <Route path="material-transfer" element={
+              <BuyerRoute>
+                <MaterialTransfer />
+              </BuyerRoute>
+            } />
+            <Route path="raw-materials" element={
+              <BuyerRoute>
+                <RawMaterialsCatalog />
+              </BuyerRoute>
+            } />
+            <Route path="rejected-deliveries" element={
+              <BuyerRoute>
+                <RejectedDeliveries />
+              </BuyerRoute>
+            } />
+            <Route path="return-requests" element={
+              <BuyerRoute>
+                <VendorReturnRequests />
+              </BuyerRoute>
+            } />
 
             {/* Vendor Management Routes - Role-specific vendor hub */}
             <Route path="vendors" element={<RoleSpecificVendorHub />} />
@@ -976,6 +1082,11 @@ function App() {
             <Route path="purchase-comparison" element={
               <TechnicalDirectorRoute>
                 <PurchaseComparison />
+              </TechnicalDirectorRoute>
+            } />
+            <Route path="return-approvals" element={
+              <TechnicalDirectorRoute>
+                <ReturnApprovals />
               </TechnicalDirectorRoute>
             } />
             {/* purchase-orders route moved to general routes (line 916 - RoleSpecificPurchaseOrders) */}
@@ -1042,11 +1153,13 @@ function App() {
               </SiteEngineerRoute>
             } />
 
-            {/* Labour Management Routes - Site Engineer (Steps 2, 5, 6) */}
+            {/* Labour Management Routes - Site Engineer & Project Manager (Steps 2, 5, 6) */}
+            {/* SE: Create requisitions for PM approval */}
+            {/* PM: Create requisitions that go directly to Production */}
             <Route path="labour/requisitions" element={
-              <SiteEngineerRoute>
+              <LabourRequisitionRoute>
                 <LabourRequisition />
-              </SiteEngineerRoute>
+              </LabourRequisitionRoute>
             } />
             <Route path="labour/arrivals" element={
               <SiteEngineerRoute>
@@ -1059,7 +1172,8 @@ function App() {
               </SiteEngineerRoute>
             } />
 
-            {/* Labour Management Routes - Project Manager (Steps 3, 7) */}
+            {/* Labour Management Routes - Project Manager & MEP (Steps 3, 7) */}
+            {/* Backend filters requisitions to show only from assigned SEs */}
             <Route path="labour/approvals" element={
               <ProjectManagerRoute>
                 <RequisitionApprovals />
@@ -1252,6 +1366,11 @@ function App() {
             <Route path="signature-upload" element={
               <AdminRoute>
                 <AdminSignatureUpload />
+              </AdminRoute>
+            } />
+            <Route path="security" element={
+              <AdminRoute>
+                <AdminSecurityDashboard />
               </AdminRoute>
             } />
             <Route path="support-management" element={

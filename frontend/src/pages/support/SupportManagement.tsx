@@ -3,7 +3,7 @@
  * For developers/company team to review and resolve user-reported bugs and issues
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bug,
@@ -52,8 +52,11 @@ import {
   getNotificationPermission,
   isNotificationSupported,
   notifyNewTicket,
+  notifyAdminResponse,
   initializeKnownTickets,
-  isNewTicketForAdmin
+  isNewTicketForAdmin,
+  getUnreadCommentCountForAdmin,
+  markCommentsAsReadForAdmin
 } from '@/utils/supportNotificationHelper';
 import SupportDBNotificationPanel from '@/components/support/SupportDBNotificationPanel';
 
@@ -83,13 +86,8 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
   closed: { label: 'Closed', color: 'text-gray-600', bgColor: 'bg-gray-200', icon: XCircle }
 };
 
-// Polling interval for checking new tickets (60 seconds to avoid rate limiting)
-// ✅ PERFORMANCE: Removed polling - using real-time subscriptions instead
-// const POLLING_INTERVAL = 60000; // DEPRECATED - replaced with real-time updates
-
 const SupportManagement: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // State
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
@@ -106,8 +104,6 @@ const SupportManagement: React.FC = () => {
 
   // Notification state
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>('default');
-  // Using DB API polling for notifications (every 5 seconds via SupportDBNotificationPanel)
-  const [isPolling] = useState(false);
 
   // Modal state
   const [actionModal, setActionModal] = useState<{
@@ -124,6 +120,8 @@ const SupportManagement: React.FC = () => {
   // Comment state
   const [commentText, setCommentText] = useState<Record<number, string>>({});
   const [isSendingComment, setIsSendingComment] = useState<Record<number, boolean>>({});
+  // Counter to trigger re-sort when comments are marked as read
+  const [commentReadCounter, setCommentReadCounter] = useState(0);
 
   // Close ticket state
   const [closeTicketModal, setCloseTicketModal] = useState<{ ticket: SupportTicket | null }>({ ticket: null });
@@ -232,21 +230,6 @@ const SupportManagement: React.FC = () => {
   useEffect(() => {
     loadTickets();
   }, [loadTickets]);
-
-  // Set up polling separately (only depends on isPolling)
-  useEffect(() => {
-    if (isPolling) {
-      pollingIntervalRef.current = setInterval(() => {
-        loadTicketsRef.current(false); // Silent load (no loader)
-      }, POLLING_INTERVAL);
-    }
-
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
-    };
-  }, [isPolling]);
 
   // Real-time updates handled by SupportDBNotificationPanel (polling every 5 seconds)
 
@@ -465,10 +448,42 @@ const SupportManagement: React.FC = () => {
   const getPriorityConfig = (priority: string) => priorityOptions.find(p => p.value === priority) || priorityOptions[1];
   const getStatusConfig = (status: string) => statusConfig[status] || statusConfig.submitted;
 
+  // Sort tickets:
+  // 1. Tickets with new comments appear first (in order they received comments)
+  // 2. Active tickets (not closed/resolved/pending_deployment) come next
+  // 3. Closed/resolved/pending_deployment tickets go to bottom
+  // Note: commentReadCounter triggers re-sort when comments are marked as read
+  const sortedTickets = useMemo(() => {
+    const endedStatuses = ['closed', 'resolved', 'pending_deployment'];
+
+    return [...tickets].sort((a, b) => {
+      const aUnread = getUnreadCommentCountForAdmin(a.ticket_id, a.comments?.length || 0);
+      const bUnread = getUnreadCommentCountForAdmin(b.ticket_id, b.comments?.length || 0);
+      const aIsEnded = endedStatuses.includes(a.status);
+      const bIsEnded = endedStatuses.includes(b.status);
+
+      // Priority 1: Tickets with unread comments come first
+      if (aUnread > 0 && bUnread === 0) return -1;
+      if (bUnread > 0 && aUnread === 0) return 1;
+
+      // Priority 2: If both have unread comments, sort by most recent activity
+      if (aUnread > 0 && bUnread > 0) {
+        return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime();
+      }
+
+      // Priority 3: Active tickets before ended tickets (when no unread comments)
+      if (!aIsEnded && bIsEnded) return -1;
+      if (aIsEnded && !bIsEnded) return 1;
+
+      // Priority 4: Within same category, sort by created_at (newest first)
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  }, [tickets, commentReadCounter]);
+
   // Pagination
-  const totalPages = Math.ceil(tickets.length / ticketsPerPage);
+  const totalPages = Math.ceil(sortedTickets.length / ticketsPerPage);
   const startIndex = (currentPage - 1) * ticketsPerPage;
-  const paginatedTickets = tickets.slice(startIndex, startIndex + ticketsPerPage);
+  const paginatedTickets = sortedTickets.slice(startIndex, startIndex + ticketsPerPage);
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -630,7 +645,15 @@ const SupportManagement: React.FC = () => {
                 {/* Ticket Header */}
                 <div
                   className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                  onClick={() => setExpandedTicketId(isExpanded ? null : ticket.ticket_id)}
+                  onClick={() => {
+                    if (!isExpanded) {
+                      // Mark comments as read when expanding ticket
+                      markCommentsAsReadForAdmin(ticket.ticket_id, ticket.comments?.length || 0);
+                      // Trigger re-sort to move ticket down after reading
+                      setCommentReadCounter(c => c + 1);
+                    }
+                    setExpandedTicketId(isExpanded ? null : ticket.ticket_id);
+                  }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
@@ -649,6 +672,18 @@ const SupportManagement: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
+                      {/* New Comment Badge */}
+                      {(() => {
+                        const unreadCount = getUnreadCommentCountForAdmin(ticket.ticket_id, ticket.comments?.length || 0);
+                        return unreadCount > 0 ? (
+                          <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-purple-100 animate-pulse">
+                            <MessageCircle className="w-4 h-4 text-purple-600" />
+                            <span className="text-xs font-bold text-purple-600">
+                              {unreadCount} new
+                            </span>
+                          </div>
+                        ) : null;
+                      })()}
                       <div className={`flex items-center gap-1 px-3 py-1 rounded-full ${statusCfg.bgColor}`}>
                         <StatusIcon className={`w-4 h-4 ${statusCfg.color}`} />
                         <span className={`text-sm font-medium ${statusCfg.color}`}>

@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { XMarkIcon } from '@heroicons/react/24/outline';
+import { XMarkIcon, ChevronUpDownIcon, PlusIcon } from '@heroicons/react/24/outline';
 import { buyerVendorService, VendorProduct } from '@/roles/buyer/services/buyerVendorService';
-import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { showSuccess, showError } from '@/utils/toastHelper';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -30,8 +30,12 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const [customUnit, setCustomUnit] = useState('');
-  const [showCustomUnit, setShowCustomUnit] = useState(false);
+  const [categorySearch, setCategorySearch] = useState('');
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const categoryRef = useRef<HTMLDivElement>(null);
+  const [unitSearch, setUnitSearch] = useState('');
+  const [showUnitDropdown, setShowUnitDropdown] = useState(false);
+  const unitRef = useRef<HTMLDivElement>(null);
 
   // Comprehensive universal units list
   const units = [
@@ -60,12 +64,10 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
   ];
 
   useEffect(() => {
-    loadCategories();
-  }, []);
-
-  useEffect(() => {
     if (editProduct) {
       setFormData(editProduct);
+      setCategorySearch(editProduct.category || '');
+      setUnitSearch(editProduct.unit || '');
     } else {
       resetForm();
     }
@@ -81,6 +83,41 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
     }
   };
 
+  // Refetch categories each time modal opens (picks up newly added categories)
+  useEffect(() => {
+    if (isOpen) {
+      loadCategories();
+    }
+  }, [isOpen]);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (categoryRef.current && !categoryRef.current.contains(e.target as Node)) {
+        setShowCategoryDropdown(false);
+      }
+      if (unitRef.current && !unitRef.current.contains(e.target as Node)) {
+        setShowUnitDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredCategories = categories.filter(cat =>
+    cat.toLowerCase().includes(categorySearch.toLowerCase())
+  );
+
+  const isNewCategory = categorySearch.trim() !== '' &&
+    !categories.some(cat => cat.toLowerCase() === categorySearch.toLowerCase().trim());
+
+  const filteredUnits = units.filter(u =>
+    u !== 'Other (Custom)' && u.toLowerCase().includes(unitSearch.toLowerCase())
+  );
+
+  const isCustomUnit = unitSearch.trim() !== '' &&
+    !units.some(u => u.toLowerCase() === unitSearch.toLowerCase().trim());
+
   const resetForm = () => {
     setFormData({
       product_name: '',
@@ -90,8 +127,10 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
       unit_price: undefined
     });
     setErrors([]);
-    setCustomUnit('');
-    setShowCustomUnit(false);
+    setCategorySearch('');
+    setShowCategoryDropdown(false);
+    setUnitSearch('');
+    setShowUnitDropdown(false);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -135,14 +174,20 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
     setLoading(true);
 
     try {
+      // If category is new (not in existing list), save it first
+      const trimmedCategory = formData.category?.trim();
+      if (trimmedCategory && !categories.includes(trimmedCategory)) {
+        await buyerVendorService.createVendorCategory(trimmedCategory).catch(() => {
+          // Ignore if category already exists or fails - product still gets saved with the category name
+        });
+      }
+
       let product: VendorProduct;
 
       if (editProduct && editProduct.product_id) {
-        // Update existing product
         product = await buyerVendorService.updateVendorProduct(vendorId, editProduct.product_id, formData);
         showSuccess('Product updated successfully');
       } else {
-        // Add new product
         product = await buyerVendorService.addVendorProduct(vendorId, formData as Omit<VendorProduct, 'product_id' | 'vendor_id'>);
         showSuccess('Product added successfully');
       }
@@ -227,21 +272,79 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
                 </div>
 
                 {/* Category */}
-                <div>
+                <div ref={categoryRef} className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Category
                   </label>
-                  <select
-                    name="category"
-                    value={formData.category}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">Select Category</option>
-                    {categories.map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={categorySearch}
+                      onChange={(e) => {
+                        setCategorySearch(e.target.value);
+                        setFormData(prev => ({ ...prev, category: e.target.value }));
+                        setShowCategoryDropdown(true);
+                      }}
+                      onFocus={() => setShowCategoryDropdown(true)}
+                      placeholder="Type to search or add new category"
+                      className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
+                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                    >
+                      <ChevronUpDownIcon className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {showCategoryDropdown && (
+                    <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {/* Add new category option */}
+                      {isNewCategory && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newCat = categorySearch.trim();
+                            setFormData(prev => ({ ...prev, category: newCat }));
+                            setCategorySearch(newCat);
+                            setShowCategoryDropdown(false);
+                          }}
+                          className="w-full px-4 py-2.5 text-left text-sm flex items-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border-b border-blue-200"
+                        >
+                          <PlusIcon className="w-4 h-4" />
+                          Add "<span className="font-semibold">{categorySearch.trim()}</span>"
+                        </button>
+                      )}
+
+                      {filteredCategories.length > 0 ? (
+                        filteredCategories.map((cat) => (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => {
+                              setFormData(prev => ({ ...prev, category: cat }));
+                              setCategorySearch(cat);
+                              setShowCategoryDropdown(false);
+                            }}
+                            className={`w-full px-4 py-2.5 text-left text-sm hover:bg-gray-50 transition-colors ${
+                              formData.category === cat ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        ))
+                      ) : (
+                        !isNewCategory && (
+                          <p className="px-4 py-3 text-sm text-gray-400">No categories found</p>
+                        )
+                      )}
+                    </div>
+                  )}
+
+                  <p className="mt-1 text-xs text-gray-500">
+                    Select existing or type to add a new category
+                  </p>
                 </div>
 
                 {/* Description */}
@@ -261,62 +364,78 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
 
                 {/* Unit and Unit Price */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="unit" className="block text-sm font-medium text-gray-700 mb-2">
+                  <div ref={unitRef} className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
                       Unit
                     </label>
-                    {!showCustomUnit ? (
-                      <select
-                        id="unit"
-                        name="unit"
-                        value={formData.unit}
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={unitSearch}
                         onChange={(e) => {
-                          if (e.target.value === 'Other (Custom)') {
-                            setShowCustomUnit(true);
-                            setFormData(prev => ({ ...prev, unit: '' }));
-                          } else {
-                            handleInputChange(e);
-                          }
+                          setUnitSearch(e.target.value);
+                          setFormData(prev => ({ ...prev, unit: e.target.value }));
+                          setShowUnitDropdown(true);
                         }}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        onFocus={() => setShowUnitDropdown(true)}
+                        placeholder="Search or type custom unit"
+                        className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowUnitDropdown(!showUnitDropdown)}
+                        className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
                       >
-                        <option value="">Select Unit</option>
-                        {units.map((unit) => (
-                          <option key={unit} value={unit}>{unit}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={customUnit}
-                          onChange={(e) => {
-                            setCustomUnit(e.target.value);
-                            setFormData(prev => ({ ...prev, unit: e.target.value }));
-                          }}
-                          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="Enter custom unit (e.g., Bundle, Drum)"
-                          autoFocus
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowCustomUnit(false);
-                            setCustomUnit('');
-                            setFormData(prev => ({ ...prev, unit: '' }));
-                          }}
-                          className="px-3 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50"
-                          title="Back to list"
-                        >
-                          ←
-                        </button>
+                        <ChevronUpDownIcon className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {showUnitDropdown && (
+                      <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                        {isCustomUnit && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const custom = unitSearch.trim();
+                              setFormData(prev => ({ ...prev, unit: custom }));
+                              setUnitSearch(custom);
+                              setShowUnitDropdown(false);
+                            }}
+                            className="w-full px-4 py-2.5 text-left text-sm flex items-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border-b border-blue-200"
+                          >
+                            <PlusIcon className="w-4 h-4" />
+                            Use "<span className="font-semibold">{unitSearch.trim()}</span>"
+                          </button>
+                        )}
+
+                        {filteredUnits.length > 0 ? (
+                          filteredUnits.map((u) => (
+                            <button
+                              key={u}
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({ ...prev, unit: u }));
+                                setUnitSearch(u);
+                                setShowUnitDropdown(false);
+                              }}
+                              className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors ${
+                                formData.unit === u ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'
+                              }`}
+                            >
+                              {u}
+                            </button>
+                          ))
+                        ) : (
+                          !isCustomUnit && (
+                            <p className="px-4 py-3 text-sm text-gray-400">No units found</p>
+                          )
+                        )}
                       </div>
                     )}
-                    {!showCustomUnit && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Can't find your unit? Select "Other (Custom)" to enter manually
-                      </p>
-                    )}
+
+                    <p className="mt-1 text-xs text-gray-500">
+                      Select or type a custom unit
+                    </p>
                   </div>
 
                   <div>

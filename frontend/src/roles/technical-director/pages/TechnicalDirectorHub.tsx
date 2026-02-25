@@ -473,76 +473,137 @@ const TechnicalDirectorDashboard: React.FC = () => {
     };
   }, [dashboardData?.monthlyRevenue, dashboardData?.monthLabels]);
 
-  // ✅ NEW: Top Estimators Chart
-  const topEstimatorsChart = useMemo(() => {
-    if (!dashboardData?.topEstimators || dashboardData.topEstimators.length === 0) return null;
+  // ✅ NEW: Disposal Trend Chart (Asset + Material) - Column + Line combo
+  const disposalChart = useMemo(() => {
+    if (!dashboardData?.disposalStats) return null;
 
-    const estimatorNames = dashboardData.topEstimators.map((e: any) => e.name);
-    const estimatorCounts = dashboardData.topEstimators.map((e: any) => e.count);
+    const { asset, material, trend, month_labels, grand_total } = dashboardData.disposalStats;
+
+    // Extract trend data
+    const assetTrendData = trend?.map((t: any) => t.asset_disposals) || [];
+    const materialTrendData = trend?.map((t: any) => t.material_disposals) || [];
+
+    // Calculate combined total for line
+    const combinedTotal = assetTrendData.map((val: number, idx: number) =>
+      val + (materialTrendData[idx] || 0)
+    );
 
     return {
       chart: {
-        type: 'column',
         backgroundColor: 'transparent',
+        height: 300,
         style: {
           fontFamily: 'inherit'
         }
       },
       title: {
-        text: 'Top 5 Estimators by BOQ Count',
+        text: 'Disposal Requests Trend',
+        align: 'left',
         style: {
           fontSize: '16px',
           fontWeight: '600'
         }
       },
+      subtitle: {
+        text: `Total: ${grand_total || 0} (Assets: ${asset?.total || 0}, Materials: ${material?.total || 0})`,
+        align: 'left',
+        style: {
+          fontSize: '12px',
+          color: '#6b7280'
+        }
+      },
       xAxis: {
-        categories: estimatorNames,
+        categories: month_labels || [],
         labels: {
           style: {
-            fontSize: '11px'
+            fontSize: '11px',
+            color: '#6b7280'
           }
         }
       },
       yAxis: {
-        title: {
-          text: 'Number of BOQs',
+        title: { text: '' },
+        labels: {
           style: {
-            fontSize: '12px'
+            fontSize: '11px',
+            color: '#9ca3af'
           }
-        }
-      },
-      series: [{
-        name: 'BOQs Created',
-        data: estimatorCounts,
-        color: {
-          linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
-          stops: [
-            [0, '#8b5cf6'],
-            [1, '#c4b5fd']
-          ]
         },
-        borderRadius: 8
-      }],
-      plotOptions: {
-        column: {
-          borderWidth: 0,
-          dataLabels: {
-            enabled: true,
-            style: {
-              fontSize: '11px',
-              fontWeight: 'bold'
-            }
-          }
-        }
+        gridLineColor: '#f3f4f6',
+        allowDecimals: false
       },
       legend: {
-        enabled: false
+        enabled: true,
+        align: 'center',
+        verticalAlign: 'bottom',
+        layout: 'horizontal',
+        itemStyle: {
+          fontSize: '11px'
+        }
+      },
+      plotOptions: {
+        column: {
+          borderRadius: 4,
+          dataLabels: {
+            enabled: false
+          }
+        },
+        areaspline: {
+          fillOpacity: 0.3,
+          marker: {
+            enabled: true,
+            radius: 5,
+            symbol: 'circle'
+          },
+          lineWidth: 2
+        }
+      },
+      series: [
+        {
+          type: 'column',
+          name: 'Asset Disposals',
+          color: '#6366f1',
+          data: assetTrendData
+        },
+        {
+          type: 'areaspline',
+          name: 'Material Disposals',
+          color: '#ec4899',
+          fillColor: {
+            linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+            stops: [
+              [0, 'rgba(236, 72, 153, 0.4)'],
+              [1, 'rgba(236, 72, 153, 0.05)']
+            ]
+          },
+          data: materialTrendData
+        },
+        {
+          type: 'spline',
+          name: 'Total',
+          color: '#10b981',
+          marker: {
+            enabled: true,
+            radius: 5,
+            symbol: 'circle',
+            fillColor: '#10b981',
+            lineWidth: 2,
+            lineColor: '#ffffff'
+          },
+          lineWidth: 3,
+          data: combinedTotal
+        }
+      ],
+      tooltip: {
+        shared: true,
+        headerFormat: '<b>{point.x}</b><br/>',
+        pointFormat: '{series.name}: <b>{point.y}</b><br/>'
       },
       credits: {
         enabled: false
       }
     };
-  }, [dashboardData?.topEstimators]);
+  }, [dashboardData?.disposalStats]);
 
   // ✅ PERFORMANCE: Show loading state
   if (loading) {
@@ -657,14 +718,14 @@ const TechnicalDirectorDashboard: React.FC = () => {
             </motion.div>
           )}
 
-          {topEstimatorsChart && (
+          {disposalChart && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.7 }}
-              className="bg-white rounded-2xl shadow-lg border border-purple-100 p-6"
+              className="bg-white rounded-2xl shadow-lg border border-orange-100 p-6"
             >
-              <HighchartsReact highcharts={Highcharts} options={topEstimatorsChart} />
+              <HighchartsReact highcharts={Highcharts} options={disposalChart} />
             </motion.div>
           )}
         </div>

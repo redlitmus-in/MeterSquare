@@ -447,10 +447,10 @@ const saveTicketStates = (states: Map<number, string>): void => {
   }
 };
 
-// Get comment counts for tickets
+// Get comment counts for tickets (uses localStorage to persist across reloads)
 const getCommentCounts = (): Map<number, number> => {
   try {
-    const stored = sessionStorage.getItem(COMMENT_COUNT_KEY);
+    const stored = localStorage.getItem(COMMENT_COUNT_KEY);
     if (stored) {
       return new Map(JSON.parse(stored));
     }
@@ -460,10 +460,10 @@ const getCommentCounts = (): Map<number, number> => {
   return new Map();
 };
 
-// Save comment counts
+// Save comment counts (uses localStorage to persist across reloads)
 const saveCommentCounts = (counts: Map<number, number>): void => {
   try {
-    sessionStorage.setItem(COMMENT_COUNT_KEY, JSON.stringify(Array.from(counts.entries())));
+    localStorage.setItem(COMMENT_COUNT_KEY, JSON.stringify(Array.from(counts.entries())));
   } catch (e) {
     console.error('Error saving comment counts:', e);
   }
@@ -568,7 +568,7 @@ export const hasNewComments = (ticketId: number, currentCommentCount: number): b
 export const clearTicketStateStore = (): void => {
   sessionStorage.removeItem(STORAGE_KEY);
   sessionStorage.removeItem(NOTIFIED_KEY);
-  sessionStorage.removeItem(COMMENT_COUNT_KEY);
+  localStorage.removeItem(COMMENT_COUNT_KEY); // Comment counts now in localStorage
 };
 
 // Initialize stored tickets (call on page load)
@@ -621,10 +621,10 @@ const saveKnownTicketIds = (ids: Set<number>): void => {
   }
 };
 
-// Get admin comment counts
+// Get admin comment counts (uses localStorage to persist across reloads)
 const getAdminCommentCounts = (): Map<number, number> => {
   try {
-    const stored = sessionStorage.getItem(ADMIN_COMMENT_COUNTS_KEY);
+    const stored = localStorage.getItem(ADMIN_COMMENT_COUNTS_KEY);
     if (stored) {
       return new Map(JSON.parse(stored));
     }
@@ -634,10 +634,10 @@ const getAdminCommentCounts = (): Map<number, number> => {
   return new Map();
 };
 
-// Save admin comment counts
+// Save admin comment counts (uses localStorage to persist across reloads)
 const saveAdminCommentCounts = (counts: Map<number, number>): void => {
   try {
-    sessionStorage.setItem(ADMIN_COMMENT_COUNTS_KEY, JSON.stringify(Array.from(counts.entries())));
+    localStorage.setItem(ADMIN_COMMENT_COUNTS_KEY, JSON.stringify(Array.from(counts.entries())));
   } catch (e) {
     console.error('Error saving admin comment counts:', e);
   }
@@ -737,5 +737,59 @@ export const hasNewCommentsForAdmin = (ticketId: number, currentCommentCount: nu
 export const clearAdminNotificationState = (): void => {
   sessionStorage.removeItem(ADMIN_KNOWN_TICKETS_KEY);
   sessionStorage.removeItem(ADMIN_NOTIFIED_KEY);
-  sessionStorage.removeItem(ADMIN_COMMENT_COUNTS_KEY);
+  localStorage.removeItem(ADMIN_COMMENT_COUNTS_KEY); // Comment counts now in localStorage
+};
+
+// ============================================
+// UNREAD COMMENT BADGE HELPERS
+// ============================================
+
+/**
+ * Check if ticket has unread comments (without updating count)
+ * Used for displaying badge on ticket cards
+ */
+export const getUnreadCommentCount = (ticketId: number, currentCommentCount: number): number => {
+  const counts = getCommentCounts();
+  const previousCount = counts.get(ticketId);
+
+  if (previousCount === undefined) {
+    return 0; // First time seeing ticket, no unread
+  }
+
+  return Math.max(0, currentCommentCount - previousCount);
+};
+
+/**
+ * Check if ticket has unread comments for admin (without updating count)
+ * Used for displaying badge on ticket cards in admin view
+ */
+export const getUnreadCommentCountForAdmin = (ticketId: number, currentCommentCount: number): number => {
+  const counts = getAdminCommentCounts();
+  const previousCount = counts.get(ticketId);
+
+  if (previousCount === undefined) {
+    return 0; // First time seeing ticket, no unread
+  }
+
+  return Math.max(0, currentCommentCount - previousCount);
+};
+
+/**
+ * Mark ticket comments as read (client side)
+ * Call when user expands/views ticket comments
+ */
+export const markCommentsAsRead = (ticketId: number, currentCommentCount: number): void => {
+  const counts = getCommentCounts();
+  counts.set(ticketId, currentCommentCount);
+  saveCommentCounts(counts);
+};
+
+/**
+ * Mark ticket comments as read for admin
+ * Call when admin expands/views ticket comments
+ */
+export const markCommentsAsReadForAdmin = (ticketId: number, currentCommentCount: number): void => {
+  const counts = getAdminCommentCounts();
+  counts.set(ticketId, currentCommentCount);
+  saveAdminCommentCounts(counts);
 };

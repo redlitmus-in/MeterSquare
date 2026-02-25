@@ -153,6 +153,9 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [showNewCategoryInput, setShowNewCategoryInput] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
 
   // Get tax number label and placeholder based on country
   const getTaxNumberInfo = (country: string) => {
@@ -212,6 +215,68 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
       console.error('Error loading categories:', error);
       setCategories(buyerVendorService.getDefaultCategories());
     }
+  };
+
+  const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === '__add_new__') {
+      setShowNewCategoryInput(true);
+      setFormData(prev => ({ ...prev, category: '' }));
+    } else {
+      setShowNewCategoryInput(false);
+      setNewCategoryName('');
+      setFormData(prev => ({ ...prev, category: value }));
+    }
+  };
+
+  const handleCreateNewCategory = async () => {
+    const trimmedName = newCategoryName.trim();
+    if (!trimmedName) {
+      showWarning('Please enter a category name');
+      return;
+    }
+
+    // Check if category already exists (case-insensitive)
+    const exists = categories.some(
+      cat => cat.toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (exists) {
+      showWarning('This category already exists');
+      const existingCat = categories.find(
+        cat => cat.toLowerCase() === trimmedName.toLowerCase()
+      );
+      if (existingCat) {
+        setFormData(prev => ({ ...prev, category: existingCat }));
+        setShowNewCategoryInput(false);
+        setNewCategoryName('');
+      }
+      return;
+    }
+
+    setIsCreatingCategory(true);
+    try {
+      const result = await buyerVendorService.createVendorCategory(trimmedName);
+      if (result.success) {
+        showSuccess(`Category "${trimmedName}" created successfully`);
+        // Add the new category to the list and select it
+        setCategories(prev => [...prev, trimmedName].sort());
+        setFormData(prev => ({ ...prev, category: trimmedName }));
+        setShowNewCategoryInput(false);
+        setNewCategoryName('');
+      } else {
+        showError(result.error || 'Failed to create category');
+      }
+    } catch (error) {
+      console.error('Error creating category:', error);
+      showError('Failed to create category');
+    } finally {
+      setIsCreatingCategory(false);
+    }
+  };
+
+  const handleCancelNewCategory = () => {
+    setShowNewCategoryInput(false);
+    setNewCategoryName('');
   };
 
   const resetForm = () => {
@@ -368,18 +433,59 @@ const AddVendorModal: React.FC<AddVendorModalProps> = ({
                     <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">
                       Category
                     </label>
-                    <select
-                      id="category"
-                      name="category"
-                      value={formData.category}
-                      onChange={handleInputChange}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    >
-                      <option value="">Select Category</option>
-                      {categories.map((cat) => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
+                    {!showNewCategoryInput ? (
+                      <select
+                        id="category"
+                        name="category"
+                        value={formData.category}
+                        onChange={handleCategoryChange}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      >
+                        <option value="">Select Category</option>
+                        {categories.map((cat) => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                        <option value="__add_new__" className="text-purple-600 font-medium">+ Add New Category</option>
+                      </select>
+                    ) : (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={newCategoryName}
+                          onChange={(e) => setNewCategoryName(e.target.value)}
+                          placeholder="Enter new category name"
+                          maxLength={100}
+                          className="w-full px-3 py-2 text-sm border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleCreateNewCategory();
+                            } else if (e.key === 'Escape') {
+                              handleCancelNewCategory();
+                            }
+                          }}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCreateNewCategory}
+                            disabled={isCreatingCategory || !newCategoryName.trim()}
+                            className="flex-1 px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {isCreatingCategory ? 'Creating...' : 'Add Category'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelNewCategory}
+                            disabled={isCreatingCategory}
+                            className="flex-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div>

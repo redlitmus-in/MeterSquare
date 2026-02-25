@@ -2,6 +2,7 @@
 Universal Email Styles for MeterSquare ERP
 Using only Dark Black (#000000) and Light Blue (#3b82f6) color scheme
 """
+import os
 
 def get_email_styles():
     """Returns the universal email styles for all emails"""
@@ -338,8 +339,44 @@ def get_email_styles():
         </style>
     """
 
-def wrap_email_content(content):
-    """Wraps email content with the universal styles"""
+def get_open_erp_button():
+    """Returns the 'Open MeterSquare ERP' CTA button HTML based on current ENVIRONMENT."""
+    environment = os.getenv("ENVIRONMENT", "development").lower()
+    if environment == "production":
+        app_url = os.getenv("PROD_FRONTEND_URL", "https://msq.kol.tel")
+    else:
+        app_url = os.getenv("DEV_FRONTEND_URL", "http://localhost:3000")
+
+    return f"""
+    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+            <td align="left" style="padding: 16px 30px;">
+                <a href="{app_url}"
+                   style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+                          color: #ffffff;
+                          padding: 11px 26px;
+                          text-decoration: none;
+                          border-radius: 6px;
+                          font-family: Arial, sans-serif;
+                          font-weight: 700;
+                          font-size: 13px;
+                          display: inline-block;
+                          box-shadow: 0 3px 8px rgba(37, 99, 235, 0.25);
+                          letter-spacing: 0.4px;
+                          mso-padding-alt: 0;">
+                    Open MeterSquare ERP &nbsp;&rarr;
+                </a>
+            </td>
+        </tr>
+    </table>
+    """
+
+
+def wrap_email_content(content, show_erp_button=True):
+    """Wraps email content with the universal styles and optional CTA button at the bottom.
+    Set show_erp_button=False for client-facing emails where ERP access is not relevant.
+    """
+    button_html = get_open_erp_button() if show_erp_button else ""
     return f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -352,6 +389,7 @@ def wrap_email_content(content):
     <body>
         <div class="email-wrapper">
             {content}
+            {button_html}
         </div>
     </body>
     </html>

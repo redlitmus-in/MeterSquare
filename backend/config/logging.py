@@ -39,4 +39,23 @@ def get_logger():
 
     return logger
 
+
+def configure_quiet_logging():
+    """
+    Suppress verbose logging from third-party libraries.
+    Call this early in app startup to reduce log noise.
+    """
+    # Suppress werkzeug HTTP request logs (only show errors)
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+    # Suppress Socket.IO and EngineIO verbose logs
+    logging.getLogger('socketio').setLevel(logging.WARNING)
+    logging.getLogger('socketio.server').setLevel(logging.WARNING)
+    logging.getLogger('engineio').setLevel(logging.WARNING)
+    logging.getLogger('engineio.server').setLevel(logging.WARNING)
+
+    # Suppress SQLAlchemy engine logs (only show warnings+)
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+
+
 logger = get_logger()

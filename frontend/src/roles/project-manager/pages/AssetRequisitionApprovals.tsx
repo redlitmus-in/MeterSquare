@@ -15,6 +15,7 @@ import {
 } from '@heroicons/react/24/outline';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { showError, showSuccess } from '@/utils/toastHelper';
+import { PAGINATION } from '@/lib/constants';
 import {
   AssetRequisition,
   RequisitionStatus,
@@ -55,6 +56,9 @@ const AssetRequisitionApprovals: React.FC = () => {
   const [selectedRequisition, setSelectedRequisition] = useState<AssetRequisition | null>(null);
   const [actionNotes, setActionNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Fetch pending requisitions
   const fetchPending = useCallback(async () => {
@@ -161,6 +165,19 @@ const AssetRequisitionApprovals: React.FC = () => {
       rejected: rejectedRequisitions.length,
     };
   }, [pendingRequisitions, approvedRequisitions, rejectedRequisitions]);
+
+  // Pagination calculations
+  const totalRecords = currentRequisitions.length;
+  const totalPages = Math.ceil(totalRecords / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequisitions = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return currentRequisitions.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [currentRequisitions, currentPage]);
+
+  // Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
 
   // Refresh current tab
   const refreshCurrentTab = useCallback(() => {
@@ -308,7 +325,7 @@ const AssetRequisitionApprovals: React.FC = () => {
         </div>
       ) : !isLoading && (
         <div className="space-y-4">
-          {currentRequisitions.map((req) => (
+          {paginatedRequisitions.map((req) => (
             <div
               key={req.requisition_id}
               className={`bg-white rounded-xl shadow-sm border overflow-hidden ${
@@ -463,6 +480,67 @@ const AssetRequisitionApprovals: React.FC = () => {
               )}
             </div>
           ))}
+
+          {/* Pagination */}
+          {totalRecords > 0 && (
+            <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm mt-4">
+              <div className="text-sm text-gray-700">
+                Showing {(currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to{' '}
+                {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)} of{' '}
+                {totalRecords} requisitions
+                {totalPages > 1 && (
+                  <span className="text-gray-500 ml-2">(Page {currentPage} of {totalPages})</span>
+                )}
+              </div>
+              {totalPages > 1 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                      const showPage =
+                        page === 1 ||
+                        page === totalPages ||
+                        (page >= currentPage - 1 && page <= currentPage + 1);
+
+                      if (!showPage) {
+                        if (page === currentPage - 2 || page === currentPage + 2) {
+                          return <span key={page} className="px-2 text-gray-500">...</span>;
+                        }
+                        return null;
+                      }
+
+                      return (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                            currentPage === page
+                              ? 'bg-yellow-500 text-white font-medium'
+                              : 'border border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

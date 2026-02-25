@@ -853,7 +853,15 @@ def dispatch_asset():
                 # Get item codes for individual tracking
                 item_codes = None
                 if category.tracking_mode == 'individual':
-                    item_codes = [ReturnableAssetItem.query.get(iid).item_code for iid in data.get('item_ids', [])]
+                    _iids = data.get('item_ids', [])
+                    if _iids:
+                        _items = ReturnableAssetItem.query.filter(
+                            ReturnableAssetItem.id.in_(_iids)
+                        ).with_entities(ReturnableAssetItem.id, ReturnableAssetItem.item_code).all()
+                        _iid_to_code = {r.id: r.item_code for r in _items}
+                        item_codes = [_iid_to_code.get(iid) for iid in _iids if _iid_to_code.get(iid)]
+                    else:
+                        item_codes = []
 
                 dispatched_qty = len(item_codes) if item_codes else quantity if 'quantity' in dir() else 1
 
@@ -1877,8 +1885,16 @@ def create_return_request():
             if not item_ids or not isinstance(item_ids, list):
                 return jsonify({'error': 'item_ids required for individual tracking'}), 400
 
+            # ── Batch pre-fetch all asset items in one query ──────────────────────
+            _batch_asset_items = {
+                ai.asset_item_id: ai for ai in ReturnableAssetItem.query.filter(
+                    ReturnableAssetItem.asset_item_id.in_(item_ids)
+                ).all()
+            }
+            # ─────────────────────────────────────────────────────────────────────
+
             for item_id in item_ids:
-                item = ReturnableAssetItem.query.get(item_id)
+                item = _batch_asset_items.get(item_id)  # dict lookup — no DB call
                 if not item:
                     return jsonify({'error': f'Item with ID {item_id} not found'}), 404
                 if item.current_status != 'dispatched':

@@ -618,7 +618,8 @@ const LabourRegistry: React.FC = () => {
                     required
                     min="0"
                     step="0.01"
-                    value={formData.hourly_rate}
+                    value={formData.hourly_rate || ''}
+                    placeholder="0.00"
                     onChange={(e) => setFormData({ ...formData, hourly_rate: parseFloat(e.target.value) || 0 })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
                   />

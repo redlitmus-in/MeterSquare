@@ -11,12 +11,12 @@ import { realtimeNotificationHub } from './realtimeNotificationHub';
 
 class NotificationPollingService {
   private static instance: NotificationPollingService;
-  private pollingInterval: NodeJS.Timeout | null = null;
   private isPolling = false;
-  private pollIntervalMs = 10000; // Poll every 10 seconds when Socket.IO is disconnected
+  private pollIntervalMs = 30000; // Poll every 30 seconds when Socket.IO is disconnected
   private lastFetchTime: number = 0;
   private backoffMultiplier = 1; // Exponential backoff if no new notifications
-  private maxBackoffMultiplier = 6; // Max 1 minute (10s * 6 = 60s)
+  private maxBackoffMultiplier = 4; // Max 2 minutes (30s * 4 = 120s)
+  private pollTimeout: NodeJS.Timeout | null = null; // Used for backoff-aware scheduling
   private processedNotificationIds: Set<string> = new Set(); // Track processed IDs
   private maxProcessedIds = 500; // Limit to prevent memory leaks
 
@@ -42,17 +42,33 @@ class NotificationPollingService {
     }
 
     if (import.meta.env.DEV) {
-      console.log('[Polling] Starting notification polling (every 10s when Socket.IO disconnected)');
+      console.log('[Polling] Starting notification polling (every 30s when Socket.IO disconnected)');
     }
     this.isPolling = true;
 
     // Fetch immediately
     this.fetchNotifications();
 
-    // Then poll at intervals
-    this.pollingInterval = setInterval(() => {
-      this.fetchNotifications();
-    }, this.pollIntervalMs);
+    // Schedule next poll with backoff-aware timeout
+    this.scheduleNextPoll();
+  }
+
+  /**
+   * Schedule the next poll using setTimeout so backoff multiplier actually takes effect.
+   * Unlike setInterval, this adjusts the delay dynamically based on backoffMultiplier.
+   */
+  private scheduleNextPoll() {
+    if (!this.isPolling) return;
+
+    const delay = this.pollIntervalMs * this.backoffMultiplier;
+    if (import.meta.env.DEV) {
+      console.log(`[Polling] Next poll in ${delay / 1000}s (backoff: ${this.backoffMultiplier}x)`);
+    }
+
+    this.pollTimeout = setTimeout(async () => {
+      await this.fetchNotifications();
+      this.scheduleNextPoll();
+    }, delay);
   }
 
   /**
@@ -68,9 +84,9 @@ class NotificationPollingService {
     }
     this.isPolling = false;
 
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
+    if (this.pollTimeout) {
+      clearTimeout(this.pollTimeout);
+      this.pollTimeout = null;
     }
 
     // Reset backoff multiplier
@@ -79,34 +95,34 @@ class NotificationPollingService {
 
   /**
    * Fetch latest notifications from API
-   * Only fetches when Socket.IO is disconnected to minimize server load
+   * Always fetches as safety net - Socket.IO can silently fail after server restarts
    */
   private async fetchNotifications() {
     try {
-      // OPTIMIZATION: Only poll if Socket.IO is disconnected
       const hubStatus = realtimeNotificationHub.getStatus();
       if (hubStatus.socketConnected) {
-        if (import.meta.env.DEV) {
-          console.log('[Polling] Skipping poll - Socket.IO is connected');
+        // Socket.IO connected - use max backoff to reduce server load but still poll
+        if (this.backoffMultiplier < this.maxBackoffMultiplier) {
+          this.backoffMultiplier = this.maxBackoffMultiplier;
         }
-        // Reset backoff when Socket.IO is connected
-        this.backoffMultiplier = 1;
-        return;
       }
 
       const token = localStorage.getItem('access_token');
       const baseUrl = import.meta.env.VITE_API_BASE_URL;
 
       if (!token || !baseUrl) {
+        if (import.meta.env.DEV) {
+          console.warn('[Polling] Missing credentials:', { hasToken: !!token, hasBaseUrl: !!baseUrl });
+        }
         return;
       }
 
       const currentTime = Date.now();
 
-      // Fetch only notifications created after last fetch
+      // Fetch ALL notifications (not just unread) to ensure persistence across reloads
       const params = new URLSearchParams({
-        unread_only: 'true',
-        limit: '20'
+        unread_only: 'false',  // Changed from 'true' to fetch all notifications
+        limit: '100'  // Increased from 20 to get more notifications
       });
 
       const response = await fetch(`${baseUrl}/notifications?${params}`, {
@@ -119,29 +135,102 @@ class NotificationPollingService {
 
       if (!response.ok) {
         if (import.meta.env.DEV) {
-          console.error('[Polling] Failed to fetch notifications:', response.status);
+          console.error('[Polling] Failed to fetch notifications:', response.status, response.statusText);
+        }
+        // If unauthorized, clear token and notify user
+        if (response.status === 401) {
+          localStorage.removeItem('access_token');
+          console.error('[Polling] Unauthorized - token may be expired');
         }
         return;
       }
 
       const data = await response.json();
 
+      if (import.meta.env.DEV) {
+        console.log('[Polling] Fetched notifications:', {
+          success: data.success,
+          count: data.notifications?.length,
+          total: data.total,
+          unreadCount: data.unread_count
+        });
+      }
+
       if (data.success && data.notifications && Array.isArray(data.notifications)) {
-        // SYNC: Remove local notifications that no longer exist in DB
         const store = useNotificationStore.getState();
+
+        // On first fetch or when notifications are empty, load all notifications from server
+        if (this.lastFetchTime === 0 || store.notifications.length === 0) {
+          if (import.meta.env.DEV) {
+            console.log('[Polling] Initial load - adding all notifications from server');
+          }
+
+          // Add all notifications from server (will handle duplicates internally)
+          const allNotifications = data.notifications.map((notif: any) => ({
+            id: String(notif.id),
+            type: notif.type || 'info',
+            title: notif.title,
+            message: notif.message,
+            priority: notif.priority || 'medium',
+            timestamp: new Date(notif.timestamp || notif.createdAt),
+            read: notif.read || false,
+            category: notif.category || 'system',
+            metadata: notif.metadata,
+            actionUrl: notif.actionUrl,
+            actionLabel: notif.actionLabel,
+            actionRequired: notif.actionRequired,
+            senderName: notif.senderName
+          }));
+
+          if (import.meta.env.DEV) {
+            console.log('[Polling] Adding notifications to store:', allNotifications.length, 'notifications');
+          }
+
+          store.addNotifications(allNotifications);
+          this.lastFetchTime = currentTime;
+
+          if (import.meta.env.DEV) {
+            console.log('[Polling] Store updated. Current store state:', {
+              totalNotifications: store.notifications.length,
+              unreadCount: store.unreadCount
+            });
+          }
+
+          return;
+        }
+
+        // SYNC: Remove local notifications that no longer exist in DB
         const serverIds = new Set(data.notifications.map((n: any) => String(n.id)));
         const localNotifications = store.notifications;
         const orphanedNotifications = localNotifications.filter(n => !serverIds.has(String(n.id)));
 
         if (orphanedNotifications.length > 0) {
+          if (import.meta.env.DEV) {
+            console.log('[Polling] Removing orphaned notifications:', orphanedNotifications.length);
+          }
           orphanedNotifications.forEach(n => {
             store.deleteNotification(String(n.id));
           });
         }
 
+        // Update existing notifications' read status from server
+        const localNotifMap = new Map(store.notifications.map(n => [String(n.id), n]));
+        data.notifications.forEach((serverNotif: any) => {
+          const notifIdStr = String(serverNotif.id);
+          const localNotif = localNotifMap.get(notifIdStr);
+
+          // If local notification exists and read status changed, update it
+          if (localNotif && localNotif.read !== serverNotif.read) {
+            if (serverNotif.read) {
+              store.markAsRead(notifIdStr);
+            }
+          }
+        });
+
         const newNotifications = data.notifications.filter((notif: any) => {
-          // Skip if already processed
-          if (this.processedNotificationIds.has(notif.id)) {
+          // Skip if already processed (normalize to string for consistent comparison)
+          const notifIdStr = String(notif.id);
+          if (this.processedNotificationIds.has(notifIdStr)) {
             return false;
           }
 
@@ -155,8 +244,11 @@ class NotificationPollingService {
           // Add each new notification to the store AND show popup
           const store = useNotificationStore.getState();
           for (const notif of newNotifications) {
+            // Normalize ID to string for consistent comparison
+            const notifIdStr = String(notif.id);
+
             // Mark as processed BEFORE adding to store
-            this.processedNotificationIds.add(notif.id);
+            this.processedNotificationIds.add(notifIdStr);
 
             // Limit processed IDs set size to prevent memory leaks
             if (this.processedNotificationIds.size > this.maxProcessedIds) {
@@ -166,7 +258,7 @@ class NotificationPollingService {
             }
 
             const notificationData = {
-              id: notif.id,
+              id: notifIdStr,
               type: notif.type || 'info',
               title: notif.title,
               message: notif.message,

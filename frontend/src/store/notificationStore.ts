@@ -1,15 +1,30 @@
 import { create } from 'zustand';
 import { NotificationData, notificationService } from '@/services/notificationService';
 import { filterOldNotifications, sanitizeNotificationData } from '@/utils/notificationSecurity';
+import { getApiClient } from '@/utils/apiClientLoader';
+
+// ─── Backend sync helper ────────────────────────────────────────
+async function syncToBackend(method: 'post' | 'delete', path: string, data?: any) {
+  try {
+    const client = await getApiClient();
+    if (method === 'delete') {
+      await client.delete(path);
+    } else {
+      await client.post(path, data);
+    }
+  } catch (err) {
+    // Log but don't throw – notification UI should not break on sync failures
+    if (import.meta.env.DEV) {
+      console.warn('[NotificationStore] Backend sync failed:', path, err);
+    }
+  }
+}
 
 // One-time cleanup: Remove old localStorage and IndexedDB caches from previous versions
 function cleanupOldCaches() {
   try {
-    // Clear old localStorage
     localStorage.removeItem('notification-store');
     localStorage.removeItem('notification-cache-version');
-
-    // Clear old IndexedDB
     if ('indexedDB' in window) {
       indexedDB.deleteDatabase('MeterSquareNotifications');
     }
@@ -17,8 +32,6 @@ function cleanupOldCaches() {
     // Silent fail
   }
 }
-
-// Run cleanup once on load
 cleanupOldCaches();
 
 interface NotificationStore {
@@ -27,24 +40,19 @@ interface NotificationStore {
   isPermissionRequested: boolean;
   isPermissionGranted: boolean;
 
-  // Actions
   addNotification: (notification: NotificationData) => void;
+  addNotifications: (batch: NotificationData[]) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   deleteNotification: (id: string) => void;
   clearAll: () => void;
-
-  // Permission handling
   requestPermission: () => Promise<void>;
-
-  // Getters
   getUnreadNotifications: () => NotificationData[];
   getNotificationsByCategory: (category: string) => NotificationData[];
   getNotificationsByPriority: (priority: string) => NotificationData[];
 }
 
-// Simple in-memory store - no localStorage/IndexedDB persistence
-// Notifications are fetched fresh from server on each page load via Socket.IO
+// Notifications are fetched fresh from server on each page load via Socket.IO + polling fallback
 export const useNotificationStore = create<NotificationStore>()((set, get) => ({
   notifications: [],
   unreadCount: 0,
@@ -53,158 +61,89 @@ export const useNotificationStore = create<NotificationStore>()((set, get) => ({
 
   addNotification: (notification: NotificationData) => {
     set((state) => {
-      const sanitizedNotification = sanitizeNotificationData(notification);
+      const sanitized = sanitizeNotificationData(notification);
+      // Normalize ID to string to prevent number/string mismatch with === comparisons
+      const sanitizedId = String(sanitized.id);
+      if (state.notifications.find(n => String(n.id) === sanitizedId)) return state;
 
-      // Check if notification already exists (prevent duplicates)
-      const exists = state.notifications.find(n => n.id === sanitizedNotification.id);
-      if (exists) {
-        return state;
-      }
-
-      // Add new notification and apply storage limits
-      let newNotifications = [sanitizedNotification, ...state.notifications];
+      const normalized = { ...sanitized, id: sanitizedId };
+      let newNotifications = [normalized, ...state.notifications];
       newNotifications = filterOldNotifications(newNotifications);
-
       const newUnreadCount = newNotifications.filter(n => !n.read).length;
       notificationService.updateTabTitle(newUnreadCount);
 
-      return {
-        notifications: newNotifications,
-        unreadCount: newUnreadCount
-      };
+      return { notifications: newNotifications, unreadCount: newUnreadCount };
+    });
+  },
+
+  addNotifications: (batch: NotificationData[]) => {
+    if (!batch.length) return;
+    set((state) => {
+      const existingIds = new Set(state.notifications.map(n => String(n.id)));
+      const newItems = batch
+        .map(sanitizeNotificationData)
+        .map(n => ({ ...n, id: String(n.id) }))
+        .filter(n => !existingIds.has(n.id));
+      if (!newItems.length) return state;
+
+      let merged = [...newItems, ...state.notifications];
+      merged = filterOldNotifications(merged);
+      const newUnreadCount = merged.filter(n => !n.read).length;
+      notificationService.updateTabTitle(newUnreadCount);
+      return { notifications: merged, unreadCount: newUnreadCount };
     });
   },
 
   markAsRead: (id: string) => {
+    const strId = String(id);
     set((state) => {
       const newNotifications = state.notifications.map(n =>
-        n.id === id ? { ...n, read: true } : n
+        String(n.id) === strId ? { ...n, read: true } : n
       );
       const newUnreadCount = newNotifications.filter(n => !n.read).length;
-
-      // Update browser tab title
       notificationService.updateTabTitle(newUnreadCount);
-
-      return {
-        notifications: newNotifications,
-        unreadCount: newUnreadCount
-      };
+      return { notifications: newNotifications, unreadCount: newUnreadCount };
     });
-
-    // Mark as read on backend
-    const token = localStorage.getItem('access_token');
-    const baseUrl = import.meta.env.VITE_API_BASE_URL;
-    if (token && baseUrl) {
-      fetch(`${baseUrl}/notifications/read`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ notification_ids: [id] })
-      }).catch(() => { /* Silent fail */ });
-    }
+    syncToBackend('post', '/notifications/read', { notification_ids: [strId] });
   },
 
   markAllAsRead: () => {
     set((state) => {
       const newNotifications = state.notifications.map(n => ({ ...n, read: true }));
-
-      // Update browser tab title
       notificationService.updateTabTitle(0);
-
-      return {
-        notifications: newNotifications,
-        unreadCount: 0
-      };
+      return { notifications: newNotifications, unreadCount: 0 };
     });
-
-    // Mark all as read on backend
-    const token = localStorage.getItem('access_token');
-    const baseUrl = import.meta.env.VITE_API_BASE_URL;
-    if (token && baseUrl) {
-      fetch(`${baseUrl}/notifications/read-all`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      }).catch(() => { /* Silent fail */ });
-    }
+    syncToBackend('post', '/notifications/read-all');
   },
 
   deleteNotification: (id: string) => {
+    const strId = String(id);
     set((state) => {
-      const newNotifications = state.notifications.filter(n => n.id !== id);
+      const newNotifications = state.notifications.filter(n => String(n.id) !== strId);
       const newUnreadCount = newNotifications.filter(n => !n.read).length;
-
-      // Update browser tab title
       notificationService.updateTabTitle(newUnreadCount);
-
-      return {
-        notifications: newNotifications,
-        unreadCount: newUnreadCount
-      };
+      return { notifications: newNotifications, unreadCount: newUnreadCount };
     });
-
-    // Delete on backend
-    const token = localStorage.getItem('access_token');
-    const baseUrl = import.meta.env.VITE_API_BASE_URL;
-    if (token && baseUrl) {
-      fetch(`${baseUrl}/notifications/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      }).catch(() => { /* Silent fail */ });
-    }
+    syncToBackend('delete', `/notifications/${strId}`);
   },
 
   clearAll: () => {
-    const currentNotifications = get().notifications;
-
-    set({
-      notifications: [],
-      unreadCount: 0
-    });
-
-    // Update browser tab title
+    const hadNotifications = get().notifications.length > 0;
+    set({ notifications: [], unreadCount: 0 });
     notificationService.updateTabTitle(0);
-
-    // Delete all notifications on backend
-    const token = localStorage.getItem('access_token');
-    const baseUrl = import.meta.env.VITE_API_BASE_URL;
-    if (token && baseUrl && currentNotifications.length > 0) {
-      fetch(`${baseUrl}/notifications/delete-all`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      }).catch(() => { /* Silent fail */ });
+    if (hadNotifications) {
+      syncToBackend('post', '/notifications/delete-all');
     }
   },
 
   requestPermission: async () => {
     const permission = await notificationService.requestPermission();
-    set({
-      isPermissionRequested: true,
-      isPermissionGranted: permission === 'granted'
-    });
+    set({ isPermissionRequested: true, isPermissionGranted: permission === 'granted' });
   },
 
-  getUnreadNotifications: () => {
-    return get().notifications.filter(n => !n.read);
-  },
-
-  getNotificationsByCategory: (category: string) => {
-    return get().notifications.filter(n => n.category === category);
-  },
-
-  getNotificationsByPriority: (priority: string) => {
-    return get().notifications.filter(n => n.priority === priority);
-  }
+  getUnreadNotifications: () => get().notifications.filter(n => !n.read),
+  getNotificationsByCategory: (category: string) => get().notifications.filter(n => n.category === category),
+  getNotificationsByPriority: (priority: string) => get().notifications.filter(n => n.priority === priority),
 }));
 
 // Track subscription for cleanup
@@ -213,13 +152,8 @@ let notificationUnsubscriber: (() => void) | null = null;
 
 export const initializeNotificationService = async () => {
   if (serviceInitialized) return;
-
   serviceInitialized = true;
-
-  // Clear any existing subscriptions first
   cleanupNotificationService();
-
-  // Subscribe to notifications from service
   notificationUnsubscriber = notificationService.subscribe((notification: NotificationData) => {
     useNotificationStore.getState().addNotification(notification);
   });

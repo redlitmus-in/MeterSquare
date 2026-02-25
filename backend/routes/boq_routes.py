@@ -3,6 +3,7 @@ BOQ Routes - API endpoints for Bill of Quantities management
 """
 from flask import Blueprint, g, jsonify, current_app
 from utils.authentication import jwt_required
+from utils.response_cache import cached_response
 
 # Rate limit decorator helper for heavy endpoints
 def rate_limit(limit_string):
@@ -113,6 +114,24 @@ def get_all_item_route():
         return access_check
     return get_all_item()
 
+@boq_routes.route('/all_sub_item_names', methods=['GET'])
+@jwt_required
+def get_all_sub_item_names_route():
+    """Get all unique sub-item names for autocomplete (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_all_sub_item_names()
+
+@boq_routes.route('/sub_item_by_name/<string:sub_item_name>', methods=['GET'])
+@jwt_required
+def get_sub_item_by_name_route(sub_item_name):
+    """Get sub-item details by name with materials and labour (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return get_sub_item_by_name(sub_item_name)
+
 # BOQ Email Notification technical director
 @boq_routes.route('/boq_email/<int:boq_id>', methods=['GET'])
 @jwt_required
@@ -218,6 +237,7 @@ def update_internal_revision_boq_route(boq_id):
 
 @boq_routes.route('/boqs/internal_revisions', methods=['GET'])
 @jwt_required
+@cached_response(timeout=10, key_prefix='all_internal_revisions')
 def get_all_internal_revision_route():
     """Get all internal revisions (Estimator, PM, SE, TD, or Admin)"""
     access_check = check_boq_access()
@@ -276,6 +296,26 @@ def client_revision_td_mail_send_route():
     if access_check:
         return access_check
     return client_revision_td_mail_send()
+
+# Material Search (Global autocomplete)
+@boq_routes.route('/materials/search', methods=['GET'])
+@jwt_required
+def search_all_materials_route():
+    """Search all materials for autocomplete (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return search_all_materials()
+
+# Labour Search (Global autocomplete)
+@boq_routes.route('/labours/search', methods=['GET'])
+@jwt_required
+def search_all_labours_route():
+    """Search all labours for autocomplete (Estimator, PM, SE, TD, or Admin)"""
+    access_check = check_boq_access()
+    if access_check:
+        return access_check
+    return search_all_labours()
 
 # Custom Units Management
 @boq_routes.route('/boq/custom-units', methods=['GET'])

@@ -216,6 +216,7 @@ def get_td_purchase_order_by_id_route(cr_id):
 
 @technical_routes.route('/td_pending_boq', methods=['GET'])
 @jwt_required
+@cached_response(timeout=10, key_prefix='td_pending_boq')
 def get_td_pending_boq_route():
     """TD or Admin views all BOQs"""
     access_check = check_td_or_admin_access()
@@ -252,6 +253,7 @@ def td_approved_boq_route():
 
 @technical_routes.route('/td_revisions_boq', methods=['GET'])
 @jwt_required
+@cached_response(timeout=10, key_prefix='td_revisions_boq')
 def get_td_revisions_boq_route():
     """Get BOQs with revisions (revision_number > 0)"""
     access_check = check_td_or_admin_access()
@@ -288,6 +290,7 @@ def get_td_cancelled_boq_route():
 
 @technical_routes.route('/td_tab_counts', methods=['GET'])
 @jwt_required
+@cached_response(timeout=10, key_prefix='td_tab_counts')
 def get_td_tab_counts_route():
     """Get counts for all TD tabs"""
     access_check = check_td_or_admin_access()

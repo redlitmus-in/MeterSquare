@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g
 from flask_cors import CORS
 from flask_compress import Compress
 from flask_limiter import Limiter
@@ -7,16 +7,27 @@ from flask_caching import Cache
 from dotenv import load_dotenv
 from config.routes import initialize_routes
 from config.db import initialize_db as initialize_sqlalchemy, db
-from config.logging import get_logger
+from config.logging import get_logger, configure_quiet_logging
+from config.security_config import SecurityConfig, is_production, is_development
 from socketio_server import init_socketio
+from utils.advanced_security import (
+    init_advanced_security, register_security_routes,
+    on_login_success, on_login_failed, audit_log
+)
 from controllers.notification_controller import notification_bp
 import os
+import time
+import uuid
+import traceback
 
 # Load environment variables from .env file
 # Get the directory where this file is located (backend directory)
 basedir = os.path.abspath(os.path.dirname(__file__))
 # Load .env from the backend directory
 load_dotenv(os.path.join(basedir, '.env'))
+
+# Suppress verbose logging from third-party libraries early
+configure_quiet_logging()
 
 def create_app():
     app = Flask(__name__)
@@ -95,10 +106,11 @@ def create_app():
     app.cache = cache  # Make cache accessible to routes
 
     # ✅ SECURITY: Rate Limiting (prevents brute force, DoS)
+    # Increased production limits to handle polling, auto-refresh, and multiple users
     limiter = Limiter(
         app=app,
         key_func=get_remote_address,
-        default_limits=["1000 per day", "200 per hour"] if environment == "production" else ["10000 per hour"],
+        default_limits=["10000 per day", "1000 per hour"] if environment == "production" else ["10000 per hour"],
         storage_uri=redis_url if redis_url else "memory://",
         strategy="fixed-window"
     )
@@ -121,15 +133,27 @@ def create_app():
         if environment == "production":
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
 
-        # Content Security Policy
-        response.headers['Content-Security-Policy'] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            "font-src 'self' data:; "
-            "connect-src 'self' https://msq.kol.tel wss://msq.kol.tel"
-        )
+        # Content Security Policy — environment-based (mirrors CORS config pattern)
+        if environment == "production":
+            response.headers['Content-Security-Policy'] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: https:; "
+                "font-src 'self' data:; "
+                "media-src 'self' https: blob:; "
+                "connect-src 'self' https://msq.kol.tel wss://msq.kol.tel https://msq.ath.cx wss://msq.ath.cx https://wgddnoiakkoskbbkbygw.supabase.co"
+            )
+        else:
+            response.headers['Content-Security-Policy'] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: https:; "
+                "font-src 'self' data:; "
+                "media-src 'self' https: blob:; "
+                "connect-src 'self' http://localhost:5173 ws://localhost:5173 http://127.0.0.1:5173 ws://127.0.0.1:5173 https://nbzpvqoeolqejmplmgus.supabase.co"
+            )
 
         # Referrer Policy
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
@@ -154,6 +178,10 @@ def create_app():
     @app.before_request
     def log_security_events():
         """Log authentication and security-related events"""
+        # Start performance tracking
+        g.request_start_time = time.time()
+        g.request_id = str(uuid.uuid4())[:8]
+
         # Log failed authentication attempts
         if request.endpoint and 'login' in request.endpoint:
             logger.info(f"Login attempt from IP: {request.remote_addr}")
@@ -162,11 +190,279 @@ def create_app():
         if request.endpoint and 'admin' in request.endpoint:
             logger.info(f"Admin endpoint access: {request.endpoint} from IP: {request.remote_addr}")
 
+    # ✅ PERFORMANCE: Track request execution time
+    @app.after_request
+    def add_performance_headers(response):
+        """Add performance metrics to response headers"""
+        if hasattr(g, 'request_start_time'):
+            execution_time_ms = (time.time() - g.request_start_time) * 1000
+
+            # Add timing header
+            response.headers['X-Response-Time'] = f"{execution_time_ms:.2f}ms"
+
+            # Add request ID header
+            if hasattr(g, 'request_id'):
+                response.headers['X-Request-ID'] = g.request_id
+
+            # Log slow requests (>500ms) - ONLY in production for noise reduction
+            if is_production() and execution_time_ms > SecurityConfig.SLOW_REQUEST_THRESHOLD_MS:
+                logger.warning(
+                    f"SLOW REQUEST: {request.method} {request.path} "
+                    f"took {execution_time_ms:.2f}ms"
+                )
+
+        return response
+
+    # ✅ SECURITY: Global Response Filter (Production Only)
+    # Automatically filters sensitive data from ALL JSON responses
+    @app.after_request
+    def filter_sensitive_response_data(response):
+        """
+        Filter sensitive data from JSON responses in PRODUCTION ONLY
+
+        This protects against accidental data leaks by:
+        1. Filtering email/phone from non-admin responses
+        2. Removing internal cost data from vendor responses
+        3. Never exposing password/token fields
+
+        IMPORTANT: This ONLY runs in production. Development returns full data.
+        """
+        # Skip if not production
+        if not is_production():
+            return response
+
+        # Skip if not JSON response
+        if response.content_type != 'application/json':
+            return response
+
+        # Skip if error response
+        if response.status_code >= 400:
+            return response
+
+        try:
+            import json
+
+            # Get response data
+            data = response.get_json()
+            if not data:
+                return response
+
+            # Get current user context
+            user_role = None
+            user_id = None
+            is_admin = False
+
+            if hasattr(g, 'user') and g.user:
+                user_role = (g.user.get('role') or '').lower()
+                user_id = g.user.get('user_id')
+                is_admin = user_role in ['admin', 'pm', 'td', 'technical_director', 'project_manager']
+
+            # Filter the data
+            filtered_data = _filter_response_recursive(data, user_id, user_role, is_admin)
+
+            # Update response with filtered data
+            response.set_data(json.dumps(filtered_data))
+
+        except Exception as e:
+            # Don't break response if filtering fails
+            logger.error(f"Response filtering error: {str(e)}")
+
+        return response
+
+    def _filter_response_recursive(data, current_user_id, user_role, is_admin):
+        """Recursively filter sensitive fields from response data"""
+
+        # ============================================
+        # LEVEL 1: CRITICAL - Fields to NEVER include in any response
+        # ============================================
+        never_include = [
+            # Authentication & Security
+            'password', 'password_hash', 'reset_token', 'api_key', 'secret_key', 'otp',
+            # Government/Financial IDs
+            'id_number', 'ssn', 'bank_account', 'bank_details',
+            # Internal tokens
+            'refresh_token', 'session_token', 'auth_token'
+        ]
+
+        # ============================================
+        # LEVEL 2: PII - Only visible to admin or data owner
+        # ============================================
+        sensitive_pii_fields = [
+            # Contact info (user)
+            'email', 'phone',
+            # Worker sensitive data
+            'emergency_contact', 'emergency_phone',
+            # Audit/tracking data (admin only)
+            'ip_address', 'user_agent',
+            # Phone codes (usually paired with phone)
+            'phone_code'
+        ]
+
+        # ============================================
+        # LEVEL 3: Internal Business Data - Hidden from vendors
+        # ============================================
+        vendor_hidden = [
+            'internal_cost', 'profit_margin', 'internal_notes', 'admin_notes',
+            'estimated_cost', 'cost_breakdown', 'margin_percentage',
+            'hourly_rate'  # Worker rate is internal business data
+        ]
+
+        # ============================================
+        # LEVEL 4: Admin-Only Fields - Visible only to PM/TD/Admin
+        # ============================================
+        admin_only_fields = [
+            'ip_address', 'user_agent', 'device_type', 'browser', 'os',
+            'gst_number', 'fax'
+        ]
+
+        if data is None:
+            return None
+
+        if isinstance(data, dict):
+            filtered = {}
+
+            # Check if this dict has a user_id (it's user account data)
+            data_user_id = data.get('user_id')
+            # Also check for worker_id for worker data
+            data_worker_id = data.get('worker_id')
+            is_own_data = data_user_id and str(data_user_id) == str(current_user_id)
+            # Only user account data (has user_id) needs PII protection.
+            # Vendor records, CC lists, and other business data expose email/phone freely.
+            is_user_profile_data = data_user_id is not None
+            # Vendor business data — for admin-only fields (gst_number, fax)
+            is_vendor_data = bool(data.get('vendor_id')) and 'company_name' in data
+
+            for key, value in data.items():
+                key_lower = key.lower()
+
+                # LEVEL 1: Skip fields that should NEVER be included
+                if key_lower in never_include:
+                    continue
+
+                # LEVEL 2: Protect PII only on user account data (has user_id).
+                # CC lists, vendor contacts, and other entity emails are business data — not filtered.
+                if key_lower in sensitive_pii_fields:
+                    if is_user_profile_data and not is_admin and not is_own_data:
+                        continue
+
+                # LEVEL 3: Skip vendor-hidden fields if user is vendor
+                if user_role == 'vendor' and key_lower in vendor_hidden:
+                    continue
+
+                # LEVEL 4: Skip admin-only fields if not admin
+                # Vendor gst_number/fax are business fields, visible to authorized roles
+                if key_lower in admin_only_fields and not is_admin and not is_vendor_data:
+                    continue
+
+                # Recursively filter nested data
+                filtered[key] = _filter_response_recursive(value, current_user_id, user_role, is_admin)
+
+            return filtered
+
+        elif isinstance(data, list):
+            return [_filter_response_recursive(item, current_user_id, user_role, is_admin) for item in data]
+
+        else:
+            return data
+
     initialize_sqlalchemy(app)  # Init SQLAlchemy ORM
 
     # Create all tables
     # with app.app_context():
     #     db.create_all()
+
+    # ✅ CRITICAL: Database session cleanup after each request
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
+        """
+        Remove database session after each request to prevent session leaks
+        This prevents "write() before start_response" errors caused by uncommitted transactions
+        """
+        try:
+            db.session.remove()
+        except Exception as e:
+            logger.error(f"Error removing database session: {str(e)}")
+
+    @app.teardown_request
+    def teardown_request_handler(exception=None):
+        """
+        Ensure database session is properly closed after each request
+        Handles both successful requests and exceptions
+        """
+        if exception:
+            try:
+                db.session.rollback()
+            except Exception as e:
+                logger.error(f"Error rolling back database session: {str(e)}")
+        try:
+            db.session.close()
+        except Exception as e:
+            logger.error(f"Error closing database session: {str(e)}")
+
+    # ✅ CRITICAL: Global error handlers to prevent "write() before start_response" errors
+    # These catch any unhandled exceptions and ensure a proper HTTP response is returned
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        """Catch-all error handler for unhandled exceptions"""
+        import traceback
+
+        # Generate error ID for tracking
+        error_id = str(uuid.uuid4())
+
+        logger.error(f"Error ID {error_id}: Unhandled exception: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+        # ✅ SECURITY: Show detailed errors only in development
+        # Production gets generic message + error_id for support
+        if SecurityConfig.SHOW_DETAILED_ERRORS:
+            # Development: Show full details for debugging
+            return jsonify({
+                "success": False,
+                "error": "Internal server error",
+                "message": str(e),
+                "type": type(e).__name__,
+                "traceback": traceback.format_exc()
+            }), 500
+        else:
+            # Production: Generic message + error_id
+            return jsonify({
+                "success": False,
+                "error": "Internal server error",
+                "message": "An unexpected error occurred",
+                "error_id": error_id,
+                "support": "Please contact support with this error_id"
+            }), 500
+
+    @app.errorhandler(404)
+    def handle_not_found(e):
+        """Handle 404 errors"""
+        return jsonify({
+            "success": False,
+            "error": "Not found",
+            "message": "The requested resource was not found"
+        }), 404
+
+    @app.errorhandler(500)
+    def handle_internal_error(e):
+        """Handle 500 errors"""
+        logger.error(f"Internal server error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "Internal server error",
+            "message": "An internal server error occurred"
+        }), 500
+
+    @app.errorhandler(AssertionError)
+    def handle_assertion_error(e):
+        """Handle assertion errors (including werkzeug WSGI issues)"""
+        import traceback
+        logger.error(f"Assertion error: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "success": False,
+            "error": "Request processing error",
+            "message": "The request could not be processed"
+        }), 500
 
     # WhatsApp Webhook endpoint for Echt.im
     @app.route('/api/whatsapp/webhook', methods=['GET', 'POST'])
@@ -181,10 +477,34 @@ def create_app():
         logger.info(f"WhatsApp webhook received: {data}")
         return jsonify({"status": "ok"}), 200
 
+    # ✅ Health Check Endpoint - Shows system and security status
+    @app.route('/api/health', methods=['GET'])
+    def health_check():
+        """Health check endpoint - shows system status"""
+        return jsonify({
+            "status": "healthy",
+            "environment": environment,
+            "timestamp": time.time(),
+            "security": {
+                "rate_limiting_enabled": SecurityConfig.RATE_LIMIT_ENABLED,
+                "strict_headers_enabled": SecurityConfig.STRICT_SECURITY_HEADERS,
+                "detailed_errors_enabled": SecurityConfig.SHOW_DETAILED_ERRORS,
+                "is_production": is_production()
+            }
+        }), 200
+
     initialize_routes(app)  # Register routes
 
     # Register notification routes
     app.register_blueprint(notification_bp, url_prefix='/api')
+
+    # ✅ SECURITY: Initialize Advanced Security Features
+    # Rate Limiting, IP Blocking, Token Fingerprinting, Audit Logging
+    security_components = init_advanced_security(app)
+    app.security = security_components  # Make accessible to routes
+
+    # Register security admin endpoints (/api/security/*)
+    register_security_routes(app)
 
     # Initialize Socket.IO for real-time notifications
     socketio = init_socketio(app)

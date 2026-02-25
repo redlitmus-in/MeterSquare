@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -37,6 +37,7 @@ import {
   MapPin
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
+import { PAGINATION } from '@/lib/constants';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
@@ -52,6 +53,7 @@ interface Buyer {
   user_id: number;
   full_name: string;
   username: string;
+  is_active: boolean;
 }
 
 // Purchase Request Modal Component with Materials and Preliminaries tabs
@@ -142,7 +144,7 @@ const PurchaseRequestModal: React.FC<PurchaseRequestModalProps> = ({ onClose }) 
 
 const ChangeRequestsPage: React.FC = () => {
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
   const isExtraMaterial = location.pathname.includes('extra-material');
 
@@ -180,6 +182,9 @@ const ChangeRequestsPage: React.FC = () => {
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [selectedBuyerId, setSelectedBuyerId] = useState<number | null>(null);
 
+  // Track if we've already auto-opened modal from URL (to prevent reopening on close)
+  const hasAutoOpenedRef = useRef<string | null>(null);
+
   // ✅ PERFORMANCE: Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pagination, setPagination] = useState<{
@@ -188,7 +193,7 @@ const ChangeRequestsPage: React.FC = () => {
     has_next: boolean;
     has_prev: boolean;
   } | null>(null);
-  const perPage = 20;
+  const perPage = PAGINATION.DEFAULT_PAGE_SIZE;
 
   // State for data loading
   const [changeRequestsData, setChangeRequestsData] = useState<ChangeRequestItem[]>([]);
@@ -248,6 +253,16 @@ const ChangeRequestsPage: React.FC = () => {
     loadChangeRequests(false);
   }, [changeRequestUpdateTimestamp]);
 
+  // Reset page when main tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Reset page when sub-tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [pendingSubTab]);
+
   const refetch = () => loadChangeRequests(false);
 
   const changeRequests = useMemo(() => {
@@ -261,13 +276,20 @@ const ChangeRequestsPage: React.FC = () => {
 
   // Auto-open change request details when cr_id is in URL (from notification redirect)
   useEffect(() => {
-    if (urlCrId && changeRequests.length > 0 && !showDetailsModal) {
+    // Only auto-open if we haven't already opened for this specific urlCrId
+    if (urlCrId && changeRequests.length > 0 && !showDetailsModal && hasAutoOpenedRef.current !== urlCrId) {
       const crIdNum = parseInt(urlCrId, 10);
       const targetCr = changeRequests.find((cr: ChangeRequestItem) => cr.cr_id === crIdNum);
       if (targetCr) {
         setSelectedChangeRequest(targetCr);
         setShowDetailsModal(true);
+        // Mark this urlCrId as already opened
+        hasAutoOpenedRef.current = urlCrId;
       }
+    }
+    // Reset the ref when urlCrId is cleared
+    if (!urlCrId) {
+      hasAutoOpenedRef.current = null;
     }
   }, [urlCrId, changeRequests, showDetailsModal]);
 
@@ -350,7 +372,7 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await changeRequestService.getBuyers();
       if (response.success && response.data) {
-        setBuyers(response.data);
+        setBuyers(response.data as Buyer[]);
       }
     } catch (error) {
       console.error('Error fetching buyers:', error);
@@ -438,6 +460,8 @@ const ChangeRequestsPage: React.FC = () => {
     await handleApprove(selectedChangeRequest.cr_id);
     setShowDetailsModal(false);
     setSelectedChangeRequest(null);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   const handleRejectFromModal = () => {
@@ -445,6 +469,8 @@ const ChangeRequestsPage: React.FC = () => {
     setRejectingCrId(selectedChangeRequest.cr_id);
     setShowDetailsModal(false);
     setShowRejectionModal(true);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   const formatCurrency = (value: number) => {
@@ -461,8 +487,10 @@ const ChangeRequestsPage: React.FC = () => {
       approved_by_td: 'bg-blue-100 text-blue-800',
       assigned_to_buyer: 'bg-purple-100 text-purple-800',
       purchase_completed: 'bg-green-100 text-green-800',
+      routed_to_store: 'bg-green-100 text-green-800',
       rejected: 'bg-red-100 text-red-800',
-      split_to_sub_crs: 'bg-indigo-100 text-indigo-800'
+      split_to_sub_crs: 'bg-indigo-100 text-indigo-800',
+      vendor_approved: 'bg-teal-100 text-teal-800'
     };
     return colors[status as keyof typeof colors] || colors.pending;
   };
@@ -498,8 +526,14 @@ const ChangeRequestsPage: React.FC = () => {
     if (status === 'assigned_to_buyer') {
       return 'ASSIGNED TO BUYER';
     }
+    if (status === 'vendor_approved') {
+      return 'VENDOR APPROVED';
+    }
     if (status === 'purchase_completed') {
       return 'PURCHASE COMPLETED';
+    }
+    if (status === 'routed_to_store') {
+      return 'ROUTED TO M2 STORE';
     }
     if (status === 'rejected') {
       return 'REJECTED';
@@ -521,7 +555,8 @@ const ChangeRequestsPage: React.FC = () => {
 
     const getChildStatusColor = (status: string) => {
       switch (status) {
-        case 'purchase_completed': return 'bg-green-100 text-green-700';
+        case 'purchase_completed':
+        case 'routed_to_store': return 'bg-green-100 text-green-700';
         case 'vendor_approved': return 'bg-blue-100 text-blue-700';
         case 'pending_td_approval': return 'bg-yellow-100 text-yellow-700';
         case 'rejected': return 'bg-red-100 text-red-700';
@@ -531,7 +566,8 @@ const ChangeRequestsPage: React.FC = () => {
 
     const getChildStatusLabel = (status: string) => {
       switch (status) {
-        case 'purchase_completed': return 'Completed';
+        case 'purchase_completed':
+        case 'routed_to_store': return 'Completed';
         case 'vendor_approved': return 'Vendor Approved';
         case 'pending_td_approval': return 'Pending TD';
         case 'rejected': return 'Rejected';
@@ -619,16 +655,16 @@ const ChangeRequestsPage: React.FC = () => {
       matchesTab = (
         (activeTab === 'requested' && !isPMCreatedRequest && (req.status === 'send_to_pm' || (req.status === 'under_review' && req.approval_required_from === 'project_manager'))) ||  // Requests needing PM approval (send_to_pm or under_review) - EXCLUDE PM's own requests
         (activeTab === 'pending' && isPendingTabStatus) ||  // ALL requests for pending sub-tabs
-        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || req.status === 'send_to_est' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs')) ||  // approved_by_pm, send_to_est, send_to_buyer, pending_td_approval and split_to_sub_crs status
-        (activeTab === 'completed' && req.status === 'purchase_completed') ||
+        (activeTab === 'accepted' && (req.status === 'approved_by_pm' || req.status === 'send_to_est' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs' || req.status === 'sent_to_store' || req.status === 'vendor_approved' || req.status === 'assigned_to_buyer')) ||  // approved_by_pm, send_to_est, send_to_buyer, pending_td_approval, split_to_sub_crs, sent_to_store, vendor_approved and assigned_to_buyer status
+        (activeTab === 'completed' && (req.status === 'purchase_completed' || req.status === 'routed_to_store')) ||
         (activeTab === 'rejected' && req.status === 'rejected')
       );
     } else {
       // Change Requests tab filtering - show requests that need PM action or PM created
       matchesTab = (
         (activeTab === 'pending' && ['pending', 'under_review'].includes(req.status)) ||
-        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs'].includes(req.status)) ||
-        (activeTab === 'completed' && req.status === 'purchase_completed') ||
+        (activeTab === 'approved' && ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs', 'sent_to_store', 'vendor_approved'].includes(req.status)) ||
+        (activeTab === 'completed' && (req.status === 'purchase_completed' || req.status === 'routed_to_store')) ||
         (activeTab === 'rejected' && req.status === 'rejected')
       );
     }
@@ -637,8 +673,8 @@ const ChangeRequestsPage: React.FC = () => {
 
   const stats = {
     pending: changeRequests.filter(r => ['pending', 'under_review'].includes(r.status)).length,
-    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs'].includes(r.status)).length,
-    completed: changeRequests.filter(r => r.status === 'purchase_completed').length,
+    approved: changeRequests.filter(r => ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_est', 'send_to_buyer', 'pending_td_approval', 'split_to_sub_crs', 'vendor_approved'].includes(r.status)).length,
+    completed: changeRequests.filter(r => r.status === 'purchase_completed' || r.status === 'routed_to_store').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length,
     // For Extra Material - Requested tab count (send_to_pm or under_review with PM approval) - EXCLUDE PM's own requests
     my_requests: changeRequests.filter(r => {
@@ -655,9 +691,47 @@ const ChangeRequestsPage: React.FC = () => {
         (r.status === 'under_review' && r.approval_required_from === 'buyer') ||  // Sent to Buyer
         r.status === 'assigned_to_buyer'  // Assigned to Buyer
       ).length,  // ALL requests for pending tab sub-tabs (backend already filters by project)
-    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || r.status === 'send_to_est' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs').length,  // approved_by_pm, send_to_est, send_to_buyer, pending_td_approval and split_to_sub_crs status
-    completed_extra: changeRequests.filter(r => r.status === 'purchase_completed').length
+    accepted: changeRequests.filter(r => r.status === 'approved_by_pm' || r.status === 'send_to_est' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs' || r.status === 'vendor_approved' || r.status === 'assigned_to_buyer').length,  // approved_by_pm, send_to_est, send_to_buyer, pending_td_approval, split_to_sub_crs, vendor_approved and assigned_to_buyer status
+    completed_extra: changeRequests.filter(r => r.status === 'purchase_completed' || r.status === 'routed_to_store').length
   };
+
+  // Sub-tab specific filtered data for "My Requests" (pending) tab
+  const draftsRequests = useMemo(() =>
+    filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status)),
+    [filteredRequests]
+  );
+
+  const sentToEstimatorRequests = useMemo(() =>
+    filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator'),
+    [filteredRequests]
+  );
+
+  const sentToBuyerRequests = useMemo(() =>
+    filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer'),
+    [filteredRequests]
+  );
+
+  // Get the correct data based on active tab and sub-tab
+  const currentTabData = useMemo(() => {
+    if (isExtraMaterial && activeTab === 'pending') {
+      // For "My Requests" tab with sub-tabs
+      switch (pendingSubTab) {
+        case 'drafts': return draftsRequests;
+        case 'sent_to_estimator': return sentToEstimatorRequests;
+        case 'sent_to_buyer': return sentToBuyerRequests;
+        default: return draftsRequests;
+      }
+    }
+    // For other tabs, use the full filtered requests
+    return filteredRequests;
+  }, [isExtraMaterial, activeTab, pendingSubTab, filteredRequests, draftsRequests, sentToEstimatorRequests, sentToBuyerRequests]);
+
+  // Paginated data for current tab/sub-tab
+  const paginatedRequests = useMemo(() => {
+    const startIndex = (currentPage - 1) * perPage;
+    const endIndex = startIndex + perPage;
+    return currentTabData.slice(startIndex, endIndex);
+  }, [currentTabData, currentPage, perPage]);
 
   if (initialLoad) {
     return (
@@ -927,10 +1001,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No change requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -1092,10 +1166,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No approved requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -1185,10 +1259,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No completed requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -1279,10 +1353,10 @@ const ChangeRequestsPage: React.FC = () => {
                     <p className="text-gray-500 text-lg">No rejected requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={paginatedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                    {filteredRequests.map((request, index) => (
+                    {paginatedRequests.map((request, index) => (
                       <motion.div
                         key={request.cr_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -1371,10 +1445,10 @@ const ChangeRequestsPage: React.FC = () => {
                       <p className="text-gray-500 text-lg">No requests found</p>
                     </div>
                   ) : viewMode === 'table' ? (
-                    <RequestsTable requests={filteredRequests} />
+                    <RequestsTable requests={paginatedRequests} />
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                      {filteredRequests.map((request, index) => (
+                      {paginatedRequests.map((request, index) => (
                         <motion.div
                           key={request.cr_id}
                           initial={{ opacity: 0, y: 20 }}
@@ -1501,7 +1575,7 @@ const ChangeRequestsPage: React.FC = () => {
                         <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
                           pendingSubTab === 'drafts' ? 'bg-[#243d8a]/20' : 'bg-gray-100'
                         }`}>
-                          ({filteredRequests.filter(r => r.status === 'pending').length})
+                          ({draftsRequests.length})
                         </span>
                       </div>
                     </button>
@@ -1519,7 +1593,7 @@ const ChangeRequestsPage: React.FC = () => {
                         <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
                           pendingSubTab === 'sent_to_estimator' ? 'bg-[#243d8a]/20' : 'bg-gray-100'
                         }`}>
-                          ({filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator').length})
+                          ({sentToEstimatorRequests.length})
                         </span>
                       </div>
                     </button>
@@ -1537,7 +1611,7 @@ const ChangeRequestsPage: React.FC = () => {
                         <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
                           pendingSubTab === 'sent_to_buyer' ? 'bg-[#243d8a]/20' : 'bg-gray-100'
                         }`}>
-                          ({filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer').length})
+                          ({sentToBuyerRequests.length})
                         </span>
                       </div>
                     </button>
@@ -1546,16 +1620,16 @@ const ChangeRequestsPage: React.FC = () => {
                   {/* Drafts Sub-tab Content */}
                   {pendingSubTab === 'drafts' && (
                     <>
-                      {filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status)).length === 0 ? (
+                      {draftsRequests.length === 0 ? (
                         <div className="text-center py-12">
                           <Pencil className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                           <p className="text-gray-500 text-lg">No draft requests found</p>
                         </div>
                       ) : viewMode === 'table' ? (
-                        <RequestsTable requests={filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status))} />
+                        <RequestsTable requests={paginatedRequests} />
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                          {filteredRequests.filter(r => ['pending', 'pm_request', 'ss_request', 'mep_request', 'admin_request'].includes(r.status)).map((request, index) => (
+                          {paginatedRequests.map((request, index) => (
                             <motion.div
                               key={request.cr_id}
                               initial={{ opacity: 0, y: 20 }}
@@ -1662,16 +1736,16 @@ const ChangeRequestsPage: React.FC = () => {
                   {/* Sent to Estimator Sub-tab Content */}
                   {pendingSubTab === 'sent_to_estimator' && (
                     <>
-                      {filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator').length === 0 ? (
+                      {sentToEstimatorRequests.length === 0 ? (
                         <div className="text-center py-12">
                           <Clock className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                           <p className="text-gray-500 text-lg">No requests sent to estimator</p>
                         </div>
                       ) : viewMode === 'table' ? (
-                        <RequestsTable requests={filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator')} />
+                        <RequestsTable requests={paginatedRequests} />
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                          {filteredRequests.filter(r => r.status === 'under_review' && r.approval_required_from === 'estimator').map((request, index) => (
+                          {paginatedRequests.map((request, index) => (
                             <motion.div
                               key={request.cr_id}
                               initial={{ opacity: 0, y: 20 }}
@@ -1758,16 +1832,16 @@ const ChangeRequestsPage: React.FC = () => {
                   {/* Sent to Buyer Sub-tab Content */}
                   {pendingSubTab === 'sent_to_buyer' && (
                     <>
-                      {filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer').length === 0 ? (
+                      {sentToBuyerRequests.length === 0 ? (
                         <div className="text-center py-12">
                           <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                           <p className="text-gray-500 text-lg">No requests sent to buyer</p>
                         </div>
                       ) : viewMode === 'table' ? (
-                        <RequestsTable requests={filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer')} />
+                        <RequestsTable requests={paginatedRequests} />
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                          {filteredRequests.filter(r => (r.status === 'under_review' && r.approval_required_from === 'buyer') || r.status === 'assigned_to_buyer').map((request, index) => (
+                          {paginatedRequests.map((request, index) => (
                             <motion.div
                               key={request.cr_id}
                               initial={{ opacity: 0, y: 20 }}
@@ -1857,10 +1931,10 @@ const ChangeRequestsPage: React.FC = () => {
                       <p className="text-gray-500 text-lg">No accepted requests found</p>
                     </div>
                   ) : viewMode === 'table' ? (
-                    <RequestsTable requests={filteredRequests} />
+                    <RequestsTable requests={paginatedRequests} />
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                      {filteredRequests.map((request, index) => (
+                      {paginatedRequests.map((request, index) => (
                         <motion.div
                           key={request.cr_id}
                           initial={{ opacity: 0, y: 20 }}
@@ -1943,10 +2017,10 @@ const ChangeRequestsPage: React.FC = () => {
                       <p className="text-gray-500 text-lg">No completed requests found</p>
                     </div>
                   ) : viewMode === 'table' ? (
-                    <RequestsTable requests={filteredRequests} />
+                    <RequestsTable requests={paginatedRequests} />
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                      {filteredRequests.map((request, index) => (
+                      {paginatedRequests.map((request, index) => (
                         <motion.div
                           key={request.cr_id}
                           initial={{ opacity: 0, y: 20 }}
@@ -2029,10 +2103,10 @@ const ChangeRequestsPage: React.FC = () => {
                       <p className="text-gray-500 text-lg">No rejected requests found</p>
                     </div>
                   ) : viewMode === 'table' ? (
-                    <RequestsTable requests={filteredRequests} />
+                    <RequestsTable requests={paginatedRequests} />
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                      {filteredRequests.map((request, index) => (
+                      {paginatedRequests.map((request, index) => (
                         <motion.div
                           key={request.cr_id}
                           initial={{ opacity: 0, y: 20 }}
@@ -2117,46 +2191,74 @@ const ChangeRequestsPage: React.FC = () => {
             )}
           </Tabs>
 
-          {/* ✅ PERFORMANCE: Pagination Controls */}
-          {pagination && (
-            <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
-              <div className="text-sm text-gray-600 font-medium">
-                Showing {pagination.total_count > 0 ? Math.min((currentPage - 1) * perPage + 1, pagination.total_count) : 0} to {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
+          {/* ✅ PERFORMANCE: Pagination Controls - Based on current tab/sub-tab data */}
+          {(() => {
+            const totalFilteredCount = currentTabData.length;
+            const totalFilteredPages = Math.ceil(totalFilteredCount / perPage);
+            const startItem = totalFilteredCount > 0 ? (currentPage - 1) * perPage + 1 : 0;
+            const endItem = Math.min(currentPage * perPage, totalFilteredCount);
+
+            if (totalFilteredCount === 0) return null;
+
+            return (
+              <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                <div className="text-sm text-gray-700">
+                  Showing {startItem} to {endItem} of {totalFilteredCount} results
+                  {totalFilteredPages > 1 && (
+                    <span className="text-gray-500 ml-2">(Page {currentPage} of {totalFilteredPages})</span>
+                  )}
+                </div>
+                {totalFilteredPages > 1 && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Previous
+                    </button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalFilteredPages }, (_, i) => i + 1).map(page => {
+                        const showPage =
+                          page === 1 ||
+                          page === totalFilteredPages ||
+                          (page >= currentPage - 1 && page <= currentPage + 1);
+
+                        if (!showPage) {
+                          if (page === currentPage - 2 || page === currentPage + 2) {
+                            return <span key={page} className="px-2 text-gray-500">...</span>;
+                          }
+                          return null;
+                        }
+
+                        return (
+                          <button
+                            key={page}
+                            onClick={() => setCurrentPage(page)}
+                            className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                              currentPage === page
+                                ? 'text-white font-medium'
+                                : 'border border-gray-300 hover:bg-gray-50'
+                            }`}
+                            style={currentPage === page ? { backgroundColor: 'rgb(36, 61, 138)' } : {}}
+                          >
+                            {page}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(totalFilteredPages, prev + 1))}
+                      disabled={currentPage === totalFilteredPages}
+                      className="px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={!pagination.has_prev}
-                  className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  style={{ color: 'rgb(36, 61, 138)' }}
-                >
-                  Previous
-                </button>
-                {Array.from({ length: pagination.total_pages || 1 }, (_, i) => i + 1).map(page => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                      currentPage === page
-                        ? 'border-[rgb(36,61,138)] bg-blue-50'
-                        : 'border-gray-300 hover:bg-gray-50'
-                    }`}
-                    style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
-                  >
-                    {page}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
-                  disabled={!pagination.has_next}
-                  className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  style={{ color: 'rgb(36, 61, 138)' }}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </div>
 
@@ -2166,6 +2268,8 @@ const ChangeRequestsPage: React.FC = () => {
         onClose={() => {
           setShowDetailsModal(false);
           setSelectedChangeRequest(null);
+          // Clear URL parameters to prevent auto-reopen
+          setSearchParams({});
         }}
         changeRequest={selectedChangeRequest}
         onApprove={handleApproveFromModal}
@@ -2180,6 +2284,8 @@ const ChangeRequestsPage: React.FC = () => {
           onClose={() => {
             setShowEditModal(false);
             setSelectedChangeRequest(null);
+            // Clear URL parameters to prevent auto-reopen
+            setSearchParams({});
           }}
           changeRequest={selectedChangeRequest}
           onSuccess={handleEditSuccess}
@@ -2278,20 +2384,10 @@ const ChangeRequestsPage: React.FC = () => {
                   </label>
                 </div>
 
-                {/* Online Status Indicator */}
-                <div className="flex items-center gap-2 mb-4 text-sm">
-                  <div className="flex items-center gap-1.5 text-green-600">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="font-medium">ONLINE</span>
-                  </div>
-                </div>
-
-                {/* Buyers List - Scrollable with visible styled scrollbar */}
+                {/* Buyers List - Scrollable */}
                 <div
-                  className="space-y-3 max-h-[280px] overflow-y-auto pr-2 custom-scrollbar"
-                  style={{
-                    scrollBehavior: 'smooth',
-                  }}
+                  className="space-y-4 max-h-[280px] overflow-y-auto pr-2 custom-scrollbar"
+                  style={{ scrollBehavior: 'smooth' }}
                 >
                   {buyers.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
@@ -2299,58 +2395,128 @@ const ChangeRequestsPage: React.FC = () => {
                       <p>No buyers available</p>
                     </div>
                   ) : (
-                    buyers.map((buyer) => {
-                      const initials = buyer.full_name
-                        ? buyer.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-                        : buyer.username.slice(0, 2).toUpperCase();
-
-                      return (
-                        <label
-                          key={buyer.user_id}
-                          className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                            selectedBuyerId === buyer.user_id
-                              ? 'border-green-500 bg-green-50 shadow-sm'
-                              : 'border-gray-200 hover:border-green-300 hover:bg-gray-50'
-                          }`}
-                          onClick={() => setSelectedBuyerId(buyer.user_id)}
-                        >
-                          {/* Avatar */}
-                          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg ${
-                            selectedBuyerId === buyer.user_id ? 'bg-green-600' : 'bg-blue-600'
-                          }`}>
-                            {initials}
+                    <>
+                      {/* Online Buyers */}
+                      {buyers.filter(b => b.is_active === true).length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                            <span className="text-xs font-bold text-green-700 uppercase tracking-wide">Online</span>
+                            <div className="flex-1 h-px bg-green-200"></div>
                           </div>
-
-                          {/* User Info */}
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-gray-900">
-                                {buyer.full_name || buyer.username}
-                              </span>
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                                <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                                Online
-                              </span>
-                            </div>
-                            <div className="text-sm text-gray-500 mt-0.5">
-                              {buyer.username}
-                            </div>
+                          <div className="space-y-3">
+                            {buyers.filter(b => b.is_active === true).map((buyer) => {
+                              const initials = buyer.full_name
+                                ? buyer.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+                                : buyer.username.slice(0, 2).toUpperCase();
+                              return (
+                                <label
+                                  key={buyer.user_id}
+                                  className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                                    selectedBuyerId === buyer.user_id
+                                      ? 'border-green-500 bg-green-50 shadow-sm'
+                                      : 'border-gray-200 hover:border-green-300 hover:bg-gray-50'
+                                  }`}
+                                  onClick={() => setSelectedBuyerId(buyer.user_id)}
+                                >
+                                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg relative ${
+                                    selectedBuyerId === buyer.user_id ? 'bg-green-600' : 'bg-blue-600'
+                                  }`}>
+                                    {initials}
+                                    <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-semibold text-gray-900">{buyer.full_name || buyer.username}</span>
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                        <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                                        Online
+                                      </span>
+                                    </div>
+                                    <div className="text-sm text-gray-500 mt-0.5">{buyer.username}</div>
+                                  </div>
+                                  <input
+                                    type="radio"
+                                    name="buyer"
+                                    value={buyer.user_id}
+                                    checked={selectedBuyerId === buyer.user_id}
+                                    onChange={() => setSelectedBuyerId(buyer.user_id)}
+                                    className="w-5 h-5 text-green-600 focus:ring-green-500"
+                                  />
+                                </label>
+                              );
+                            })}
                           </div>
+                        </div>
+                      )}
 
-                          {/* Radio Button */}
-                          <input
-                            type="radio"
-                            name="buyer"
-                            value={buyer.user_id}
-                            checked={selectedBuyerId === buyer.user_id}
-                            onChange={() => setSelectedBuyerId(buyer.user_id)}
-                            className="w-5 h-5 text-green-600 focus:ring-green-500"
-                          />
-                        </label>
-                      );
-                    })
+                      {/* Offline Buyers */}
+                      {buyers.filter(b => b.is_active !== true).length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                            <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Offline</span>
+                            <div className="flex-1 h-px bg-gray-200"></div>
+                          </div>
+                          <div className="space-y-3">
+                            {buyers.filter(b => b.is_active !== true).map((buyer) => {
+                              const initials = buyer.full_name
+                                ? buyer.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+                                : buyer.username.slice(0, 2).toUpperCase();
+                              return (
+                                <label
+                                  key={buyer.user_id}
+                                  className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                                    selectedBuyerId === buyer.user_id
+                                      ? 'border-gray-400 bg-gray-100 shadow-sm'
+                                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                  }`}
+                                  onClick={() => setSelectedBuyerId(buyer.user_id)}
+                                >
+                                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg bg-gray-400 relative">
+                                    {initials}
+                                    <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-gray-400 rounded-full border-2 border-white" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-semibold text-gray-700">{buyer.full_name || buyer.username}</span>
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+                                        <div className="w-1.5 h-1.5 bg-gray-400 rounded-full"></div>
+                                        Offline
+                                      </span>
+                                    </div>
+                                    <div className="text-sm text-gray-500 mt-0.5">{buyer.username}</div>
+                                  </div>
+                                  <input
+                                    type="radio"
+                                    name="buyer"
+                                    value={buyer.user_id}
+                                    checked={selectedBuyerId === buyer.user_id}
+                                    onChange={() => setSelectedBuyerId(buyer.user_id)}
+                                    className="w-5 h-5 text-gray-500 focus:ring-gray-400"
+                                  />
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
+
+                {/* Offline email hint */}
+                {(() => {
+                  const selBuyer = buyers.find(b => b.user_id === selectedBuyerId);
+                  return selBuyer && selBuyer.is_active !== true ? (
+                    <p className="text-xs mt-2 text-amber-600 flex items-center gap-1">
+                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      This buyer is offline. An email notification will be sent to notify them.
+                    </p>
+                  ) : null;
+                })()}
               </div>
 
               {/* Comments Section */}

@@ -114,6 +114,9 @@ class ChangeRequest(db.Model):
     vendor_email_sent_date = db.Column(db.DateTime, nullable=True)
     vendor_email_sent_by_user_id = db.Column(db.Integer, nullable=True)
 
+    # LPO PDF storage (generated at TD approval, used for email attachment)
+    lpo_pdf_url = db.Column(db.Text, nullable=True)
+
     # WhatsApp tracking
     vendor_whatsapp_sent = db.Column(db.Boolean, default=False)  # Track if PO WhatsApp sent to vendor
     vendor_whatsapp_sent_at = db.Column(db.DateTime, nullable=True)
@@ -132,6 +135,10 @@ class ChangeRequest(db.Model):
     material_vendor_selections = db.Column(JSONB, nullable=True, default=dict)
     use_per_material_vendors = db.Column(db.Boolean, default=False)
 
+    # Material Routing Tracking - Track which materials have been sent to store or vendor
+    # Format: {material_name: {routing: 'store'|'vendor', po_child_id: int, routed_at: timestamp, routed_by: user_id}}
+    routed_materials = db.Column(JSONB, nullable=True, default=dict)
+
     # 🗑️ REMOVED 2025-12-19: Deprecated parent-child CR columns (3 columns) - Replaced by po_children table
     # parent_cr_id, cr_number_suffix, submission_group_id
     # NOTE: Now use the po_children table and POChild model for parent-child relationships
@@ -144,6 +151,10 @@ class ChangeRequest(db.Model):
     vendor_delivery_date = db.Column(db.DateTime, nullable=True)  # When vendor delivered to warehouse
     buyer_completion_notes = db.Column(db.Text, nullable=True)  # Buyer notes when completing
     store_request_status = db.Column(db.String(50), nullable=True)  # Workflow status: pending_vendor_delivery, delivered_to_store, pm_received, dispatched_to_site, delivered_to_site
+
+    # Vendor Delivery Inspection (Added 2026-02-16)
+    inspection_status = db.Column(db.String(30), nullable=True)
+    # Values: 'pending_inspection', 'fully_approved', 'partially_approved', 'fully_rejected', 'return_in_progress', 'resolved'
 
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)  # ✅ PERFORMANCE: Added index
@@ -340,6 +351,9 @@ class ChangeRequest(db.Model):
             'rejected_by_name': self.rejected_by_name,
             'rejected_at_stage': self.rejected_at_stage,
 
+            # LPO PDF
+            'lpo_pdf_url': self.lpo_pdf_url,
+
             # Vendor Email/WhatsApp tracking
             'vendor_email_sent': self.vendor_email_sent,
             'vendor_email_sent_date': self.vendor_email_sent_date.isoformat() if self.vendor_email_sent_date else None,
@@ -353,11 +367,36 @@ class ChangeRequest(db.Model):
             'buyer_completion_notes': self.buyer_completion_notes,
             'store_request_status': self.store_request_status,
 
+            # Vendor Delivery Inspection
+            'inspection_status': self.inspection_status,
+
+            # Material Routing Tracking (Prevent duplicates)
+            'routed_materials': self.routed_materials if self.routed_materials else {},
+
             # Timestamps
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'is_deleted': self.is_deleted
         }
+
+        # Include full vendor details if vendor relationship is loaded
+        if self.vendor:
+            result['vendor_details'] = {
+                'company_name': self.vendor.company_name,
+                'contact_person_name': self.vendor.contact_person_name,
+                'email': self.vendor.email,
+                'phone_code': self.vendor.phone_code,
+                'phone': self.vendor.phone,
+                'category': self.vendor.category,
+                'street_address': self.vendor.street_address,
+                'city': self.vendor.city,
+                'state': self.vendor.state,
+                'pin_code': self.vendor.pin_code,
+                'gst_number': self.vendor.gst_number,
+                'country': self.vendor.country,
+            }
+
+        return result
 
     def __repr__(self):
         return f"<ChangeRequest {self.cr_id} - BOQ:{self.boq_id} - Status:{self.status}>"

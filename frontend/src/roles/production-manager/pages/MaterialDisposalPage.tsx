@@ -12,11 +12,14 @@ import {
   X,
   Eye,
   AlertTriangle,
-  Package
+  Package,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { inventoryService, MaterialReturn } from '../services/inventoryService';
 import { showError } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { PAGINATION } from '@/lib/inventoryConstants';
 
 const MaterialDisposalPage: React.FC = () => {
   const [disposalItems, setDisposalItems] = useState<MaterialReturn[]>([]);
@@ -25,6 +28,7 @@ const MaterialDisposalPage: React.FC = () => {
   const [selectedItem, setSelectedItem] = useState<MaterialReturn | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'pending' | 'approved'>('pending');
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     fetchDisposalItems();
@@ -78,6 +82,25 @@ const MaterialDisposalPage: React.FC = () => {
 
     return items;
   }, [disposalItems, searchTerm, activeTab]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredItems.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedItems = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredItems.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredItems, currentPage]);
+
+  // Reset page when tab or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchTerm]);
+
+  // Clamp page when total pages decreases
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   // Count items by status
   const pendingCount = disposalItems.filter(item => item.disposal_status === 'pending_review').length;
@@ -205,7 +228,7 @@ const MaterialDisposalPage: React.FC = () => {
               <ModernLoadingSpinners size="sm" className="mx-auto mb-4" />
               <p className="text-gray-500">Loading disposal items...</p>
             </div>
-          ) : filteredItems.length > 0 ? (
+          ) : paginatedItems.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-red-50">
@@ -237,7 +260,7 @@ const MaterialDisposalPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {filteredItems.map((item) => (
+                  {paginatedItems.map((item) => (
                     <tr key={item.return_id} className="hover:bg-gray-50">
                       <td className="px-6 py-4">
                         <p className="font-medium text-gray-900">
@@ -308,14 +331,37 @@ const MaterialDisposalPage: React.FC = () => {
               </p>
             </div>
           )}
-        </div>
 
-        {/* Results count */}
-        {filteredItems.length > 0 && (
-          <p className="mt-4 text-sm text-gray-600 text-center">
-            Showing {filteredItems.length} disposal request{filteredItems.length !== 1 ? 's' : ''}
-          </p>
-        )}
+          {/* Pagination */}
+          {filteredItems.length > 0 && (
+            <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
+              <p className="text-sm text-gray-600">
+                Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredItems.length)} of {filteredItems.length} disposal requests
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </button>
+                <span className="text-sm text-gray-600">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Detail Modal */}

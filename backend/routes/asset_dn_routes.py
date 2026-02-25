@@ -118,6 +118,12 @@ def process_return_note_route(ardn_id):
     return process_return_note(ardn_id)
 
 
+@asset_dn_routes.route('/api/assets/return-notes/upload-delivery-note', methods=['POST'])
+def upload_return_note_delivery_note_route():
+    """Upload delivery note document for ARDN (from vendor/transporter)"""
+    return upload_return_note_delivery_note()
+
+
 # ==================== DASHBOARD & UTILITY ROUTES ====================
 
 @asset_dn_routes.route('/api/assets/dn-dashboard', methods=['GET'])

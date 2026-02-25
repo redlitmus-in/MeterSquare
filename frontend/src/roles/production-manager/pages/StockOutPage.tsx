@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Plus, Search, Package, CheckCircle, X, Save, FileText,
-  ArrowUpCircle, RefreshCw, Download, Printer
+  ArrowUpCircle, RefreshCw, Download, Printer, DollarSign, ChevronDown, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import {
   inventoryService,
@@ -16,23 +16,25 @@ import {
 import { showSuccess, showError, showWarning } from '@/utils/toastHelper';
 import { API_BASE_URL } from '@/api/config';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import { INVENTORY_DEFAULTS } from '@/lib/inventoryConstants';
+import { INVENTORY_DEFAULTS, PAGINATION } from '@/lib/inventoryConstants';
 import { normalizeStatus } from '../utils/inventoryHelpers';
 import ConfirmationModal from '../components/ConfirmationModal';
 
-type StockOutSubTab = 'requests' | 'delivery-notes';
+// Unified tab type - all tabs in single row
+type MainTabType = 'pending' | 'approved' | 'completed' | 'rejected' | 'draft_dn' | 'issued_dn' | 'delivered_dn';
 
 const StockOutPage: React.FC = () => {
   const [searchParams] = useSearchParams();
 
-  // Tab state
-  const [activeSubTab, setActiveSubTab] = useState<StockOutSubTab>('requests');
+  // Main tab state
+  const [activeMainTab, setActiveMainTab] = useState<MainTabType>('pending');
 
   // Handle URL parameters
   useEffect(() => {
-    const subtab = searchParams.get('subtab');
-    if (subtab === 'requests') setActiveSubTab('requests');
-    else if (subtab === 'delivery-notes') setActiveSubTab('delivery-notes');
+    const tab = searchParams.get('tab');
+    if (tab && ['pending', 'approved', 'completed', 'rejected', 'draft_dn', 'issued_dn', 'delivered_dn'].includes(tab)) {
+      setActiveMainTab(tab as MainTabType);
+    }
   }, [searchParams]);
 
   // Data states - Lazy loading pattern for Material Requests
@@ -64,8 +66,7 @@ const StockOutPage: React.FC = () => {
   // UI states
   const [loadingInitialData, setLoadingInitialData] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('PENDING');
-  const [dnStatusFilter, setDnStatusFilter] = useState<string>('DRAFT');
+  const [currentPage, setCurrentPage] = useState(1);
   const [showDeliveryNoteModal, setShowDeliveryNoteModal] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -105,10 +106,12 @@ const StockOutPage: React.FC = () => {
     show: boolean;
     materials: any[];
     requestNumber: number | null;
+    parentMaterialName?: string;
   }>({
     show: false,
     materials: [],
-    requestNumber: null
+    requestNumber: null,
+    parentMaterialName: undefined
   });
 
   // Form state for new Delivery Note
@@ -121,18 +124,21 @@ const StockOutPage: React.FC = () => {
     vehicle_number: '',
     driver_name: '',
     driver_contact: '',
-    notes: ''
+    notes: '',
+    transport_fee: 0
   });
 
   // Items to add to the delivery note
   const [dnItems, setDnItems] = useState<Array<{
     inventory_material_id: number;
     quantity: number;
+    unit?: string;
     notes: string;
     internal_request_id?: number;
     use_backup?: boolean;
     // For vendor delivery materials (not yet in inventory)
     material_name?: string;
+    sub_item_name?: string;
     brand?: string;
     is_vendor_delivery?: boolean;
   }>>([]);
@@ -159,6 +165,15 @@ const StockOutPage: React.FC = () => {
     }
   }, []);
 
+  // Find matching inventory material by trying multiple name strategies
+  const findInventoryMatch = useCallback((matName?: string, matBrand?: string, parentItemName?: string) => {
+    const tryMatch = (name?: string) => {
+      if (!name) return undefined;
+      return materials.find(inv => inv.material_name?.toLowerCase() === name.toLowerCase());
+    };
+    return tryMatch(matBrand) || tryMatch(matName) || tryMatch(parentItemName);
+  }, [materials]);
+
   // Fetch pending requests
   const fetchPendingRequests = useCallback(async () => {
     setLoadingPending(true);
@@ -182,7 +197,7 @@ const StockOutPage: React.FC = () => {
       const requestsData = await inventoryService.getSentInternalRequests();
       const approved = requestsData.filter(req => {
         const status = normalizeStatus(req.status);
-        return status === 'APPROVED' || status === 'DN_PENDING';
+        return status === 'APPROVED';
       });
       setApprovedRequests(approved);
       setApprovedLoaded(true);
@@ -245,26 +260,24 @@ const StockOutPage: React.FC = () => {
     fetchInitialData();
   }, [fetchInitialData]);
 
-  // Lazy load based on active sub-tab
+  // Lazy load based on active main tab
   useEffect(() => {
-    if (activeSubTab === 'requests') {
-      // For requests tab, load based on statusFilter
-      if (statusFilter === 'PENDING' && !pendingLoaded && !loadingPending) {
-        fetchPendingRequests();
-      } else if (statusFilter === 'APPROVED' && !approvedLoaded && !loadingApproved) {
-        fetchApprovedRequests();
-      } else if (statusFilter === 'COMPLETED' && !completedLoaded && !loadingCompleted) {
-        fetchCompletedRequests();
-      } else if (statusFilter === 'REJECTED' && !rejectedLoaded && !loadingRejected) {
-        fetchRejectedRequests();
-      }
-    } else if (activeSubTab === 'delivery-notes') {
-      // Load delivery notes when switching to delivery-notes tab
+    // Material request tabs
+    if (activeMainTab === 'pending' && !pendingLoaded && !loadingPending) {
+      fetchPendingRequests();
+    } else if (activeMainTab === 'approved' && !approvedLoaded && !loadingApproved) {
+      fetchApprovedRequests();
+    } else if (activeMainTab === 'completed' && !completedLoaded && !loadingCompleted) {
+      fetchCompletedRequests();
+    } else if (activeMainTab === 'rejected' && !rejectedLoaded && !loadingRejected) {
+      fetchRejectedRequests();
+    }
+    // Delivery note tabs
+    else if (['draft_dn', 'issued_dn', 'delivered_dn'].includes(activeMainTab)) {
       fetchDeliveryNotes();
     }
   }, [
-    activeSubTab,
-    statusFilter,
+    activeMainTab,
     pendingLoaded,
     approvedLoaded,
     completedLoaded,
@@ -442,29 +455,27 @@ const StockOutPage: React.FC = () => {
       attention_to: attentionTo,
       delivery_from: inventoryConfig.store_name,
       requested_by: request.requester_details?.full_name || '',
+      request_date: request.created_at ? new Date(request.created_at).toISOString().split('T')[0] : undefined,
       vehicle_number: '',
       driver_name: '',
       driver_contact: '',
+      transport_fee: 0,
       notes: `Material request #${request.request_number || request.request_id}${destinationNote}`
     });
-
-    // For vendor delivery requests, store material info since it's not in inventory
-    // Match inventory by sub-item (brand) name, not item name
 
     // Handle grouped materials (materials_data) or single material
     if (request.materials_data && Array.isArray(request.materials_data) && request.materials_data.length > 0) {
       // Grouped materials - create DN item for each material
       const dnItemsList = request.materials_data.map(mat => {
-        const subItemName = mat.brand || mat.material_name;
-        const matchedInventory = materials.find(
-          inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-        );
+        const matchedInventory = findInventoryMatch(mat.material_name, mat.brand, request.item_name);
         return {
           inventory_material_id: matchedInventory?.inventory_material_id || 0,
           quantity: mat.quantity || 0,
+          unit: mat.unit || matchedInventory?.unit || 'unit',
           notes: '',
           internal_request_id: request.request_id,
           material_name: isVendorDelivery ? mat.material_name : undefined,
+          sub_item_name: isVendorDelivery ? mat.sub_item_name : undefined,
           brand: isVendorDelivery ? mat.brand : undefined,
           is_vendor_delivery: isVendorDelivery
         };
@@ -472,24 +483,23 @@ const StockOutPage: React.FC = () => {
       setDnItems(dnItemsList);
     } else {
       // Single material
-      const subItemName = request.brand || request.material_name;
-      const matchedInventory = materials.find(
-        inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-      );
+      const matchedInventory = findInventoryMatch(request.item_name, request.brand);
 
       setDnItems([{
         inventory_material_id: matchedInventory?.inventory_material_id || request.inventory_material_id || 0,
         quantity: request.quantity || 0,
+        unit: request.unit || matchedInventory?.unit || 'unit',
         notes: '',
         internal_request_id: request.request_id,
-        material_name: isVendorDelivery ? request.material_name : undefined,
+        material_name: isVendorDelivery ? request.item_name : undefined,
+        sub_item_name: isVendorDelivery ? request.sub_item_name : undefined,
         brand: isVendorDelivery ? request.brand : undefined,
         is_vendor_delivery: isVendorDelivery
       }]);
     }
 
     setShowDeliveryNoteModal(true);
-    setActiveSubTab('delivery-notes');
+    setActiveMainTab('draft_dn');
   };
 
   const handleDeliveryNoteProjectSelect = (projectId: number) => {
@@ -518,6 +528,11 @@ const StockOutPage: React.FC = () => {
       return;
     }
 
+    if (!dnFormData.transport_fee || dnFormData.transport_fee <= 0) {
+      showWarning('Please enter the transport fee');
+      return;
+    }
+
     if (dnItems.length === 0) {
       showWarning('Please add at least one item to the delivery note');
       return;
@@ -525,7 +540,7 @@ const StockOutPage: React.FC = () => {
 
     setSaving(true);
     try {
-      const newNote = await inventoryService.createDeliveryNote(dnFormData);
+      const newNote = await inventoryService.createDeliveryNote(dnFormData, null);
 
       // Use bulk endpoint to add all items in a single request (eliminates N+1 API calls)
       // Include vendor delivery info for items that need inventory creation
@@ -537,6 +552,7 @@ const StockOutPage: React.FC = () => {
         // For vendor delivery materials - include info for auto-creating inventory entry
         is_vendor_delivery: item.is_vendor_delivery,
         material_name: item.material_name,
+        sub_item_name: item.sub_item_name,
         brand: item.brand
       }));
 
@@ -550,7 +566,7 @@ const StockOutPage: React.FC = () => {
       resetDeliveryNoteForm();
 
       // Refresh the appropriate request list and delivery notes
-      if (statusFilter === 'APPROVED' && approvedLoaded) {
+      if (activeMainTab === 'approved' && approvedLoaded) {
         fetchApprovedRequests();
       }
       fetchDeliveryNotes();
@@ -574,7 +590,8 @@ const StockOutPage: React.FC = () => {
       vehicle_number: '',
       driver_name: '',
       driver_contact: '',
-      notes: ''
+      notes: '',
+      transport_fee: 0
     });
     setDnItems([]);
     setSelectedRequestForDN(null);
@@ -659,7 +676,7 @@ const StockOutPage: React.FC = () => {
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/delivery_note/${dn.delivery_note_id}/download`, {
+      const response = await fetch(`${API_BASE_URL}/inventory/delivery_note/${dn.delivery_note_id}/download`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -695,7 +712,7 @@ const StockOutPage: React.FC = () => {
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/delivery_note/${dn.delivery_note_id}/download`, {
+      const response = await fetch(`${API_BASE_URL}/inventory/delivery_note/${dn.delivery_note_id}/download`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -722,14 +739,14 @@ const StockOutPage: React.FC = () => {
     }
   };
 
-  // Get current requests based on status filter
+  // Get current requests based on active tab
   const currentRequests = useMemo(() => {
-    if (statusFilter === 'PENDING') return pendingRequests;
-    if (statusFilter === 'APPROVED') return approvedRequests;
-    if (statusFilter === 'COMPLETED') return completedRequests;
-    if (statusFilter === 'REJECTED') return rejectedRequests;
+    if (activeMainTab === 'pending') return pendingRequests;
+    if (activeMainTab === 'approved') return approvedRequests;
+    if (activeMainTab === 'completed') return completedRequests;
+    if (activeMainTab === 'rejected') return rejectedRequests;
     return [];
-  }, [statusFilter, pendingRequests, approvedRequests, completedRequests, rejectedRequests]);
+  }, [activeMainTab, pendingRequests, approvedRequests, completedRequests, rejectedRequests]);
 
   // Memoized filtered data with search
   const filteredRequests = useMemo(() => {
@@ -737,21 +754,59 @@ const StockOutPage: React.FC = () => {
 
     return currentRequests.filter(req => {
       const matchesSearch =
-        req.material_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        req.item_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         req.project_details?.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         req.requester_details?.full_name?.toLowerCase().includes(searchTerm.toLowerCase());
       return matchesSearch;
     });
   }, [currentRequests, searchTerm]);
 
+  // Pagination for requests
+  const requestsTotalPages = Math.ceil(filteredRequests.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequests = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredRequests.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequests, currentPage]);
+
+  // Filtered delivery notes based on active tab
+  const filteredDeliveryNotes = useMemo(() => {
+    return deliveryNotes.filter(dn => {
+      const status = normalizeStatus(dn.status);
+      if (activeMainTab === 'draft_dn') return status === 'DRAFT';
+      if (activeMainTab === 'issued_dn') return ['ISSUED', 'IN_TRANSIT', 'DISPATCHED'].includes(status);
+      if (activeMainTab === 'delivered_dn') return status === 'DELIVERED';
+      return false;
+    });
+  }, [deliveryNotes, activeMainTab]);
+
+  // Pagination for delivery notes
+  const dnTotalPages = Math.ceil(filteredDeliveryNotes.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedDeliveryNotes = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredDeliveryNotes.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredDeliveryNotes, currentPage]);
+
+  // Reset page when tab or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeMainTab, searchTerm]);
+
+  // Clamp page when total pages changes
+  useEffect(() => {
+    const totalPages = ['draft_dn', 'issued_dn', 'delivered_dn'].includes(activeMainTab) ? dnTotalPages : requestsTotalPages;
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [requestsTotalPages, dnTotalPages, currentPage, activeMainTab]);
+
   // Get loading state for current tab
   const isCurrentTabLoading = useMemo(() => {
-    if (statusFilter === 'PENDING') return loadingPending;
-    if (statusFilter === 'APPROVED') return loadingApproved;
-    if (statusFilter === 'COMPLETED') return loadingCompleted;
-    if (statusFilter === 'REJECTED') return loadingRejected;
+    if (activeMainTab === 'pending') return loadingPending;
+    if (activeMainTab === 'approved') return loadingApproved;
+    if (activeMainTab === 'completed') return loadingCompleted;
+    if (activeMainTab === 'rejected') return loadingRejected;
     return false;
-  }, [statusFilter, loadingPending, loadingApproved, loadingCompleted, loadingRejected]);
+  }, [activeMainTab, loadingPending, loadingApproved, loadingCompleted, loadingRejected]);
 
   const stockOutStats = useMemo(() => {
     const pending = pendingLoaded ? pendingRequests.length : 0;
@@ -802,103 +857,147 @@ const StockOutPage: React.FC = () => {
         <p className="text-gray-600 mt-1">Issue materials to project sites</p>
       </div>
 
-      {/* Info Banner */}
-      <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-4">
-        <div className="flex items-start gap-3">
-          <ArrowUpCircle className="w-5 h-5 text-cyan-600 mt-0.5 flex-shrink-0" />
-          <div>
-            <h3 className="font-semibold text-cyan-900">Stock Out - Decrease Inventory</h3>
-            <p className="text-sm text-cyan-700 mt-1">
-              Issue materials <strong>going out</strong> to project sites. This <strong>decreases stock quantities</strong>.
-            </p>
-            <div className="flex flex-wrap gap-4 mt-2 text-xs text-cyan-600">
-              <span className="flex items-center gap-1">
-                <Package className="w-3 h-3" />
-                <strong>Requests:</strong> Material requests from Procurement team
-              </span>
-              <span className="flex items-center gap-1">
-                <FileText className="w-3 h-3" />
-                <strong>Delivery Notes:</strong> Official dispatch documents for site delivery
-              </span>
-            </div>
-          </div>
+      {/* Main Tabs - Single Row with horizontal scroll */}
+      <div className="overflow-x-auto pb-2">
+        <div className="flex gap-2 min-w-max">
+          {/* Material Request Tabs */}
+          <button
+            onClick={() => setActiveMainTab('pending')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'pending'
+                ? 'bg-yellow-500 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <Package className="w-4 h-4" />
+            Pending
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'pending' ? 'bg-white/20' : 'bg-yellow-100 text-yellow-700'
+            }`}>
+              {pendingRequests.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('approved')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'approved'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <CheckCircle className="w-4 h-4" />
+            Approved
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'approved' ? 'bg-white/20' : 'bg-blue-100 text-blue-700'
+            }`}>
+              {approvedRequests.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('draft_dn')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'draft_dn'
+                ? 'bg-gray-700 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            Draft DN
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'draft_dn' ? 'bg-white/20' : 'bg-gray-200 text-gray-700'
+            }`}>
+              {deliveryNotes.filter(dn => normalizeStatus(dn.status) === 'DRAFT').length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('issued_dn')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'issued_dn'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            Issued DN
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'issued_dn' ? 'bg-white/20' : 'bg-blue-100 text-blue-700'
+            }`}>
+              {deliveryNotes.filter(dn => ['ISSUED', 'IN_TRANSIT', 'DISPATCHED'].includes(normalizeStatus(dn.status))).length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('completed')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'completed'
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <CheckCircle className="w-4 h-4" />
+            Completed
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'completed' ? 'bg-white/20' : 'bg-green-100 text-green-700'
+            }`}>
+              {completedRequests.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('rejected')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'rejected'
+                ? 'bg-red-500 text-white'
+                : 'bg-red-50 text-red-700 hover:bg-red-100'
+            }`}
+          >
+            <X className="w-4 h-4" />
+            Rejected
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'rejected' ? 'bg-white/20' : 'bg-red-100 text-red-700'
+            }`}>
+              {rejectedRequests.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveMainTab('delivered_dn')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              activeMainTab === 'delivered_dn'
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <CheckCircle className="w-4 h-4" />
+            Delivered DN
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              activeMainTab === 'delivered_dn' ? 'bg-white/20' : 'bg-green-100 text-green-700'
+            }`}>
+              {deliveryNotes.filter(dn => normalizeStatus(dn.status) === 'DELIVERED').length}
+            </span>
+          </button>
         </div>
       </div>
 
-      {/* Sub-tabs */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setActiveSubTab('requests')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            activeSubTab === 'requests'
-              ? 'bg-cyan-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-          aria-label="Material Requests tab"
-        >
-          <Package className="w-4 h-4 inline mr-2" />
-          Material Requests
-          <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-yellow-100 text-yellow-700">
-            {stockOutStats.pending}
-          </span>
-        </button>
-        <button
-          onClick={() => setActiveSubTab('delivery-notes')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            activeSubTab === 'delivery-notes'
-              ? 'bg-cyan-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-          aria-label="Delivery Notes tab"
-        >
-          <FileText className="w-4 h-4 inline mr-2" />
-          Delivery Notes
-          <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
-            {deliveryNotes.length}
-          </span>
-        </button>
-      </div>
-
-      {/* REQUESTS SUB-TAB */}
-      {activeSubTab === 'requests' && (
+      {/* MATERIAL REQUESTS TABS */}
+      {['pending', 'approved', 'completed', 'rejected'].includes(activeMainTab) && (
         <>
-          {/* Filters */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-            <div className="flex gap-2 flex-wrap">
-              {['PENDING', 'APPROVED', 'COMPLETED', 'REJECTED'].map(status => (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    statusFilter === status
-                      ? status === 'REJECTED'
-                        ? 'bg-red-600 text-white'
-                        : 'bg-cyan-600 text-white'
-                      : status === 'REJECTED'
-                        ? 'bg-red-50 text-red-700 hover:bg-red-100'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                  aria-label={`Filter by ${status}`}
-                >
-                  {status}
-                </button>
-              ))}
-            </div>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Search materials..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 w-64"
-                aria-label="Search material requests"
-              />
-            </div>
-          </div>
-
           {/* Requests Table */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            {/* Table Header with Search */}
+            <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
+              <h2 className="text-lg font-semibold text-gray-800">
+                {activeMainTab.charAt(0).toUpperCase() + activeMainTab.slice(1)} Material Requests
+              </h2>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="Search materials..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 w-64"
+                  aria-label="Search material requests"
+                />
+              </div>
+            </div>
             {isCurrentTabLoading ? (
               <div className="flex items-center justify-center py-12">
                 <ModernLoadingSpinners size="md" />
@@ -919,14 +1018,14 @@ const StockOutPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {filteredRequests.length === 0 ? (
+                  {paginatedRequests.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                         No material requests found
                       </td>
                     </tr>
                   ) : (
-                  filteredRequests.map((req) => (
+                  paginatedRequests.map((req) => (
                     <tr key={req.request_id} className="hover:bg-gray-50">
                       <td className="px-4 py-4 text-sm font-medium text-gray-900">
                         #{req.request_number || req.request_id}
@@ -951,17 +1050,15 @@ const StockOutPage: React.FC = () => {
                               // Single material from grouped data - show directly with inventory status
                               (() => {
                                 const mat = req.materials_data[0];
-                                // Check inventory against sub-item (brand) name, not item name
-                                const subItemName = mat.brand || mat.material_name;
-                                const inventoryMatch = materials.find(
-                                  inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-                                );
+                                const inventoryMatch = findInventoryMatch(mat.material_name, mat.brand, req.item_name);
                                 const isInInventory = !!inventoryMatch;
+                                // Use material_details if available, otherwise use materials_data
+                                const displayName = req.material_details?.material_name || mat.material_name || req.item_name;
                                 return (
                                   <div>
-                                    <div className="text-xs text-gray-500">{mat.material_name}</div>
-                                    {mat.brand && (
-                                      <div className="font-semibold text-gray-900">{mat.brand}</div>
+                                    <div className="font-semibold text-gray-900">{displayName}</div>
+                                    {req.material_details?.material_code && (
+                                      <div className="text-xs text-gray-400">{req.material_details.material_code}</div>
                                     )}
                                     {/* Inventory status indicator - checks sub-item */}
                                     {isInInventory ? (
@@ -979,32 +1076,39 @@ const StockOutPage: React.FC = () => {
                                 );
                               })()
                             ) : (
-                              // Multiple materials - show View button
-                              <button
-                                onClick={() => setMaterialsViewModal({
-                                  show: true,
-                                  materials: req.materials_data || [],
-                                  requestNumber: req.request_number || null
-                                })}
-                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                              >
-                                <Package className="w-3.5 h-3.5 mr-1.5" />
-                                View {req.materials_data.length} Materials
-                              </button>
+                              // Multiple materials - show item name first, then View button
+                              <div>
+                                <div className="font-semibold text-gray-900 mb-2">{req.material_details?.material_name || req.item_name}</div>
+                                {req.material_details?.material_code && (
+                                  <div className="text-xs text-gray-400 mb-2">{req.material_details.material_code}</div>
+                                )}
+                                <button
+                                  onClick={() => setMaterialsViewModal({
+                                    show: true,
+                                    materials: req.materials_data || [],
+                                    requestNumber: req.request_number || null,
+                                    parentMaterialName: req.item_name
+                                  })}
+                                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                                >
+                                  <Package className="w-3.5 h-3.5 mr-1.5" />
+                                  View {req.materials_data.length} Materials
+                                </button>
+                              </div>
                             )
                           ) : (
                             // Single material without materials_data
                             (() => {
-                              // Check inventory against sub-item (brand) name, not item name
-                              const subItemName = req.brand || req.material_name;
-                              const inventoryMatch = materials.find(
-                                inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-                              );
+                              const inventoryMatch = findInventoryMatch(req.item_name, req.brand);
                               const isInInventory = !!inventoryMatch;
+                              // Use material_details if available, otherwise use item_name
+                              const displayName = req.material_details?.material_name || req.item_name;
                               return (
                                 <div>
-                                  <div className="text-xs text-gray-500">{req.material_name}</div>
-                                  {req.brand && <div className="font-semibold text-gray-900">{req.brand}</div>}
+                                  <div className="font-semibold text-gray-900">{displayName}</div>
+                                  {req.material_details?.material_code && (
+                                    <div className="text-xs text-gray-400">{req.material_details.material_code}</div>
+                                  )}
                                   {/* Inventory status indicator - checks sub-item */}
                                   {isInInventory ? (
                                     <div className="flex items-center gap-1 mt-1">
@@ -1045,9 +1149,11 @@ const StockOutPage: React.FC = () => {
                         ) : (
                           (() => {
                             // Get stock from material_details or lookup from materials array
-                            const subItemName = req.brand || req.material_name;
-                            const inventoryMatch = materials.find(
-                              inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
+                            const matData0 = req.materials_data?.[0];
+                            const inventoryMatch = findInventoryMatch(
+                              matData0?.material_name || req.item_name,
+                              matData0?.brand || req.brand,
+                              req.item_name
                             );
                             const stockValue = req.material_details?.updated_stock ?? inventoryMatch?.current_stock ?? 0;
                             const unitValue = req.material_details?.unit || inventoryMatch?.unit || '';
@@ -1069,21 +1175,39 @@ const StockOutPage: React.FC = () => {
                         <div className="flex gap-2 flex-wrap">
                           {normalizeStatus(req.status) === 'PENDING' && (
                             (() => {
-                              // Check if sub-item is in inventory - use brand (sub-item) for check
-                              const matData = req.materials_data?.[0];
-                              const subItemName = matData?.brand || matData?.material_name || req.brand || req.material_name;
-                              const isInInventory = materials.some(
-                                inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-                              );
-                              const isAwaitingVendor = !isInInventory;
+                              // Vendor deliveries bring stock from outside — skip inventory check
+                              let hasEnoughStock = false;
+                              if (req.source_type === 'from_vendor_delivery') {
+                                hasEnoughStock = true;
+                              } else if (req.materials_data && Array.isArray(req.materials_data) && req.materials_data.length > 0) {
+                                // Grouped request: ALL materials must have sufficient stock
+                                hasEnoughStock = req.materials_data.every((mat: any) => {
+                                  const match = findInventoryMatch(mat.material_name, mat.brand, req.item_name);
+                                  return match && (match.current_stock || 0) >= (mat.quantity || 0);
+                                });
+                              } else {
+                                // Single-material: prefer authoritative backend field, fallback to inventory lookup
+                                const singleStock = req.material_details?.current_stock;
+                                if (singleStock !== undefined) {
+                                  hasEnoughStock = singleStock >= (req.quantity || 0);
+                                } else {
+                                  const match = findInventoryMatch(req.item_name, req.brand, req.item_name);
+                                  hasEnoughStock = !!match && (match.current_stock || 0) >= (req.quantity || 0);
+                                }
+                              }
+
+                              const isButtonDisabled = !hasEnoughStock;
+                              const disabledTitle = isButtonDisabled
+                                ? 'Insufficient stock — check inventory levels before approving'
+                                : '';
 
                               return (
                                 <>
                                   <button
                                     onClick={() => handleApproveRequest(req.request_id!)}
-                                    disabled={isAwaitingVendor}
+                                    disabled={isButtonDisabled}
                                     className={`px-3 py-1.5 text-xs rounded-lg font-medium ${
-                                      isAwaitingVendor
+                                      isButtonDisabled
                                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                         : req.source_type === 'from_vendor_delivery'
                                           ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
@@ -1092,7 +1216,7 @@ const StockOutPage: React.FC = () => {
                                     aria-label={req.source_type === 'from_vendor_delivery'
                                       ? `Confirm vendor delivery ${req.request_number}`
                                       : `Approve request ${req.request_number}`}
-                                    title={isAwaitingVendor ? 'Material not yet in inventory - awaiting vendor delivery' : ''}
+                                    title={disabledTitle}
                                   >
                                     {req.source_type === 'from_vendor_delivery' ? 'Confirm Receipt' : 'Approve'}
                                   </button>
@@ -1111,14 +1235,38 @@ const StockOutPage: React.FC = () => {
                             })()
                           )}
                           {(req.status === 'APPROVED' || req.status === 'approved') && (
-                            <button
-                              onClick={() => handleCreateDNFromRequest(req)}
-                              className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 font-medium flex items-center gap-1"
-                              aria-label={`Create delivery note for request ${req.request_number}`}
-                            >
-                              <FileText className="w-3 h-3" />
-                              Create DN
-                            </button>
+                            (() => {
+                              // Check if all materials have sufficient stock
+                              let hasStock = false;
+                              if (req.materials_data && Array.isArray(req.materials_data) && req.materials_data.length > 0) {
+                                hasStock = req.materials_data.every((mat: any) => {
+                                  const match = findInventoryMatch(mat.material_name, mat.brand, req.item_name);
+                                  return match && (match.current_stock || 0) >= (mat.quantity || 0);
+                                });
+                              } else {
+                                const match = findInventoryMatch(req.item_name, req.brand);
+                                hasStock = !!match && (match.current_stock || 0) >= (req.quantity || 0);
+                              }
+
+                              return hasStock ? (
+                                <button
+                                  onClick={() => handleCreateDNFromRequest(req)}
+                                  className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 font-medium flex items-center gap-1"
+                                  aria-label={`Create delivery note for request ${req.request_number}`}
+                                >
+                                  <FileText className="w-3 h-3" />
+                                  Create DN
+                                </button>
+                              ) : (
+                                <span
+                                  className="px-3 py-1.5 text-xs bg-amber-50 text-amber-700 rounded-lg font-medium flex items-center gap-1 border border-amber-200"
+                                  title="Stock is insufficient. Complete vendor delivery inspection in Stock In page first."
+                                >
+                                  <Package className="w-3 h-3" />
+                                  Awaiting Stock
+                                </span>
+                              );
+                            })()
                           )}
                           {(req.status === 'DN_PENDING' || req.status === 'dn_pending') && (
                             <span className="px-3 py-1.5 text-xs bg-indigo-100 text-indigo-600 rounded-lg font-medium flex items-center gap-1">
@@ -1159,43 +1307,63 @@ const StockOutPage: React.FC = () => {
               </tbody>
             </table>
             )}
+
+            {/* Pagination for Requests */}
+            {filteredRequests.length > 0 && (
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div className="text-sm text-gray-600">
+                    Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredRequests.length)} of {filteredRequests.length} requests
+                  </div>
+                  {requestsTotalPages > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600 px-2">
+                        Page {currentPage} of {requestsTotalPages}
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, requestsTotalPages))}
+                        disabled={currentPage === requestsTotalPages}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
 
-      {/* DELIVERY NOTES SUB-TAB */}
-      {activeSubTab === 'delivery-notes' && (
+      {/* DELIVERY NOTES TABS */}
+      {['draft_dn', 'issued_dn', 'delivered_dn'].includes(activeMainTab) && (
         <>
-          {/* Filters for Delivery Notes */}
-          <div className="flex justify-between items-center">
-            <div className="flex gap-2">
-              {['DRAFT', 'ISSUED', 'DELIVERED'].map(status => (
-                <button
-                  key={status}
-                  onClick={() => setDnStatusFilter(status)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    dnStatusFilter === status
-                      ? 'bg-cyan-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                  aria-label={`Filter by ${status}`}
-                >
-                  {status.replace('_', ' ')}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowDeliveryNoteModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition-colors"
-              aria-label="Create new delivery note"
-            >
-              <Plus className="w-5 h-5" />
-              New Delivery Note
-            </button>
-          </div>
-
           {/* Delivery Notes Table */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            {/* Table Header with Create Button */}
+            <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
+              <h2 className="text-lg font-semibold text-gray-800">
+                {activeMainTab === 'draft_dn' ? 'Draft' : activeMainTab === 'issued_dn' ? 'Issued' : 'Delivered'} Delivery Notes
+              </h2>
+              {/* <button
+                onClick={() => setShowDeliveryNoteModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition-colors"
+                aria-label="Create new delivery note"
+              >
+                <Plus className="w-5 h-5" />
+                New Delivery Note
+              </button> */}
+            </div>
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -1209,28 +1377,14 @@ const StockOutPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {deliveryNotes
-                  .filter(dn => {
-                    if (dnStatusFilter === 'DRAFT') return dn.status === 'DRAFT';
-                    if (dnStatusFilter === 'ISSUED') return dn.status === 'ISSUED' || dn.status === 'IN_TRANSIT';
-                    if (dnStatusFilter === 'DELIVERED') return dn.status === 'DELIVERED';
-                    return true;
-                  })
-                  .length === 0 ? (
+                {paginatedDeliveryNotes.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                      No delivery notes found
+                      No {activeMainTab === 'draft_dn' ? 'draft' : activeMainTab === 'issued_dn' ? 'issued' : 'delivered'} delivery notes found
                     </td>
                   </tr>
                 ) : (
-                  deliveryNotes
-                    .filter(dn => {
-                      if (dnStatusFilter === 'DRAFT') return dn.status === 'DRAFT';
-                      if (dnStatusFilter === 'ISSUED') return dn.status === 'ISSUED' || dn.status === 'IN_TRANSIT';
-                      if (dnStatusFilter === 'DELIVERED') return dn.status === 'DELIVERED';
-                      return true;
-                    })
-                    .map((dn) => (
+                  paginatedDeliveryNotes.map((dn) => (
                       <tr key={dn.delivery_note_id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">
                           {dn.delivery_note_number}
@@ -1349,6 +1503,40 @@ const StockOutPage: React.FC = () => {
                 )}
               </tbody>
             </table>
+
+            {/* Pagination for Delivery Notes */}
+            {filteredDeliveryNotes.length > 0 && (
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div className="text-sm text-gray-600">
+                    Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredDeliveryNotes.length)} of {filteredDeliveryNotes.length} delivery notes
+                  </div>
+                  {dnTotalPages > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600 px-2">
+                        Page {currentPage} of {dnTotalPages}
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, dnTotalPages))}
+                        disabled={currentPage === dnTotalPages}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1514,38 +1702,142 @@ const StockOutPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number *</label>
+              {/* Transport & Delivery Details */}
+              <div className="border-t pt-6 mt-6">
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center mb-4">
+                  <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
+                  </svg>
+                  Transport & Delivery Details
+                </h3>
+
+                {/* Transport Fee Calculation Section - Full Width */}
+                <div className="mb-4">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3">Transport Fee Calculation</h4>
+
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter total transport fee <span className="text-red-500">*</span> <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
+                  </label>
                   <input
-                    type="text"
-                    value={dnFormData.vehicle_number}
-                    onChange={(e) => setDnFormData({ ...dnFormData, vehicle_number: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                    required
-                    aria-label="Vehicle number"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={dnFormData.transport_fee === 0 ? '' : dnFormData.transport_fee}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Allow empty string or valid decimal numbers
+                      if (value === '') {
+                        setDnFormData({ ...dnFormData, transport_fee: 0 });
+                      } else {
+                        const numValue = parseFloat(value);
+                        if (!isNaN(numValue)) {
+                          setDnFormData({ ...dnFormData, transport_fee: numValue });
+                        }
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                    placeholder="0.00"
                   />
+                  <p className="text-xs text-gray-500 mt-1.5 flex items-start">
+                    <svg className="w-4 h-4 text-gray-400 mr-1 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    This is the total transport cost paid for material delivered.
+                  </p>
+
+                  {/* Total Transport Fee Display */}
+                  {dnFormData.transport_fee > 0 && (
+                    <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-lg p-4 shadow-sm mt-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center">
+                          <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                          </svg>
+                          <span className="text-sm text-blue-900 font-semibold">
+                            Total Transport Fee:
+                          </span>
+                        </div>
+                        <span className="text-2xl font-bold text-blue-900">
+                          AED {(dnFormData.transport_fee || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="bg-white rounded-md p-2 border border-blue-200">
+                        <p className="text-xs text-blue-800 font-medium">
+                          📊 Calculation: 1 × {(dnFormData.transport_fee || 0).toFixed(2)} = <span className="font-bold">{(dnFormData.transport_fee || 0).toFixed(2)} AED</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-amber-600 italic mt-2">
+                    ⚡ Total transport fee will be calculated automatically when you enter the quantity
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name *</label>
-                  <input
-                    type="text"
-                    value={dnFormData.driver_name}
-                    onChange={(e) => setDnFormData({ ...dnFormData, driver_name: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                    required
-                    aria-label="Driver name"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Driver Contact</label>
-                  <input
-                    type="text"
-                    value={dnFormData.driver_contact}
-                    onChange={(e) => setDnFormData({ ...dnFormData, driver_contact: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-                    aria-label="Driver contact"
-                  />
+
+                {/* 2x2 Grid Layout for Driver & Vehicle Details */}
+                <div className="grid grid-cols-2 gap-4">
+
+                  {/* Row 1, Col 2: Driver Name */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Driver Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={dnFormData.driver_name}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Only allow letters, spaces, and common name characters
+                        if (/^[a-zA-Z\s.''-]*$/.test(value)) {
+                          setDnFormData({ ...dnFormData, driver_name: value });
+                        }
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                      placeholder="Enter driver name"
+                      required
+                    />
+                  </div>
+
+                  {/* Row 2, Col 1: Vehicle Number */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Vehicle Number *
+                    </label>
+                    <input
+                      type="text"
+                      value={dnFormData.vehicle_number}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Allow alphanumeric characters, hyphens, and spaces for vehicle numbers
+                        if (/^[a-zA-Z0-9\s-]*$/.test(value)) {
+                          setDnFormData({ ...dnFormData, vehicle_number: value.toUpperCase() });
+                        }
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                      placeholder="Enter vehicle number"
+                      required
+                    />
+                  </div>
+
+                  {/* Row 2, Col 2: Driver Contact */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Driver Contact
+                    </label>
+                    <input
+                      type="tel"
+                      value={dnFormData.driver_contact}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Only allow numbers, +, -, spaces, and parentheses
+                        if (/^[0-9+\s()-]*$/.test(value)) {
+                          setDnFormData({ ...dnFormData, driver_contact: value });
+                        }
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                      placeholder="Enter driver contact number"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1556,13 +1848,13 @@ const StockOutPage: React.FC = () => {
 
                 <div className="space-y-2">
                   {dnItems.map((item, index) => (
-                    <div key={index} className={`grid grid-cols-12 gap-2 items-center p-2 rounded ${item.is_vendor_delivery ? 'bg-orange-50 border border-orange-200' : 'bg-gray-50'}`}>
-                      <div className="col-span-7">
+                    <div key={index} className={`flex items-center gap-2 p-2 rounded ${item.is_vendor_delivery ? 'bg-orange-50 border border-orange-200' : 'bg-gray-50'}`}>
+                      <div className="flex-1 min-w-0">
                         {/* Show material name directly for vendor deliveries, dropdown for store materials */}
                         {item.is_vendor_delivery ? (
                           <div className="px-2 py-1 text-sm">
                             <div className="font-medium text-gray-900">{item.material_name}</div>
-                            {item.brand && <div className="text-xs text-gray-500">{item.brand}</div>}
+                            {item.sub_item_name && <div className="text-xs text-gray-500">{item.sub_item_name}</div>}
                             <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700">
                               <Package className="w-2.5 h-2.5 mr-0.5" />
                               Vendor Delivery
@@ -1574,14 +1866,11 @@ const StockOutPage: React.FC = () => {
                           </div>
                         )}
                       </div>
-                      <div className="col-span-2">
-                        <div className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center bg-white">
+                      <div className="flex items-center gap-1 shrink-0">
+                        <div className="w-20 px-2 py-1 text-sm text-center bg-gray-100 border border-gray-300 rounded text-gray-700">
                           {item.quantity}
                         </div>
-                      </div>
-                      <div className="col-span-3">
-                        {/* Show unit */}
-                        <div className="text-sm text-gray-700 px-2 py-1">
+                        <div className="text-sm text-gray-700 px-1 py-1 whitespace-nowrap">
                           {item.unit || 'unit'}
                         </div>
                       </div>
@@ -1725,13 +2014,11 @@ const StockOutPage: React.FC = () => {
               <div className="space-y-3">
                 {materialsViewModal.materials.map((mat: any, idx: number) => {
                   // Check if material exists in inventory - use sub-item (brand) for check
-                  const subItemName = mat.brand || mat.material_name;
-                  const inventoryMatch = materials.find(
-                    inv => inv.material_name?.toLowerCase() === subItemName?.toLowerCase()
-                  );
+                  const inventoryMatch = findInventoryMatch(mat.material_name, mat.brand, materialsViewModal.parentMaterialName);
                   const isInInventory = !!inventoryMatch;
                   const currentStock = inventoryMatch?.current_stock || 0;
-                  const hasEnoughStock = isInInventory && currentStock >= (mat.quantity || 0);
+                  const matQty = mat.quantity || mat.rejected_qty || 0;
+                  const hasEnoughStock = isInInventory && currentStock >= matQty;
 
                   return (
                     <div
@@ -1746,13 +2033,15 @@ const StockOutPage: React.FC = () => {
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
-                          <div className="text-xs text-gray-500">{mat.material_name}</div>
-                          {mat.brand && <div className="font-semibold text-gray-900">{mat.brand}</div>}
+                          <div className="font-semibold text-gray-900">{mat.material_name}</div>
+                          {materialsViewModal.parentMaterialName && (
+                            <div className="text-xs text-gray-500">{materialsViewModal.parentMaterialName}</div>
+                          )}
                           {mat.specification && <div className="text-xs text-gray-400">{mat.specification}</div>}
                         </div>
                         <div className="text-right">
                           <div className="text-sm font-bold text-cyan-600">
-                            {mat.quantity} {mat.unit || 'nos'}
+                            {mat.quantity || mat.rejected_qty || 0} {mat.unit || 'nos'}
                           </div>
                           {mat.unit_price > 0 && (
                             <div className="text-xs text-gray-500">
@@ -1782,7 +2071,7 @@ const StockOutPage: React.FC = () => {
                               <ArrowUpCircle className="w-3.5 h-3.5 text-yellow-500" />
                               <span className="text-yellow-600 font-medium">Low stock</span>
                             </div>
-                            <span className="text-gray-600">Stock: {currentStock} {inventoryMatch?.unit || mat.unit || 'nos'} (need {mat.quantity})</span>
+                            <span className="text-gray-600">Stock: {currentStock} {inventoryMatch?.unit || mat.unit || 'nos'} (need {matQty})</span>
                           </div>
                         )}
                       </div>

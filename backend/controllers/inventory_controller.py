@@ -1,10 +1,12 @@
 from flask import jsonify, request, g, send_file
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 from config.db import db
 from models.inventory import *
 from models.project import Project
 from models.user import User
 from models.system_settings import SystemSettings
+from models.change_request import ChangeRequest
 from datetime import datetime
 from utils.comprehensive_notification_service import ComprehensiveNotificationService
 from utils.rdn_pdf_generator import RDNPDFGenerator
@@ -152,15 +154,17 @@ def get_project_managers(project):
     """Extract project managers from project object"""
     managers = []
     if project and project.user_id:
-        pm_ids = project.user_id if isinstance(project.user_id, list) else []
-        for pm_id in pm_ids:
-            pm_user = User.query.get(pm_id)
-            if pm_user:
-                managers.append({
-                    'user_id': pm_user.user_id,
-                    'full_name': pm_user.full_name,
-                    'email': pm_user.email
-                })
+        pm_ids = [pid for pid in (project.user_id if isinstance(project.user_id, list) else []) if pid]
+        if pm_ids:
+            batch_users = {u.user_id: u for u in User.query.filter(User.user_id.in_(pm_ids)).all()}
+            for pm_id in pm_ids:
+                pm_user = batch_users.get(pm_id)
+                if pm_user:
+                    managers.append({
+                        'user_id': pm_user.user_id,
+                        'full_name': pm_user.full_name,
+                        'email': pm_user.email
+                    })
     return managers
 
 
@@ -168,15 +172,17 @@ def get_mep_supervisors(project):
     """Extract MEP supervisors from project object"""
     supervisors = []
     if project and project.mep_supervisor_id:
-        mep_ids = project.mep_supervisor_id if isinstance(project.mep_supervisor_id, list) else []
-        for mep_id in mep_ids:
-            mep_user = User.query.get(mep_id)
-            if mep_user:
-                supervisors.append({
-                    'user_id': mep_user.user_id,
-                    'full_name': mep_user.full_name,
-                    'email': mep_user.email
-                })
+        mep_ids = [mid for mid in (project.mep_supervisor_id if isinstance(project.mep_supervisor_id, list) else []) if mid]
+        if mep_ids:
+            batch_users = {u.user_id: u for u in User.query.filter(User.user_id.in_(mep_ids)).all()}
+            for mep_id in mep_ids:
+                mep_user = batch_users.get(mep_id)
+                if mep_user:
+                    supervisors.append({
+                        'user_id': mep_user.user_id,
+                        'full_name': mep_user.full_name,
+                        'email': mep_user.email
+                    })
     return supervisors
 
 
@@ -189,16 +195,58 @@ def get_site_supervisors(project):
     3. PMAssignSS.assigned_to_se_id (single SE assignment)
 
     Returns array of site supervisor objects with user details
+
+    IMPORTANT: Only returns users with Site Engineer role to prevent
+    incorrect assignments (e.g., Estimators being listed as Site Engineers)
     """
     from models.pm_assign_ss import PMAssignSS
 
     supervisors = []
     seen_ids = set()
 
-    # First, check if project has direct site_supervisor_id
-    if project and project.site_supervisor_id:
-        site_user = User.query.get(project.site_supervisor_id)
-        if site_user:
+    if not project:
+        return None
+
+    # Collect ALL user IDs needed across all three sources before any DB call
+    all_user_ids = set()
+    if project.site_supervisor_id:
+        all_user_ids.add(project.site_supervisor_id)
+
+    assignments = PMAssignSS.query.filter_by(
+        project_id=project.project_id,
+        is_deleted=False
+    ).all()
+
+    for assignment in assignments:
+        if assignment.ss_ids:
+            all_user_ids.update(assignment.ss_ids)
+        if assignment.assigned_to_se_id:
+            all_user_ids.add(assignment.assigned_to_se_id)
+
+    if not all_user_ids:
+        return None
+
+    # Single batch query for all users
+    batch_users = {u.user_id: u for u in User.query.filter(User.user_id.in_(list(all_user_ids))).all()}
+
+    # Single batch query for all roles needed
+    role_ids_needed = {u.role_id for u in batch_users.values() if u.role_id}
+    batch_roles = {r.role_id: r for r in Role.query.filter(Role.role_id.in_(list(role_ids_needed))).all()} if role_ids_needed else {}
+
+    def is_site_engineer(user):
+        """Check if user has Site Engineer role (uses pre-fetched roles dict)"""
+        if not user or not user.role_id:
+            return False
+        role = batch_roles.get(user.role_id)
+        if not role:
+            return False
+        role_name_lower = role.role.lower().replace('_', '').replace(' ', '')
+        return role_name_lower in ['siteengineer', 'sitesupervisor', 'se']
+
+    # Process direct site_supervisor_id
+    if project.site_supervisor_id:
+        site_user = batch_users.get(project.site_supervisor_id)
+        if site_user and is_site_engineer(site_user):
             supervisors.append({
                 'user_id': site_user.user_id,
                 'full_name': site_user.full_name,
@@ -206,37 +254,29 @@ def get_site_supervisors(project):
             })
             seen_ids.add(site_user.user_id)
 
-    # Then, check PMAssignSS table for additional site supervisors
-    if project:
-        assignments = PMAssignSS.query.filter_by(
-            project_id=project.project_id,
-            is_deleted=False
-        ).all()
+    # Process PMAssignSS assignments (already fetched above)
+    for assignment in assignments:
+        if assignment.ss_ids:
+            for ss_id in assignment.ss_ids:
+                if ss_id not in seen_ids:
+                    ss_user = batch_users.get(ss_id)
+                    if ss_user and is_site_engineer(ss_user):
+                        supervisors.append({
+                            'user_id': ss_user.user_id,
+                            'full_name': ss_user.full_name,
+                            'email': ss_user.email
+                        })
+                        seen_ids.add(ss_user.user_id)
 
-        for assignment in assignments:
-            # Check ss_ids array
-            if assignment.ss_ids:  # ss_ids is an array
-                for ss_id in assignment.ss_ids:
-                    if ss_id not in seen_ids:
-                        ss_user = User.query.get(ss_id)
-                        if ss_user:
-                            supervisors.append({
-                                'user_id': ss_user.user_id,
-                                'full_name': ss_user.full_name,
-                                'email': ss_user.email
-                            })
-                            seen_ids.add(ss_user.user_id)
-
-            # Also check assigned_to_se_id (single SE assignment)
-            if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in seen_ids:
-                se_user = User.query.get(assignment.assigned_to_se_id)
-                if se_user:
-                    supervisors.append({
-                        'user_id': se_user.user_id,
-                        'full_name': se_user.full_name,
-                        'email': se_user.email
-                    })
-                    seen_ids.add(se_user.user_id)
+        if assignment.assigned_to_se_id and assignment.assigned_to_se_id not in seen_ids:
+            se_user = batch_users.get(assignment.assigned_to_se_id)
+            if se_user and is_site_engineer(se_user):
+                supervisors.append({
+                    'user_id': se_user.user_id,
+                    'full_name': se_user.full_name,
+                    'email': se_user.email
+                })
+                seen_ids.add(se_user.user_id)
 
     return supervisors if supervisors else None
 
@@ -564,8 +604,53 @@ def create_inventory_transaction():
         # Calculate total amount
         total_amount = quantity * unit_price
 
+        # Extract transport/delivery fields (optional - for Production Manager role)
+        driver_name = data.get('driver_name', None)
+        vehicle_number = data.get('vehicle_number', None)
+        transport_fee = float(data.get('transport_fee', 0.0)) if data.get('transport_fee') else None
+        # transport_notes = data.get('transport_notes', None)
+        delivery_batch_ref = data.get('delivery_batch_ref', None)
+
         # Handle file upload to Supabase if provided
         delivery_note_url = None
+
+        # Check if delivery_note_url is provided in request data (for reusing URLs when creating new batch with different transport fee)
+        if data.get('delivery_note_url'):
+            delivery_note_url = data.get('delivery_note_url')
+            print(f"✓ Using delivery note URL from request: {delivery_note_url}")
+        # If batch reference is provided but no file is uploaded and no URL in request, check if batch already has a file URL
+        elif delivery_batch_ref and not delivery_note_file:
+            existing_batch_txn = InventoryTransaction.query.filter_by(
+                delivery_batch_ref=delivery_batch_ref
+            ).filter(
+                InventoryTransaction.delivery_note_url.isnot(None)
+            ).first()
+
+            if existing_batch_txn and existing_batch_txn.delivery_note_url:
+                delivery_note_url = existing_batch_txn.delivery_note_url
+                print(f"✓ Reusing delivery note URL from batch {delivery_batch_ref}: {delivery_note_url}")
+
+        # If batch reference is provided but no transport details, inherit from first transaction in batch
+        if delivery_batch_ref:
+            if not driver_name or not vehicle_number or not transport_fee:
+                # Find the first transaction in this batch with complete transport details
+                batch_txn_with_transport = InventoryTransaction.query.filter_by(
+                    delivery_batch_ref=delivery_batch_ref
+                ).filter(
+                    InventoryTransaction.driver_name.isnot(None),
+                    InventoryTransaction.vehicle_number.isnot(None),
+                    InventoryTransaction.transport_fee.isnot(None)
+                ).first()
+
+                if batch_txn_with_transport:
+                    if not driver_name:
+                        driver_name = batch_txn_with_transport.driver_name
+                    if not vehicle_number:
+                        vehicle_number = batch_txn_with_transport.vehicle_number
+                    if not transport_fee:
+                        transport_fee = batch_txn_with_transport.transport_fee
+                    print(f"✓ Reusing transport details from batch {delivery_batch_ref}")
+
         if delivery_note_file:
             try:
                 import os
@@ -585,11 +670,6 @@ def create_inventory_transaction():
                 if not supabase_url or not supabase_key:
                     raise Exception('Supabase credentials must be set in environment variables')
 
-                # Create Supabase client with service role key
-                print(f"[DEBUG] Environment: {environment}")
-                print(f"[DEBUG] Supabase URL: {supabase_url}")
-                print(f"[DEBUG] Using service role key: {supabase_key[:20]}...")
-
                 supabase = create_client(supabase_url, supabase_key)
 
                 # Generate unique filename
@@ -597,9 +677,6 @@ def create_inventory_transaction():
                 original_filename = delivery_note_file.filename
                 file_extension = os.path.splitext(original_filename)[1]
                 unique_filename = f"delivery-notes/{timestamp}_{original_filename}"
-
-                print(f"[DEBUG] Uploading file: {unique_filename}")
-                print(f"[DEBUG] Content type: {delivery_note_file.content_type}")
 
                 # Upload to Supabase Storage
                 file_data = delivery_note_file.read()
@@ -614,15 +691,11 @@ def create_inventory_transaction():
                         file_data,  # file bytes (positional)
                         {"content-type": delivery_note_file.content_type, "upsert": "false"}  # file_options (positional)
                     )
-                    print(f"[DEBUG] Upload response: {response}")
                 except Exception as e:
-                    print(f"[DEBUG] Upload error details: {e}")
-                    print(f"[DEBUG] Error type: {type(e)}")
                     raise
 
                 # Get public URL
                 delivery_note_url = bucket.get_public_url(unique_filename)
-                print(f"[DEBUG] Public URL: {delivery_note_url}")
 
             except Exception as upload_error:
                 return jsonify({'error': f'File upload failed: {str(upload_error)}'}), 500
@@ -638,6 +711,12 @@ def create_inventory_transaction():
             project_id=data.get('project_id'),
             notes=data.get('notes'),
             delivery_note_url=delivery_note_url,
+            # Transport/Delivery fields
+            driver_name=driver_name,
+            vehicle_number=vehicle_number,
+            transport_fee=transport_fee,
+            # transport_notes=transport_notes,
+            delivery_batch_ref=delivery_batch_ref,
             created_by=current_user
         )
 
@@ -687,7 +766,10 @@ def get_all_inventory_transactions():
         if validation_error:
             return jsonify(validation_error[0]), validation_error[1]
 
-        query = InventoryTransaction.query
+        # Eager load material relationship to avoid N+1 queries
+        query = InventoryTransaction.query.options(
+            db.joinedload(InventoryTransaction.material)
+        )
 
         # Apply filters
         if inventory_material_id:
@@ -728,10 +810,36 @@ def get_all_inventory_transactions():
             transactions = query.all()
             total_pages = 1
 
-        # Enrich with material details
+        # Batch pre-fetch delivery notes by delivery_batch_ref for all transactions
+        _txn_batch_refs = list({t.delivery_batch_ref for t in transactions if t.delivery_batch_ref})
+        _batch_dn_by_ref = {}
+        if _txn_batch_refs:
+            for _dn in MaterialDeliveryNote.query.filter(
+                MaterialDeliveryNote.delivery_batch_ref.in_(_txn_batch_refs)
+            ).all():
+                if _dn.delivery_batch_ref not in _batch_dn_by_ref:
+                    _batch_dn_by_ref[_dn.delivery_batch_ref] = _dn
+
+        # Batch pre-fetch delivery_note_url per batch_ref from other transactions in the same batch
+        # This eliminates an N+1 that fires when a transaction lacks a URL but its batch-mate has one
+        _batch_ref_to_url = {}
+        if _txn_batch_refs:
+            _url_txns = InventoryTransaction.query.filter(
+                InventoryTransaction.delivery_batch_ref.in_(_txn_batch_refs),
+                InventoryTransaction.delivery_note_url.isnot(None)
+            ).with_entities(
+                InventoryTransaction.delivery_batch_ref,
+                InventoryTransaction.delivery_note_url
+            ).all()
+            for _bt_ref, _bt_url in _url_txns:
+                if _bt_ref not in _batch_ref_to_url:
+                    _batch_ref_to_url[_bt_ref] = _bt_url
+
+        # Enrich with material details (already loaded via joinedload - no N+1 queries)
         result = []
         for txn in transactions:
             txn_data = txn.to_dict()
+            # Material is already loaded via joinedload, so no additional query here
             if txn.material:
                 txn_data['material_code'] = txn.material.material_code
                 txn_data['material_name'] = txn.material.material_name
@@ -739,6 +847,109 @@ def get_all_inventory_transactions():
                 txn_data['size'] = txn.material.size
                 txn_data['category'] = txn.material.category
                 txn_data['unit'] = txn.material.unit
+
+            # Try to find associated delivery note
+            delivery_note = None
+
+            # Method 1: Try matching by delivery_batch_ref (pre-fetched dict — no DB call)
+            if txn.delivery_batch_ref:
+                delivery_note = _batch_dn_by_ref.get(txn.delivery_batch_ref)
+
+            # Method 2: If no batch ref match, try matching by transaction details
+            # This handles cases where transactions were created before proper batch ref linking
+            if not delivery_note and txn.reference_number:
+                # Try to find a delivery note where the reference matches or transport details align
+                from datetime import timedelta
+                date_range_start = txn.created_at - timedelta(days=7) if txn.created_at else None
+                date_range_end = txn.created_at + timedelta(days=7) if txn.created_at else None
+
+                query = MaterialDeliveryNote.query
+
+                # Filter by date range if available
+                if date_range_start and date_range_end:
+                    query = query.filter(
+                        MaterialDeliveryNote.created_at >= date_range_start,
+                        MaterialDeliveryNote.created_at <= date_range_end
+                    )
+
+                # Try matching by driver AND vehicle (strong correlation)
+                if txn.driver_name and txn.vehicle_number:
+                    delivery_note = query.filter_by(
+                        driver_name=txn.driver_name,
+                        vehicle_number=txn.vehicle_number
+                    ).first()
+
+                # If still no match, try just vehicle number (vehicles are more unique than driver names)
+                if not delivery_note and txn.vehicle_number:
+                    delivery_note = query.filter_by(
+                        vehicle_number=txn.vehicle_number
+                    ).first()
+
+            # Add delivery note details if found
+            if delivery_note:
+                txn_data['delivery_note_details'] = {
+                    'delivery_note_id': delivery_note.delivery_note_id,
+                    'delivery_note_number': delivery_note.delivery_note_number,
+                    'delivery_date': delivery_note.delivery_date.isoformat() if delivery_note.delivery_date else None,
+                    'status': delivery_note.status,
+                    'driver_name': delivery_note.driver_name,
+                    'vehicle_number': delivery_note.vehicle_number,
+                    'driver_contact': delivery_note.driver_contact,
+                    'transport_fee': delivery_note.transport_fee,
+                    'project_id': delivery_note.project_id
+                }
+
+                # Override transaction-level fields with delivery note info
+                if delivery_note.delivery_note_number:
+                    txn_data['delivery_note_number'] = delivery_note.delivery_note_number
+                if delivery_note.transport_fee is not None:
+                    txn_data['dn_transport_fee'] = delivery_note.transport_fee
+                if delivery_note.driver_name:
+                    txn_data['dn_driver_name'] = delivery_note.driver_name
+                if delivery_note.vehicle_number:
+                    txn_data['dn_vehicle_number'] = delivery_note.vehicle_number
+                # Use delivery note file URL if transaction doesn't have one
+                if delivery_note.delivery_note_url and not txn_data.get('delivery_note_url'):
+                    txn_data['delivery_note_url'] = delivery_note.delivery_note_url
+
+                # Log successful match for debugging
+                print(f"✓ Matched transaction {txn.inventory_transaction_id} to DN {delivery_note.delivery_note_number}")
+
+            # If transaction still doesn't have a delivery_note_url but has a batch reference,
+            # look up the file URL from the pre-fetched batch_ref → url map (no N+1 query)
+            if not txn_data.get('delivery_note_url') and txn.delivery_batch_ref:
+                _batch_url = _batch_ref_to_url.get(txn.delivery_batch_ref)
+                if _batch_url:
+                    txn_data['delivery_note_url'] = _batch_url
+                    print(f"✓ Found delivery note URL from batch {txn.delivery_batch_ref} for transaction {txn.inventory_transaction_id}")
+
+            # If transaction doesn't have transport details but has a batch reference,
+            # look up transport details from other transactions in the same batch
+            if txn.delivery_batch_ref:
+                needs_transport_data = (
+                    not txn_data.get('driver_name') or
+                    not txn_data.get('vehicle_number') or
+                    not txn_data.get('transport_fee')
+                )
+
+                if needs_transport_data:
+                    batch_txn_with_transport = InventoryTransaction.query.filter_by(
+                        delivery_batch_ref=txn.delivery_batch_ref
+                    ).filter(
+                        InventoryTransaction.driver_name.isnot(None),
+                        InventoryTransaction.vehicle_number.isnot(None),
+                        InventoryTransaction.transport_fee.isnot(None)
+                    ).first()
+
+                    if batch_txn_with_transport:
+                        if not txn_data.get('driver_name'):
+                            txn_data['driver_name'] = batch_txn_with_transport.driver_name
+                        if not txn_data.get('vehicle_number'):
+                            txn_data['vehicle_number'] = batch_txn_with_transport.vehicle_number
+                        if not txn_data.get('transport_fee'):
+                            txn_data['transport_fee'] = batch_txn_with_transport.transport_fee
+                        print(f"✓ Found transport details from batch {txn.delivery_batch_ref} for transaction {txn.inventory_transaction_id}")
+
             result.append(txn_data)
 
         response_data = {
@@ -779,6 +990,44 @@ def get_inventory_transaction_by_id(inventory_transaction_id):
             txn_data['category'] = transaction.material.category
             txn_data['unit'] = transaction.material.unit
 
+        # If transaction doesn't have a delivery_note_url but has a batch reference,
+        # look up the file URL from other transactions in the same batch
+        if not txn_data.get('delivery_note_url') and transaction.delivery_batch_ref:
+            batch_txn_with_file = InventoryTransaction.query.filter_by(
+                delivery_batch_ref=transaction.delivery_batch_ref
+            ).filter(
+                InventoryTransaction.delivery_note_url.isnot(None)
+            ).first()
+
+            if batch_txn_with_file and batch_txn_with_file.delivery_note_url:
+                txn_data['delivery_note_url'] = batch_txn_with_file.delivery_note_url
+
+        # If transaction doesn't have transport details but has a batch reference,
+        # look up transport details from other transactions in the same batch
+        if transaction.delivery_batch_ref:
+            needs_transport_data = (
+                not txn_data.get('driver_name') or
+                not txn_data.get('vehicle_number') or
+                not txn_data.get('transport_fee')
+            )
+
+            if needs_transport_data:
+                batch_txn_with_transport = InventoryTransaction.query.filter_by(
+                    delivery_batch_ref=transaction.delivery_batch_ref
+                ).filter(
+                    InventoryTransaction.driver_name.isnot(None),
+                    InventoryTransaction.vehicle_number.isnot(None),
+                    InventoryTransaction.transport_fee.isnot(None)
+                ).first()
+
+                if batch_txn_with_transport:
+                    if not txn_data.get('driver_name'):
+                        txn_data['driver_name'] = batch_txn_with_transport.driver_name
+                    if not txn_data.get('vehicle_number'):
+                        txn_data['vehicle_number'] = batch_txn_with_transport.vehicle_number
+                    if not txn_data.get('transport_fee'):
+                        txn_data['transport_fee'] = batch_txn_with_transport.transport_fee
+
         return jsonify({'transaction': txn_data}), 200
 
     except Exception as e:
@@ -797,6 +1046,14 @@ def get_item_transaction_history(inventory_material_id):
             inventory_material_id=inventory_material_id
         ).order_by(InventoryTransaction.created_at.desc()).all()
 
+        # Batch pre-fetch projects for all transactions
+        _hist_proj_ids = list({t.project_id for t in transactions if t.project_id})
+        _batch_hist_projects = {
+            p.project_id: p for p in Project.query.filter(
+                Project.project_id.in_(_hist_proj_ids)
+            ).all()
+        } if _hist_proj_ids else {}
+
         # Enrich transactions with project details
         enriched_transactions = []
         for txn in transactions:
@@ -804,9 +1061,47 @@ def get_item_transaction_history(inventory_material_id):
 
             # Add project details if project_id exists
             if txn.project_id:
-                project = Project.query.get(txn.project_id)
+                project = _batch_hist_projects.get(txn.project_id)
                 if project:
                     txn_data['project_details'] = enrich_project_details(project)
+
+            # If transaction doesn't have a delivery_note_url but has a batch reference,
+            # look up the file URL from other transactions in the same batch
+            if not txn_data.get('delivery_note_url') and txn.delivery_batch_ref:
+                batch_txn_with_file = InventoryTransaction.query.filter_by(
+                    delivery_batch_ref=txn.delivery_batch_ref
+                ).filter(
+                    InventoryTransaction.delivery_note_url.isnot(None)
+                ).first()
+
+                if batch_txn_with_file and batch_txn_with_file.delivery_note_url:
+                    txn_data['delivery_note_url'] = batch_txn_with_file.delivery_note_url
+
+            # If transaction doesn't have transport details but has a batch reference,
+            # look up transport details from other transactions in the same batch
+            if txn.delivery_batch_ref:
+                needs_transport_data = (
+                    not txn_data.get('driver_name') or
+                    not txn_data.get('vehicle_number') or
+                    not txn_data.get('transport_fee')
+                )
+
+                if needs_transport_data:
+                    batch_txn_with_transport = InventoryTransaction.query.filter_by(
+                        delivery_batch_ref=txn.delivery_batch_ref
+                    ).filter(
+                        InventoryTransaction.driver_name.isnot(None),
+                        InventoryTransaction.vehicle_number.isnot(None),
+                        InventoryTransaction.transport_fee.isnot(None)
+                    ).first()
+
+                    if batch_txn_with_transport:
+                        if not txn_data.get('driver_name'):
+                            txn_data['driver_name'] = batch_txn_with_transport.driver_name
+                        if not txn_data.get('vehicle_number'):
+                            txn_data['vehicle_number'] = batch_txn_with_transport.vehicle_number
+                        if not txn_data.get('transport_fee'):
+                            txn_data['transport_fee'] = batch_txn_with_transport.transport_fee
 
             enriched_transactions.append(txn_data)
 
@@ -843,12 +1138,15 @@ def get_inventory_summary():
 
 
 def get_inventory_dashboard():
-    """Get comprehensive inventory dashboard data in a single API call"""
+    """Get comprehensive Production Manager dashboard analytics in a single API call"""
     try:
-        # Get all active materials
+        from datetime import timedelta
+        from sqlalchemy import case
+        from sqlalchemy.orm import joinedload
+
+        # ==================== 1. STOCK HEALTH METRICS ====================
         materials = InventoryMaterial.query.filter_by(is_active=True).all()
 
-        # Calculate stock health metrics
         total_items = len(materials)
         healthy_items = 0
         low_stock_items = 0
@@ -864,7 +1162,8 @@ def get_inventory_dashboard():
                     'stock': mat.current_stock,
                     'unit': mat.unit,
                     'status': 'out-of-stock',
-                    'material_code': mat.material_code
+                    'material_code': mat.material_code,
+                    'category': mat.category
                 })
             elif mat.min_stock_level and mat.current_stock <= mat.min_stock_level * 0.5:
                 critical_items += 1
@@ -873,7 +1172,8 @@ def get_inventory_dashboard():
                     'stock': mat.current_stock,
                     'unit': mat.unit,
                     'status': 'critical',
-                    'material_code': mat.material_code
+                    'material_code': mat.material_code,
+                    'category': mat.category
                 })
             elif mat.min_stock_level and mat.current_stock <= mat.min_stock_level:
                 low_stock_items += 1
@@ -882,30 +1182,154 @@ def get_inventory_dashboard():
                     'stock': mat.current_stock,
                     'unit': mat.unit,
                     'status': 'low',
-                    'material_code': mat.material_code
+                    'material_code': mat.material_code,
+                    'category': mat.category
                 })
             else:
                 healthy_items += 1
 
         # Calculate total inventory value
         total_value = sum(mat.current_stock * mat.unit_price for mat in materials)
+        total_backup_value = sum(mat.backup_stock * mat.unit_price for mat in materials if mat.backup_stock)
 
-        # Get category distribution
+        # ==================== 2. CATEGORY DISTRIBUTION ====================
         category_map = {}
         for mat in materials:
             cat = mat.category or 'Uncategorized'
             if cat not in category_map:
-                category_map[cat] = {'count': 0, 'value': 0}
+                category_map[cat] = {'count': 0, 'value': 0, 'stock': 0}
             category_map[cat]['count'] += 1
             category_map[cat]['value'] += mat.current_stock * mat.unit_price
+            category_map[cat]['stock'] += mat.current_stock
 
-        categories = [
-            {'name': k, 'count': v['count'], 'value': round(v['value'], 2)}
+        categories = sorted([
+            {'name': k, 'count': v['count'], 'value': round(v['value'], 2), 'stock': round(v['stock'], 2)}
             for k, v in category_map.items()
-        ]
+        ], key=lambda x: x['value'], reverse=True)
 
-        # Get transaction data
-        transactions = InventoryTransaction.query.order_by(
+        # ==================== 3. DELIVERY NOTES TRACKING (Optimized single query) ====================
+        dn_counts = db.session.query(
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'DRAFT', 1), else_=0)), 0).label('draft'),
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'ISSUED', 1), else_=0)), 0).label('issued'),
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'IN_TRANSIT', 1), else_=0)), 0).label('in_transit'),
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'DELIVERED', 1), else_=0)), 0).label('delivered'),
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'PARTIAL', 1), else_=0)), 0).label('partial'),
+            func.coalesce(func.sum(case((MaterialDeliveryNote.status == 'CANCELLED', 1), else_=0)), 0).label('cancelled')
+        ).first()
+
+        dn_draft = int(dn_counts.draft) if dn_counts else 0
+        dn_issued = int(dn_counts.issued) if dn_counts else 0
+        dn_in_transit = int(dn_counts.in_transit) if dn_counts else 0
+        dn_delivered = int(dn_counts.delivered) if dn_counts else 0
+        dn_partial = int(dn_counts.partial) if dn_counts else 0
+        dn_cancelled = int(dn_counts.cancelled) if dn_counts else 0
+
+        delivery_notes_status = {
+            'draft': dn_draft,
+            'issued': dn_issued,
+            'in_transit': dn_in_transit,
+            'delivered': dn_delivered,
+            'partial': dn_partial,
+            'cancelled': dn_cancelled,
+            'total': dn_draft + dn_issued + dn_in_transit + dn_delivered + dn_partial,
+            'pending_action': dn_draft + dn_issued
+        }
+
+        # ==================== 4. RETURN DELIVERY NOTES TRACKING (Optimized single query) ====================
+        rdn_counts = db.session.query(
+            func.coalesce(func.sum(case((ReturnDeliveryNote.status == 'DRAFT', 1), else_=0)), 0).label('draft'),
+            func.coalesce(func.sum(case((ReturnDeliveryNote.status == 'ISSUED', 1), else_=0)), 0).label('issued'),
+            func.coalesce(func.sum(case((ReturnDeliveryNote.status == 'IN_TRANSIT', 1), else_=0)), 0).label('in_transit'),
+            func.coalesce(func.sum(case((ReturnDeliveryNote.status == 'RECEIVED', 1), else_=0)), 0).label('received'),
+            func.coalesce(func.sum(case((ReturnDeliveryNote.status == 'PARTIAL', 1), else_=0)), 0).label('partial')
+        ).first()
+
+        rdn_draft = int(rdn_counts.draft) if rdn_counts else 0
+        rdn_issued = int(rdn_counts.issued) if rdn_counts else 0
+        rdn_in_transit = int(rdn_counts.in_transit) if rdn_counts else 0
+        rdn_received = int(rdn_counts.received) if rdn_counts else 0
+        rdn_partial = int(rdn_counts.partial) if rdn_counts else 0
+
+        return_notes_status = {
+            'draft': rdn_draft,
+            'issued': rdn_issued,
+            'in_transit': rdn_in_transit,
+            'received': rdn_received,
+            'partial': rdn_partial,
+            'total': rdn_draft + rdn_issued + rdn_in_transit + rdn_received + rdn_partial,
+            'incoming': rdn_issued + rdn_in_transit
+        }
+
+        # ==================== 5. INTERNAL MATERIAL REQUESTS (Optimized single query) ====================
+        imr_counts = db.session.query(
+            func.coalesce(func.sum(case((InternalMaterialRequest.status.in_(['PENDING', 'send_request']), 1), else_=0)), 0).label('pending'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'awaiting_vendor_delivery', 1), else_=0)), 0).label('awaiting_vendor'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'approved', 1), else_=0)), 0).label('approved'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'dn_pending', 1), else_=0)), 0).label('dn_pending'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'dispatched', 1), else_=0)), 0).label('dispatched'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'fulfilled', 1), else_=0)), 0).label('fulfilled'),
+            func.coalesce(func.sum(case((InternalMaterialRequest.status == 'rejected', 1), else_=0)), 0).label('rejected')
+        ).first()
+
+        imr_pending = int(imr_counts.pending) if imr_counts else 0
+        imr_awaiting_vendor = int(imr_counts.awaiting_vendor) if imr_counts else 0
+        imr_approved = int(imr_counts.approved) if imr_counts else 0
+        imr_dn_pending = int(imr_counts.dn_pending) if imr_counts else 0
+        imr_dispatched = int(imr_counts.dispatched) if imr_counts else 0
+        imr_fulfilled = int(imr_counts.fulfilled) if imr_counts else 0
+        imr_rejected = int(imr_counts.rejected) if imr_counts else 0
+
+        material_requests_status = {
+            'pending': imr_pending,
+            'awaiting_vendor': imr_awaiting_vendor,
+            'approved': imr_approved,
+            'dn_pending': imr_dn_pending,
+            'dispatched': imr_dispatched,
+            'fulfilled': imr_fulfilled,
+            'rejected': imr_rejected,
+            'total_active': imr_pending + imr_awaiting_vendor + imr_approved + imr_dn_pending + imr_dispatched,
+            'needs_action': imr_pending + imr_approved + imr_dn_pending
+        }
+
+        # ==================== 6. MATERIAL RETURNS & DISPOSAL (Optimized single query) ====================
+        returns_counts = db.session.query(
+            func.coalesce(func.sum(case((MaterialReturn.disposal_status == 'pending_approval', 1), else_=0)), 0).label('pending_approval'),
+            func.coalesce(func.sum(case((MaterialReturn.disposal_status == 'pending_review', 1), else_=0)), 0).label('pending_review'),
+            func.coalesce(func.sum(case((MaterialReturn.disposal_status == 'sent_for_repair', 1), else_=0)), 0).label('sent_for_repair'),
+            func.coalesce(func.sum(case((MaterialReturn.disposal_status == 'approved', 1), else_=0)), 0).label('approved'),
+            func.coalesce(func.sum(case((MaterialReturn.disposal_status == 'disposed', 1), else_=0)), 0).label('disposed'),
+            func.coalesce(func.sum(case((MaterialReturn.condition == 'Good', 1), else_=0)), 0).label('good'),
+            func.coalesce(func.sum(case((MaterialReturn.condition == 'Damaged', 1), else_=0)), 0).label('damaged'),
+            func.coalesce(func.sum(case((MaterialReturn.condition == 'Defective', 1), else_=0)), 0).label('defective')
+        ).first()
+
+        returns_pending = int(returns_counts.pending_approval) if returns_counts else 0
+        returns_pending_review = int(returns_counts.pending_review) if returns_counts else 0
+        returns_sent_repair = int(returns_counts.sent_for_repair) if returns_counts else 0
+        returns_approved = int(returns_counts.approved) if returns_counts else 0
+        returns_disposed = int(returns_counts.disposed) if returns_counts else 0
+        returns_good = int(returns_counts.good) if returns_counts else 0
+        returns_damaged = int(returns_counts.damaged) if returns_counts else 0
+        returns_defective = int(returns_counts.defective) if returns_counts else 0
+
+        returns_status = {
+            'pending_approval': returns_pending,
+            'pending_review': returns_pending_review,
+            'sent_for_repair': returns_sent_repair,
+            'approved': returns_approved,
+            'disposed': returns_disposed,
+            'by_condition': {
+                'good': returns_good,
+                'damaged': returns_damaged,
+                'defective': returns_defective
+            },
+            'needs_action': returns_pending + returns_pending_review + returns_sent_repair
+        }
+
+        # ==================== 7. RECENT TRANSACTIONS (Eager loading to avoid N+1) ====================
+        transactions = InventoryTransaction.query.options(
+            joinedload(InventoryTransaction.material)
+        ).order_by(
             InventoryTransaction.created_at.desc()
         ).limit(10).all()
 
@@ -917,36 +1341,180 @@ def get_inventory_dashboard():
                 txn_data['material_code'] = txn.material.material_code
             recent_transactions.append(txn_data)
 
-        total_transactions = InventoryTransaction.query.count()
+        # ==================== 8. STOCK MOVEMENT SUMMARY (Last 30 days) ====================
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
 
-        # Get internal request data
-        pending_requests = InternalMaterialRequest.query.filter(
-            InternalMaterialRequest.status.in_(['PENDING', 'send_request'])
+        # Purchases in last 30 days
+        purchases_30d = db.session.query(
+            func.coalesce(func.sum(InventoryTransaction.quantity), 0),
+            func.coalesce(func.sum(InventoryTransaction.total_amount), 0)
+        ).filter(
+            InventoryTransaction.transaction_type == 'PURCHASE',
+            InventoryTransaction.created_at >= thirty_days_ago
+        ).first()
+
+        # Withdrawals in last 30 days
+        withdrawals_30d = db.session.query(
+            func.coalesce(func.sum(InventoryTransaction.quantity), 0),
+            func.coalesce(func.sum(InventoryTransaction.total_amount), 0)
+        ).filter(
+            InventoryTransaction.transaction_type == 'WITHDRAWAL',
+            InventoryTransaction.created_at >= thirty_days_ago
+        ).first()
+
+        stock_movement = {
+            'period': '30_days',
+            'purchases': {
+                'quantity': float(purchases_30d[0]) if purchases_30d[0] else 0,
+                'value': round(float(purchases_30d[1]) if purchases_30d[1] else 0, 2)
+            },
+            'withdrawals': {
+                'quantity': float(withdrawals_30d[0]) if withdrawals_30d[0] else 0,
+                'value': round(float(withdrawals_30d[1]) if withdrawals_30d[1] else 0, 2)
+            }
+        }
+
+        # ==================== 9. PROJECT-WISE DISPATCH SUMMARY ====================
+        project_dispatch = db.session.query(
+            MaterialDeliveryNote.project_id,
+            Project.project_name,
+            func.count(MaterialDeliveryNote.delivery_note_id).label('total_dns'),
+            func.sum(case(
+                (MaterialDeliveryNote.status == 'DELIVERED', 1),
+                else_=0
+            )).label('delivered_count')
+        ).join(
+            Project, MaterialDeliveryNote.project_id == Project.project_id
+        ).filter(
+            MaterialDeliveryNote.project_id.isnot(None)
+        ).group_by(
+            MaterialDeliveryNote.project_id, Project.project_name
+        ).order_by(func.count(MaterialDeliveryNote.delivery_note_id).desc()).limit(5).all()
+
+        top_projects = [{
+            'project_id': p.project_id,
+            'project_name': p.project_name,
+            'total_delivery_notes': p.total_dns,
+            'delivered': p.delivered_count or 0
+        } for p in project_dispatch]
+
+        # ==================== 10. TODAY'S ACTIVITY ====================
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        today_transactions = InventoryTransaction.query.filter(
+            InventoryTransaction.created_at >= today_start
         ).count()
 
-        approved_requests = InternalMaterialRequest.query.filter_by(status='approved').count()
-        rejected_requests = InternalMaterialRequest.query.filter_by(status='rejected').count()
+        today_dns_created = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.created_at >= today_start
+        ).count()
+
+        today_dns_dispatched = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.dispatched_at >= today_start
+        ).count()
+
+        today_activity = {
+            'transactions': today_transactions,
+            'delivery_notes_created': today_dns_created,
+            'delivery_notes_dispatched': today_dns_dispatched
+        }
+
+        # ==================== 11. RECENT DELIVERY NOTES ====================
+        # Use a single query with join to get project names
+        recent_dns_query = db.session.query(
+            MaterialDeliveryNote,
+            Project.project_name
+        ).outerjoin(
+            Project, MaterialDeliveryNote.project_id == Project.project_id
+        ).order_by(
+            MaterialDeliveryNote.created_at.desc()
+        ).limit(5).all()
+
+        # Batch-fetch item counts for all recent DNs in one GROUP BY query
+        _recent_dn_ids = [dn.delivery_note_id for dn, _ in recent_dns_query]
+        _dn_item_counts = {}
+        if _recent_dn_ids:
+            _dn_item_counts = dict(
+                db.session.query(
+                    DeliveryNoteItem.delivery_note_id,
+                    func.count(DeliveryNoteItem.item_id)
+                ).filter(
+                    DeliveryNoteItem.delivery_note_id.in_(_recent_dn_ids)
+                ).group_by(DeliveryNoteItem.delivery_note_id).all()
+            )
+
+        recent_delivery_notes = []
+        for dn, project_name in recent_dns_query:
+            item_count = _dn_item_counts.get(dn.delivery_note_id, 0)
+            recent_delivery_notes.append({
+                'delivery_note_id': dn.delivery_note_id,
+                'delivery_note_number': dn.delivery_note_number,
+                'project_name': project_name or 'N/A',
+                'status': dn.status,
+                'total_items': item_count,
+                'created_at': dn.created_at.isoformat() if dn.created_at else None,
+                'attention_to': dn.attention_to
+            })
+
+        # ==================== 12. PENDING ACTIONS SUMMARY ====================
+        pending_actions = {
+            'delivery_notes_to_issue': dn_draft,
+            'delivery_notes_to_dispatch': dn_issued,
+            'material_requests_to_process': imr_pending + imr_approved,
+            'returns_to_process': returns_pending + returns_pending_review,
+            'incoming_returns': rdn_issued + rdn_in_transit,
+            'total': dn_draft + dn_issued + imr_pending + imr_approved + returns_pending + returns_pending_review + rdn_issued + rdn_in_transit
+        }
 
         return jsonify({
             'dashboard': {
+                # Stock Overview
                 'totalItems': total_items,
                 'totalValue': round(total_value, 2),
+                'totalBackupValue': round(total_backup_value, 2),
                 'healthyStockItems': healthy_items,
                 'lowStockItems': low_stock_items,
                 'criticalItems': critical_items,
                 'outOfStockItems': out_of_stock_items,
-                'stockAlerts': stock_alerts[:10],  # Limit to 10 alerts
+                'stockAlerts': stock_alerts[:10],
                 'categories': categories,
-                'totalTransactions': total_transactions,
+
+                # Delivery Notes
+                'deliveryNotesStatus': delivery_notes_status,
+                'returnNotesStatus': return_notes_status,
+                'recentDeliveryNotes': recent_delivery_notes,
+
+                # Material Requests
+                'materialRequestsStatus': material_requests_status,
+
+                # Returns & Disposal
+                'returnsStatus': returns_status,
+
+                # Transactions & Movement
                 'recentTransactions': recent_transactions,
-                'pendingRequests': pending_requests,
-                'approvedRequests': approved_requests,
-                'rejectedRequests': rejected_requests
+                'stockMovement': stock_movement,
+
+                # Project Summary
+                'topProjects': top_projects,
+
+                # Activity
+                'todayActivity': today_activity,
+
+                # Pending Actions (Action Required)
+                'pendingActions': pending_actions,
+
+                # Legacy fields for backward compatibility
+                'totalTransactions': InventoryTransaction.query.count(),
+                'pendingRequests': imr_pending,
+                'approvedRequests': imr_approved,
+                'rejectedRequests': imr_rejected
             }
         }), 200
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import logging
+        logging.exception("Error in inventory dashboard")
+        return jsonify({'error': 'Failed to load dashboard data'}), 500
 
 
 # ==================== INTERNAL MATERIAL REQUEST APIs ====================
@@ -958,7 +1526,7 @@ def internal_inventory_material_request():
         current_user = g.user.get('email', 'system')
 
         # Validate required fields
-        required_fields = ['material_name', 'inventory_material_id', 'quantity', 'project_id']
+        required_fields = ['item_name', 'inventory_material_id', 'quantity', 'project_id']
         for field in required_fields:
             if not data.get(field):
                 return jsonify({'error': f'{field} is required'}), 400
@@ -998,7 +1566,7 @@ def internal_inventory_material_request():
             # request_number=request_number,
             project_id=data['project_id'],
             cr_id=data.get('cr_id'),
-            material_name=data['material_name'],
+            item_name=data['item_name'],
             inventory_material_id=data['inventory_material_id'],
             quantity=float(data['quantity']),
             brand=data.get('brand'),  # Handles null
@@ -1006,6 +1574,7 @@ def internal_inventory_material_request():
             notes=data.get('notes'),
             request_send=True if is_buyer_request else data.get('request_send', False),
             status='send_request' if is_buyer_request else 'PENDING',
+            source_type='manual',  # Direct PM/buyer stock request, not a vendor delivery IMR
             created_by=current_user,
             request_buyer_id=g.user.get('user_id'),
             last_modified_by=current_user
@@ -1122,8 +1691,8 @@ def update_internal_material_request(request_id):
         current_user = g.user.get('email', 'system')
 
         # Update allowed fields
-        if 'material_name' in data:
-            internal_req.material_name = data['material_name']
+        # if 'item_name' in data:
+        #     internal_req.item_name = data['item_name']
         if 'inventory_material_id' in data:
             internal_req.inventory_material_id = data['inventory_material_id']
         if 'quantity' in data:
@@ -1247,6 +1816,14 @@ def get_sent_internal_requests():
         project_ids = set(req.project_id for req in requests if req.project_id)
         material_ids = set(req.inventory_material_id for req in requests if req.inventory_material_id)
         buyer_ids = set(req.request_buyer_id for req in requests if req.request_buyer_id)
+
+        # Batch load POChildren for VRR IMRs (to enrich quantity from rejected_qty)
+        po_child_ids = set(req.po_child_id for req in requests if req.po_child_id)
+        po_children_map = {}
+        if po_child_ids:
+            from models.po_child import POChild
+            po_children = POChild.query.filter(POChild.id.in_(po_child_ids)).all()
+            po_children_map = {pc.id: pc for pc in po_children}
 
         # Batch load projects (single query)
         projects_map = {}
@@ -1376,6 +1953,29 @@ def get_sent_internal_requests():
                     'unit_price': material.unit_price
                 }
 
+            # For VRR-created IMRs: enrich materials_data quantities from linked POChild
+            # (VRR rejected materials use 'rejected_qty'; the IMR stores quantity:0)
+            if req.po_child_id and req.po_child_id in po_children_map:
+                po_child = po_children_map[req.po_child_id]
+                if po_child.materials_data:
+                    pc_qty_lookup = {}
+                    for pc_mat in po_child.materials_data:
+                        name = (pc_mat.get('material_name') or '').lower().strip()
+                        pc_qty = pc_mat.get('quantity') or pc_mat.get('rejected_qty', 0)
+                        if name and pc_qty:
+                            pc_qty_lookup[name] = pc_qty
+                    if pc_qty_lookup:
+                        enriched = []
+                        for mat in (req_data.get('materials_data') or []):
+                            if (mat.get('quantity') or 0) == 0:
+                                lookup_name = (mat.get('material_name') or '').lower().strip()
+                                enriched_qty = pc_qty_lookup.get(lookup_name, 0)
+                                if enriched_qty:
+                                    mat = dict(mat)
+                                    mat['quantity'] = enriched_qty
+                            enriched.append(mat)
+                        req_data['materials_data'] = enriched
+
             # Add requester details from cache
             if req.request_buyer_id and req.request_buyer_id in users_map:
                 requester = users_map[req.request_buyer_id]
@@ -1416,13 +2016,20 @@ def get_all_internal_material_requests():
         # Order by latest first - PERFORMANCE: Limit to 200 records max
         requests = query.order_by(InternalMaterialRequest.created_at.desc()).limit(200).all()
 
+        # Batch pre-fetch projects for all IMRs
+        _imr_proj_ids = list({r.project_id for r in requests if r.project_id})
+        _batch_imr_projects = {
+            p.project_id: p for p in Project.query.filter(
+                Project.project_id.in_(_imr_proj_ids)
+            ).all()
+        } if _imr_proj_ids else {}
+
         # Enrich with project details
         result = []
         for req in requests:
             req_data = req.to_dict()
 
-            # Get project details
-            project = Project.query.get(req.project_id)
+            project = _batch_imr_projects.get(req.project_id)
             if project:
                 req_data['project_details'] = enrich_project_details(project)
 
@@ -1454,6 +2061,9 @@ def approve_internal_request(request_id):
     - Create withdrawal transaction
     """
     try:
+        from config.logging import get_logger
+        log = get_logger()
+
         # Use row locking to prevent race conditions on concurrent approvals
         internal_req = InternalMaterialRequest.query.with_for_update().get(request_id)
 
@@ -1476,19 +2086,24 @@ def approve_internal_request(request_id):
             transaction_details = []
 
             if materials_data and isinstance(materials_data, list) and len(materials_data) > 0:
-                # GROUPED VENDOR DELIVERY - Multiple materials
-                print(f"Processing grouped vendor delivery: {len(materials_data)} materials")
+                # Batch pre-fetch inventory materials by lower name for all materials in this request
+                _vd_names = list({mat.get('material_name', '').lower() for mat in materials_data if mat.get('material_name')})
+                _batch_vd_materials = {}
+                if _vd_names:
+                    for _m in InventoryMaterial.query.filter(
+                        db.func.lower(InventoryMaterial.material_name).in_(_vd_names)
+                    ).all():
+                        _batch_vd_materials[_m.material_name.lower()] = _m
 
+                # GROUPED VENDOR DELIVERY - Multiple materials
                 for mat in materials_data:
                     mat_name = mat.get('material_name', '')
                     mat_qty = float(mat.get('quantity', 0))
                     mat_unit = mat.get('unit', 'nos')
                     mat_price = float(mat.get('unit_price', 0) or 0)
 
-                    # Find matching inventory material by name (case-insensitive)
-                    inv_material = InventoryMaterial.query.filter(
-                        db.func.lower(InventoryMaterial.material_name) == mat_name.lower()
-                    ).first()
+                    # Find matching inventory material by name (pre-fetched dict — no DB call)
+                    inv_material = _batch_vd_materials.get(mat_name.lower())
 
                     if inv_material:
                         # Step 1: ADD to inventory (received from vendor)
@@ -1534,7 +2149,6 @@ def approve_internal_request(request_id):
                             'unit': mat_unit,
                             'action': 'received_and_dispatched'
                         })
-                        print(f"Vendor delivery: {mat_name} x{mat_qty} {mat_unit} → received and dispatched to {internal_req.final_destination_site}")
                     else:
                         # Material not in inventory - just log it
                         transaction_details.append({
@@ -1543,11 +2157,10 @@ def approve_internal_request(request_id):
                             'unit': mat_unit,
                             'action': 'skipped_not_in_inventory'
                         })
-                        print(f"Material '{mat_name}' not found in inventory - skipping transaction")
 
             else:
                 # SINGLE MATERIAL VENDOR DELIVERY
-                mat_name = internal_req.material_name
+                mat_name = internal_req.item_name
                 mat_qty = internal_req.quantity
 
                 # Find matching inventory material
@@ -1595,14 +2208,12 @@ def approve_internal_request(request_id):
                         'quantity': mat_qty,
                         'action': 'received_and_dispatched'
                     })
-                    print(f"Vendor delivery: {mat_name} x{mat_qty} → received and dispatched to {internal_req.final_destination_site}")
                 else:
                     transaction_details.append({
                         'material_name': mat_name,
                         'quantity': mat_qty,
                         'action': 'skipped_not_in_inventory'
                     })
-                    print(f"Material '{mat_name}' not found in inventory - skipping transaction")
 
             # Approve the request
             internal_req.status = 'APPROVED'
@@ -1610,6 +2221,45 @@ def approve_internal_request(request_id):
             internal_req.approved_at = datetime.utcnow()
             internal_req.vendor_delivery_confirmed = True
             internal_req.last_modified_by = current_user
+
+            # ✅ FIX: Update linked POChild status when PM approves vendor delivery
+            if internal_req.po_child_id:
+                from models.po_child import POChild
+                po_child = POChild.query.get(internal_req.po_child_id)
+                if po_child and po_child.status in ['sent_to_store', 'routed_to_store']:
+                    po_child.status = 'purchase_completed'
+                    po_child.store_request_status = 'completed'
+                    po_child.updated_at = datetime.utcnow()
+                    log.info(f"POChild {po_child.id}: {po_child.status} → purchase_completed (PM approved vendor delivery)")
+
+            # ✅ FIX: Update CR status when PM approves vendor delivery
+            # Only complete parent when ALL children are done AND all materials are covered
+            if internal_req.cr_id:
+                cr = ChangeRequest.query.get(internal_req.cr_id)
+                if cr and cr.status in ['sent_to_store', 'routed_to_store']:
+                    from models.po_child import POChild as POChildModel
+                    from utils.po_helpers import are_all_cr_materials_covered
+                    po_children = POChildModel.query.filter_by(
+                        parent_cr_id=cr.cr_id, is_deleted=False
+                    ).all()
+                    if po_children:
+                        all_done = all(
+                            pc.status in ['routed_to_store', 'purchase_completed']
+                            for pc in po_children
+                        )
+                        all_covered, uncovered = are_all_cr_materials_covered(cr, po_children)
+                        if all_done and all_covered:
+                            cr.status = 'purchase_completed'
+                            cr.store_request_status = 'completed'
+                            cr.updated_at = datetime.utcnow()
+                            log.info(f"CR-{cr.cr_id}: All POChildren done + all materials covered → purchase_completed")
+                        elif all_done and not all_covered:
+                            log.info(f"CR-{cr.cr_id}: All POChildren done but {len(uncovered)} materials uncovered — NOT completing parent")
+                    else:
+                        # No POChildren — all materials handled at parent level, safe to complete
+                        cr.status = 'purchase_completed'
+                        cr.store_request_status = 'completed'
+                        cr.updated_at = datetime.utcnow()
 
             db.session.commit()
 
@@ -1630,9 +2280,16 @@ def approve_internal_request(request_id):
         materials_data = internal_req.materials_data
 
         if materials_data and isinstance(materials_data, list) and len(materials_data) > 0:
-            # GROUPED MATERIALS REQUEST - Handle multiple materials
-            print(f"Processing grouped materials request: {len(materials_data)} materials")
+            # Batch pre-fetch inventory materials by lower name for all deduction materials
+            _deduct_names = list({mat.get('material_name', '').lower() for mat in materials_data if mat.get('material_name')})
+            _batch_deduct_materials = {}
+            if _deduct_names:
+                for _m in InventoryMaterial.query.filter(
+                    db.func.lower(InventoryMaterial.material_name).in_(_deduct_names)
+                ).all():
+                    _batch_deduct_materials[_m.material_name.lower()] = _m
 
+            # GROUPED MATERIALS REQUEST - Handle multiple materials
             # Step 1: Find inventory items for all materials and check stock
             materials_to_deduct = []
             insufficient_stock = []
@@ -1642,10 +2299,8 @@ def approve_internal_request(request_id):
                 mat_qty = float(mat.get('quantity', 0))
                 mat_unit = mat.get('unit', 'nos')
 
-                # Find matching inventory material by name (case-insensitive)
-                inv_material = InventoryMaterial.query.filter(
-                    db.func.lower(InventoryMaterial.material_name) == mat_name.lower()
-                ).first()
+                # Find matching inventory material (pre-fetched dict — no DB call)
+                inv_material = _batch_deduct_materials.get(mat_name.lower())
 
                 if inv_material:
                     # Check if sufficient stock available
@@ -1715,13 +2370,50 @@ def approve_internal_request(request_id):
                     'unit': item['unit']
                 })
 
-                print(f"Deducted {qty} {item['unit']} of '{item['material_name']}' from inventory (was {previous_stock}, now {inv_mat.current_stock})")
-
             # Step 3: Approve the request
             internal_req.status = 'APPROVED'
             internal_req.approved_by = current_user
             internal_req.approved_at = datetime.utcnow()
             internal_req.last_modified_by = current_user
+
+            # ✅ FIX: Update linked POChild status when PM approves store request
+            if internal_req.po_child_id:
+                from models.po_child import POChild
+                po_child = POChild.query.get(internal_req.po_child_id)
+                if po_child and po_child.status == 'sent_to_store':
+                    po_child.status = 'purchase_completed'
+                    po_child.store_request_status = 'completed'
+                    po_child.updated_at = datetime.utcnow()
+                    log.info(f"POChild {po_child.id}: sent_to_store → purchase_completed (PM approved)")
+
+            # ✅ FIX: Update CR status when PM approves store request (grouped materials)
+            # Only complete parent when ALL children are done AND all materials are covered
+            if internal_req.cr_id:
+                cr = ChangeRequest.query.get(internal_req.cr_id)
+                if cr and cr.status in ['sent_to_store', 'routed_to_store']:
+                    from models.po_child import POChild as POChildModel
+                    from utils.po_helpers import are_all_cr_materials_covered
+                    po_children = POChildModel.query.filter_by(
+                        parent_cr_id=cr.cr_id, is_deleted=False
+                    ).all()
+                    if po_children:
+                        all_done = all(
+                            pc.status in ['routed_to_store', 'purchase_completed']
+                            for pc in po_children
+                        )
+                        all_covered, uncovered = are_all_cr_materials_covered(cr, po_children)
+                        if all_done and all_covered:
+                            cr.status = 'purchase_completed'
+                            cr.store_request_status = 'completed'
+                            cr.updated_at = datetime.utcnow()
+                            log.info(f"CR-{cr.cr_id}: All POChildren done + all materials covered → purchase_completed")
+                        elif all_done and not all_covered:
+                            log.info(f"CR-{cr.cr_id}: All POChildren done but {len(uncovered)} materials uncovered — NOT completing parent")
+                    else:
+                        # No POChildren — all materials handled at parent level, safe to complete
+                        cr.status = 'purchase_completed'
+                        cr.store_request_status = 'completed'
+                        cr.updated_at = datetime.utcnow()
 
             db.session.commit()
 
@@ -1775,6 +2467,44 @@ def approve_internal_request(request_id):
         internal_req.inventory_transaction_id = new_transaction.inventory_transaction_id
         internal_req.last_modified_by = current_user
 
+        # ✅ FIX: Update linked POChild status when PM approves (single material)
+        if internal_req.po_child_id:
+            from models.po_child import POChild
+            po_child = POChild.query.get(internal_req.po_child_id)
+            if po_child and po_child.status in ['sent_to_store', 'routed_to_store']:
+                po_child.status = 'purchase_completed'
+                po_child.store_request_status = 'completed'
+                po_child.updated_at = datetime.utcnow()
+                log.info(f"POChild {po_child.id}: → purchase_completed (PM approved single material)")
+
+        # ✅ FIX: Update CR status when PM approves store request (single material)
+        # Only complete parent when ALL children are done AND all materials are covered
+        if internal_req.cr_id:
+            cr = ChangeRequest.query.get(internal_req.cr_id)
+            if cr and cr.status in ['sent_to_store', 'routed_to_store']:
+                from models.po_child import POChild as POChildModel
+                from utils.po_helpers import are_all_cr_materials_covered
+                po_children = POChildModel.query.filter_by(
+                    parent_cr_id=cr.cr_id, is_deleted=False
+                ).all()
+                if po_children:
+                    all_done = all(
+                        pc.status in ['routed_to_store', 'purchase_completed']
+                        for pc in po_children
+                    )
+                    all_covered, uncovered = are_all_cr_materials_covered(cr, po_children)
+                    if all_done and all_covered:
+                        cr.status = 'purchase_completed'
+                        cr.store_request_status = 'completed'
+                        cr.updated_at = datetime.utcnow()
+                    elif all_done and not all_covered:
+                        log.info(f"CR-{cr.cr_id}: All POChildren done but {len(uncovered)} materials uncovered — NOT completing parent")
+                else:
+                    # No POChildren — all materials handled at parent level, safe to complete
+                    cr.status = 'purchase_completed'
+                    cr.store_request_status = 'completed'
+                    cr.updated_at = datetime.utcnow()
+
         db.session.add(new_transaction)
         db.session.commit()
 
@@ -1800,6 +2530,8 @@ def approve_internal_request(request_id):
 
 def reject_internal_request(request_id):
     """Reject an internal material request"""
+    import logging
+    log = logging.getLogger(__name__)
     try:
         internal_req = InternalMaterialRequest.query.get(request_id)
 
@@ -1821,7 +2553,80 @@ def reject_internal_request(request_id):
         internal_req.rejection_reason = rejection_reason
         internal_req.last_modified_by = current_user
 
+        # Propagate rejection to linked store POChild so buyer sees it in Rejected tab
+        buyer_user_id = None
+        try:
+            from models.po_child import POChild
+            from models.change_request import ChangeRequest
+
+            if internal_req.po_child_id:
+                po_child = POChild.query.get(internal_req.po_child_id)
+                if po_child and po_child.routing_type == 'store':
+                    po_child.status = 'store_rejected'
+                    po_child.vendor_selection_status = 'store_rejected'
+                    po_child.rejection_reason = rejection_reason
+                    po_child.vendor_approved_by_td_name = g.user.get('full_name', 'Production Manager')
+                    po_child.updated_at = datetime.utcnow()
+                    log.info(f"Store POChild {po_child.get_formatted_id()} marked as store_rejected (IMR #{request_id} rejected: {rejection_reason})")
+
+                    parent_cr = ChangeRequest.query.get(po_child.parent_cr_id)
+                    if parent_cr:
+                        parent_cr.store_request_status = 'store_rejected'
+                        parent_cr.updated_at = datetime.utcnow()
+                        buyer_user_id = parent_cr.assigned_to_buyer_user_id
+            elif internal_req.cr_id:
+                parent_cr = ChangeRequest.query.get(internal_req.cr_id)
+                if parent_cr:
+                    parent_cr.store_request_status = 'store_rejected'
+                    parent_cr.updated_at = datetime.utcnow()
+                    buyer_user_id = parent_cr.assigned_to_buyer_user_id
+
+                    # Fallback: Find the store POChild via parent CR when po_child_id is missing
+                    store_po_child = POChild.query.filter_by(
+                        parent_cr_id=parent_cr.cr_id,
+                        routing_type='store',
+                        is_deleted=False
+                    ).first()
+                    if store_po_child and store_po_child.status != 'store_rejected':
+                        store_po_child.status = 'store_rejected'
+                        store_po_child.vendor_selection_status = 'store_rejected'
+                        store_po_child.rejection_reason = rejection_reason
+                        store_po_child.vendor_approved_by_td_name = g.user.get('full_name', 'Production Manager')
+                        store_po_child.updated_at = datetime.utcnow()
+                        log.info(f"Fallback: Store POChild {store_po_child.get_formatted_id()} marked as store_rejected via CR lookup")
+        except Exception as po_error:
+            log.error(f"Failed to update store POChild/CR on IMR rejection: {po_error}")
+
         db.session.commit()
+
+        # Send notification to buyer about store rejection
+        if buyer_user_id:
+            try:
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user
+
+                pm_name = g.user.get('full_name', 'Production Manager')
+                notification = NotificationManager.create_notification(
+                    user_id=buyer_user_id,
+                    type='rejection',
+                    title='Store Material Request Rejected',
+                    message=f'{pm_name} rejected store request #{request_id} for {internal_req.item_name or "materials"}. Reason: {rejection_reason}',
+                    priority='high',
+                    category='purchase',
+                    action_url='/buyer/purchase-orders?tab=rejected',
+                    action_label='View Rejected Items',
+                    metadata={
+                        'imr_id': request_id,
+                        'rejection_reason': rejection_reason,
+                        'target_role': 'buyer'
+                    },
+                    sender_id=g.user.get('user_id'),
+                    sender_name=pm_name,
+                    target_role='buyer'
+                )
+                send_notification_to_user(buyer_user_id, notification.to_dict())
+            except Exception as notif_error:
+                log.error(f"Failed to send store rejection notification: {notif_error}")
 
         return jsonify({
             'message': 'Internal request rejected',
@@ -1872,7 +2677,7 @@ def dispatch_material(request_id):
         material_info = {
             'inventory_material_id': internal_req.inventory_material_id,
             'material_code': material.material_code if material else None,
-            'material_name': material.material_name if material else internal_req.material_name,
+            'material_name': material.material_name if material else internal_req.item_name,
             'quantity': internal_req.quantity,
             'brand': internal_req.brand,
             'size': internal_req.size
@@ -1957,7 +2762,7 @@ def _check_material_availability(internal_req):
 
     # MODE 2: Search by name/brand/size (Fallback)
     query = InventoryMaterial.query.filter(
-        InventoryMaterial.material_name.ilike(f'%{internal_req.material_name}%'),
+        InventoryMaterial.material_name.ilike(f'%{internal_req.item_name}%'),
         InventoryMaterial.is_active == True
     )
 
@@ -2240,13 +3045,27 @@ def get_all_material_returns():
         # Order by latest first - PERFORMANCE: Limit to 200 records max
         returns = query.order_by(MaterialReturn.created_at.desc()).limit(200).all()
 
+        # Batch pre-fetch projects and materials for all returns
+        _ret_proj_ids = list({r.project_id for r in returns if r.project_id})
+        _batch_ret_projects = {
+            p.project_id: p for p in Project.query.filter(
+                Project.project_id.in_(_ret_proj_ids)
+            ).all()
+        } if _ret_proj_ids else {}
+
+        _ret_mat_ids = list({r.inventory_material_id for r in returns if r.inventory_material_id})
+        _batch_ret_materials = {
+            m.inventory_material_id: m for m in InventoryMaterial.query.filter(
+                InventoryMaterial.inventory_material_id.in_(_ret_mat_ids)
+            ).all()
+        } if _ret_mat_ids else {}
+
         # Enrich with project and material details
         result = []
         for ret in returns:
             ret_data = ret.to_dict()
 
-            # Get project details
-            project = Project.query.get(ret.project_id)
+            project = _batch_ret_projects.get(ret.project_id)
             if project:
                 ret_data['project_details'] = {
                     'project_id': project.project_id,
@@ -2256,8 +3075,8 @@ def get_all_material_returns():
                     'area': project.area
                 }
 
-            # Get material details including brand
-            material = InventoryMaterial.query.get(ret.inventory_material_id)
+            # Get material details from pre-fetched dict
+            material = _batch_ret_materials.get(ret.inventory_material_id)
             if material:
                 ret_data['material_details'] = {
                     'material_code': material.material_code,
@@ -2316,8 +3135,11 @@ def get_dispatched_materials_for_project(project_id):
     with their dispatched quantity, already returned quantity, and returnable quantity.
     """
     try:
-        # Get all delivery notes for this project with delivered status
-        delivery_notes = MaterialDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items and materials
+        delivery_notes = MaterialDeliveryNote.query.options(
+            joinedload(MaterialDeliveryNote.items)
+            .joinedload(DeliveryNoteItem.inventory_material)
+        ).filter(
             MaterialDeliveryNote.project_id == project_id,
             MaterialDeliveryNote.status.in_(RETURNABLE_DN_STATUSES)
         ).order_by(MaterialDeliveryNote.delivery_date.desc()).all()
@@ -2327,7 +3149,7 @@ def get_dispatched_materials_for_project(project_id):
 
         for dn in delivery_notes:
             for item in dn.items:
-                material = InventoryMaterial.query.get(item.inventory_material_id)
+                material = item.inventory_material  # Already loaded via joinedload
                 if not material:
                     continue
 
@@ -2356,6 +3178,14 @@ def get_pending_disposal_returns():
             disposal_status=DISPOSAL_PENDING_REVIEW
         ).order_by(MaterialReturn.created_at.desc()).all()
 
+        # Batch pre-fetch projects for all disposal returns
+        _disp_proj_ids = list({r.project_id for r in returns if r.project_id and r.project_id > 0})
+        _batch_disp_projects = {
+            p.project_id: p for p in Project.query.filter(
+                Project.project_id.in_(_disp_proj_ids)
+            ).all()
+        } if _disp_proj_ids else {}
+
         # Enrich with project and material details
         result = []
         for ret in returns:
@@ -2363,7 +3193,7 @@ def get_pending_disposal_returns():
 
             # Get project details (skip for catalog disposals where project_id = 0)
             if ret.project_id and ret.project_id > 0:
-                project = Project.query.get(ret.project_id)
+                project = _batch_disp_projects.get(ret.project_id)
                 if project:
                     ret_data['project_details'] = {
                         'project_id': project.project_id,
@@ -2734,7 +3564,6 @@ def request_disposal_from_repair(return_id):
                     action_url=f'/inventory/disposal-requests'
                 )
 
-            print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
         except Exception as email_error:
             print(f"Failed to send TD notification: {str(email_error)}")
 
@@ -2927,7 +3756,17 @@ def generate_delivery_note_number():
 def create_delivery_note():
     """Create a new material delivery note"""
     try:
-        data = request.get_json()
+        # Check if request contains files (multipart/form-data)
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # Get form data
+            data = request.form.to_dict()
+            # Get file
+            delivery_note_file = request.files.get('delivery_note_file')
+        else:
+            # Regular JSON request
+            data = request.get_json()
+            delivery_note_file = None
+
         current_user_email = g.user.get('email', 'system')
         current_user_id = g.user.get('user_id')
 
@@ -2945,7 +3784,7 @@ def create_delivery_note():
                 return jsonify({'error': f'{field} is required'}), 400
 
         # Validate project exists
-        project = Project.query.get(data['project_id'])
+        project = Project.query.get(int(data['project_id']))
         if not project:
             return jsonify({'error': 'Project not found'}), 404
 
@@ -2959,9 +3798,57 @@ def create_delivery_note():
         if data.get('request_date'):
             request_date = datetime.fromisoformat(data['request_date'].replace('Z', '+00:00')) if isinstance(data['request_date'], str) else data['request_date']
 
+        # Handle file upload to Supabase if provided, or use existing URL from batch
+        delivery_note_url = data.get('delivery_note_url')  # Check if URL provided (for reuse from batch)
+        if delivery_note_file:
+            try:
+                import os
+                from datetime import datetime as dt
+                from supabase import create_client
+
+                # Get Supabase credentials based on environment
+                environment = os.environ.get('ENVIRONMENT', 'production')
+                if environment == 'development':
+                    supabase_url = os.environ.get('DEV_SUPABASE_URL')
+                    supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
+                else:
+                    supabase_url = os.environ.get('SUPABASE_URL')
+                    supabase_key = os.environ.get('SUPABASE_ANON_KEY')
+
+                if not supabase_url or not supabase_key:
+                    raise Exception('Supabase credentials must be set in environment variables')
+
+                supabase = create_client(supabase_url, supabase_key)
+
+                # Generate unique filename
+                timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
+                original_filename = delivery_note_file.filename
+                file_extension = os.path.splitext(original_filename)[1]
+                unique_filename = f"delivery-notes/{timestamp}_{original_filename}"
+
+                # Upload to Supabase Storage
+                file_data = delivery_note_file.read()
+
+                bucket = supabase.storage.from_('inventory-files')
+
+                try:
+                    response = bucket.upload(
+                        unique_filename,
+                        file_data,
+                        {"content-type": delivery_note_file.content_type, "upsert": "false"}
+                    )
+                except Exception as e:
+                    raise
+
+                # Get public URL
+                delivery_note_url = bucket.get_public_url(unique_filename)
+
+            except Exception as upload_error:
+                return jsonify({'error': f'File upload failed: {str(upload_error)}'}), 500
+
         new_note = MaterialDeliveryNote(
             delivery_note_number=delivery_note_number,
-            project_id=data['project_id'],
+            project_id=int(data['project_id']),
             delivery_date=delivery_date,
             attention_to=data.get('attention_to'),
             delivery_from=data.get('delivery_from', get_store_name()),
@@ -2970,10 +3857,14 @@ def create_delivery_note():
             vehicle_number=data.get('vehicle_number'),
             driver_name=data.get('driver_name'),
             driver_contact=data.get('driver_contact'),
+            delivery_note_url=delivery_note_url,
             prepared_by=prepared_by_name,
             checked_by=data.get('checked_by'),
             status='DRAFT',
             notes=data.get('notes'),
+            # Transport tracking fields
+            transport_fee=float(data.get('transport_fee', 0.0)) if data.get('transport_fee') else None,
+            delivery_batch_ref=data.get('delivery_batch_ref'),
             created_by=current_user_email
         )
 
@@ -3016,7 +3907,11 @@ def get_all_delivery_notes():
         if validation_error:
             return jsonify(validation_error[0]), validation_error[1]
 
-        query = MaterialDeliveryNote.query
+        # Fix N+1 query: Eager load items and materials
+        query = MaterialDeliveryNote.query.options(
+            joinedload(MaterialDeliveryNote.items)
+            .joinedload(DeliveryNoteItem.inventory_material)
+        )
 
         if project_id:
             query = query.filter_by(project_id=int(project_id))
@@ -3051,10 +3946,17 @@ def get_all_delivery_notes():
             notes = query.all()
             total_pages = 1
 
+        # Batch load projects to avoid N+1
+        project_ids = list(set(note.project_id for note in notes if note.project_id))
+        projects_map = {}
+        if project_ids:
+            projects = Project.query.filter(Project.project_id.in_(project_ids)).all()
+            projects_map = {p.project_id: p for p in projects}
+
         result = []
         for note in notes:
             note_data = note.to_dict()
-            project = Project.query.get(note.project_id)
+            project = projects_map.get(note.project_id)
             if project:
                 note_data['project_details'] = {
                     'project_id': project.project_id,
@@ -3135,6 +4037,8 @@ def update_delivery_note(delivery_note_id):
             note.driver_name = data['driver_name']
         if 'driver_contact' in data:
             note.driver_contact = data['driver_contact']
+        if 'transport_fee' in data:
+            note.transport_fee = float(data['transport_fee']) if data['transport_fee'] else None
         if 'checked_by' in data:
             note.checked_by = data['checked_by']
         if 'notes' in data:
@@ -3252,6 +4156,21 @@ def add_items_to_delivery_note_bulk(delivery_note_id):
         errors = []
         current_user = g.user.get('email', 'system')
 
+        # Batch pre-fetch existing inventory materials by name for vendor delivery items
+        _vd_names_lower = [
+            (item_data.get('material_name') or '').strip().lower()
+            for item_data in items
+            if item_data.get('is_vendor_delivery') and not item_data.get('inventory_material_id')
+            and (item_data.get('material_name') or '').strip()
+        ]
+        _batch_existing_by_name = {}
+        if _vd_names_lower:
+            _existing_mats = InventoryMaterial.query.filter(
+                func.lower(InventoryMaterial.material_name).in_(_vd_names_lower)
+            ).all()
+            for _em in _existing_mats:
+                _batch_existing_by_name[_em.material_name.lower()] = _em
+
         for idx, item_data in enumerate(items):
             try:
                 # Validate quantity first
@@ -3286,9 +4205,8 @@ def add_items_to_delivery_note_bulk(delivery_note_id):
                         continue
 
                     # Check if material already exists in inventory by name (case-insensitive exact match)
-                    existing_material = InventoryMaterial.query.filter(
-                        func.lower(InventoryMaterial.material_name) == material_name.lower()
-                    ).first()
+                    # Use pre-fetched batch dict (also check newly flushed materials added in this loop)
+                    existing_material = _batch_existing_by_name.get(material_name.lower())
 
                     if existing_material:
                         # Use existing material
@@ -3319,7 +4237,8 @@ def add_items_to_delivery_note_bulk(delivery_note_id):
 
                         material = new_material
                         inventory_material_id = new_material.inventory_material_id
-                        print(f"Auto-created inventory material: {material_name} (ID: {inventory_material_id})")
+                        # Cache newly created material so duplicates in same batch don't re-create
+                        _batch_existing_by_name[material_name.lower()] = new_material
 
                 elif inventory_material_id:
                     material = InventoryMaterial.query.get(inventory_material_id)
@@ -3462,10 +4381,18 @@ def issue_delivery_note(delivery_note_id):
 
         current_user = g.user.get('email', 'system')
 
+        # Batch pre-fetch InternalMaterialRequests for all note items
+        _issue_imr_ids = [item.internal_request_id for item in note.items if item.internal_request_id]
+        _batch_issue_imrs = {
+            r.request_id: r for r in InternalMaterialRequest.query.filter(
+                InternalMaterialRequest.request_id.in_(_issue_imr_ids)
+            ).all()
+        } if _issue_imr_ids else {}
+
         # Update internal request status to DISPATCHED
         for item in note.items:
             if item.internal_request_id:
-                internal_req = InternalMaterialRequest.query.get(item.internal_request_id)
+                internal_req = _batch_issue_imrs.get(item.internal_request_id)
                 if internal_req:
                     internal_req.status = 'DISPATCHED'
                     internal_req.dispatch_date = datetime.utcnow()
@@ -3489,19 +4416,26 @@ def issue_delivery_note(delivery_note_id):
 
 
 def dispatch_delivery_note(delivery_note_id):
-    """Mark delivery note as dispatched (in transit)"""
+    """Mark delivery note as dispatched (in transit)
+
+    Supports two workflows:
+    1. Production Manager: ISSUED → IN_TRANSIT (with stock deduction already done)
+    2. Buyer Direct Transfer: DRAFT → IN_TRANSIT (external materials, no stock deduction)
+    """
     try:
         note = MaterialDeliveryNote.query.get(delivery_note_id)
 
         if not note:
             return jsonify({'error': 'Delivery note not found'}), 404
 
-        if note.status != 'ISSUED':
-            return jsonify({'error': f'Cannot dispatch delivery note with status {note.status}.'}), 400
+        # Allow dispatch from DRAFT (Buyer external transfer) or ISSUED (PM store dispatch)
+        if note.status not in ['DRAFT', 'ISSUED']:
+            return jsonify({'error': f'Cannot dispatch delivery note with status {note.status}. Must be DRAFT or ISSUED.'}), 400
 
         data = request.get_json() or {}
         current_user = g.user.get('email', 'system')
 
+        # Update transport details if provided
         if data.get('vehicle_number'):
             note.vehicle_number = data['vehicle_number']
         if data.get('driver_name'):
@@ -3509,15 +4443,26 @@ def dispatch_delivery_note(delivery_note_id):
         if data.get('driver_contact'):
             note.driver_contact = data['driver_contact']
 
+        # Set status to IN_TRANSIT (valid for both DRAFT and ISSUED sources)
+        # DRAFT → IN_TRANSIT (Buyer external transfer, no stock involved)
+        # ISSUED → IN_TRANSIT (PM dispatch from store, stock already deducted)
         note.status = 'IN_TRANSIT'
         note.dispatched_at = datetime.utcnow()
         note.dispatched_by = current_user
         note.last_modified_by = current_user
 
+        # Batch pre-fetch InternalMaterialRequests for dispatch
+        _dispatch_imr_ids = [item.internal_request_id for item in note.items if item.internal_request_id]
+        _batch_dispatch_imrs = {
+            r.request_id: r for r in InternalMaterialRequest.query.filter(
+                InternalMaterialRequest.request_id.in_(_dispatch_imr_ids)
+            ).all()
+        } if _dispatch_imr_ids else {}
+
         # Update linked internal requests to DISPATCHED
         for item in note.items:
             if item.internal_request_id:
-                internal_req = InternalMaterialRequest.query.get(item.internal_request_id)
+                internal_req = _batch_dispatch_imrs.get(item.internal_request_id)
                 if internal_req and internal_req.status in ['APPROVED', 'approved']:
                     internal_req.status = 'DISPATCHED'
                     internal_req.dispatch_date = datetime.utcnow()
@@ -3551,9 +4496,18 @@ def confirm_delivery(delivery_note_id):
 
         is_partial = False
         if data.get('items_received'):
+            # Batch pre-fetch all DeliveryNoteItems for this delivery note
+            _recv_item_ids = [d['item_id'] for d in data['items_received'] if 'item_id' in d]
+            _batch_dn_items = {
+                i.item_id: i for i in DeliveryNoteItem.query.filter(
+                    DeliveryNoteItem.item_id.in_(_recv_item_ids),
+                    DeliveryNoteItem.delivery_note_id == delivery_note_id
+                ).all()
+            } if _recv_item_ids else {}
+
             for item_data in data['items_received']:
-                item = DeliveryNoteItem.query.get(item_data['item_id'])
-                if item and item.delivery_note_id == delivery_note_id:
+                item = _batch_dn_items.get(item_data['item_id'])
+                if item:
                     item.quantity_received = float(item_data.get('quantity_received', item.quantity))
                     if item.quantity_received < item.quantity:
                         is_partial = True
@@ -3564,9 +4518,17 @@ def confirm_delivery(delivery_note_id):
         note.receiver_notes = data.get('receiver_notes')
         note.last_modified_by = current_user
 
+        # Batch pre-fetch InternalMaterialRequests for all note items
+        _imr_ids = [item.internal_request_id for item in note.items if item.internal_request_id]
+        _batch_imrs = {
+            r.request_id: r for r in InternalMaterialRequest.query.filter(
+                InternalMaterialRequest.request_id.in_(_imr_ids)
+            ).all()
+        } if _imr_ids else {}
+
         for item in note.items:
             if item.internal_request_id:
-                internal_req = InternalMaterialRequest.query.get(item.internal_request_id)
+                internal_req = _batch_imrs.get(item.internal_request_id)
                 if internal_req:
                     internal_req.status = 'FULFILLED'
                     internal_req.actual_delivery_date = datetime.utcnow()
@@ -3639,36 +4601,61 @@ def get_delivery_notes_for_se():
     1. Project.site_supervisor_id (direct assignment)
     2. PMAssignSS.ss_ids (array of SE IDs)
     3. PMAssignSS.assigned_to_se_id (single SE assignment)
+
+    Admin viewing as SE gets ALL delivery notes (no user-specific filtering)
     """
     try:
         current_user_id = g.user.get('user_id')
+        user_role = g.user.get('role', '').lower()
+        view_as_role = request.args.get('view_as_role', '').lower()
+
         from models.project import Project
         from models.pm_assign_ss import PMAssignSS
         from sqlalchemy import or_, any_
+        import logging
+        log = logging.getLogger(__name__)
+
+        # Valid roles for view_as_role parameter
+        VALID_VIEW_AS_ROLES = frozenset(['se', 'siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])
+        SUPER_ADMIN_ROLES = frozenset(['admin', 'superadmin', 'super_admin'])
+
+        # Validate view_as_role if provided
+        if view_as_role and view_as_role not in VALID_VIEW_AS_ROLES:
+            log.warning(f"Invalid view_as_role '{view_as_role}' provided by user {current_user_id}")
+            return jsonify({'error': f'Invalid view_as_role: {view_as_role}'}), 400
+
+        # Check if admin is viewing as SE
+        is_admin_viewing_as_role = user_role in SUPER_ADMIN_ROLES and view_as_role
 
         # Collect all project IDs from multiple sources
         project_ids = set()
 
-        # Source 1: Direct assignment via Project.site_supervisor_id
-        direct_projects = Project.query.filter(
-            Project.site_supervisor_id == current_user_id,
-            Project.is_deleted == False
-        ).all()
-        for p in direct_projects:
-            project_ids.add(p.project_id)
+        # Admin viewing as role gets ALL projects
+        if is_admin_viewing_as_role or user_role in SUPER_ADMIN_ROLES:
+            log.info(f"Admin {current_user_id} viewing as {view_as_role or 'admin'} - getting ALL projects for delivery notes")
+            all_projects = Project.query.filter(Project.is_deleted == False).all()
+            project_ids = set(p.project_id for p in all_projects)
+        else:
+            # Source 1: Direct assignment via Project.site_supervisor_id
+            direct_projects = Project.query.filter(
+                Project.site_supervisor_id == current_user_id,
+                Project.is_deleted == False
+            ).all()
+            for p in direct_projects:
+                project_ids.add(p.project_id)
 
-        # Source 2 & 3: Assignment via pm_assign_ss table
-        pm_assignments = PMAssignSS.query.filter(
-            PMAssignSS.is_deleted == False,
-            or_(
-                PMAssignSS.assigned_to_se_id == current_user_id,
-                PMAssignSS.ss_ids.any(current_user_id)
-            )
-        ).all()
+            # Source 2 & 3: Assignment via pm_assign_ss table
+            pm_assignments = PMAssignSS.query.filter(
+                PMAssignSS.is_deleted == False,
+                or_(
+                    PMAssignSS.assigned_to_se_id == current_user_id,
+                    PMAssignSS.ss_ids.any(current_user_id)
+                )
+            ).all()
 
-        for assignment in pm_assignments:
-            if assignment.project_id:
-                project_ids.add(assignment.project_id)
+            for assignment in pm_assignments:
+                if assignment.project_id:
+                    project_ids.add(assignment.project_id)
 
         project_ids = list(project_ids)
 
@@ -3684,9 +4671,12 @@ def get_delivery_notes_for_se():
             Project.is_deleted == False
         ).all()
 
-        # Get delivery notes for these projects that have been dispatched or in transit
+        # Fix N+1 query: Eager load items and materials
         status_filter = request.args.get('status')
-        query = MaterialDeliveryNote.query.filter(
+        query = MaterialDeliveryNote.query.options(
+            joinedload(MaterialDeliveryNote.items)
+            .joinedload(DeliveryNoteItem.inventory_material)
+        ).filter(
             MaterialDeliveryNote.project_id.in_(project_ids)
         )
 
@@ -3731,35 +4721,60 @@ def get_returnable_materials_for_se():
     1. Project.site_supervisor_id (direct assignment)
     2. PMAssignSS.ss_ids (array of SE IDs)
     3. PMAssignSS.assigned_to_se_id (single SE assignment)
+
+    Admin viewing as SE gets ALL returnable materials (no user-specific filtering)
     """
     try:
         current_user_id = g.user.get('user_id')
+        user_role = g.user.get('role', '').lower()
+        view_as_role = request.args.get('view_as_role', '').lower()
+
         from models.pm_assign_ss import PMAssignSS
         from sqlalchemy import or_
+        import logging
+        log = logging.getLogger(__name__)
+
+        # Valid roles for view_as_role parameter
+        VALID_VIEW_AS_ROLES = frozenset(['se', 'siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])
+        SUPER_ADMIN_ROLES = frozenset(['admin', 'superadmin', 'super_admin'])
+
+        # Validate view_as_role if provided
+        if view_as_role and view_as_role not in VALID_VIEW_AS_ROLES:
+            log.warning(f"Invalid view_as_role '{view_as_role}' provided by user {current_user_id}")
+            return jsonify({'error': f'Invalid view_as_role: {view_as_role}'}), 400
+
+        # Check if admin is viewing as SE
+        is_admin_viewing_as_role = user_role in SUPER_ADMIN_ROLES and view_as_role
 
         # Collect all project IDs from multiple sources
         project_ids = set()
 
-        # Source 1: Direct assignment via Project.site_supervisor_id
-        direct_projects = Project.query.filter(
-            Project.site_supervisor_id == current_user_id,
-            Project.is_deleted == False
-        ).all()
-        for p in direct_projects:
-            project_ids.add(p.project_id)
+        # Admin viewing as role gets ALL projects
+        if is_admin_viewing_as_role or user_role in SUPER_ADMIN_ROLES:
+            log.info(f"Admin {current_user_id} viewing as {view_as_role or 'admin'} - getting ALL projects for returnable materials")
+            all_projects = Project.query.filter(Project.is_deleted == False).all()
+            project_ids = set(p.project_id for p in all_projects)
+        else:
+            # Source 1: Direct assignment via Project.site_supervisor_id
+            direct_projects = Project.query.filter(
+                Project.site_supervisor_id == current_user_id,
+                Project.is_deleted == False
+            ).all()
+            for p in direct_projects:
+                project_ids.add(p.project_id)
 
-        # Source 2 & 3: Assignment via pm_assign_ss table
-        pm_assignments = PMAssignSS.query.filter(
-            PMAssignSS.is_deleted == False,
-            or_(
-                PMAssignSS.assigned_to_se_id == current_user_id,
-                PMAssignSS.ss_ids.any(current_user_id)
-            )
-        ).all()
+            # Source 2 & 3: Assignment via pm_assign_ss table
+            pm_assignments = PMAssignSS.query.filter(
+                PMAssignSS.is_deleted == False,
+                or_(
+                    PMAssignSS.assigned_to_se_id == current_user_id,
+                    PMAssignSS.ss_ids.any(current_user_id)
+                )
+            ).all()
 
-        for assignment in pm_assignments:
-            if assignment.project_id:
-                project_ids.add(assignment.project_id)
+            for assignment in pm_assignments:
+                if assignment.project_id:
+                    project_ids.add(assignment.project_id)
 
         if not project_ids:
             return jsonify({
@@ -3779,14 +4794,24 @@ def get_returnable_materials_for_se():
                 'message': 'No assigned projects found'
             }), 200
 
+        # ── Batch pre-fetch all delivery notes for all projects in one query ─────
+        _all_proj_ids = [p.project_id for p in assigned_projects]
+        _all_dns = MaterialDeliveryNote.query.options(
+            joinedload(MaterialDeliveryNote.items)
+            .joinedload(DeliveryNoteItem.inventory_material)
+        ).filter(
+            MaterialDeliveryNote.project_id.in_(_all_proj_ids),
+            MaterialDeliveryNote.status.in_(RETURNABLE_DN_STATUSES)
+        ).order_by(MaterialDeliveryNote.delivery_date.desc()).all()
+        _dns_by_project = {}
+        for _dn in _all_dns:
+            _dns_by_project.setdefault(_dn.project_id, []).append(_dn)
+        # ─────────────────────────────────────────────────────────────────────────
+
         result = []
 
         for project in assigned_projects:
-            # Get delivery notes for this project with returnable status
-            delivery_notes = MaterialDeliveryNote.query.filter(
-                MaterialDeliveryNote.project_id == project.project_id,
-                MaterialDeliveryNote.status.in_(RETURNABLE_DN_STATUSES)
-            ).order_by(MaterialDeliveryNote.delivery_date.desc()).all()
+            delivery_notes = _dns_by_project.get(project.project_id, [])
 
             if not delivery_notes:
                 continue
@@ -3796,7 +4821,7 @@ def get_returnable_materials_for_se():
 
             for dn in delivery_notes:
                 for item in dn.items:
-                    material = InventoryMaterial.query.get(item.inventory_material_id)
+                    material = item.inventory_material  # Already loaded via joinedload
                     if not material:
                         continue
 
@@ -3836,36 +4861,61 @@ def get_material_returns_for_se():
     1. Project.site_supervisor_id (direct assignment)
     2. PMAssignSS.ss_ids (array of SE IDs)
     3. PMAssignSS.assigned_to_se_id (single SE assignment)
+
+    Admin viewing as SE gets ALL material returns (no user-specific filtering)
     """
     try:
         current_user_id = g.user.get('user_id')
+        user_role = g.user.get('role', '').lower()
+        view_as_role = request.args.get('view_as_role', '').lower()
+
         from models.project import Project
         from models.pm_assign_ss import PMAssignSS
         from sqlalchemy import or_
+        import logging
+        log = logging.getLogger(__name__)
+
+        # Valid roles for view_as_role parameter
+        VALID_VIEW_AS_ROLES = frozenset(['se', 'siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor'])
+        SUPER_ADMIN_ROLES = frozenset(['admin', 'superadmin', 'super_admin'])
+
+        # Validate view_as_role if provided
+        if view_as_role and view_as_role not in VALID_VIEW_AS_ROLES:
+            log.warning(f"Invalid view_as_role '{view_as_role}' provided by user {current_user_id}")
+            return jsonify({'error': f'Invalid view_as_role: {view_as_role}'}), 400
+
+        # Check if admin is viewing as SE
+        is_admin_viewing_as_role = user_role in SUPER_ADMIN_ROLES and view_as_role
 
         # Collect all project IDs from multiple sources
         project_ids = set()
 
-        # Source 1: Direct assignment via Project.site_supervisor_id
-        direct_projects = Project.query.filter(
-            Project.site_supervisor_id == current_user_id,
-            Project.is_deleted == False
-        ).all()
-        for p in direct_projects:
-            project_ids.add(p.project_id)
+        # Admin viewing as role gets ALL projects
+        if is_admin_viewing_as_role or user_role in SUPER_ADMIN_ROLES:
+            log.info(f"Admin {current_user_id} viewing as {view_as_role or 'admin'} - getting ALL projects for material returns")
+            all_projects = Project.query.filter(Project.is_deleted == False).all()
+            project_ids = set(p.project_id for p in all_projects)
+        else:
+            # Source 1: Direct assignment via Project.site_supervisor_id
+            direct_projects = Project.query.filter(
+                Project.site_supervisor_id == current_user_id,
+                Project.is_deleted == False
+            ).all()
+            for p in direct_projects:
+                project_ids.add(p.project_id)
 
-        # Source 2 & 3: Assignment via pm_assign_ss table
-        pm_assignments = PMAssignSS.query.filter(
-            PMAssignSS.is_deleted == False,
-            or_(
-                PMAssignSS.assigned_to_se_id == current_user_id,
-                PMAssignSS.ss_ids.any(current_user_id)
-            )
-        ).all()
+            # Source 2 & 3: Assignment via pm_assign_ss table
+            pm_assignments = PMAssignSS.query.filter(
+                PMAssignSS.is_deleted == False,
+                or_(
+                    PMAssignSS.assigned_to_se_id == current_user_id,
+                    PMAssignSS.ss_ids.any(current_user_id)
+                )
+            ).all()
 
-        for assignment in pm_assignments:
-            if assignment.project_id:
-                project_ids.add(assignment.project_id)
+            for assignment in pm_assignments:
+                if assignment.project_id:
+                    project_ids.add(assignment.project_id)
 
         project_ids = list(project_ids)
 
@@ -3893,6 +4943,21 @@ def get_material_returns_for_se():
             'location': p.location
         } for p in assigned_projects}
 
+        # Batch pre-fetch DeliveryNoteItems and MaterialDeliveryNotes for returns
+        _ret_dni_ids = [ret.delivery_note_item_id for ret in returns if ret.delivery_note_item_id]
+        _batch_dni = {}
+        _batch_dn_for_returns = {}
+        if _ret_dni_ids:
+            _fetched_dnis = DeliveryNoteItem.query.filter(DeliveryNoteItem.item_id.in_(_ret_dni_ids)).all()
+            _batch_dni = {dni.item_id: dni for dni in _fetched_dnis}
+            _dn_ids_for_returns = list({dni.delivery_note_id for dni in _fetched_dnis if dni.delivery_note_id})
+            if _dn_ids_for_returns:
+                _batch_dn_for_returns = {
+                    dn.delivery_note_id: dn for dn in MaterialDeliveryNote.query.filter(
+                        MaterialDeliveryNote.delivery_note_id.in_(_dn_ids_for_returns)
+                    ).all()
+                }
+
         result = []
         for ret in returns:
             ret_data = ret.to_dict()
@@ -3902,9 +4967,9 @@ def get_material_returns_for_se():
 
             # Add delivery note info if available
             if ret.delivery_note_item_id:
-                delivery_note_item = DeliveryNoteItem.query.get(ret.delivery_note_item_id)
+                delivery_note_item = _batch_dni.get(ret.delivery_note_item_id)
                 if delivery_note_item:
-                    delivery_note = MaterialDeliveryNote.query.get(delivery_note_item.delivery_note_id)
+                    delivery_note = _batch_dn_for_returns.get(delivery_note_item.delivery_note_id)
                     if delivery_note:
                         ret_data['delivery_note_number'] = delivery_note.delivery_note_number
                         ret_data['delivery_date'] = delivery_note.delivery_date.isoformat() if delivery_note.delivery_date else None
@@ -3959,7 +5024,30 @@ def generate_return_note_number():
 def create_return_delivery_note():
     """STEP 1: Create a new return delivery note (RDN) - SE creates DRAFT"""
     try:
-        data = request.get_json()
+        # Handle both JSON and multipart/form-data
+        delivery_note_file = None
+
+        # Check if this is a multipart request (has files)
+        if request.files and len(request.files) > 0:
+            # Get form data
+            data = request.form.to_dict()
+            # Handle materials_data (JSON string)
+            if 'materials_data' in data:
+                import json
+                data['materials_data'] = json.loads(data['materials_data'])
+            # Convert numeric fields
+            if 'project_id' in data:
+                data['project_id'] = int(data['project_id'])
+            if 'transport_fee' in data:
+                data['transport_fee'] = float(data['transport_fee']) if data['transport_fee'] else 0
+            # Get file
+            delivery_note_file = request.files.get('delivery_note')
+        else:
+            # Try to get JSON data
+            data = request.get_json(silent=True) or {}
+            if not data:
+                return jsonify({'error': 'No data provided'}), 400
+
         current_user_email = g.user.get('email', 'system')
         current_user_id = g.user.get('user_id')
 
@@ -3987,6 +5075,48 @@ def create_return_delivery_note():
         # Parse return date
         return_date = datetime.fromisoformat(data['return_date'].replace('Z', '+00:00')) if isinstance(data['return_date'], str) else data['return_date']
 
+        # Upload delivery note file if provided
+        delivery_note_url = None
+        if delivery_note_file:
+            try:
+                import os
+                from supabase import create_client
+
+                # Get Supabase credentials
+                is_dev = os.environ.get('FLASK_ENV') == 'development'
+                if is_dev:
+                    supabase_url = os.environ.get('DEV_SUPABASE_URL')
+                    supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
+                else:
+                    supabase_url = os.environ.get('SUPABASE_URL')
+                    supabase_key = os.environ.get('SUPABASE_ANON_KEY')
+
+                if not supabase_url or not supabase_key:
+                    raise Exception("Supabase configuration not found")
+
+                supabase = create_client(supabase_url, supabase_key)
+
+                # Generate unique filename
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                original_filename = delivery_note_file.filename
+                unique_filename = f"return-delivery-notes/{timestamp}_{original_filename}"
+
+                # Upload to Supabase Storage
+                file_data = delivery_note_file.read()
+                bucket = supabase.storage.from_('inventory-files')
+
+                response = bucket.upload(
+                    unique_filename,
+                    file_data,
+                    {"content-type": delivery_note_file.content_type, "upsert": "false"}
+                )
+
+                # Get public URL
+                delivery_note_url = bucket.get_public_url(unique_filename)
+
+            except Exception as upload_error:
+                return jsonify({'error': f'File upload failed: {str(upload_error)}'}), 500
+
         # Create RDN
         new_rdn = ReturnDeliveryNote(
             return_note_number=return_note_number,
@@ -4002,6 +5132,8 @@ def create_return_delivery_note():
             checked_by=data.get('checked_by'),
             status='DRAFT',
             notes=data.get('notes'),
+            transport_fee=data.get('transport_fee', 0),
+            delivery_note_url=delivery_note_url,
             created_by=current_user_email
         )
 
@@ -4040,10 +5172,18 @@ def get_all_return_delivery_notes():
         # PERFORMANCE: Limit to 200 records max
         rdns = query.order_by(ReturnDeliveryNote.created_at.desc()).limit(200).all()
 
+        # Batch pre-fetch projects for all RDNs
+        _rdn_proj_ids = list({rdn.project_id for rdn in rdns if rdn.project_id})
+        _batch_rdn_projects = {
+            p.project_id: p for p in Project.query.filter(
+                Project.project_id.in_(_rdn_proj_ids)
+            ).all()
+        } if _rdn_proj_ids else {}
+
         result = []
         for rdn in rdns:
             rdn_data = rdn.to_dict()
-            project = Project.query.get(rdn.project_id)
+            project = _batch_rdn_projects.get(rdn.project_id)
             if project:
                 rdn_data['project_details'] = {
                     'project_id': project.project_id,
@@ -4306,22 +5446,46 @@ def issue_return_delivery_note(return_note_id):
 
         current_user = g.user.get('email', 'system')
 
+        # ── Batch pre-fetch materials and original DN items before validation loop ─
+        _rdn_mat_ids = list({item.inventory_material_id for item in rdn.items if item.inventory_material_id})
+        _batch_rdn_materials = {
+            m.inventory_material_id: m for m in InventoryMaterial.query.filter(
+                InventoryMaterial.inventory_material_id.in_(_rdn_mat_ids)
+            ).all()
+        } if _rdn_mat_ids else {}
+
+        _rdn_dn_item_ids = list({item.original_delivery_note_item_id for item in rdn.items if item.original_delivery_note_item_id})
+        _batch_rdn_dn_items = {
+            di.item_id: di for di in DeliveryNoteItem.query.filter(
+                DeliveryNoteItem.item_id.in_(_rdn_dn_item_ids)
+            ).all()
+        } if _rdn_dn_item_ids else {}
+
+        # Batch pre-fetch existing return sums per dn_item_id (excluding current RDN's items)
+        _current_rdn_item_ids = [item.return_item_id for item in rdn.items if item.return_item_id]
+        _batch_existing_return_sums = {}
+        if _rdn_dn_item_ids:
+            _return_sum_rows = db.session.query(
+                ReturnDeliveryNoteItem.original_delivery_note_item_id,
+                db.func.sum(ReturnDeliveryNoteItem.quantity)
+            ).filter(
+                ReturnDeliveryNoteItem.original_delivery_note_item_id.in_(_rdn_dn_item_ids),
+                ReturnDeliveryNoteItem.return_item_id.notin_(_current_rdn_item_ids) if _current_rdn_item_ids else True
+            ).group_by(ReturnDeliveryNoteItem.original_delivery_note_item_id).all()
+            _batch_existing_return_sums = {row[0]: (row[1] or 0) for row in _return_sum_rows}
+        # ─────────────────────────────────────────────────────────────────────────
+
         # Validate all items
         for item in rdn.items:
-            material = InventoryMaterial.query.get(item.inventory_material_id)
+            material = _batch_rdn_materials.get(item.inventory_material_id)
             if not material:
                 return jsonify({'error': f'Material with ID {item.inventory_material_id} not found'}), 404
 
             # Validate returnable quantity if linked to original delivery
             if item.original_delivery_note_item_id:
-                dn_item = DeliveryNoteItem.query.get(item.original_delivery_note_item_id)
+                dn_item = _batch_rdn_dn_items.get(item.original_delivery_note_item_id)
                 if dn_item:
-                    # Check total returned quantity including this RDN
-                    existing_returns = db.session.query(db.func.sum(ReturnDeliveryNoteItem.quantity)).filter(
-                        ReturnDeliveryNoteItem.original_delivery_note_item_id == item.original_delivery_note_item_id,
-                        ReturnDeliveryNoteItem.return_item_id != item.return_item_id
-                    ).scalar() or 0
-
+                    existing_returns = _batch_existing_return_sums.get(item.original_delivery_note_item_id, 0)
                     returnable = dn_item.quantity - existing_returns
                     if item.quantity > returnable:
                         return jsonify({
@@ -4339,8 +5503,6 @@ def issue_return_delivery_note(return_note_id):
         # Send notification to PM
         try:
             project = Project.query.get(rdn.project_id)
-            # TODO: Implement notification - RDN ready for pickup
-            print(f"Notification: RDN {rdn.return_note_number} ready for pickup from {project.project_name}")
         except Exception as notif_err:
             print(f"Error sending RDN issue notification: {notif_err}")
 
@@ -4387,7 +5549,6 @@ def dispatch_return_delivery_note(return_note_id):
         # Send notification to PM
         try:
             project = Project.query.get(rdn.project_id)
-            print(f"Notification: RDN {rdn.return_note_number} dispatched from {project.project_name}, materials in transit")
         except Exception as notif_err:
             print(f"Error sending RDN dispatch notification: {notif_err}")
 
@@ -4418,9 +5579,18 @@ def confirm_return_delivery_receipt(return_note_id):
         # Check for partial receipt
         is_partial = False
         if data.get('items_received'):
+            # Batch pre-fetch all ReturnDeliveryNoteItems for this note
+            _rdn_recv_ids = [d['return_item_id'] for d in data['items_received'] if 'return_item_id' in d]
+            _batch_rdn_recv_items = {
+                i.return_item_id: i for i in ReturnDeliveryNoteItem.query.filter(
+                    ReturnDeliveryNoteItem.return_item_id.in_(_rdn_recv_ids),
+                    ReturnDeliveryNoteItem.return_note_id == return_note_id
+                ).all()
+            } if _rdn_recv_ids else {}
+
             for item_data in data['items_received']:
-                item = ReturnDeliveryNoteItem.query.get(item_data['return_item_id'])
-                if item and item.return_note_id == return_note_id:
+                item = _batch_rdn_recv_items.get(item_data['return_item_id'])
+                if item:
                     quantity_accepted = float(item_data.get('quantity_accepted', item.quantity))
                     item.quantity_accepted = quantity_accepted
                     item.acceptance_status = item_data.get('acceptance_status', 'ACCEPTED')
@@ -4445,8 +5615,6 @@ def confirm_return_delivery_receipt(return_note_id):
         # Send notification to SE
         try:
             project = Project.query.get(rdn.project_id)
-            # TODO: Implement notification - RDN received at store
-            print(f"Notification: RDN {rdn.return_note_number} received at store from {project.project_name}")
         except Exception as notif_err:
             print(f"Error sending RDN receipt notification: {notif_err}")
 
@@ -4640,8 +5808,6 @@ def process_return_delivery_item(return_note_id, item_id):
                         action_url=f'/inventory/disposal-requests'
                     )
 
-                print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
-
             except Exception as notif_error:
                 print(f"Error sending disposal request notification: {notif_error}")
                 # Don't fail the request if notification fails
@@ -4697,12 +5863,27 @@ def process_all_return_delivery_items(return_note_id):
         processed_items = []
         errors = []
 
+        # Batch pre-fetch RDN items and their inventory materials
+        _batch_item_ids = [ia.get('item_id') for ia in items_data if ia.get('item_id')]
+        _batch_rdn_items_map = {
+            it.return_item_id: it for it in ReturnDeliveryNoteItem.query.filter(
+                ReturnDeliveryNoteItem.return_item_id.in_(_batch_item_ids),
+                ReturnDeliveryNoteItem.return_note_id == return_note_id
+            ).all()
+        } if _batch_item_ids else {}
+        _batch_mat_ids_for_rdn = list({it.inventory_material_id for it in _batch_rdn_items_map.values() if it.inventory_material_id})
+        _batch_materials_for_rdn = {
+            m.inventory_material_id: m for m in InventoryMaterial.query.filter(
+                InventoryMaterial.inventory_material_id.in_(_batch_mat_ids_for_rdn)
+            ).all()
+        } if _batch_mat_ids_for_rdn else {}
+
         for item_action in items_data:
             item_id = item_action.get('item_id')
             pm_action = item_action.get('action')
 
             try:
-                item = ReturnDeliveryNoteItem.query.get(item_id)
+                item = _batch_rdn_items_map.get(item_id)
 
                 if not item or item.return_note_id != return_note_id:
                     errors.append(f"Item {item_id}: not found in this RDN")
@@ -4712,7 +5893,7 @@ def process_all_return_delivery_items(return_note_id):
                     errors.append(f"Item {item_id}: already processed")
                     continue
 
-                material = InventoryMaterial.query.get(item.inventory_material_id)
+                material = _batch_materials_for_rdn.get(item.inventory_material_id)
                 if not material:
                     errors.append(f"Item {item_id}: material not found")
                     continue
@@ -4993,11 +6174,19 @@ def get_return_delivery_notes_for_pm():
 
         rdns = query.order_by(ReturnDeliveryNote.created_at.desc()).all()
 
+        # Batch pre-fetch projects for all PM RDNs
+        _pm_rdn_proj_ids = list({rdn.project_id for rdn in rdns if rdn.project_id})
+        _batch_pm_rdn_projects = {
+            p.project_id: p for p in Project.query.filter(
+                Project.project_id.in_(_pm_rdn_proj_ids)
+            ).all()
+        } if _pm_rdn_proj_ids else {}
+
         # Enrich with project details
         result = []
         for rdn in rdns:
             rdn_dict = rdn.to_dict()
-            project = Project.query.get(rdn.project_id)
+            project = _batch_pm_rdn_projects.get(rdn.project_id)
             if project:
                 rdn_dict['project_name'] = project.project_name
                 rdn_dict['project_code'] = project.project_code
@@ -5020,21 +6209,26 @@ def download_dn_pdf(delivery_note_id):
     import re
     from flask import send_file
     from config.constants import is_admin_role, is_project_manager_role, is_buyer_role, is_site_engineer_role, DefaultValues, ErrorMessages
+    from config.logging import get_logger
+    log = get_logger()
 
     try:
         current_user_email = g.user.get('email')
         current_user_id = g.user.get('user_id')
         user_role = g.user.get('role')
 
-        dn = MaterialDeliveryNote.query.get(delivery_note_id)
+        dn = MaterialDeliveryNote.query.filter_by(delivery_note_id=delivery_note_id).first()
 
         if not dn:
-            return jsonify({'error': ErrorMessages.NOT_FOUND}), 404
+            log.error(f"Delivery note with ID {delivery_note_id} not found")
+            return jsonify({'error': f'Delivery note with ID {delivery_note_id} not found'}), 404
 
-        # Get project details
-        project = Project.query.get(dn.project_id)
-        if not project:
-            return jsonify({'error': ErrorMessages.NOT_FOUND}), 404
+        # Get project details (may be None for store-destined DNs)
+        project = None
+        if dn.project_id:
+            project = Project.query.get(dn.project_id)
+            if not project:
+                return jsonify({'error': 'Project not found for this delivery note'}), 404
 
         # Helper to check if role is Production Manager
         def is_production_manager_role(role):
@@ -5055,27 +6249,82 @@ def download_dn_pdf(delivery_note_id):
         if not has_full_access:
             # Site Engineers/Supervisors can only access DNs for their assigned projects
             if is_site_engineer_role(user_role):
-                # Check BOTH site_supervisor_id AND site_supervisors relationship (multi-SE support)
+                # Store-destined DNs (project_id = None) are NOT accessible to Site Engineers
+                # Only Production Manager, Buyer, PM, or Admin can access those
+                if not project:
+                    import logging
+                    logging.warning(f"SE {current_user_id} tried to access store DN {delivery_note_id}")
+                    return jsonify({'error': 'This delivery note is for store transfer and not accessible'}), 403
+
+                # Check MULTIPLE sources for SE assignment (comprehensive check)
                 is_assigned = False
 
-                # Check primary supervisor
+                # Check 1: Primary supervisor (direct assignment via project.site_supervisor_id)
                 if project.site_supervisor_id == current_user_id:
                     is_assigned = True
+                    import logging
+                    logging.info(f"SE {current_user_id} authorized via site_supervisor_id for DN {delivery_note_id}")
 
-                # Check site_supervisors relationship (many-to-many)
-                if hasattr(project, 'site_supervisors') and project.site_supervisors:
+                # Check 2: site_supervisors relationship (many-to-many)
+                if not is_assigned and hasattr(project, 'site_supervisors') and project.site_supervisors:
                     assigned_se_ids = [se.user_id for se in project.site_supervisors]
                     if current_user_id in assigned_se_ids:
                         is_assigned = True
+                        import logging
+                        logging.info(f"SE {current_user_id} authorized via site_supervisors relationship for DN {delivery_note_id}")
+
+                # Check 3: PMAssignSS table (Project Manager assigns Site Engineer to BOQ)
+                # Check both assigned_to_se_id AND ss_ids array
+                if not is_assigned:
+                    from models.pm_assign_ss import PMAssignSS
+                    from models.boq import BOQ
+                    from sqlalchemy import or_
+
+                    pm_assignment = (
+                        db.session.query(PMAssignSS)
+                        .join(BOQ, PMAssignSS.boq_id == BOQ.boq_id)
+                        .filter(
+                            BOQ.project_id == project.project_id,
+                            PMAssignSS.is_deleted == False,
+                            or_(
+                                PMAssignSS.assigned_to_se_id == current_user_id,
+                                PMAssignSS.ss_ids.any(current_user_id)  # Check ss_ids array
+                            )
+                        )
+                        .first()
+                    )
+                    if pm_assignment:
+                        is_assigned = True
+                        import logging
+                        logging.info(f"SE {current_user_id} authorized via PMAssignSS (assigned_to_se_id or ss_ids) for DN {delivery_note_id}")
 
                 if not is_assigned:
-                    return jsonify({'error': ErrorMessages.UNAUTHORIZED}), 403
+                    import logging
+                    logging.warning(f"SE {current_user_id} NOT authorized for DN {delivery_note_id}, Project {project.project_id}")
+                    return jsonify({
+                        'error': f'You are not assigned to this project ({project.project_name}). Please contact your Project Manager.'
+                    }), 403
             else:
-                return jsonify({'error': ErrorMessages.UNAUTHORIZED}), 403
+                import logging
+                logging.warning(f"User {current_user_id} with role {user_role} tried to access DN {delivery_note_id}")
+                return jsonify({'error': f'Role {user_role} is not authorized to access delivery notes'}), 403
 
         # Get company name from system settings using centralized default
         settings = SystemSettings.query.first()
         company_name = getattr(settings, 'company_name', None) or DefaultValues.DEFAULT_COMPANY_NAME
+
+        # If this DN has a batch reference and transport_fee is 0, lookup the batch's original transport fee
+        display_transport_fee = dn.transport_fee
+        if dn.delivery_batch_ref and (dn.transport_fee is None or dn.transport_fee == 0):
+            # Find the first DN in this batch that has a non-zero transport fee
+            batch_dn_with_fee = MaterialDeliveryNote.query.filter(
+                MaterialDeliveryNote.delivery_batch_ref == dn.delivery_batch_ref,
+                MaterialDeliveryNote.transport_fee.isnot(None),
+                MaterialDeliveryNote.transport_fee > 0
+            ).order_by(MaterialDeliveryNote.created_at.asc()).first()
+
+            if batch_dn_with_fee:
+                display_transport_fee = batch_dn_with_fee.transport_fee
 
         # Prepare DN data using centralized defaults (no hardcoded values!)
         dn_data = {
@@ -5087,6 +6336,7 @@ def download_dn_pdf(delivery_note_id):
             'vehicle_number': dn.vehicle_number,
             'driver_name': dn.driver_name,
             'driver_contact': dn.driver_contact,
+            'transport_fee': display_transport_fee,
             'notes': dn.notes,
             'prepared_by': dn.prepared_by,
             'created_by': dn.created_by,
@@ -5094,13 +6344,15 @@ def download_dn_pdf(delivery_note_id):
             'request_date': dn.request_date
         }
 
-        # Prepare project data
-        project_data = {
-            'project_id': project.project_id,
-            'project_name': project.project_name,
-            'project_code': project.project_code,
-            'location': project.location
-        }
+        # Prepare project data (None for store-destined DNs)
+        project_data = None
+        if project:
+            project_data = {
+                'project_id': project.project_id,
+                'project_name': project.project_name,
+                'project_code': project.project_code,
+                'location': project.location
+            }
 
         # Prepare items data - PERFORMANCE: Batch load materials to avoid N+1 query
         material_ids = [item.inventory_material_id for item in dn.items]
@@ -5153,9 +6405,9 @@ def download_dn_pdf(delivery_note_id):
         )
 
     except Exception as e:
-        print(f"Error downloading DN PDF: {e}")
-        import traceback
-        traceback.print_exc()
+        from config.logging import get_logger
+        log = get_logger()
+        log.error(f"Error downloading DN PDF: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -5236,6 +6488,7 @@ def download_rdn_pdf(return_note_id):
             'status': rdn.status,
             'return_date': rdn.return_date.strftime('%d %B %Y') if rdn.return_date else 'N/A',
             'created_by': created_by_name,
+            'returned_by': rdn.returned_by,
             'issued_at': rdn.issued_at.strftime('%d %B %Y %I:%M %p') if rdn.issued_at else None,
             'issued_by': rdn.issued_by,
             'dispatched_at': rdn.dispatched_at.strftime('%d %B %Y %I:%M %p') if rdn.dispatched_at else None,
@@ -5243,6 +6496,7 @@ def download_rdn_pdf(return_note_id):
             'vehicle_number': rdn.vehicle_number,
             'driver_name': rdn.driver_name,
             'driver_contact': rdn.driver_contact,
+            'transport_fee': float(rdn.transport_fee) if rdn.transport_fee else 0,
             'notes': rdn.notes,
         }
 
@@ -5388,7 +6642,6 @@ def request_material_disposal(material_id):
                     action_url=f'/inventory/disposal-requests'
                 )
 
-            print(f"Disposal request notification sent to {len(tds)} TD(s) for material {material.material_name}")
 
         except Exception as notif_error:
             print(f"Error sending disposal request notification: {notif_error}")
@@ -5409,3 +6662,479 @@ def request_material_disposal(material_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+def check_material_availability():
+    """
+    Check M2 Store inventory availability for materials before completing purchase.
+
+    Request Body:
+    {
+        "materials": [
+            {
+                "material_name": "Cement 50kg",
+                "brand": "UltraTech",
+                "size": "50kg",
+                "quantity": 100
+            },
+            ...
+        ]
+    }
+
+    Response:
+    {
+        "success": true,
+        "overall_available": false,
+        "materials": [
+            {
+                "material_name": "Cement 50kg",
+                "brand": "UltraTech",
+                "size": "50kg",
+                "requested_quantity": 100,
+                "available_quantity": 75,
+                "is_available": false,
+                "shortfall": 25,
+                "status": "insufficient_stock"
+            }
+        ]
+    }
+
+    Error Response:
+    {
+        "success": false,
+        "error": "Failed to check availability: <error message>",
+        "materials": []
+    }
+
+    Status Codes:
+    - 200: Success
+    - 400: Invalid request (no materials, too many materials, invalid quantities)
+    - 500: Server error
+    """
+    try:
+        from config.logging import get_logger
+        log = get_logger()
+
+        data = request.get_json()
+        materials_list = data.get('materials', [])
+
+        if not materials_list:
+            return jsonify({
+                "success": False,
+                "error": "No materials provided for availability check",
+                "materials": []
+            }), 400
+
+        # Security: Limit max materials per request to prevent DoS
+        MAX_MATERIALS_PER_REQUEST = 100
+        if len(materials_list) > MAX_MATERIALS_PER_REQUEST:
+            return jsonify({
+                "success": False,
+                "error": f"Too many materials. Maximum {MAX_MATERIALS_PER_REQUEST} per request.",
+                "materials": []
+            }), 400
+
+        results = []
+        overall_available = True
+
+        # Batch pre-fetch all inventory materials matching any of the requested names
+        # This avoids one query per material in the loop below
+        _avail_names = [
+            sanitize_search_term((m.get('material_name') or '').strip())
+            for m in materials_list
+            if (m.get('material_name') or '').strip()
+        ]
+        _batch_avail_materials = []
+        if _avail_names:
+            # Build OR conditions for all name patterns (LIKE match for fuzzy support)
+            _name_patterns = [func.lower(InventoryMaterial.material_name).like(f'%{n.lower()}%') for n in _avail_names]
+            from sqlalchemy import or_ as _or_
+            _batch_avail_materials = InventoryMaterial.query.filter(
+                InventoryMaterial.is_active == True,
+                _or_(*_name_patterns)
+            ).all()
+        # Group by lowercase name for lookup
+        _avail_by_name = {}
+        for _m in _batch_avail_materials:
+            _avail_by_name.setdefault(_m.material_name.lower(), []).append(_m)
+
+        for material_req in materials_list:
+            material_name = material_req.get('material_name', '').strip()
+            brand = material_req.get('brand', '').strip()
+            size = material_req.get('size', '').strip()
+            requested_qty = material_req.get('quantity', 0)
+
+            if not material_name:
+                continue
+
+            # Validate quantity using existing helper
+            validated_qty, error_msg = validate_quantity(requested_qty, 'quantity')
+            if error_msg:  # Validation failed
+                results.append({
+                    "material_name": material_name,
+                    "brand": brand or "N/A",
+                    "size": size or "N/A",
+                    "requested_quantity": requested_qty,
+                    "error": error_msg,
+                    "is_available": False,
+                    "status": "invalid_quantity"
+                })
+                overall_available = False
+                continue
+
+            # Use validated quantity for further processing
+            requested_qty = validated_qty
+
+            # Sanitize input to prevent SQL injection
+            sanitized_name = sanitize_search_term(material_name)
+
+            # Search pre-fetched batch for matching material (no DB hit per item)
+            inventory_material = None
+            candidates = _avail_by_name.get(material_name.lower(), [])
+
+            # Try exact match first (with optional brand/size filters)
+            for _candidate in candidates:
+                if brand and (_candidate.brand or '').lower() != brand.lower():
+                    continue
+                if size and (_candidate.size or '').lower() != size.lower():
+                    continue
+                inventory_material = _candidate
+                break
+
+            # If no exact match, try fuzzy match on name only (substring)
+            if not inventory_material:
+                sanitized_lower = sanitized_name.lower()
+                for _name_key, _candidates in _avail_by_name.items():
+                    if sanitized_lower in _name_key:
+                        inventory_material = _candidates[0]
+                        break
+
+            if inventory_material:
+                available_qty = inventory_material.current_stock or 0
+                shortfall = max(0, requested_qty - available_qty)
+                is_available = available_qty >= requested_qty
+
+                if not is_available:
+                    overall_available = False
+
+                results.append({
+                    "material_name": material_name,
+                    "brand": brand or "N/A",
+                    "size": size or "N/A",
+                    "requested_quantity": requested_qty,
+                    "available_quantity": available_qty,
+                    "is_available": is_available,
+                    "shortfall": shortfall,
+                    "status": "in_stock" if is_available else "insufficient_stock",
+                    "inventory_material_id": inventory_material.inventory_material_id,
+                    "material_code": inventory_material.material_code
+                })
+            else:
+                # Material not found in inventory
+                overall_available = False
+                results.append({
+                    "material_name": material_name,
+                    "brand": brand or "N/A",
+                    "size": size or "N/A",
+                    "requested_quantity": requested_qty,
+                    "available_quantity": 0,
+                    "is_available": False,
+                    "shortfall": requested_qty,
+                    "status": "not_in_inventory",
+                    "inventory_material_id": None,
+                    "material_code": None
+                })
+
+        return jsonify({
+            "success": True,
+            "overall_available": overall_available,
+            "total_materials": len(results),
+            "available_count": sum(1 for m in results if m.get('is_available')),
+            "unavailable_count": sum(1 for m in results if not m.get('is_available')),
+            "materials": results
+        }), 200
+
+    except Exception as e:
+        import traceback
+        from config.logging import get_logger
+        log = get_logger()
+        log.error(f"Error checking material availability: {e}")
+        log.error(traceback.format_exc())
+        return jsonify({
+            "success": False,
+            "error": f"Failed to check availability: {str(e)}",
+            "materials": []
+        }), 500
+
+
+# ==================== BUYER TRANSFER RECEPTION (PM) ====================
+
+def get_pending_buyer_transfers():
+    """Get all pending buyer transfers to M2 Store for PM to receive"""
+    try:
+        from config.logging import get_logger
+        log = get_logger()
+
+        # Check PM/Admin access
+        current_user = g.user
+        user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
+        allowed_roles = ['productionmanager', 'admin']
+
+        if not any(role in user_role for role in allowed_roles):
+            return jsonify({"success": False, "error": "Access denied. Production Manager or Admin role required."}), 403
+
+        # Get DNs from buyers to store that are pending (DRAFT or ISSUED status)
+        pending_transfers = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.delivery_from.like('%Buyer%Transfer%Store%'),
+            MaterialDeliveryNote.status.in_(['DRAFT', 'ISSUED', 'IN_TRANSIT'])
+        ).order_by(MaterialDeliveryNote.created_at.desc()).all()
+
+        # Batch pre-fetch projects for all pending transfer DNs
+        _pt_proj_ids = list({dn.project_id for dn in pending_transfers if dn.project_id})
+        _pt_proj_map = {
+            p.project_id: p for p in Project.query.filter(
+                Project.project_id.in_(_pt_proj_ids),
+                Project.is_deleted == False
+            ).all()
+        } if _pt_proj_ids else {}
+
+        transfers_data = []
+        for dn in pending_transfers:
+            project = _pt_proj_map.get(dn.project_id)  # dict lookup — no DB call
+
+            transfers_data.append({
+                "delivery_note_id": dn.delivery_note_id,
+                "delivery_note_number": dn.delivery_note_number,
+                "project_id": dn.project_id,
+                "project_name": project.project_name if project else "M2 Store",
+                "delivery_date": dn.delivery_date.isoformat() if dn.delivery_date else None,
+                "vehicle_number": dn.vehicle_number,
+                "driver_name": dn.driver_name,
+                "driver_contact": dn.driver_contact,
+                "transport_fee": dn.transport_fee,
+                "notes": dn.notes,
+                "status": dn.status,
+                "created_by": dn.created_by,
+                "created_at": dn.created_at.isoformat() if dn.created_at else None,
+                "items": [{
+                    "item_id": item.item_id,
+                    "inventory_material_id": item.inventory_material_id,
+                    "material_name": item.inventory_material.material_name if item.inventory_material else "Unknown",
+                    "material_code": item.inventory_material.material_code if item.inventory_material else None,
+                    "quantity": item.quantity,
+                    "unit": item.inventory_material.unit if item.inventory_material else "pcs",
+                    "unit_price": item.unit_price
+                } for item in dn.items],
+                "total_items": len(dn.items),
+                "total_quantity": sum(item.quantity for item in dn.items)
+            })
+
+        return jsonify({
+            "success": True,
+            "transfers": transfers_data,
+            "count": len(transfers_data)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        from config.logging import get_logger
+        log = get_logger()
+        log.error(f"Error fetching pending buyer transfers: {e}")
+        log.error(traceback.format_exc())
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def get_buyer_transfers_history():
+    """Get all received buyer transfers history for PM to view"""
+    try:
+        from config.logging import get_logger
+        log = get_logger()
+        from models.inventory import MaterialDeliveryNote
+
+        # Get all received buyer transfers (status = DELIVERED)
+        # Filter by delivery_from containing 'Buyer...Store' pattern (buyer to M2 Store)
+        received_dns = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.delivery_from.like('%Buyer%Store%'),
+            MaterialDeliveryNote.status == 'DELIVERED'
+        ).order_by(MaterialDeliveryNote.received_at.desc()).limit(100).all()
+
+        transfers_data = []
+        for dn in received_dns:
+            materials_data = []
+            for item in dn.items:
+                materials_data.append({
+                    'material_name': item.inventory_material.material_name if item.inventory_material else 'Unknown',
+                    'quantity': float(item.quantity),
+                    'unit': item.inventory_material.unit if item.inventory_material else 'unit',
+                    'category': item.inventory_material.category if item.inventory_material else 'General'
+                })
+
+            # Creator name is already stored in created_by field as the buyer's full name
+            created_by_name = dn.created_by if dn.created_by else 'Unknown Buyer'
+
+            transfers_data.append({
+                'delivery_note_id': dn.delivery_note_id,
+                'delivery_note_number': dn.delivery_note_number,
+                'status': dn.status,
+                'created_by': created_by_name,
+                'delivery_date': dn.delivery_date.isoformat() if dn.delivery_date else None,
+                'received_at': dn.received_at.isoformat() if dn.received_at else None,
+                'total_items': len(dn.items),
+                'materials': materials_data,
+                'vehicle_number': dn.vehicle_number,
+                'driver_name': dn.driver_name,
+                'driver_contact': dn.driver_contact,
+                'transport_fee': float(dn.transport_fee) if dn.transport_fee else 0,
+                'notes': dn.notes
+            })
+
+        return jsonify({
+            "success": True,
+            "transfers": transfers_data
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching buyer transfers history: {e}")
+        log.error(traceback.format_exc())
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def receive_buyer_transfer(delivery_note_id):
+    """
+    PM confirms receipt of buyer transfer and adds materials to inventory
+
+    This endpoint uses the BuyerTransferService for clean separation of concerns.
+    """
+    try:
+        from config.logging import get_logger
+        from services.buyer_transfer_service import BuyerTransferService
+
+        log = get_logger()
+
+        # Authorization check
+        current_user = g.user
+        user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
+        pm_name = current_user.get('full_name', 'Production Manager')
+        allowed_roles = ['productionmanager', 'admin']
+
+        if not any(role in user_role for role in allowed_roles):
+            return jsonify({
+                "success": False,
+                "error": "Access denied. Production Manager or Admin role required."
+            }), 403
+
+        # Extract request data
+        data = request.get_json() or {}
+        receiver_notes = data.get('notes', '')
+
+        # Use service to handle business logic
+        service = BuyerTransferService()
+        result = service.receive_transfer(
+            delivery_note_id=delivery_note_id,
+            receiver_name=pm_name,
+            receiver_notes=receiver_notes
+        )
+
+        # Handle result
+        if not result.success:
+            log.warning(f"Failed to receive buyer transfer {delivery_note_id}: {result.error_message}")
+            status_code = 404 if "not found" in result.error_message.lower() else 400
+            return jsonify({
+                "success": False,
+                "error": result.error_message
+            }), status_code
+
+        # Log success
+        log.info(
+            f"PM {pm_name} received buyer transfer {result.delivery_note_number} "
+            f"with {len(result.items_processed)} items. Batch: {result.batch_reference}"
+        )
+
+        # Return success response
+        return jsonify({
+            "success": True,
+            "message": f"Transfer {result.delivery_note_number} received successfully",
+            "delivery_note_id": result.delivery_note_id,
+            "delivery_note_number": result.delivery_note_number,
+            "items_processed": result.items_processed,
+            "received_by": result.received_by,
+            "received_at": result.received_at,
+            "batch_reference": result.batch_reference
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        from config.logging import get_logger
+        log = get_logger()
+        log.error(f"Error receiving buyer transfer {delivery_note_id}: {e}")
+        log.error(traceback.format_exc())
+        return jsonify({
+            "success": False,
+            "error": "An unexpected error occurred while receiving the transfer"
+        }), 500
+
+
+def get_received_buyer_transfers():
+    """Get history of received buyer transfers"""
+    try:
+        from config.logging import get_logger
+        log = get_logger()
+
+        # Check PM/Admin access
+        current_user = g.user
+        user_role = current_user.get('role', '').lower().replace('_', '').replace(' ', '')
+        allowed_roles = ['productionmanager', 'admin']
+
+        if not any(role in user_role for role in allowed_roles):
+            return jsonify({"success": False, "error": "Access denied. Production Manager or Admin role required."}), 403
+
+        # Get DNs from buyers to store that are DELIVERED
+        received_transfers = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.delivery_from.like('%Buyer%Transfer%Store%'),
+            MaterialDeliveryNote.status == 'DELIVERED'
+        ).order_by(MaterialDeliveryNote.received_at.desc()).limit(50).all()
+
+        # Batch pre-fetch projects for all received transfer DNs
+        _rt_proj_ids = list({dn.project_id for dn in received_transfers if dn.project_id})
+        _rt_proj_map = {
+            p.project_id: p for p in Project.query.filter(
+                Project.project_id.in_(_rt_proj_ids),
+                Project.is_deleted == False
+            ).all()
+        } if _rt_proj_ids else {}
+
+        transfers_data = []
+        for dn in received_transfers:
+            project = _rt_proj_map.get(dn.project_id)  # dict lookup — no DB call
+
+            transfers_data.append({
+                "delivery_note_id": dn.delivery_note_id,
+                "delivery_note_number": dn.delivery_note_number,
+                "project_name": project.project_name if project else "M2 Store",
+                "delivery_date": dn.delivery_date.isoformat() if dn.delivery_date else None,
+                "received_by": dn.received_by,
+                "received_at": dn.received_at.isoformat() if dn.received_at else None,
+                "receiver_notes": dn.receiver_notes,
+                "created_by": dn.created_by,
+                "items": [{
+                    "material_name": item.inventory_material.material_name if item.inventory_material else "Unknown",
+                    "quantity": item.quantity,
+                    "unit": item.inventory_material.unit if item.inventory_material else "pcs"
+                } for item in dn.items],
+                "total_items": len(dn.items)
+            })
+
+        return jsonify({
+            "success": True,
+            "transfers": transfers_data,
+            "count": len(transfers_data)
+        }), 200
+
+    except Exception as e:
+        import traceback
+        from config.logging import get_logger
+        log = get_logger()
+        log.error(f"Error fetching received buyer transfers: {e}")
+        log.error(traceback.format_exc())
+        return jsonify({"success": False, "error": str(e)}), 500

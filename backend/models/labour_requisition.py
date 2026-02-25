@@ -22,6 +22,10 @@ class LabourRequisition(db.Model):
     project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False, index=True)
     site_name = db.Column(db.String(255), nullable=False)
     required_date = db.Column(db.Date, nullable=False, index=True)
+    start_time = db.Column(db.Time, nullable=True)  # Work shift start time
+    end_time = db.Column(db.Time, nullable=True)  # Work shift end time
+    preferred_worker_ids = db.Column(JSONB, nullable=True)  # Array of preferred worker IDs: [1, 2, 3]
+    preferred_workers_notes = db.Column(db.Text, nullable=True)  # Additional notes
 
     # Labour items as JSONB array - stores multiple labours in single requisition
     # Format: [{"work_description": "...", "skill_required": "...", "workers_count": 5, "boq_id": 1, "item_id": "...", "labour_id": "..."}]
@@ -38,9 +42,10 @@ class LabourRequisition(db.Model):
     # Work completion status (tracks labour work progress)
     work_status = db.Column(db.String(50), default='pending_assignment', index=True)  # pending_assignment, assigned, in_progress, completed
 
-    # Requester info (Site Engineer)
+    # Requester info (Site Engineer or Project Manager)
     requested_by_user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False, index=True)
     requested_by_name = db.Column(db.String(255), nullable=False)
+    requester_role = db.Column(db.String(10), default='SE', index=True)  # 'SE' or 'PM'
     request_date = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Approval workflow (Step 3 - Project Manager)
@@ -57,6 +62,13 @@ class LabourRequisition(db.Model):
     assigned_by_name = db.Column(db.String(255), nullable=True)
     assignment_date = db.Column(db.DateTime, nullable=True)
     whatsapp_notified = db.Column(db.Boolean, default=False)
+
+    # Transport fee (for master requisition or standalone transport)
+    transport_fee = db.Column(db.Float, default=0.0)
+    # Transport logistics details (driver and vehicle information)
+    driver_name = db.Column(db.Text(255), nullable=True)
+    vehicle_number = db.Column(db.Text(100), nullable=True)
+    driver_contact = db.Column(db.Text(50), nullable=True)
 
     # Standard tracking fields
     is_deleted = db.Column(db.Boolean, default=False, index=True)
@@ -88,6 +100,18 @@ class LabourRequisition(db.Model):
                 ).all()
                 assigned_workers = [{'worker_id': w.worker_id, 'full_name': w.full_name, 'worker_code': w.worker_code} for w in workers]
 
+        # Get preferred worker details
+        preferred_workers = []
+        if self.preferred_worker_ids:
+            from models.worker import Worker
+            pref_worker_ids = self.preferred_worker_ids if isinstance(self.preferred_worker_ids, list) else []
+            if pref_worker_ids:
+                pref_workers = Worker.query.filter(
+                    Worker.worker_id.in_(pref_worker_ids),
+                    Worker.is_deleted == False
+                ).all()
+                preferred_workers = [{'worker_id': w.worker_id, 'full_name': w.full_name, 'worker_code': w.worker_code} for w in pref_workers]
+
         return {
             'requisition_id': self.requisition_id,
             'requisition_code': self.requisition_code,
@@ -95,6 +119,11 @@ class LabourRequisition(db.Model):
             'project_name': self.project.project_name if self.project else None,
             'site_name': self.site_name,
             'required_date': self.required_date.isoformat() if self.required_date else None,
+            'start_time': self.start_time.strftime('%H:%M') if self.start_time else None,
+            'end_time': self.end_time.strftime('%H:%M') if self.end_time else None,
+            'preferred_worker_ids': self.preferred_worker_ids or [],
+            'preferred_workers': preferred_workers,
+            'preferred_workers_notes': self.preferred_workers_notes,
             'labour_items': self.labour_items or [],
             'total_workers_count': total_workers,
             # Backward compatibility fields (deprecated, use labour_items instead)
@@ -107,6 +136,7 @@ class LabourRequisition(db.Model):
             'work_status': self.work_status,
             'requested_by_user_id': self.requested_by_user_id,
             'requested_by_name': self.requested_by_name,
+            'requester_role': self.requester_role,
             'request_date': self.request_date.isoformat() if self.request_date else None,
             'status': self.status,
             'approved_by_user_id': self.approved_by_user_id,
@@ -120,6 +150,11 @@ class LabourRequisition(db.Model):
             'assigned_by_name': self.assigned_by_name,
             'assignment_date': self.assignment_date.isoformat() if self.assignment_date else None,
             'whatsapp_notified': self.whatsapp_notified,
+            'transport_fee': self.transport_fee,
+            'driver_name': self.driver_name,
+            'vehicle_number': self.vehicle_number,
+            'driver_contact': self.driver_contact,
+            # Standard fields
             'is_deleted': self.is_deleted,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by,

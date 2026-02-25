@@ -19,8 +19,11 @@ import {
   UserIcon,
   WrenchScrewdriverIcon,
   UsersIcon,
-  PlusIcon
+  PlusIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon
 } from '@heroicons/react/24/outline';
+import { PAGINATION } from '@/lib/inventoryConstants';
 
 // Tab configuration
 type TabType = 'pending' | 'assigned';
@@ -46,6 +49,18 @@ const WhatsAppIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
+// Helper function to convert 24-hour time to 12-hour format with AM/PM
+const formatTimeTo12Hour = (time24: string): string => {
+  if (!time24) return '';
+
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+
+  return `${hour12}:${minutes} ${period}`;
+};
+
 const WorkerAssignments: React.FC = () => {
   const [requisitions, setRequisitions] = useState<LabourRequisition[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,7 +72,17 @@ const WorkerAssignments: React.FC = () => {
   const [assigning, setAssigning] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('pending');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showQuickSelectDropdown, setShowQuickSelectDropdown] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState<'low-rate' | 'high-rate' | 'single-skill' | 'multi-skill' | null>(null);
   const [detailsRequisition, setDetailsRequisition] = useState<LabourRequisition | null>(null);
+
+  // Date filter for daily schedule
+  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [downloadingDailySchedule, setDownloadingDailySchedule] = useState(false);
+
+  // Scroll position preservation
+  const workerListRef = React.useRef<HTMLDivElement>(null);
+  const [shouldPreserveScroll, setShouldPreserveScroll] = React.useState(false);
 
   // Add Worker Form State
   const [showAddWorkerForm, setShowAddWorkerForm] = useState(false);
@@ -71,6 +96,15 @@ const WorkerAssignments: React.FC = () => {
 
   // Confirmation Modal State
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  // Transport Fee State
+  const [transportFee, setTransportFee] = useState<number>(0);
+  const [driverName, setDriverName] = useState<string>('');
+  const [vehicleNumber, setVehicleNumber] = useState<string>('');
+  const [driverContact, setDriverContact] = useState<string>('');
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
 
   const fetchRequisitions = async () => {
     setLoading(true);
@@ -92,9 +126,47 @@ const WorkerAssignments: React.FC = () => {
     fetchRequisitions();
   }, [activeTab]);
 
+  // Date filtering for assigned tab
+  const filteredRequisitions = useMemo(() => {
+    if (activeTab !== 'assigned') {
+      return requisitions;
+    }
+
+    // Filter by selected date
+    return requisitions.filter(req => {
+      if (!req.required_date) return false;
+      // Compare dates (req.required_date is in YYYY-MM-DD format)
+      return req.required_date === selectedDate;
+    });
+  }, [requisitions, selectedDate, activeTab]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredRequisitions.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequisitions = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredRequisitions.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequisitions, currentPage]);
+
+  // Reset page when tab or date changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, selectedDate]);
+
+  // Clamp page when total pages decreases
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const openAssignModal = async (requisition: LabourRequisition) => {
     setSelectedRequisition(requisition);
     setSelectedWorkerIds([]);
+    setSelectedFilter(null); // Reset filter when opening modal
+    setTransportFee(0); // Reset transport fee
+    setDriverName(''); // Reset driver name
+    setVehicleNumber(''); // Reset vehicle number
+    setDriverContact(''); // Reset driver contact
     setShowAssignModal(true);
     setLoadingWorkers(true);
     setShowAddWorkerForm(false);
@@ -130,7 +202,8 @@ const WorkerAssignments: React.FC = () => {
       for (const skill of skillsToFetch) {
         const result = await labourService.getAvailableWorkers(
           skill,
-          requisition.required_date
+          requisition.required_date,
+          requisition.requisition_id
         );
         if (result.success && result.data) {
           // Add workers, avoiding duplicates
@@ -144,6 +217,25 @@ const WorkerAssignments: React.FC = () => {
       }
 
       setAvailableWorkers(allWorkers);
+
+      // Auto-select preferred workers if they exist and are available
+      if (requisition.preferred_worker_ids && requisition.preferred_worker_ids.length > 0) {
+        const availablePreferredWorkers = requisition.preferred_worker_ids.filter(
+          (prefWorkerId: number) => allWorkers.some((w: Worker) => w.worker_id === prefWorkerId && !w.is_assigned)
+        );
+
+        if (availablePreferredWorkers.length > 0) {
+          setSelectedWorkerIds(availablePreferredWorkers);
+          // Show notification about auto-selection
+          const selectedCount = availablePreferredWorkers.length;
+          const totalPreferred = requisition.preferred_worker_ids.length;
+          if (selectedCount === totalPreferred) {
+            showSuccess(`✓ Auto-selected all ${selectedCount} preferred worker(s)`);
+          } else {
+            showSuccess(`✓ Auto-selected ${selectedCount} of ${totalPreferred} preferred workers (${totalPreferred - selectedCount} unavailable)`);
+          }
+        }
+      }
     } catch (error) {
       showError('Failed to fetch available workers');
     }
@@ -195,12 +287,103 @@ const WorkerAssignments: React.FC = () => {
     }
   };
 
+  // Auto-select workers based on filter
+  const handleAutoSelect = (filter: 'low-rate' | 'high-rate' | 'single-skill' | 'multi-skill') => {
+    const maxWorkers = selectedRequisition?.total_workers_count || selectedRequisition?.workers_count || 0;
+    const currentlySelected = selectedWorkerIds.length;
+    const remainingSlots = maxWorkers - currentlySelected;
+
+    if (remainingSlots <= 0) {
+      showError(`Already selected ${maxWorkers} worker(s). No more slots available.`);
+      return;
+    }
+
+    // Get available workers (not already assigned AND not currently selected)
+    const eligibleWorkers = availableWorkers.filter(w =>
+      !w.is_assigned && !selectedWorkerIds.includes(w.worker_id)
+    );
+
+    if (eligibleWorkers.length === 0) {
+      showError('No available workers to select');
+      return;
+    }
+
+    let sortedWorkers = [...eligibleWorkers];
+
+    // Apply sorting based on filter
+    switch (filter) {
+      case 'low-rate':
+        // Sort by hourly rate ascending (lowest first)
+        sortedWorkers.sort((a, b) => (a.hourly_rate || 0) - (b.hourly_rate || 0));
+        break;
+
+      case 'high-rate':
+        // Sort by hourly rate descending (highest first)
+        sortedWorkers.sort((a, b) => (b.hourly_rate || 0) - (a.hourly_rate || 0));
+        break;
+
+      case 'single-skill':
+        // Filter and prioritize workers with only one skill
+        sortedWorkers = sortedWorkers.filter(w => (w.skills?.length || 0) === 1);
+        if (sortedWorkers.length === 0) {
+          showError('No single-skill workers available');
+          return;
+        }
+        // Then sort by rate (lowest first for single skill)
+        sortedWorkers.sort((a, b) => (a.hourly_rate || 0) - (b.hourly_rate || 0));
+        break;
+
+      case 'multi-skill':
+        // Filter and prioritize workers with multiple skills
+        sortedWorkers = sortedWorkers.filter(w => (w.skills?.length || 0) > 1);
+        if (sortedWorkers.length === 0) {
+          showError('No multi-skill workers available');
+          return;
+        }
+        // Then sort by rate (lowest first for multi skill)
+        sortedWorkers.sort((a, b) => (a.hourly_rate || 0) - (b.hourly_rate || 0));
+        break;
+    }
+
+    // Select workers to fill remaining slots (keep existing selections)
+    const workersToSelect = sortedWorkers.slice(0, remainingSlots);
+    const newWorkerIds = workersToSelect.map(w => w.worker_id);
+
+    // Add new selections to existing selections
+    setSelectedWorkerIds(prev => [...prev, ...newWorkerIds]);
+    setSelectedFilter(filter); // Save the selected filter
+
+    const filterLabels = {
+      'low-rate': 'Low Rate',
+      'high-rate': 'High Rate',
+      'single-skill': 'Single Skill',
+      'multi-skill': 'Multi Skill'
+    };
+
+    if (currentlySelected > 0) {
+      showSuccess(`Auto-selected ${newWorkerIds.length} more worker(s) using ${filterLabels[filter]} (Total: ${currentlySelected + newWorkerIds.length}/${maxWorkers})`);
+    } else {
+      showSuccess(`Auto-selected ${newWorkerIds.length} worker(s) - ${filterLabels[filter]}`);
+    }
+  };
+
   const toggleWorkerSelection = (workerId: number) => {
+    // Save scroll position before state change
+    const scrollTop = workerListRef.current?.scrollTop || 0;
+
     setSelectedWorkerIds(prev => {
       const isCurrentlySelected = prev.includes(workerId);
 
       // If deselecting, always allow
       if (isCurrentlySelected) {
+        // Preserve scroll position for manual selection
+        setShouldPreserveScroll(true);
+        requestAnimationFrame(() => {
+          if (workerListRef.current) {
+            workerListRef.current.scrollTop = scrollTop;
+          }
+          setShouldPreserveScroll(false);
+        });
         return prev.filter(id => id !== workerId);
       }
 
@@ -210,6 +393,15 @@ const WorkerAssignments: React.FC = () => {
         showError(`Cannot select more than ${maxWorkers} workers for this requisition`);
         return prev;
       }
+
+      // Preserve scroll position for manual selection
+      setShouldPreserveScroll(true);
+      requestAnimationFrame(() => {
+        if (workerListRef.current) {
+          workerListRef.current.scrollTop = scrollTop;
+        }
+        setShouldPreserveScroll(false);
+      });
 
       // Add to selection
       return [...prev, workerId];
@@ -248,7 +440,11 @@ const WorkerAssignments: React.FC = () => {
     try {
       const result = await labourService.assignWorkersToRequisition(
         selectedRequisition.requisition_id,
-        selectedWorkerIds
+        selectedWorkerIds,
+        transportFee,
+        driverName,
+        vehicleNumber,
+        driverContact
       );
       if (result.success) {
         showSuccess(result.message || 'Workers assigned successfully');
@@ -256,6 +452,10 @@ const WorkerAssignments: React.FC = () => {
         setShowAssignModal(false);
         setSelectedRequisition(null);
         setSelectedWorkerIds([]);
+        setTransportFee(0); // Reset transport fee
+        setDriverName(''); // Reset driver name
+        setVehicleNumber(''); // Reset vehicle number
+        setDriverContact(''); // Reset driver contact
         fetchRequisitions();
       } else {
         showError(result.message || 'Failed to assign workers');
@@ -317,26 +517,88 @@ const WorkerAssignments: React.FC = () => {
         })}
       </div>
 
+      {/* Daily Schedule Download Section - Only show in Assigned tab */}
+      {activeTab === 'assigned' && (
+        <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-4">
+          <div className="flex flex-col md:flex-row md:items-center gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <CalendarIcon className="w-5 h-5 text-blue-600" />
+                <h3 className="text-sm font-semibold text-blue-900">Daily Worker Assignment Schedule</h3>
+              </div>
+              <p className="text-xs text-blue-700">Download a poster-format PDF showing all assigned workers by project, site, and transport details for the selected date</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex flex-col">
+                <label className="text-xs font-medium text-blue-900 mb-1">Select Date</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="px-3 py-2 border-2 border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <button
+                onClick={async () => {
+                  if (!selectedDate) {
+                    showError('Please select a date');
+                    return;
+                  }
+                  setDownloadingDailySchedule(true);
+                  try {
+                    await labourService.downloadDailySchedulePDF(selectedDate);
+                    showSuccess('Daily schedule PDF downloaded successfully');
+                  } catch (error) {
+                    showError('Failed to download daily schedule');
+                  } finally {
+                    setDownloadingDailySchedule(false);
+                  }
+                }}
+                disabled={downloadingDailySchedule}
+                className="mt-5 flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-md"
+                title="Download Daily Worker Schedule Poster"
+              >
+                {downloadingDailySchedule ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    <span className="text-sm">Generating...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span className="text-sm">Download Daily Schedule</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Requisitions List */}
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
         </div>
-      ) : requisitions.length === 0 ? (
+      ) : filteredRequisitions.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <ClipboardDocumentListIcon className="mx-auto h-12 w-12 text-gray-400" />
           <h3 className="mt-2 text-sm font-medium text-gray-900">
-            {activeTab === 'pending' ? 'All caught up!' : 'No assigned requisitions'}
+            {activeTab === 'pending' ? 'All caught up!' : (requisitions.length === 0 ? 'No assigned requisitions' : 'No assignments for selected date')}
           </h3>
           <p className="mt-1 text-sm text-gray-500">
             {activeTab === 'pending'
               ? 'No requisitions pending assignment.'
-              : 'No requisitions have been assigned yet.'}
+              : (requisitions.length === 0
+                  ? 'No requisitions have been assigned yet.'
+                  : `No worker assignments found for ${new Date(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Try selecting a different date.`)}
           </p>
         </div>
       ) : (
         <div className="space-y-2">
-          {requisitions.map((req) => (
+          {paginatedRequisitions.map((req) => (
             <motion.div
               key={req.requisition_id}
               initial={{ opacity: 0, y: 10 }}
@@ -375,6 +637,25 @@ const WorkerAssignments: React.FC = () => {
                     <EyeIcon className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">View</span>
                   </button>
+                  {activeTab === 'assigned' && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await labourService.downloadAssignmentPDF(req.requisition_id);
+                          showSuccess('PDF downloaded successfully');
+                        } catch (error) {
+                          showError('Failed to download PDF');
+                        }
+                      }}
+                      className="flex items-center justify-center gap-1 px-2 py-1 text-xs border border-green-600 text-green-600 rounded hover:bg-green-50 transition-colors"
+                      title="Download PDF Report"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span className="hidden sm:inline">PDF</span>
+                    </button>
+                  )}
                   {activeTab === 'pending' && (
                     <button
                       onClick={() => openAssignModal(req)}
@@ -388,6 +669,41 @@ const WorkerAssignments: React.FC = () => {
               </div>
             </motion.div>
           ))}
+
+          {/* Pagination */}
+          {filteredRequisitions.length > 0 && (
+            <div className="mt-4 px-4 py-3 bg-white rounded-lg border border-gray-200 flex items-center justify-between text-sm">
+              <span className="text-gray-600">
+                Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredRequisitions.length)} of {filteredRequisitions.length} requisitions
+                {activeTab === 'assigned' && filteredRequisitions.length !== requisitions.length && (
+                  <span className="text-gray-400 ml-1">(filtered from {requisitions.length})</span>
+                )}
+              </span>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeftIcon className="w-4 h-4" />
+                    Previous
+                  </button>
+                  <span className="text-sm text-gray-600">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                    <ChevronRightIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -520,10 +836,96 @@ const WorkerAssignments: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Required Date</h3>
-                    <p className="text-sm text-gray-900">{new Date(detailsRequisition.required_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                    <p className="text-sm text-gray-900">
+                      {new Date(detailsRequisition.required_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                    </p>
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Work Shift</h3>
+                    <p className="text-sm text-gray-900">
+                      {detailsRequisition.start_time && detailsRequisition.end_time ? (
+                        <span className="text-blue-600 font-medium">
+                          {formatTimeTo12Hour(detailsRequisition.start_time)} - {formatTimeTo12Hour(detailsRequisition.end_time)}
+                        </span>
+                      ) : detailsRequisition.start_time ? (
+                        <span className="text-blue-600 font-medium">
+                          From {formatTimeTo12Hour(detailsRequisition.start_time)}
+                        </span>
+                      ) : detailsRequisition.end_time ? (
+                        <span className="text-blue-600 font-medium">
+                          Until {formatTimeTo12Hour(detailsRequisition.end_time)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500 text-xs">Not specified</span>
+                      )}
+                    </p>
                   </div>
                 </div>
+                {(detailsRequisition.preferred_workers && detailsRequisition.preferred_workers.length > 0) && (
+                  <div className="mt-3">
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Preferred Workers</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {detailsRequisition.preferred_workers.map((worker: any) => (
+                        <div key={worker.worker_id} className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-full text-sm font-medium border border-purple-200">
+                          {worker.full_name} ({worker.worker_code})
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {detailsRequisition.preferred_workers_notes && (
+                  <div className="mt-3">
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Preferred Workers (Additional Notes)</h3>
+                    <p className="text-sm text-gray-900 whitespace-pre-wrap bg-gray-50 p-2 rounded border border-gray-200">
+                      {detailsRequisition.preferred_workers_notes}
+                    </p>
+                  </div>
+                )}
               </div>
+
+              {/* Transport Details Section - Only show for assigned requisitions */}
+              {detailsRequisition.assignment_status === 'assigned' && (
+                detailsRequisition.driver_name ||
+                detailsRequisition.vehicle_number ||
+                detailsRequisition.driver_contact ||
+                (detailsRequisition.transport_fee && detailsRequisition.transport_fee > 0)
+              ) && (
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                    </svg>
+                    <h3 className="text-sm font-semibold text-blue-900">Transport Details</h3>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    {detailsRequisition.driver_name && (
+                      <div>
+                        <h4 className="text-xs font-medium text-gray-600 mb-1">Driver Name</h4>
+                        <p className="text-sm text-gray-900 font-medium">{detailsRequisition.driver_name}</p>
+                      </div>
+                    )}
+                    {detailsRequisition.driver_contact && (
+                      <div>
+                        <h4 className="text-xs font-medium text-gray-600 mb-1">Driver Contact</h4>
+                        <p className="text-sm text-gray-900 font-medium">{detailsRequisition.driver_contact}</p>
+                      </div>
+                    )}
+                    {detailsRequisition.vehicle_number && (
+                      <div>
+                        <h4 className="text-xs font-medium text-gray-600 mb-1">Vehicle Number</h4>
+                        <p className="text-sm text-gray-900 font-medium">{detailsRequisition.vehicle_number}</p>
+                      </div>
+                    )}
+                    {detailsRequisition.transport_fee && detailsRequisition.transport_fee > 0 && (
+                      <div>
+                        <h4 className="text-xs font-medium text-gray-600 mb-1">Transport Fee</h4>
+                        <p className="text-sm text-blue-700 font-semibold">AED {detailsRequisition.transport_fee.toFixed(2)}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Request Info */}
               <div className="border-t border-gray-200 pt-4 space-y-3">
@@ -572,7 +974,24 @@ const WorkerAssignments: React.FC = () => {
               >
                 Close
               </button>
-              {detailsRequisition.assignment_status !== 'assigned' && (
+              {detailsRequisition.assignment_status === 'assigned' ? (
+                <button
+                  onClick={async () => {
+                    try {
+                      await labourService.downloadAssignmentPDF(detailsRequisition.requisition_id);
+                      showSuccess('PDF downloaded successfully');
+                    } catch (error) {
+                      showError('Failed to download PDF');
+                    }
+                  }}
+                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Download PDF Report
+                </button>
+              ) : (
                 <button
                   onClick={() => {
                     setShowDetailsModal(false);
@@ -618,7 +1037,7 @@ const WorkerAssignments: React.FC = () => {
             </div>
 
             <div className="p-4">
-              <p className="text-sm text-gray-600 mb-4">
+              <p className="text-sm text-gray-600 mb-3">
                 Select {selectedRequisition.total_workers_count || selectedRequisition.workers_count} worker(s) with {selectedRequisition.labour_items && selectedRequisition.labour_items.length > 0 ? (
                   <>
                     {Array.from(new Set(selectedRequisition.labour_items.map((item: any) => item.skill_required))).map((skill, idx, arr) => (
@@ -633,6 +1052,186 @@ const WorkerAssignments: React.FC = () => {
                 )}
               </p>
 
+              {/* Preferred Workers Section */}
+              {selectedRequisition.preferred_workers && selectedRequisition.preferred_workers.length > 0 && (
+                <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                    </svg>
+                    <h3 className="text-sm font-semibold text-purple-900">
+                      Preferred Workers Requested
+                    </h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedRequisition.preferred_workers.map((worker: any) => {
+                      const isSelected = selectedWorkerIds.includes(worker.worker_id);
+                      return (
+                        <div
+                          key={worker.worker_id}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border-2 ${
+                            isSelected
+                              ? 'bg-green-100 border-green-500 text-green-900'
+                              : 'bg-white border-purple-300 text-purple-900'
+                          }`}
+                        >
+                          {isSelected && (
+                            <svg className="w-3.5 h-3.5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                          <span className="font-medium">{worker.full_name}</span>
+                          <span className={isSelected ? 'text-green-700' : 'text-purple-600'}>({worker.worker_code})</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs text-purple-700">
+                    💡 These workers were requested by the {selectedRequisition.requester_role === 'PM' ? 'Project Manager' : 'Site Engineer'}
+                    {selectedWorkerIds.some((id: number) => selectedRequisition.preferred_worker_ids?.includes(id)) && (
+                      <span className="ml-1 text-green-700 font-medium">• Auto-selected ✓</span>
+                    )}
+                  </p>
+                </div>
+              )}
+
+              {/* Auto-Select Dropdown */}
+              {!loadingWorkers && availableWorkers.length > 0 && (() => {
+                const maxWorkers = selectedRequisition?.total_workers_count || selectedRequisition?.workers_count || 0;
+                const remainingSlots = maxWorkers - selectedWorkerIds.length;
+                const allSlotsFilled = remainingSlots <= 0;
+
+                return (
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    {!allSlotsFilled && (
+                      <div className="relative flex-1">
+                        <button
+                          onClick={() => setShowQuickSelectDropdown(!showQuickSelectDropdown)}
+                          onBlur={() => setTimeout(() => setShowQuickSelectDropdown(false), 200)}
+                          className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm"
+                        >
+                      <div className="flex items-center gap-2">
+                        <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        <span className="text-gray-700 font-medium">
+                          {selectedFilter ? (
+                            {
+                              'low-rate': 'Low Rate',
+                              'high-rate': 'High Rate',
+                              'single-skill': 'Single Skill',
+                              'multi-skill': 'Multi Skill'
+                            }[selectedFilter]
+                          ) : 'Quick Select'}
+                        </span>
+                      </div>
+                      <svg className={`w-4 h-4 text-gray-400 transition-transform ${showQuickSelectDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {/* Dropdown Menu */}
+                    {showQuickSelectDropdown && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                        <button
+                          onClick={() => {
+                            handleAutoSelect('low-rate');
+                            setShowQuickSelectDropdown(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-green-50 text-left transition-colors border-b border-gray-100"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-green-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">Low Rate</p>
+                            <p className="text-xs text-gray-500">Select cheapest workers</p>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            handleAutoSelect('high-rate');
+                            setShowQuickSelectDropdown(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-blue-50 text-left transition-colors border-b border-gray-100"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-blue-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">High Rate</p>
+                            <p className="text-xs text-gray-500">Select premium workers</p>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            handleAutoSelect('single-skill');
+                            setShowQuickSelectDropdown(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-orange-50 text-left transition-colors border-b border-gray-100"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-orange-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">Single Skill</p>
+                            <p className="text-xs text-gray-500">Workers with one skill</p>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            handleAutoSelect('multi-skill');
+                            setShowQuickSelectDropdown(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-purple-50 text-left transition-colors"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-purple-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">Multi Skill</p>
+                            <p className="text-xs text-gray-500">Versatile workers</p>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                      </div>
+                    )}
+
+                    {/* Clear All Button */}
+                    {selectedWorkerIds.length > 0 && (
+                      <button
+                        onClick={() => {
+                          // Keep preferred workers, clear only manually selected ones
+                          const preferredWorkerIds = selectedRequisition?.preferred_worker_ids || [];
+                          const remainingWorkers = selectedWorkerIds.filter(id => preferredWorkerIds.includes(id));
+                          setSelectedWorkerIds(remainingWorkers);
+                          setSelectedFilter(null); // Reset filter when clearing
+
+                          if (remainingWorkers.length > 0) {
+                            showSuccess(`Cleared selections (kept ${remainingWorkers.length} preferred worker(s))`);
+                          }
+                        }}
+                        className="px-3 py-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors font-medium whitespace-nowrap"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
               {loadingWorkers ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
@@ -641,8 +1240,17 @@ const WorkerAssignments: React.FC = () => {
                 <>
                   {/* Worker List */}
                   {availableWorkers.length > 0 && (
-                    <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
-                      {availableWorkers.map((worker) => {
+                    <div ref={workerListRef} className="space-y-2 max-h-60 overflow-y-auto mb-4">
+                      {availableWorkers
+                        .sort((a, b) => {
+                          // Selected workers first
+                          const aSelected = selectedWorkerIds.includes(a.worker_id);
+                          const bSelected = selectedWorkerIds.includes(b.worker_id);
+                          if (aSelected && !bSelected) return -1;
+                          if (!aSelected && bSelected) return 1;
+                          return 0;
+                        })
+                        .map((worker) => {
                         const isAlreadyAssigned = worker.is_assigned || false;
                         const isSelected = selectedWorkerIds.includes(worker.worker_id);
                         const maxWorkers = selectedRequisition?.total_workers_count || selectedRequisition?.workers_count || 0;
@@ -671,15 +1279,36 @@ const WorkerAssignments: React.FC = () => {
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <p className="font-medium text-gray-900">{worker.full_name}</p>
-                                  {isAlreadyAssigned && (
-                                    <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 font-medium">
-                                      Already Assigned
-                                    </span>
+                              <div className="flex items-center gap-3 flex-1">
+                                {/* Selection Checkbox */}
+                                <div className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                                  isSelected
+                                    ? 'bg-purple-600 border-purple-600'
+                                    : isAlreadyAssigned || limitReached
+                                    ? 'bg-gray-200 border-gray-300'
+                                    : 'border-gray-300 bg-white'
+                                }`}>
+                                  {isSelected && (
+                                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                    </svg>
                                   )}
                                 </div>
+
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium text-gray-900">{worker.full_name}</p>
+                                    {isSelected && (
+                                      <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700 font-medium">
+                                        Selected
+                                      </span>
+                                    )}
+                                    {isAlreadyAssigned && (
+                                      <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 font-medium">
+                                        Already Assigned
+                                      </span>
+                                    )}
+                                  </div>
                                 <p className="text-sm text-gray-500">{worker.worker_code}</p>
                                 {isAlreadyAssigned && worker.assignment?.available_from && (
                                   <p className="text-xs text-gray-400 mt-1">
@@ -704,10 +1333,11 @@ const WorkerAssignments: React.FC = () => {
                               </div>
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                   {/* No Workers Message */}
                   {availableWorkers.length === 0 && !showAddWorkerForm && (
@@ -944,10 +1574,10 @@ const WorkerAssignments: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-xl shadow-xl w-full max-w-md"
+            className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col"
           >
             {/* Header */}
-            <div className="p-4 border-b border-gray-200 flex items-center gap-3">
+            <div className="p-4 border-b border-gray-200 flex items-center gap-3 flex-shrink-0">
               <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
                 <WhatsAppIcon className="w-6 h-6 text-green-600" />
               </div>
@@ -957,8 +1587,8 @@ const WorkerAssignments: React.FC = () => {
               </div>
             </div>
 
-            {/* Content */}
-            <div className="p-4">
+            {/* Content - Scrollable */}
+            <div className="p-4 overflow-y-auto flex-1">
               {/* Alert Box */}
               <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
                 <div className="flex items-start gap-2">
@@ -983,6 +1613,120 @@ const WorkerAssignments: React.FC = () => {
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Workers to Assign:</span>
                   <span className="font-medium text-gray-900">{selectedWorkerIds.length}</span>
+                </div>
+              </div>
+
+              {/* Transport Details Section */}
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center gap-2 mb-3">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                  </svg>
+                  <h3 className="text-sm font-semibold text-blue-900">Transport Details</h3>
+                </div>
+
+                <div className="space-y-3">
+                  {/* Driver Name */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Driver Name
+                    </label>
+                    <input
+                      type="text"
+                      value={driverName}
+                      onChange={(e) => setDriverName(e.target.value)}
+                      placeholder="Enter driver name"
+                      className="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                  </div>
+
+                  {/* Driver Contact */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Driver Contact
+                    </label>
+                    <input
+                      type="text"
+                      value={driverContact}
+                      onChange={(e) => setDriverContact(e.target.value)}
+                      placeholder="+971XXXXXXXXX"
+                      className="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                  </div>
+
+                  {/* Vehicle Number */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Vehicle Number
+                    </label>
+                    <input
+                      type="text"
+                      value={vehicleNumber}
+                      onChange={(e) => setVehicleNumber(e.target.value)}
+                      placeholder="DXB-T-12345"
+                      className="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                  </div>
+
+                  {/* Transport Fee */}
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Enter total transport fee <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={transportFee || ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === '' || value === null || value === undefined) {
+                          setTransportFee(0);
+                        } else {
+                          const parsedValue = parseFloat(value);
+                          setTransportFee(isNaN(parsedValue) ? 0 : parsedValue);
+                        }
+                      }}
+                      onBlur={(e) => {
+                        // Ensure value is 0 if field is left empty
+                        if (e.target.value === '' || e.target.value === null) {
+                          setTransportFee(0);
+                        }
+                      }}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1.5 flex items-start">
+                      <svg className="w-4 h-4 text-gray-400 mr-1 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Enter transport details for bringing workers to site
+                    </p>
+
+                    {/* Total Transport Fee Display */}
+                    {transportFee > 0 && (
+                      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-300 rounded-md p-2.5 shadow-sm mt-3">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center">
+                            <svg className="w-4 h-4 text-blue-600 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            <span className="text-xs text-blue-900 font-semibold">
+                              Total Transport Fee:
+                            </span>
+                          </div>
+                          <span className="text-base font-bold text-blue-900">
+                            AED {transportFee.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="bg-white rounded p-1.5 border border-blue-200">
+                          <p className="text-xs text-blue-800 font-medium">
+                            📊 Calculation: 1 × {transportFee.toFixed(2)} = <span className="font-bold">{transportFee.toFixed(2)} AED</span>
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1012,8 +1756,8 @@ const WorkerAssignments: React.FC = () => {
               </div>
             </div>
 
-            {/* Footer */}
-            <div className="p-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+            {/* Footer - Fixed at bottom */}
+            <div className="p-4 border-t border-gray-200 bg-gray-50 rounded-b-xl flex-shrink-0">
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowConfirmModal(false)}

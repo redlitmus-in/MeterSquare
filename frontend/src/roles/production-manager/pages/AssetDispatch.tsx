@@ -10,8 +10,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Plus, Truck, Send, Package, RefreshCw, FileText,
   Trash2, Check, X, Eye, ChevronDown, ChevronUp, Download, Printer,
-  Clock, CheckCircle, XCircle, Search, AlertTriangle
+  Clock, CheckCircle, XCircle, Search, AlertTriangle, ChevronLeft, ChevronRight
 } from 'lucide-react';
+import { PAGINATION } from '@/lib/inventoryConstants';
 import { apiClient, API_BASE_URL } from '@/api/config';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import {
@@ -38,8 +39,8 @@ import {
 } from '@/roles/site-engineer/services/assetRequisitionService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 
-type SubTabType = 'requisitions' | 'delivery-notes';
-type RequisitionTabType = 'pending' | 'ready_dispatch' | 'rejected';
+// Unified tab type - all tabs in single row
+type MainTabType = 'pending' | 'ready_dispatch' | 'rejected' | 'draft' | 'issued' | 'delivered';
 
 interface SiteEngineer {
   user_id: number;
@@ -67,6 +68,7 @@ interface DispatchItem {
   available: number;
   condition: AssetCondition;
   notes: string;
+  individualItemIds?: number[]; // For grouped individual items (stores multiple asset_item_ids)
 }
 
 const DN_STATUS_COLORS: Record<string, string> = {
@@ -82,14 +84,15 @@ const AssetDispatch: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // ==================== SUB-TAB STATE ====================
-  const [activeSubTab, setActiveSubTab] = useState<SubTabType>('requisitions');
+  // ==================== MAIN TAB STATE ====================
+  const [activeMainTab, setActiveMainTab] = useState<MainTabType>('pending');
 
   // Handle URL parameters
   useEffect(() => {
-    const subtab = searchParams.get('subtab');
-    if (subtab === 'requisitions') setActiveSubTab('requisitions');
-    else if (subtab === 'delivery-notes') setActiveSubTab('delivery-notes');
+    const tab = searchParams.get('tab');
+    if (tab && ['pending', 'ready_dispatch', 'rejected', 'draft', 'issued', 'delivered'].includes(tab)) {
+      setActiveMainTab(tab as MainTabType);
+    }
   }, [searchParams]);
 
   // ==================== DELIVERY NOTES STATE ====================
@@ -98,7 +101,6 @@ const AssetDispatch: React.FC = () => {
   const [availableItems, setAvailableItems] = useState<AssetItem[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [expandedDN, setExpandedDN] = useState<number | null>(null);
-  const [dnStatusFilter, setDnStatusFilter] = useState<string>('DRAFT');
 
   // Separate DN data by status (lazy loading)
   const [draftDNs, setDraftDNs] = useState<AssetDeliveryNote[]>([]);
@@ -125,6 +127,8 @@ const AssetDispatch: React.FC = () => {
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [driverName, setDriverName] = useState('');
   const [driverContact, setDriverContact] = useState('');
+  const [transportFee, setTransportFee] = useState<number>(0);
+  const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null);
   const [notes, setNotes] = useState('');
   const [dispatchItems, setDispatchItems] = useState<DispatchItem[]>([]);
   const [quantityExpanded, setQuantityExpanded] = useState(true);
@@ -147,8 +151,11 @@ const AssetDispatch: React.FC = () => {
   const [readyDispatchLoaded, setReadyDispatchLoaded] = useState(false);
   const [rejectedLoaded, setRejectedLoaded] = useState(false);
 
-  const [activeReqTab, setActiveReqTab] = useState<RequisitionTabType>('pending');
   const [reqSearchTerm, setReqSearchTerm] = useState('');
+
+  // Pagination state for requisitions and DNs
+  const [reqCurrentPage, setReqCurrentPage] = useState(1);
+  const [dnCurrentPage, setDnCurrentPage] = useState(1);
 
   // Requisition Modal state
   const [selectedRequisition, setSelectedRequisition] = useState<AssetRequisition | null>(null);
@@ -291,51 +298,29 @@ const AssetDispatch: React.FC = () => {
     }
   }, []);
 
-  // Initial load based on sub-tab
+  // Lazy load tabs based on activeMainTab
   useEffect(() => {
-    if (activeSubTab === 'requisitions') {
-      if (!pendingLoaded && !loadingPending) {
-        fetchPending();
-      }
-    } else {
-      // For delivery-notes, load DRAFT by default
-      if (!draftLoaded && !loadingDraft) {
-        fetchDraftDNs();
-      }
-    }
-  }, [activeSubTab, pendingLoaded, loadingPending, draftLoaded, loadingDraft, fetchPending, fetchDraftDNs]);
-
-  // Lazy load requisition tabs
-  useEffect(() => {
-    if (activeSubTab !== 'requisitions') return;
-
-    if (activeReqTab === 'pending' && !pendingLoaded && !loadingPending) {
+    // Requisition tabs
+    if (activeMainTab === 'pending' && !pendingLoaded && !loadingPending) {
       fetchPending();
-    } else if (activeReqTab === 'ready_dispatch' && !readyDispatchLoaded && !loadingReadyDispatch) {
+    } else if (activeMainTab === 'ready_dispatch' && !readyDispatchLoaded && !loadingReadyDispatch) {
       fetchReadyDispatch();
-    } else if (activeReqTab === 'rejected' && !rejectedLoaded && !loadingRejected) {
+    } else if (activeMainTab === 'rejected' && !rejectedLoaded && !loadingRejected) {
       fetchRejected();
     }
-  }, [
-    activeSubTab, activeReqTab,
-    pendingLoaded, readyDispatchLoaded, rejectedLoaded,
-    loadingPending, loadingReadyDispatch, loadingRejected,
-    fetchPending, fetchReadyDispatch, fetchRejected
-  ]);
-
-  // Lazy load DN tabs
-  useEffect(() => {
-    if (activeSubTab !== 'delivery-notes') return;
-
-    if (dnStatusFilter === 'DRAFT' && !draftLoaded && !loadingDraft) {
+    // DN tabs
+    else if (activeMainTab === 'draft' && !draftLoaded && !loadingDraft) {
       fetchDraftDNs();
-    } else if (dnStatusFilter === 'ISSUED' && !issuedLoaded && !loadingIssued) {
+    } else if (activeMainTab === 'issued' && !issuedLoaded && !loadingIssued) {
       fetchIssuedDNs();
-    } else if (dnStatusFilter === 'DELIVERED' && !deliveredLoaded && !loadingDelivered) {
+    } else if (activeMainTab === 'delivered' && !deliveredLoaded && !loadingDelivered) {
       fetchDeliveredDNs();
     }
   }, [
-    activeSubTab, dnStatusFilter,
+    activeMainTab,
+    pendingLoaded, readyDispatchLoaded, rejectedLoaded,
+    loadingPending, loadingReadyDispatch, loadingRejected,
+    fetchPending, fetchReadyDispatch, fetchRejected,
     draftLoaded, issuedLoaded, deliveredLoaded,
     loadingDraft, loadingIssued, loadingDelivered,
     fetchDraftDNs, fetchIssuedDNs, fetchDeliveredDNs
@@ -351,22 +336,22 @@ const AssetDispatch: React.FC = () => {
   // ==================== REQUISITION HELPERS ====================
 
   const currentRequisitions = useMemo(() => {
-    switch (activeReqTab) {
+    switch (activeMainTab) {
       case 'pending': return pendingRequisitions;
       case 'ready_dispatch': return readyDispatchRequisitions;
       case 'rejected': return rejectedRequisitions;
-      default: return pendingRequisitions;
+      default: return [];
     }
-  }, [activeReqTab, pendingRequisitions, readyDispatchRequisitions, rejectedRequisitions]);
+  }, [activeMainTab, pendingRequisitions, readyDispatchRequisitions, rejectedRequisitions]);
 
   const isReqLoading = useMemo(() => {
-    switch (activeReqTab) {
+    switch (activeMainTab) {
       case 'pending': return loadingPending;
       case 'ready_dispatch': return loadingReadyDispatch;
       case 'rejected': return loadingRejected;
       default: return false;
     }
-  }, [activeReqTab, loadingPending, loadingReadyDispatch, loadingRejected]);
+  }, [activeMainTab, loadingPending, loadingReadyDispatch, loadingRejected]);
 
   const filteredRequisitions = useMemo(() => {
     if (!reqSearchTerm) return currentRequisitions;
@@ -388,44 +373,91 @@ const AssetDispatch: React.FC = () => {
     });
   }, [currentRequisitions, reqSearchTerm]);
 
+  // Pagination calculations for requisitions
+  const reqTotalPages = Math.ceil(filteredRequisitions.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequisitions = useMemo(() => {
+    const startIndex = (reqCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredRequisitions.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequisitions, reqCurrentPage]);
+
+  // Reset requisition page when tab or search changes
+  useEffect(() => {
+    setReqCurrentPage(1);
+  }, [activeMainTab, reqSearchTerm]);
+
+  // Clamp requisition page when total pages decreases
+  useEffect(() => {
+    if (reqCurrentPage > reqTotalPages && reqTotalPages > 0) {
+      setReqCurrentPage(reqTotalPages);
+    }
+  }, [reqCurrentPage, reqTotalPages]);
+
   const reqStatusCounts = useMemo(() => ({
     pending: pendingRequisitions.length,
     ready_dispatch: readyDispatchRequisitions.length,
     rejected: rejectedRequisitions.length,
   }), [pendingRequisitions, readyDispatchRequisitions, rejectedRequisitions]);
 
-  const refreshCurrentReqTab = useCallback(() => {
-    if (activeReqTab === 'pending') {
+  const refreshCurrentTab = useCallback(() => {
+    if (activeMainTab === 'pending') {
       setPendingLoaded(false);
       fetchPending();
-    } else if (activeReqTab === 'ready_dispatch') {
+    } else if (activeMainTab === 'ready_dispatch') {
       setReadyDispatchLoaded(false);
       fetchReadyDispatch();
-    } else if (activeReqTab === 'rejected') {
+    } else if (activeMainTab === 'rejected') {
       setRejectedLoaded(false);
       fetchRejected();
+    } else if (activeMainTab === 'draft') {
+      setDraftLoaded(false);
+      fetchDraftDNs();
+    } else if (activeMainTab === 'issued') {
+      setIssuedLoaded(false);
+      fetchIssuedDNs();
+    } else if (activeMainTab === 'delivered') {
+      setDeliveredLoaded(false);
+      fetchDeliveredDNs();
     }
-  }, [activeReqTab, fetchPending, fetchReadyDispatch, fetchRejected]);
+  }, [activeMainTab, fetchPending, fetchReadyDispatch, fetchRejected, fetchDraftDNs, fetchIssuedDNs, fetchDeliveredDNs]);
 
   // ==================== DN HELPERS ====================
 
   const currentDNs = useMemo(() => {
-    switch (dnStatusFilter) {
-      case 'DRAFT': return draftDNs;
-      case 'ISSUED': return issuedDNs;
-      case 'DELIVERED': return deliveredDNs;
-      default: return draftDNs;
+    switch (activeMainTab) {
+      case 'draft': return draftDNs;
+      case 'issued': return issuedDNs;
+      case 'delivered': return deliveredDNs;
+      default: return [];
     }
-  }, [dnStatusFilter, draftDNs, issuedDNs, deliveredDNs]);
+  }, [activeMainTab, draftDNs, issuedDNs, deliveredDNs]);
+
+  // Pagination calculations for DNs
+  const dnTotalPages = Math.ceil(currentDNs.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedDNs = useMemo(() => {
+    const startIndex = (dnCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return currentDNs.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [currentDNs, dnCurrentPage]);
+
+  // Reset DN page when tab changes
+  useEffect(() => {
+    setDnCurrentPage(1);
+  }, [activeMainTab]);
+
+  // Clamp DN page when total pages decreases
+  useEffect(() => {
+    if (dnCurrentPage > dnTotalPages && dnTotalPages > 0) {
+      setDnCurrentPage(dnTotalPages);
+    }
+  }, [dnCurrentPage, dnTotalPages]);
 
   const isDNLoading = useMemo(() => {
-    switch (dnStatusFilter) {
-      case 'DRAFT': return loadingDraft;
-      case 'ISSUED': return loadingIssued;
-      case 'DELIVERED': return loadingDelivered;
+    switch (activeMainTab) {
+      case 'draft': return loadingDraft;
+      case 'issued': return loadingIssued;
+      case 'delivered': return loadingDelivered;
       default: return false;
     }
-  }, [dnStatusFilter, loadingDraft, loadingIssued, loadingDelivered]);
+  }, [activeMainTab, loadingDraft, loadingIssued, loadingDelivered]);
 
   const dnStatusCounts = useMemo(() => ({
     DRAFT: draftDNs.length,
@@ -437,20 +469,6 @@ const AssetDispatch: React.FC = () => {
     return draftDNs.length + issuedDNs.length + deliveredDNs.length;
   }, [draftDNs, issuedDNs, deliveredDNs]);
 
-  const refreshCurrentDNTab = useCallback(() => {
-    if (dnStatusFilter === 'DRAFT') {
-      setDraftLoaded(false);
-      fetchDraftDNs();
-    } else if (dnStatusFilter === 'ISSUED') {
-      setIssuedLoaded(false);
-      fetchIssuedDNs();
-    } else if (dnStatusFilter === 'DELIVERED') {
-      setDeliveredLoaded(false);
-      fetchDeliveredDNs();
-    }
-    // Also refresh form data for available assets
-    setFormDataLoaded(false);
-  }, [dnStatusFilter, fetchDraftDNs, fetchIssuedDNs, fetchDeliveredDNs]);
 
   const openActionModal = (requisition: AssetRequisition, action: 'approve' | 'reject') => {
     setSelectedRequisition(requisition);
@@ -604,8 +622,38 @@ const AssetDispatch: React.FC = () => {
       return;
     }
     for (const item of dispatchItems) {
+      // availableCategories = quantity-based categories only
+      // availableItems = individual tracking items (each has category_id)
+      const isInQuantityCategories = availableCategories.some(c => c.category_id === item.category_id);
+      const categoryHasIndividualItems = availableItems.some(i => i.category_id === item.category_id);
+
+      // If category is not in either list and doesn't have asset_item_id, it's not dispatchable
+      if (!isInQuantityCategories && !categoryHasIndividualItems && !item.asset_item_id) {
+        showError(`"${item.category_name}" is not available in inventory. Please remove it from the dispatch list.`);
+        return;
+      }
+
+      // Check if item has no available stock
+      if (item.available === 0) {
+        showError(`${item.category_name} has no available stock. Please remove it from the dispatch list.`);
+        return;
+      }
       if (item.quantity > item.available) {
         showError(`Quantity exceeds available stock for ${item.category_name}`);
+        return;
+      }
+
+      // Category requires individual tracking if:
+      // 1. Item is explicitly marked as 'individual', OR
+      // 2. Category is NOT in quantity-based list (individual tracking categories don't appear there)
+      const requiresIndividualTracking = item.tracking_mode === 'individual' ||
+        (!isInQuantityCategories && (categoryHasIndividualItems || !item.asset_item_id));
+
+      // For individual tracking, accept either:
+      // - Single item with asset_item_id
+      // - Grouped items with individualItemIds
+      if (requiresIndividualTracking && !item.asset_item_id && (!item.individualItemIds || item.individualItemIds.length === 0)) {
+        showError(`"${item.category_name}" requires individual tracking. Please remove it and select specific items from the "Individual Items" section below.`);
         return;
       }
     }
@@ -619,15 +667,29 @@ const AssetDispatch: React.FC = () => {
         vehicle_number: vehicleNumber || undefined,
         driver_name: driverName || undefined,
         driver_contact: driverContact || undefined,
+        transport_fee: transportFee || undefined,
         notes: notes || undefined,
         requisition_id: linkedRequisitionId || undefined,
-        items: dispatchItems.map(item => ({
-          category_id: item.category_id,
-          asset_item_id: item.asset_item_id,
-          quantity: item.quantity,
-          condition: item.condition,
-          notes: item.notes || undefined
-        }))
+        items: dispatchItems.flatMap(item => {
+          // For grouped individual items, expand them into separate items for the backend
+          if (item.individualItemIds && item.individualItemIds.length > 0) {
+            return item.individualItemIds.map(assetItemId => ({
+              category_id: item.category_id,
+              asset_item_id: assetItemId,
+              quantity: 1,
+              condition: item.condition,
+              notes: item.notes || undefined
+            }));
+          }
+          // For quantity-based or single individual items, send as is
+          return [{
+            category_id: item.category_id,
+            asset_item_id: item.asset_item_id,
+            quantity: item.quantity,
+            condition: item.condition,
+            notes: item.notes || undefined
+          }];
+        })
       });
 
       // If linked to a requisition, mark it as dispatched
@@ -676,9 +738,9 @@ const AssetDispatch: React.FC = () => {
       setIssuedLoaded(false);
       setFormDataLoaded(false);
       // Re-fetch current tab
-      if (dnStatusFilter === 'DRAFT') {
+      if (activeMainTab === 'draft') {
         fetchDraftDNs();
-      } else if (dnStatusFilter === 'ISSUED') {
+      } else if (activeMainTab === 'issued') {
         fetchIssuedDNs();
       }
     } catch (error: unknown) {
@@ -696,6 +758,8 @@ const AssetDispatch: React.FC = () => {
     setVehicleNumber('');
     setDriverName('');
     setDriverContact('');
+    setTransportFee(0);
+    setDeliveryNoteFile(null);
     setNotes('');
     setDispatchItems([]);
     setShowForm(false);
@@ -706,13 +770,13 @@ const AssetDispatch: React.FC = () => {
   // Handle dispatch by opening DN form with requisition data
   const handleDispatchWithDN = async (requisition: AssetRequisition) => {
     try {
-      // Switch to delivery-notes tab first for visual feedback
-      setActiveSubTab('delivery-notes');
-      setDnStatusFilter('DRAFT');
+      // Switch to draft tab for visual feedback
+      setActiveMainTab('draft');
 
       // Get form data - either from existing state or fetch fresh
       let projectsList = projects;
       let categoriesList = availableCategories;
+      let itemsList = availableItems;
 
       if (!formDataLoaded) {
         const fetchedData = await fetchFormData();
@@ -722,6 +786,7 @@ const AssetDispatch: React.FC = () => {
         }
         projectsList = fetchedData.projects;
         categoriesList = fetchedData.categories;
+        itemsList = fetchedData.items;
       }
 
       // Store the linked requisition
@@ -749,15 +814,53 @@ const AssetDispatch: React.FC = () => {
       if (requisition.items && requisition.items.length > 0) {
         // Multiple items
         for (const item of requisition.items) {
-          // Find the matching category in available assets
+          // Find the matching category in available assets (quantity-based categories)
           const category = categoriesList.find(c => c.category_id === item.category_id);
 
-          if (category) {
+          // Also check if this is an individual tracking category by looking at itemsList
+          const availableItemsForCategory = itemsList.filter(
+            ai => ai.category_id === item.category_id && ai.current_status === 'available'
+          ) || [];
+          const isIndividualTracking = item.tracking_mode === 'individual' || availableItemsForCategory.length > 0;
+
+          if (isIndividualTracking) {
+            // Handle individual tracking mode - show as grouped quantity
+            const requestedQty = item.quantity || 1;
+            const itemsToAdd = availableItemsForCategory.slice(0, requestedQty);
+            const categoryName = item.category_name || category?.category_name || 'Unknown';
+            const categoryCode = item.category_code || category?.category_code || '';
+
+            // Group individual items into a single line item
+            const itemCodes = itemsToAdd.map(ai => ai.item_code).filter(Boolean).join(', ');
+            const note = itemsToAdd.length > 0
+              ? `Individual items: ${itemCodes || itemsToAdd.map((ai, idx) => `#${idx + 1}`).join(', ')}`
+              : `⚠️ No available items - ${requestedQty} needed`;
+
+            prefilledItems.push({
+              category_id: item.category_id,
+              category_name: categoryName,
+              category_code: categoryCode,
+              tracking_mode: 'individual',
+              quantity: itemsToAdd.length > 0 ? itemsToAdd.length : requestedQty,
+              available: availableItemsForCategory.length,
+              condition: 'good',
+              notes: note,
+              // Store the asset_item_ids for backend submission (will be used when creating DN)
+              individualItemIds: itemsToAdd.map(ai => ai.item_id)
+            });
+
+            // Add shortfall warning if needed
+            if (itemsToAdd.length < requestedQty) {
+              const shortfall = requestedQty - itemsToAdd.length;
+              prefilledItems[prefilledItems.length - 1].notes += ` | ⚠️ Shortfall: ${shortfall} more needed`;
+            }
+          } else if (category) {
+            // Quantity-based tracking - add as is
             prefilledItems.push({
               category_id: item.category_id,
               category_name: item.category_name || category.category_name,
               category_code: item.category_code || category.category_code,
-              tracking_mode: category.tracking_mode === 'individual' ? 'individual' : 'quantity',
+              tracking_mode: 'quantity',
               quantity: item.quantity || 1,
               available: category.available_quantity ?? item.quantity ?? 1,
               condition: 'good',
@@ -769,27 +872,82 @@ const AssetDispatch: React.FC = () => {
               category_id: item.category_id,
               category_name: item.category_name || 'Unknown',
               category_code: item.category_code || '',
-              tracking_mode: 'quantity',
+              tracking_mode: item.tracking_mode || 'quantity',
               quantity: item.quantity || 1,
-              available: item.quantity || 1,
+              available: 0,
               condition: 'good',
-              notes: ''
+              notes: '⚠️ Category not found in inventory'
             });
           }
         }
       } else if (requisition.category_id) {
         // Single item (old format)
         const category = categoriesList.find(c => c.category_id === requisition.category_id);
-        prefilledItems.push({
-          category_id: requisition.category_id,
-          category_name: requisition.category_name || (category?.category_name || 'Unknown'),
-          category_code: requisition.category_code || (category?.category_code || ''),
-          tracking_mode: category?.tracking_mode === 'individual' ? 'individual' : 'quantity',
-          quantity: requisition.quantity || 1,
-          available: category?.available_quantity ?? requisition.quantity ?? 1,
-          condition: 'good',
-          notes: ''
-        });
+
+        // Also check for individual tracking items
+        const availableItemsForCategory = (fetchedData?.items || itemsList).filter(
+          ai => ai.category_id === requisition.category_id && ai.current_status === 'available'
+        ) || [];
+        const isIndividualTracking = requisition.tracking_mode === 'individual' ||
+          category?.tracking_mode === 'individual' ||
+          availableItemsForCategory.length > 0;
+
+        if (isIndividualTracking) {
+          // Handle individual tracking for single item requisition - show as grouped quantity
+          const requestedQty = requisition.quantity || 1;
+          const itemsToAdd = availableItemsForCategory.slice(0, requestedQty);
+          const categoryName = requisition.category_name || category?.category_name || 'Unknown';
+          const categoryCode = requisition.category_code || category?.category_code || '';
+
+          // Group individual items into a single line item
+          const itemCodes = itemsToAdd.map(ai => ai.item_code).filter(Boolean).join(', ');
+          const note = itemsToAdd.length > 0
+            ? `Individual items: ${itemCodes || itemsToAdd.map((ai, idx) => `#${idx + 1}`).join(', ')}`
+            : `⚠️ No available items - ${requestedQty} needed`;
+
+          prefilledItems.push({
+            category_id: requisition.category_id,
+            category_name: categoryName,
+            category_code: categoryCode,
+            tracking_mode: 'individual',
+            quantity: itemsToAdd.length > 0 ? itemsToAdd.length : requestedQty,
+            available: availableItemsForCategory.length,
+            condition: 'good',
+            notes: note,
+            // Store the asset_item_ids for backend submission
+            individualItemIds: itemsToAdd.map(ai => ai.item_id)
+          });
+
+          // Add shortfall warning if needed
+          if (itemsToAdd.length < requestedQty) {
+            const shortfall = requestedQty - itemsToAdd.length;
+            prefilledItems[prefilledItems.length - 1].notes += ` | ⚠️ Shortfall: ${shortfall} more needed`;
+          }
+        } else if (category) {
+          // Quantity-based tracking
+          prefilledItems.push({
+            category_id: requisition.category_id,
+            category_name: requisition.category_name || category.category_name,
+            category_code: requisition.category_code || category.category_code,
+            tracking_mode: 'quantity',
+            quantity: requisition.quantity || 1,
+            available: category.available_quantity ?? requisition.quantity ?? 1,
+            condition: 'good',
+            notes: ''
+          });
+        } else {
+          // Category not found anywhere
+          prefilledItems.push({
+            category_id: requisition.category_id,
+            category_name: requisition.category_name || 'Unknown',
+            category_code: requisition.category_code || '',
+            tracking_mode: requisition.tracking_mode || 'quantity',
+            quantity: requisition.quantity || 1,
+            available: 0,
+            condition: 'good',
+            notes: '⚠️ Category not found in inventory'
+          });
+        }
       }
 
       setDispatchItems(prefilledItems);
@@ -862,11 +1020,14 @@ const AssetDispatch: React.FC = () => {
     }
   };
 
-  // Requisition Tab configuration
-  const reqTabs: { key: RequisitionTabType; label: string; icon: React.ReactNode; color: string }[] = [
-    { key: 'pending', label: 'Pending Approval', icon: <Clock className="h-4 w-4" />, color: 'yellow' },
-    { key: 'ready_dispatch', label: 'Ready to Dispatch', icon: <Truck className="h-4 w-4" />, color: 'blue' },
-    { key: 'rejected', label: 'Rejected', icon: <XCircle className="h-4 w-4" />, color: 'red' }
+  // Main Tab configuration - all tabs in single row
+  const mainTabs: { key: MainTabType; label: string; icon: React.ReactNode; activeColor: string; badgeColor: string; count: number }[] = [
+    { key: 'pending', label: 'Pending', icon: <Clock className="h-4 w-4" />, activeColor: 'bg-yellow-500 text-white', badgeColor: 'bg-yellow-100 text-yellow-700', count: reqStatusCounts.pending },
+    { key: 'ready_dispatch', label: 'Ready', icon: <Truck className="h-4 w-4" />, activeColor: 'bg-blue-600 text-white', badgeColor: 'bg-blue-100 text-blue-700', count: reqStatusCounts.ready_dispatch },
+    { key: 'rejected', label: 'Rejected', icon: <XCircle className="h-4 w-4" />, activeColor: 'bg-red-500 text-white', badgeColor: 'bg-red-100 text-red-700', count: reqStatusCounts.rejected },
+    { key: 'draft', label: 'Draft ADN', icon: <FileText className="h-4 w-4" />, activeColor: 'bg-gray-700 text-white', badgeColor: 'bg-gray-200 text-gray-700', count: dnStatusCounts.DRAFT },
+    { key: 'issued', label: 'Issued ADN', icon: <Send className="h-4 w-4" />, activeColor: 'bg-blue-600 text-white', badgeColor: 'bg-blue-100 text-blue-700', count: dnStatusCounts.ISSUED },
+    { key: 'delivered', label: 'Delivered ADN', icon: <CheckCircle className="h-4 w-4" />, activeColor: 'bg-green-600 text-white', badgeColor: 'bg-green-100 text-green-700', count: dnStatusCounts.DELIVERED },
   ];
 
   // ==================== RENDER ====================
@@ -888,7 +1049,7 @@ const AssetDispatch: React.FC = () => {
           </div>
         </div>
         <button
-          onClick={() => activeSubTab === 'requisitions' ? refreshCurrentReqTab() : refreshCurrentDNTab()}
+          onClick={() => refreshCurrentTab()}
           className="p-2 hover:bg-gray-100 rounded-lg"
           disabled={isReqLoading || isDNLoading}
         >
@@ -896,65 +1057,32 @@ const AssetDispatch: React.FC = () => {
         </button>
       </div>
 
-      {/* Sub-tabs (like Stock Out) */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setActiveSubTab('requisitions')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-            activeSubTab === 'requisitions'
-              ? 'bg-orange-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          <Package className="w-4 h-4" />
-          Requisitions
-          <span className={`px-2 py-0.5 rounded-full text-xs ${
-            activeSubTab === 'requisitions' ? 'bg-orange-500' : 'bg-yellow-100 text-yellow-700'
-          }`}>
-            {reqStatusCounts.pending}
-          </span>
-        </button>
-        <button
-          onClick={() => setActiveSubTab('delivery-notes')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-            activeSubTab === 'delivery-notes'
-              ? 'bg-orange-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          Delivery Notes (ADN)
-          <span className={`px-2 py-0.5 rounded-full text-xs ${
-            activeSubTab === 'delivery-notes' ? 'bg-orange-500' : 'bg-blue-100 text-blue-700'
-          }`}>
-            {dnStatusCounts.DRAFT}
-          </span>
-        </button>
+      {/* Main Tabs - Single Row */}
+      <div className="flex gap-2 flex-wrap">
+        {mainTabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveMainTab(tab.key)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeMainTab === tab.key
+                ? tab.activeColor
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+            <span className={`px-2 py-0.5 rounded-full text-xs ${
+              activeMainTab === tab.key ? 'bg-white/20' : tab.badgeColor
+            }`}>
+              {tab.count}
+            </span>
+          </button>
+        ))}
       </div>
 
-      {/* ==================== REQUISITIONS SUB-TAB ==================== */}
-      {activeSubTab === 'requisitions' && (
+      {/* ==================== REQUISITIONS TABS ==================== */}
+      {['pending', 'ready_dispatch', 'rejected'].includes(activeMainTab) && (
         <>
-          {/* Requisition Status Tabs */}
-          <div className="flex gap-2 flex-wrap">
-            {reqTabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveReqTab(tab.key)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  activeReqTab === tab.key
-                    ? tab.color === 'yellow' ? 'bg-yellow-100 text-yellow-700'
-                    : tab.color === 'blue' ? 'bg-blue-100 text-blue-700'
-                    : tab.color === 'green' ? 'bg-green-100 text-green-700'
-                    : 'bg-red-100 text-red-700'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {tab.icon}
-                {tab.label} ({reqStatusCounts[tab.key]})
-              </button>
-            ))}
-          </div>
 
           {/* Search */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
@@ -983,14 +1111,14 @@ const AssetDispatch: React.FC = () => {
               <Package className="h-12 w-12 text-gray-300 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No requisitions found</h3>
               <p className="text-sm text-gray-500">
-                {activeReqTab === 'pending' ? 'No requisitions waiting for your approval'
-                  : activeReqTab === 'ready_dispatch' ? 'No approved requisitions ready for dispatch'
+                {activeMainTab === 'pending' ? 'No requisitions waiting for your approval'
+                  : activeMainTab === 'ready_dispatch' ? 'No approved requisitions ready for dispatch'
                   : 'No rejected requisitions'}
               </p>
             </div>
           ) : !isReqLoading && (
             <div className="space-y-4">
-              {filteredRequisitions.map(requisition => (
+              {paginatedRequisitions.map(requisition => (
                 <div
                   key={requisition.requisition_id}
                   className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow"
@@ -1083,55 +1211,46 @@ const AssetDispatch: React.FC = () => {
                   </div>
                 </div>
               ))}
+
+              {/* Pagination for Requisitions */}
+              {filteredRequisitions.length > 0 && (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 flex items-center justify-between">
+                  <span className="text-sm text-gray-600">
+                    Showing {((reqCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(reqCurrentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredRequisitions.length)} of {filteredRequisitions.length} requisitions
+                  </span>
+                  {reqTotalPages > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setReqCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={reqCurrentPage === 1}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600">
+                        Page {reqCurrentPage} of {reqTotalPages}
+                      </span>
+                      <button
+                        onClick={() => setReqCurrentPage(prev => Math.min(prev + 1, reqTotalPages))}
+                        disabled={reqCurrentPage === reqTotalPages}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </>
       )}
 
-      {/* ==================== DELIVERY NOTES SUB-TAB ==================== */}
-      {activeSubTab === 'delivery-notes' && (
+      {/* ==================== DELIVERY NOTES TABS ==================== */}
+      {['draft', 'issued', 'delivered'].includes(activeMainTab) && (
         <>
-          {/* DN Status Filter & Create Button */}
-          <div className="flex justify-between items-center">
-            <div className="flex gap-2">
-              {(['DRAFT', 'ISSUED', 'DELIVERED'] as const).map(status => (
-                <button
-                  key={status}
-                  onClick={() => setDnStatusFilter(status)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                    dnStatusFilter === status
-                      ? status === 'DRAFT' ? 'bg-gray-700 text-white'
-                        : status === 'ISSUED' ? 'bg-blue-600 text-white'
-                        : 'bg-green-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  {status === 'DRAFT' ? <FileText className="h-4 w-4" /> :
-                   status === 'ISSUED' ? <Truck className="h-4 w-4" /> :
-                   <CheckCircle className="h-4 w-4" />}
-                  {status}
-                  <span className={`px-2 py-0.5 rounded-full text-xs ${
-                    dnStatusFilter === status
-                      ? 'bg-white/20'
-                      : status === 'DRAFT' ? 'bg-gray-200 text-gray-700'
-                        : status === 'ISSUED' ? 'bg-blue-100 text-blue-700'
-                        : 'bg-green-100 text-green-700'
-                  }`}>
-                    {dnStatusCounts[status]}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowForm(true)}
-              disabled={loadingFormData}
-              className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
-            >
-              <Plus className="w-4 h-4" />
-              Create ADN
-            </button>
-          </div>
-
           {/* Create DN Form */}
           {showForm && (
             <div className="bg-white rounded-xl shadow-sm border p-6">
@@ -1259,6 +1378,69 @@ const AssetDispatch: React.FC = () => {
                       />
                     </div>
                   </div>
+
+                  {/* Transport Fee Calculation */}
+                  <div className="mt-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3">Transport Fee Calculation</h4>
+
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Enter total transport fee <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={transportFee === 0 ? '' : transportFee}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === '') {
+                          setTransportFee(0);
+                        } else {
+                          const numValue = parseFloat(value);
+                          if (!isNaN(numValue)) {
+                            setTransportFee(numValue);
+                          }
+                        }
+                      }}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1.5 flex items-start">
+                      <svg className="w-4 h-4 text-gray-400 mr-1 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      This is the total transport cost paid for material delivered.
+                    </p>
+
+                    {/* Total Transport Fee Display */}
+                    {transportFee > 0 && (
+                      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-lg p-4 shadow-sm mt-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center">
+                            <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            <span className="text-sm text-blue-900 font-semibold">
+                              Total Transport Fee:
+                            </span>
+                          </div>
+                          <span className="text-2xl font-bold text-blue-900">
+                            AED {transportFee.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="bg-white rounded-md p-2 border border-blue-200">
+                          <p className="text-xs text-blue-800 font-medium">
+                            📊 Calculation: 1 × {transportFee.toFixed(2)} = <span className="font-bold">{transportFee.toFixed(2)} AED</span>
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-amber-600 italic mt-2">
+                      ⚡ Total transport fee will be calculated automatically when you enter the quantity
+                    </p>
+                  </div>
+
                 </div>
 
                 {/* Asset Selection - Only show if NOT creating from requisition */}
@@ -1283,14 +1465,14 @@ const AssetDispatch: React.FC = () => {
                             <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
                             <span className="text-sm font-semibold text-blue-800">Quantity-based Assets</span>
                             <span className="px-2 py-0.5 bg-blue-200 text-blue-700 text-xs font-bold rounded-full">
-                              {availableCategories.length}
+                              {availableCategories.filter(cat => cat.tracking_mode === 'quantity').length}
                             </span>
                           </div>
                           {quantityExpanded ? <ChevronUp className="w-5 h-5 text-blue-600" /> : <ChevronDown className="w-5 h-5 text-blue-600" />}
                         </button>
                         {quantityExpanded && (
                           <div className="px-4 pb-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-56 overflow-y-auto">
-                            {availableCategories.map(cat => {
+                            {availableCategories.filter(cat => cat.tracking_mode === 'quantity').map(cat => {
                               const isSelected = dispatchItems.some(i => i.category_id === cat.category_id && !i.asset_item_id);
                               return (
                                 <button
@@ -1423,21 +1605,26 @@ const AssetDispatch: React.FC = () => {
                               </span>
                             )}
                           </div>
-                          {item.tracking_mode === 'quantity' && (
-                            <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-1 rounded-lg">
-                              <label className="text-xs text-gray-600 font-medium">Qty:</label>
-                              <input
-                                type="number"
-                                min="1"
-                                max={item.available}
-                                value={item.quantity}
-                                onChange={(e) => updateDispatchItem(index, 'quantity', parseInt(e.target.value) || 1)}
-                                className="w-12 px-1.5 py-0.5 text-sm border rounded text-center font-semibold"
-                                disabled={linkedRequisitionId ? true : false}
-                              />
-                              <span className="text-xs text-gray-400">/ {item.available}</span>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-1 rounded-lg">
+                            <label className="text-xs text-gray-600 font-medium">Qty:</label>
+                            {item.tracking_mode === 'quantity' ? (
+                              <>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max={item.available}
+                                  value={item.quantity || ''}
+                                  placeholder="1"
+                                  onChange={(e) => updateDispatchItem(index, 'quantity', parseInt(e.target.value) || 1)}
+                                  className="w-12 px-1.5 py-0.5 text-sm border rounded text-center font-semibold"
+                                  disabled={linkedRequisitionId ? true : false}
+                                />
+                                <span className="text-xs text-gray-400">/ {item.available}</span>
+                              </>
+                            ) : (
+                              <span className="px-1.5 py-0.5 text-sm font-semibold text-gray-700">{item.quantity || 1}</span>
+                            )}
+                          </div>
                           {!linkedRequisitionId && (
                             <button
                               type="button"
@@ -1501,10 +1688,10 @@ const AssetDispatch: React.FC = () => {
               <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
                 <h2 className="font-semibold flex items-center gap-2 text-gray-800">
                   <Truck className="w-5 h-5 text-orange-500" />
-                  {dnStatusFilter} Delivery Notes
+                  {activeMainTab === 'draft' ? 'Draft' : activeMainTab === 'issued' ? 'Issued' : 'Delivered'} Asset Delivery Notes
                 </h2>
                 <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm font-medium">
-                  {currentDNs.length} Notes
+                  {currentDNs.length} {currentDNs.length === 1 ? 'Note' : 'Notes'}
                 </span>
               </div>
               <div className="overflow-x-auto">
@@ -1516,21 +1703,22 @@ const AssetDispatch: React.FC = () => {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Site Engineer</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Vehicle</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transport Fee</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {currentDNs.length === 0 ? (
+                    {paginatedDNs.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-6 py-12 text-center">
+                        <td colSpan={9} className="px-6 py-12 text-center">
                           <Truck className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                          <p className="text-gray-500">No {dnStatusFilter.toLowerCase()} delivery notes found</p>
+                          <p className="text-gray-500">No {activeMainTab === 'draft' ? 'draft' : activeMainTab === 'issued' ? 'issued' : 'delivered'} asset delivery notes found</p>
                         </td>
                       </tr>
                     ) : (
-                      currentDNs.map(dn => (
+                      paginatedDNs.map(dn => (
                           <React.Fragment key={dn.adn_id}>
                             <tr className="hover:bg-gray-50">
                               <td className="px-4 py-4">
@@ -1550,13 +1738,25 @@ const AssetDispatch: React.FC = () => {
                               </td>
                               <td className="px-4 py-4">
                                 <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm font-medium">
-                                  {dn.items?.length || 0} items
+                                  {(() => {
+                                    // Group items by category and count unique categories
+                                    const uniqueCategories = new Set();
+                                    dn.items?.forEach(item => {
+                                      uniqueCategories.add(item.category_name);
+                                    });
+                                    return uniqueCategories.size || 0;
+                                  })()} items
                                 </span>
                               </td>
                               <td className="px-4 py-4 text-sm text-gray-900">{dn.attention_to || '-'}</td>
                               <td className="px-4 py-4 text-sm">
                                 <div className="text-gray-900">{dn.vehicle_number || '-'}</div>
                                 {dn.driver_name && <div className="text-xs text-gray-500">{dn.driver_name}</div>}
+                              </td>
+                              <td className="px-4 py-4 text-sm">
+                                <div className="text-gray-900 font-medium">
+                                  {dn.transport_fee ? `AED ${Number(dn.transport_fee).toFixed(2)}` : '-'}
+                                </div>
                               </td>
                               <td className="px-4 py-4">
                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${DN_STATUS_COLORS[dn.status]}`}>
@@ -1600,7 +1800,7 @@ const AssetDispatch: React.FC = () => {
                             </tr>
                             {expandedDN === dn.adn_id && (
                               <tr>
-                                <td colSpan={8} className="bg-gray-50 px-6 py-4">
+                                <td colSpan={9} className="bg-gray-50 px-6 py-4">
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
                                     <div>
                                       <span className="text-gray-500 text-xs uppercase">Delivery Date</span>
@@ -1631,33 +1831,55 @@ const AssetDispatch: React.FC = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-gray-100">
-                                        {dn.items.map(item => (
-                                          <tr key={item.item_id} className="hover:bg-gray-50">
-                                            <td className="px-3 py-2 font-medium text-gray-900">{item.category_name}</td>
-                                            <td className="px-3 py-2 text-gray-500">{item.item_code || '-'}</td>
-                                            <td className="px-3 py-2 text-center font-semibold text-blue-600">{item.quantity}</td>
-                                            <td className="px-3 py-2 text-center">
-                                              {item.is_received ? (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                                                  <Check className="w-3 h-3" /> Yes
+                                        {(() => {
+                                          // Group items by category_name for display (matching PDF format)
+                                          const grouped = {};
+                                          dn.items.forEach(item => {
+                                            const key = item.category_name;
+                                            if (!grouped[key]) {
+                                              grouped[key] = {
+                                                category_name: item.category_name,
+                                                quantity: 0,
+                                                is_received_all: true,
+                                                statuses: new Set()
+                                              };
+                                            }
+                                            // For individual items, count each as 1 unit
+                                            grouped[key].quantity += (item.item_code ? 1 : item.quantity);
+                                            if (!item.is_received) grouped[key].is_received_all = false;
+                                            grouped[key].statuses.add(item.status);
+                                          });
+
+                                          return Object.values(grouped).map((groupedItem, idx) => (
+                                            <tr key={idx} className="hover:bg-gray-50">
+                                              <td className="px-3 py-2 font-medium text-gray-900">{groupedItem.category_name}</td>
+                                              <td className="px-3 py-2 text-gray-500">-</td>
+                                              <td className="px-3 py-2 text-center font-semibold text-blue-600">{groupedItem.quantity}</td>
+                                              <td className="px-3 py-2 text-center">
+                                                {groupedItem.is_received_all ? (
+                                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                                    <Check className="w-3 h-3" /> Yes
+                                                  </span>
+                                                ) : (
+                                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                                                    <X className="w-3 h-3" /> No
+                                                  </span>
+                                                )}
+                                              </td>
+                                              <td className="px-3 py-2">
+                                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                                  groupedItem.statuses.size === 1 ? (
+                                                    [...groupedItem.statuses][0] === 'fully_returned' ? 'bg-green-100 text-green-700' :
+                                                    [...groupedItem.statuses][0] === 'partial_return' ? 'bg-yellow-100 text-yellow-700' :
+                                                    'bg-blue-100 text-blue-700'
+                                                  ) : 'bg-gray-100 text-gray-700'
+                                                }`}>
+                                                  {groupedItem.statuses.size === 1 ? [...groupedItem.statuses][0]?.replace('_', ' ') : 'mixed'}
                                                 </span>
-                                              ) : (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
-                                                  <X className="w-3 h-3" /> No
-                                                </span>
-                                              )}
-                                            </td>
-                                            <td className="px-3 py-2">
-                                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                                item.status === 'fully_returned' ? 'bg-green-100 text-green-700' :
-                                                item.status === 'partial_return' ? 'bg-yellow-100 text-yellow-700' :
-                                                'bg-blue-100 text-blue-700'
-                                              }`}>
-                                                {item.status?.replace('_', ' ')}
-                                              </span>
-                                            </td>
-                                          </tr>
-                                        ))}
+                                              </td>
+                                            </tr>
+                                          ));
+                                        })()}
                                       </tbody>
                                     </table>
                                   </div>
@@ -1670,6 +1892,38 @@ const AssetDispatch: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+
+              {/* Pagination for DNs */}
+              {currentDNs.length > 0 && (
+                <div className="px-4 py-3 bg-gray-50 border-t flex items-center justify-between text-sm">
+                  <span className="text-gray-600">
+                    Showing {((dnCurrentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(dnCurrentPage * PAGINATION.DEFAULT_PAGE_SIZE, currentDNs.length)} of {currentDNs.length} delivery notes
+                  </span>
+                  {dnTotalPages > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setDnCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={dnCurrentPage === 1}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600">
+                        Page {dnCurrentPage} of {dnTotalPages}
+                      </span>
+                      <button
+                        onClick={() => setDnCurrentPage(prev => Math.min(prev + 1, dnTotalPages))}
+                        disabled={dnCurrentPage === dnTotalPages}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </>

@@ -1,20 +1,24 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
-import { DocumentTextIcon, ShoppingCartIcon } from '@heroicons/react/24/outline';
+import { DocumentTextIcon, ShoppingCartIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
+import { PAGINATION } from '@/lib/constants';
 import { boqTrackingService } from '../services/boqTrackingService';
 import PlannedVsActualView from '@/components/boq/PlannedVsActualView';
+import ProfitReportView from '@/components/boq/ProfitReportView';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Eye, User } from 'lucide-react';
+import { Eye, User, BarChart3 } from 'lucide-react';
 
 export default function RecordMaterialPurchase() {
   const [searchParams] = useSearchParams();
   const [selectedBOQ, setSelectedBOQ] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState('live');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [reportSelectedBOQ, setReportSelectedBOQ] = useState<any | null>(null);
 
   // Real-time auto-sync for BOQ list
   const { data: boqData, isLoading: loading, refetch } = useProjectsAutoSync(
@@ -66,6 +70,21 @@ export default function RecordMaterialPurchase() {
       });
     }
   }, [boqList, activeTab]);
+
+  // Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Pagination calculations
+  const totalRecords = filteredBOQList.length;
+  const totalPages = Math.ceil(totalRecords / PAGINATION.DEFAULT_PAGE_SIZE);
+
+  // Paginated BOQ list
+  const paginatedBOQList = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredBOQList.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredBOQList, currentPage]);
 
   // Auto-select BOQ from URL param (e.g., from notification click)
   useEffect(() => {
@@ -242,6 +261,14 @@ export default function RecordMaterialPurchase() {
                       }).length}
                     </span>
                   </TabsTrigger>
+                  <TabsTrigger
+                    value="report"
+                    className="px-6 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm transition-all"
+                    onClick={() => setReportSelectedBOQ(null)}
+                  >
+                    <BarChart3 className="w-4 h-4 mr-2 inline-block" />
+                    <span className="font-semibold">Report</span>
+                  </TabsTrigger>
                 </TabsList>
               </div>
 
@@ -255,7 +282,7 @@ export default function RecordMaterialPurchase() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredBOQList.map((boq) => (
+                    {paginatedBOQList.map((boq) => (
                       <motion.div
                         key={boq.boq_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -337,6 +364,86 @@ export default function RecordMaterialPurchase() {
                     ))}
                   </div>
                 )}
+
+                {/* Pagination for Live Projects */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 mt-6 rounded-lg shadow-sm">
+                    <div className="flex flex-1 justify-between sm:hidden">
+                      <button
+                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                        disabled={currentPage === 1}
+                        className="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                        disabled={currentPage === totalPages}
+                        className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                    <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm text-gray-700">
+                          Showing <span className="font-medium">{(currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1}</span> to{' '}
+                          <span className="font-medium">{Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)}</span> of{' '}
+                          <span className="font-medium">{totalRecords}</span> results
+                        </p>
+                      </div>
+                      <div>
+                        <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                          <button
+                            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                            disabled={currentPage === 1}
+                            className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <span className="sr-only">Previous</span>
+                            <ChevronLeftIcon className="h-5 w-5" aria-hidden="true" />
+                          </button>
+                          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                            // Show first page, last page, current page, and pages around current
+                            const showPage = page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1;
+                            const showEllipsis = page === 2 && currentPage > 3 || page === totalPages - 1 && currentPage < totalPages - 2;
+
+                            if (showEllipsis && !showPage) {
+                              return (
+                                <span key={page} className="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-700 ring-1 ring-inset ring-gray-300">
+                                  ...
+                                </span>
+                              );
+                            }
+
+                            if (!showPage) return null;
+
+                            return (
+                              <button
+                                key={page}
+                                onClick={() => setCurrentPage(page)}
+                                className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${
+                                  page === currentPage
+                                    ? 'z-10 bg-blue-600 text-white focus:z-20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600'
+                                    : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
+                                }`}
+                              >
+                                {page}
+                              </button>
+                            );
+                          })}
+                          <button
+                            onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                            disabled={currentPage === totalPages}
+                            className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <span className="sr-only">Next</span>
+                            <ChevronRightIcon className="h-5 w-5" aria-hidden="true" />
+                          </button>
+                        </nav>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </TabsContent>
 
               {/* Completed Tab Content */}
@@ -349,7 +456,7 @@ export default function RecordMaterialPurchase() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredBOQList.map((boq) => (
+                    {paginatedBOQList.map((boq) => (
                       <motion.div
                         key={boq.boq_id}
                         initial={{ opacity: 0, y: 20 }}
@@ -421,7 +528,7 @@ export default function RecordMaterialPurchase() {
                         <div className="px-5 pb-5">
                           <button
                             onClick={() => handleBOQChange(boq.boq_id)}
-                            className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white py-3 px-4 rounded-lg font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2 shadow-md hover:shadow-lg group-hover:scale-[1.02]"
+                            className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-3 px-4 rounded-lg font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2 shadow-md hover:shadow-lg group-hover:scale-[1.02]"
                           >
                             <Eye className="w-4 h-4" />
                             View Comparison
@@ -429,6 +536,176 @@ export default function RecordMaterialPurchase() {
                         </div>
                       </motion.div>
                     ))}
+                  </div>
+                )}
+
+                {/* Pagination for Completed Projects */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 mt-6 rounded-lg shadow-sm">
+                    <div className="flex flex-1 justify-between sm:hidden">
+                      <button
+                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                        disabled={currentPage === 1}
+                        className="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                        disabled={currentPage === totalPages}
+                        className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                    <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm text-gray-700">
+                          Showing <span className="font-medium">{(currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1}</span> to{' '}
+                          <span className="font-medium">{Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)}</span> of{' '}
+                          <span className="font-medium">{totalRecords}</span> results
+                        </p>
+                      </div>
+                      <div>
+                        <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                          <button
+                            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                            disabled={currentPage === 1}
+                            className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <span className="sr-only">Previous</span>
+                            <ChevronLeftIcon className="h-5 w-5" aria-hidden="true" />
+                          </button>
+                          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                            // Show first page, last page, current page, and pages around current
+                            const showPage = page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1;
+                            const showEllipsis = page === 2 && currentPage > 3 || page === totalPages - 1 && currentPage < totalPages - 2;
+
+                            if (showEllipsis && !showPage) {
+                              return (
+                                <span key={page} className="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-700 ring-1 ring-inset ring-gray-300">
+                                  ...
+                                </span>
+                              );
+                            }
+
+                            if (!showPage) return null;
+
+                            return (
+                              <button
+                                key={page}
+                                onClick={() => setCurrentPage(page)}
+                                className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${
+                                  page === currentPage
+                                    ? 'z-10 bg-blue-600 text-white focus:z-20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600'
+                                    : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
+                                }`}
+                              >
+                                {page}
+                              </button>
+                            );
+                          })}
+                          <button
+                            onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                            disabled={currentPage === totalPages}
+                            className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <span className="sr-only">Next</span>
+                            <ChevronRightIcon className="h-5 w-5" aria-hidden="true" />
+                          </button>
+                        </nav>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Report Tab Content */}
+              <TabsContent value="report" className="m-0">
+                {reportSelectedBOQ ? (
+                  <ProfitReportView
+                    boq={reportSelectedBOQ}
+                    onClose={() => setReportSelectedBOQ(null)}
+                  />
+                ) : (
+                  <div className="p-6">
+                    <p className="text-sm text-gray-500 mb-5">Select a project to view its detailed profit report with Transport, Material, and Item filters.</p>
+                    {boqList.length === 0 ? (
+                      <div className="text-center py-12">
+                        <DocumentTextIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                        <p className="text-gray-500 font-medium">No projects found</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {boqList.map((boq: any) => (
+                          <motion.div
+                            key={boq.boq_id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="group bg-white rounded-xl border-2 border-gray-200 hover:border-indigo-400 hover:shadow-xl transition-all duration-300 overflow-hidden"
+                          >
+                            <div className="relative p-5 bg-gradient-to-br from-gray-50 to-white">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="p-2 bg-indigo-100 rounded-lg">
+                                  <DocumentTextIcon className="w-6 h-6 text-indigo-600" />
+                                </div>
+                                <Badge className={`${getStatusColor(boq)} border px-2 py-1 text-xs font-semibold`}>
+                                  {getStatusLabel(boq)}
+                                </Badge>
+                              </div>
+                              <h3 className="font-bold text-gray-900 text-lg mb-1 line-clamp-2 min-h-[3rem]">
+                                {boq.project_name}
+                              </h3>
+                              <p className="text-sm text-gray-600 line-clamp-1 mb-3">
+                                BOQ for {boq.boq_name || boq.project_name}
+                              </p>
+                            </div>
+                            <div className="px-5 pb-4 space-y-2">
+                              <div className="flex justify-between items-center py-1 border-b border-gray-100">
+                                <span className="text-xs text-gray-500 font-medium">BOQ ID:</span>
+                                <span className="text-sm font-bold text-gray-900">#{boq.boq_id}</span>
+                              </div>
+                              {boq.created_at && (
+                                <div className="flex justify-between items-center py-1 border-b border-gray-100">
+                                  <span className="text-xs text-gray-500 font-medium">Created:</span>
+                                  <span className="text-sm font-semibold text-gray-700">
+                                    {new Date(boq.created_at).toLocaleDateString('en-GB', {
+                                      day: '2-digit', month: 'short', year: 'numeric'
+                                    })}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="mt-3 pt-3 border-t border-gray-200">
+                                <div className="flex items-center gap-3">
+                                  <div className="p-2 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg">
+                                    <User className="w-4 h-4 text-indigo-600" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-[10px] text-gray-500 mb-0.5">Current Location</p>
+                                    <p className="text-sm font-bold text-gray-900 truncate">
+                                      {getSenderReceiver(boq).receiver.name}
+                                    </p>
+                                    <p className="text-[10px] text-indigo-600 font-medium">
+                                      {getSenderReceiver(boq).receiver.role}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="px-5 pb-5">
+                              <button
+                                onClick={() => setReportSelectedBOQ(boq)}
+                                className="w-full bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white py-3 px-4 rounded-lg font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2 shadow-md hover:shadow-lg group-hover:scale-[1.02]"
+                              >
+                                <BarChart3 className="w-4 h-4" />
+                                View Report
+                              </button>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </TabsContent>

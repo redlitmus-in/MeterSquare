@@ -23,6 +23,15 @@ except ImportError:
 
 from config.logging import get_logger
 
+# Import audit logging hooks for security tracking
+try:
+    from utils.advanced_security import on_login_success, on_login_failed, audit_log
+except ImportError:
+    # Fallback if advanced_security not available
+    def on_login_success(user_id): pass
+    def on_login_failed(email): pass
+    def audit_log(event_type, **kwargs): pass
+
 log =  get_logger()
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
@@ -34,6 +43,105 @@ EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
 SECRET_KEY = os.getenv('SECRET_KEY')
 
 otp_storage = {}
+
+
+def parse_user_agent(user_agent_string):
+    """
+    Parse user agent string to extract device type, browser, and OS
+    Returns a dict with device_type, browser, os
+    """
+    if not user_agent_string:
+        return {'device_type': 'unknown', 'browser': 'unknown', 'os': 'unknown'}
+
+    ua = user_agent_string.lower()
+
+    # Detect device type
+    if 'mobile' in ua or 'android' in ua and 'mobile' in ua:
+        device_type = 'mobile'
+    elif 'tablet' in ua or 'ipad' in ua:
+        device_type = 'tablet'
+    else:
+        device_type = 'desktop'
+
+    # Detect browser
+    if 'edg/' in ua or 'edge/' in ua:
+        browser = 'Microsoft Edge'
+    elif 'chrome/' in ua and 'safari/' in ua:
+        browser = 'Chrome'
+    elif 'firefox/' in ua:
+        browser = 'Firefox'
+    elif 'safari/' in ua and 'chrome/' not in ua:
+        browser = 'Safari'
+    elif 'opera/' in ua or 'opr/' in ua:
+        browser = 'Opera'
+    elif 'msie' in ua or 'trident/' in ua:
+        browser = 'Internet Explorer'
+    else:
+        browser = 'Unknown Browser'
+
+    # Detect OS
+    if 'windows nt 10' in ua:
+        os_name = 'Windows 10/11'
+    elif 'windows nt' in ua:
+        os_name = 'Windows'
+    elif 'mac os x' in ua:
+        os_name = 'macOS'
+    elif 'linux' in ua and 'android' not in ua:
+        os_name = 'Linux'
+    elif 'android' in ua:
+        os_name = 'Android'
+    elif 'iphone' in ua or 'ipad' in ua:
+        os_name = 'iOS'
+    else:
+        os_name = 'Unknown OS'
+
+    return {
+        'device_type': device_type,
+        'browser': browser,
+        'os': os_name
+    }
+
+
+def record_login_history(user_id, login_method='email_otp'):
+    """
+    Record a login event to the login_history table
+    Extracts IP address and user agent from the current request
+    """
+    try:
+        from models.login_history import LoginHistory
+        from config.db import db
+
+        # Get client info from request
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ip_address and ',' in ip_address:
+            ip_address = ip_address.split(',')[0].strip()
+
+        user_agent = request.headers.get('User-Agent', '')
+        ua_info = parse_user_agent(user_agent)
+
+        # Create login history record
+        login_record = LoginHistory(
+            user_id=user_id,
+            ip_address=ip_address,
+            user_agent=user_agent[:500] if user_agent else None,  # Truncate if too long
+            device_type=ua_info['device_type'],
+            browser=ua_info['browser'],
+            os=ua_info['os'],
+            login_method=login_method
+        )
+
+        db.session.add(login_record)
+        db.session.commit()
+
+        log.debug(f"Recorded login for user {user_id} ({ua_info['browser']} on {ua_info['os']})")
+
+        return login_record.id
+
+    except Exception as e:
+        log.error(f"Failed to record login history: {str(e)}")
+        # Don't fail the login if history recording fails
+        return None
+
 
 def get_logo_base64():
     """Convert logo.png to base64 string for embedding in email"""
@@ -195,7 +303,7 @@ def send_otp(email_id):
                                 <!-- Footer -->
                                 <tr>
                                     <td style="background-color: #f4f6fb; text-align: center; padding: 18px; border-top: 1px solid #e0e6f5;">
-                                        <p style="font-size: 12px; color: #888; margin: 0;">© 2025 Meter Square. All rights reserved.</p>
+                                        <p style="font-size: 12px; color: #888; margin: 0;">© 2026 Meter Square. All rights reserved.</p>
                                     </td>
                                 </tr>
                             </table>
@@ -297,6 +405,7 @@ def verification_otp():
     # Get OTP data from storage first to check if role was specified
     otp_data = otp_storage.get(email_id)
     if not otp_data:
+        on_login_failed(email_id)  # Audit log - potential brute force attempt
         return jsonify({"error": "OTP not found or expired"}), 400
     
     # Check if a specific role was required during login
@@ -332,18 +441,27 @@ def verification_otp():
 
     # Check if OTP matches
     if otp_input != stored_otp:
+        on_login_failed(email_id)  # Audit log failed attempt
         return jsonify({"error": "Invalid OTP"}), 400
 
     # Check expiry
     current_time = datetime.utcnow()
     if current_time > expires_at:
         del otp_storage[email_id]
+        on_login_failed(email_id)  # Audit log expired OTP attempt
         return jsonify({"error": "OTP expired"}), 400
     
-    # Update last login
+    # Update last login and set user status to online
     user.last_login = current_time
+    user.user_status = 'online'  # Auto-set online on login
     db.session.commit()
-    
+
+    # Record login history for audit trail
+    record_login_history(user.user_id, login_method='email_otp')
+
+    # Audit log successful login for security tracking
+    on_login_success(user.user_id)
+
     # OTP verified, remove from storage
     del otp_storage[email_id]
     
@@ -390,7 +508,8 @@ def verification_otp():
             "role": role_name,
             "role_id": user.role_id,
             "department": user.department,
-            "permissions": role_permissions
+            "permissions": role_permissions,
+            "user_status": "online"  # Auto-set online on login
         }
     }
     
@@ -412,9 +531,13 @@ def jwt_required(f):
     """Decorator to require valid JWT token for protected routes"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # Skip JWT validation for CORS preflight requests
+        if request.method == 'OPTIONS':
+            return '', 200
+
         from models.role import Role  # Import Role model here
         token = None
-        
+
         # Check for token in Authorization header
         auth_header = request.headers.get('Authorization')
         if auth_header:

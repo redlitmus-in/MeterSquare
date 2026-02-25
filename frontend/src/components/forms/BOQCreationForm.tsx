@@ -48,6 +48,8 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { showSuccess, showError, showWarning, showInfo, showLoading, dismissToast } from '@/utils/toastHelper';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
+import { rawMaterialsService, RawMaterial, CatalogItem, CatalogSubItem, CatalogLinkedMaterial } from '@/services/rawMaterialsService';
+
 import { ProjectOption, BOQMaterial, BOQLabour, BOQCreatePayload, WorkType, TermsConditionsItem } from '@/roles/estimator/types';
 import { ModernSelect } from '@/components/ui/modern-select';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -272,6 +274,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [overallProfit, setOverallProfit] = useState(15);
   const [overallDiscount, setOverallDiscount] = useState(0); // Overall BOQ discount percentage
   const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [isUploadingBulk, setIsUploadingBulk] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -280,8 +283,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [masterItems, setMasterItems] = useState<MasterItem[]>([]);
   const [itemMaterials, setItemMaterials] = useState<Record<number, MasterMaterial[]>>({});
   const [itemLabours, setItemLabours] = useState<Record<number, MasterLabour[]>>({});
+  const [masterSubItemNames, setMasterSubItemNames] = useState<string[]>([]);
   const [isLoadingMasterData, setIsLoadingMasterData] = useState(false);
   const [isLoadingExistingBoq, setIsLoadingExistingBoq] = useState(false);
+
+  // Raw materials catalog state (NEW - Procurement-managed catalog)
+  const [rawMaterialsCatalog, setRawMaterialsCatalog] = useState<RawMaterial[]>([]);
+  const [isLoadingRawMaterials, setIsLoadingRawMaterials] = useState(false);
+
+  // Buyer catalog tree state (Items -> Sub-Items -> Materials)
+  const [catalogTree, setCatalogTree] = useState<CatalogItem[]>([]);
 
   // Search/dropdown states
   const [itemSearchTerms, setItemSearchTerms] = useState<Record<string, string>>({});
@@ -289,8 +300,45 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   const [materialDropdownOpen, setMaterialDropdownOpen] = useState<Record<string, boolean>>({});
   const [labourDropdownOpen, setLabourDropdownOpen] = useState<Record<string, boolean>>({});
   const [loadingItemData, setLoadingItemData] = useState<Record<string, boolean>>({});
-  const [materialSearchTerms, setMaterialSearchTerms] = useState<Record<string, string>>({});
-  const [labourSearchTerms, setLabourSearchTerms] = useState<Record<string, string>>({});
+  const [materialSearchTerms, setMaterialSearchTerms] = useState<Record<string, string | undefined>>({});
+  const [labourSearchTerms, setLabourSearchTerms] = useState<Record<string, string | undefined>>({});
+  const [subItemNameDropdownOpen, setSubItemNameDropdownOpen] = useState<Record<string, boolean>>({});
+  const [subItemNameSearchTerms, setSubItemNameSearchTerms] = useState<Record<string, string>>({});
+
+  // Global material search state
+  const [globalMaterialResults, setGlobalMaterialResults] = useState<Record<string, {
+    material_id: number;
+    material_name: string;
+    brand: string;
+    size: string;
+    specification: string;
+    description: string;
+    default_unit: string;
+    current_market_price: number;
+  }[]>>({});
+  const [globalMaterialLoading, setGlobalMaterialLoading] = useState<Record<string, boolean>>({});
+
+  // Global labour search state
+  const [globalLabourResults, setGlobalLabourResults] = useState<Record<string, {
+    labour_id: number;
+    labour_role: string;
+    work_type: string;
+    hours: number;
+    rate_per_hour: number;
+    amount: number;
+  }[]>>({});
+  const [globalLabourLoading, setGlobalLabourLoading] = useState<Record<string, boolean>>({});
+  const [labourDropdownOpenState, setLabourDropdownOpenState] = useState<Record<string, boolean>>({});
+
+  const globalSearchTimers = useRef<Record<string, NodeJS.Timeout>>({});
+  const globalSearchCounters = useRef<Record<string, number>>({});
+
+  // Cleanup global search timers on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(globalSearchTimers.current).forEach(clearTimeout);
+    };
+  }, []);
 
   // Delete state
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
@@ -746,9 +794,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       console.log('🔵 BOQCreationForm opened - editMode:', editMode, 'isRevision:', isRevision);
       loadProjects();
       loadMasterItems();
+      loadMasterSubItemNames();
       // Always load master preliminaries to show available options
       loadMasterPreliminaries();
       loadCustomUnits();
+      // Load raw materials catalog (NEW - Procurement-managed catalog)
+      loadRawMaterialsCatalog();
+      // Load buyer catalog tree for dropdown suggestions
+      loadCatalogTree();
 
       // Only load master terms for NEW BOQs (not when editing/viewing existing)
       // For existing BOQs, terms are loaded in the loadExistingBoqData useEffect
@@ -787,6 +840,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       showError('Failed to load master items');
     } finally {
       setIsLoadingMasterData(false);
+    }
+  };
+
+  const loadMasterSubItemNames = async () => {
+    try {
+      const names = await estimatorService.getAllSubItemNames();
+      console.log('Master sub-item names loaded:', names.length, 'names');
+      setMasterSubItemNames(names);
+    } catch (error) {
+      console.error('Failed to load master sub-item names:', error);
     }
   };
 
@@ -839,8 +902,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         }));
         setCustomUnits(customUnitsFromDB);
 
-        // Merge predefined and custom units
-        const merged = [...UNIT_OPTIONS, ...customUnitsFromDB];
+        // Merge predefined and custom units, removing duplicates by value (case-insensitive)
+        const predefinedValues = new Set(UNIT_OPTIONS.map(opt => opt.value.toLowerCase()));
+        const uniqueCustomUnits = customUnitsFromDB.filter(
+          (unit: { value: string }) => !predefinedValues.has(unit.value.toLowerCase())
+        );
+        const merged = [...UNIT_OPTIONS, ...uniqueCustomUnits];
         setAllUnitOptions(merged);
       }
     } catch (error) {
@@ -882,8 +949,12 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         const updatedCustomUnits = [...customUnits, newUnit];
         setCustomUnits(updatedCustomUnits);
 
-        // Update all unit options
-        const merged = [...UNIT_OPTIONS, ...updatedCustomUnits];
+        // Update all unit options, removing duplicates by value (case-insensitive)
+        const predefinedValues = new Set(UNIT_OPTIONS.map(opt => opt.value.toLowerCase()));
+        const uniqueCustomUnits = updatedCustomUnits.filter(
+          unit => !predefinedValues.has(unit.value.toLowerCase())
+        );
+        const merged = [...UNIT_OPTIONS, ...uniqueCustomUnits];
         setAllUnitOptions(merged);
 
         console.log('Custom unit saved:', newUnit);
@@ -997,6 +1068,33 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     } catch (error) {
       console.error('Failed to load labours for item:', error);
       return [];
+    }
+  };
+
+  // Load raw materials catalog (NEW - Procurement-managed catalog)
+  const loadRawMaterialsCatalog = async () => {
+    try {
+      setIsLoadingRawMaterials(true);
+      const response = await rawMaterialsService.getAllRawMaterials({
+        active_only: true,
+        per_page: 1000 // Load all materials
+      });
+      setRawMaterialsCatalog(response.materials);
+    } catch (error) {
+      console.error('Failed to load raw materials catalog:', error);
+      showError('Failed to load raw materials catalog');
+    } finally {
+      setIsLoadingRawMaterials(false);
+    }
+  };
+
+  // Load buyer catalog tree (Items -> Sub-Items -> Materials)
+  const loadCatalogTree = async () => {
+    try {
+      const items = await rawMaterialsService.getFullTree();
+      setCatalogTree(items);
+    } catch (error) {
+      console.error('Failed to load buyer catalog tree:', error);
     }
   };
 
@@ -1383,7 +1481,144 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     setItemSearchTerms(prev => ({ ...prev, [newItem.id]: '' }));
   };
 
+  // Select a buyer catalog item and populate the form slot with all sub-items + materials
+  const selectCatalogItem = (itemId: string, catalogItem: CatalogItem) => {
+    // Check for duplicate item names (same guard as selectMasterItem)
+    const normName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+    const usedNames = items
+      .filter(i => i.id !== itemId && i.item_name.trim())
+      .map(i => normName(i.item_name));
+    if (usedNames.includes(normName(catalogItem.item_name))) {
+      showError(`Item "${catalogItem.item_name}" already exists in this BOQ`);
+      setItemDropdownOpen(prev => ({ ...prev, [itemId]: false }));
+      return;
+    }
+
+    const subItems: SubItemForm[] = (catalogItem.sub_items || []).map(si => {
+      const subId = Date.now().toString() + Math.random().toString(36).slice(2, 7);
+      const materials: BOQMaterialForm[] = (si.materials || []).map(mat => ({
+        id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+        material_name: mat.material_name || '',
+        brand: mat.brand || '',
+        size: mat.size || '',
+        specification: mat.specification || '',
+        quantity: mat.quantity || 1,
+        unit: mat.unit || 'nos',
+        unit_price: mat.unit_price || 0,
+        is_new: true,
+        is_from_master: false,
+      }));
+
+      return {
+        id: subId,
+        sub_item_name: si.sub_item_name || '',
+        scope: '',
+        size: si.size || '',
+        location: '',
+        brand: si.brand || '',
+        quantity: 1,
+        unit: si.unit || 'nos',
+        rate: 0,
+        misc_percentage: BOQ_CONFIG.DEFAULT_MISC_PERCENTAGE,
+        overhead_profit_percentage: BOQ_CONFIG.DEFAULT_OVERHEAD_PROFIT_PERCENTAGE,
+        transport_percentage: BOQ_CONFIG.DEFAULT_TRANSPORT_PERCENTAGE,
+        materials,
+        labour: [{
+          id: `lab-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+          labour_role: '',
+          hours: 8,
+          rate_per_hour: 0,
+          work_type: 'daily_wages' as const,
+          is_new: true,
+        }],
+        is_new: true,
+      };
+    });
+
+    setItems(prev => prev.map(it =>
+      it.id === itemId
+        ? {
+            ...it,
+            item_name: catalogItem.item_name,
+            description: catalogItem.description || '',
+            sub_items: subItems,
+            is_new: true,
+          }
+        : it
+    ));
+    setExpandedItems(prev => prev.includes(itemId) ? prev : [...prev, itemId]);
+    setItemDropdownOpen(prev => ({ ...prev, [itemId]: false }));
+    setItemSearchTerms(prev => ({ ...prev, [itemId]: '' }));
+    showSuccess(`Loaded "${catalogItem.item_name}" with ${subItems.length} sub-item${subItems.length !== 1 ? 's' : ''} from Buyer Catalog`);
+  };
+
+  // Select a buyer catalog sub-item and populate the sub-item slot with materials
+  const selectCatalogSubItem = (itemId: string, subItemId: string, catalogSubItem: CatalogSubItem) => {
+    const materials: BOQMaterialForm[] = (catalogSubItem.materials || []).map(mat => ({
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+      material_name: mat.material_name || '',
+      brand: mat.brand || '',
+      size: mat.size || '',
+      specification: mat.specification || '',
+      quantity: mat.quantity || 1,
+      unit: mat.unit || 'nos',
+      unit_price: mat.unit_price || 0,
+      is_new: true,
+      is_from_master: false,
+    }));
+
+    setItems(prev => prev.map(it =>
+      it.id === itemId
+        ? {
+            ...it,
+            sub_items: it.sub_items.map(si =>
+              si.id === subItemId
+                ? {
+                    ...si,
+                    sub_item_name: catalogSubItem.sub_item_name,
+                    size: catalogSubItem.size || '',
+                    brand: catalogSubItem.brand || '',
+                    unit: catalogSubItem.unit || si.unit,
+                    materials,
+                  }
+                : si
+            )
+          }
+        : it
+    ));
+    setSubItemNameDropdownOpen(prev => ({ ...prev, [`${itemId}-${subItemId}-name`]: false }));
+    setSubItemNameSearchTerms(prev => ({ ...prev, [`${itemId}-${subItemId}-name`]: catalogSubItem.sub_item_name }));
+    showSuccess(`Loaded "${catalogSubItem.sub_item_name}" with ${materials.length} material${materials.length !== 1 ? 's' : ''} from Buyer Catalog`);
+  };
+
+  // Select a buyer catalog material and populate the material slot
+  const selectCatalogMaterial = (itemId: string, subItemId: string, materialId: string, catalogMaterial: CatalogLinkedMaterial) => {
+    updateSubItemMaterialBatch(itemId, subItemId, materialId, {
+      material_name: catalogMaterial.material_name || '',
+      brand: catalogMaterial.brand || '',
+      size: catalogMaterial.size || '',
+      specification: catalogMaterial.specification || '',
+      unit: catalogMaterial.unit || 'nos',
+      unit_price: catalogMaterial.unit_price || 0,
+      is_from_master: false,
+    });
+    setMaterialDropdownOpen(prev => ({ ...prev, [`${itemId}-${subItemId}-${materialId}`]: false }));
+    setMaterialSearchTerms(prev => ({ ...prev, [`${itemId}-${subItemId}-${materialId}`]: undefined }));
+  };
+
   const selectMasterItem = async (itemId: string, masterItem: MasterItem) => {
+    // Check for duplicate item names first (ignore spaces and case)
+    const normalizeItemName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+    const usedItemNames = items
+      .filter(i => i.id !== itemId && i.item_name.trim())
+      .map(i => normalizeItemName(i.item_name));
+
+    if (usedItemNames.includes(normalizeItemName(masterItem.item_name))) {
+      showError(`Item "${masterItem.item_name}" already exists in this BOQ`);
+      setItemDropdownOpen(prev => ({ ...prev, [itemId]: false }));
+      return;
+    }
+
     // Set loading state
     setLoadingItemData(prev => ({ ...prev, [itemId]: true }));
 
@@ -1573,20 +1808,33 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
   };
 
   const handleItemNameChange = (itemId: string, value: string) => {
+    // Always update search term for filtering
     setItemSearchTerms(prev => ({ ...prev, [itemId]: value }));
 
-    // Update item name for any item being edited
-    setItems(items.map(item => {
-      if (item.id === itemId) {
-        return {
-          ...item,
-          item_name: value,
-          master_item_id: undefined, // Clear master reference when manually editing
-          is_new: true // Mark as new/custom when manually edited
-        };
-      }
-      return item;
-    }));
+    // Normalize function to ignore spaces and case
+    const normalizeItemName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+
+    // Check if this value would be a duplicate (excluding current item)
+    const usedItemNames = items
+      .filter(i => i.id !== itemId && i.item_name.trim())
+      .map(i => normalizeItemName(i.item_name));
+
+    const isDuplicate = value.trim() && usedItemNames.includes(normalizeItemName(value));
+
+    // Only update item name if NOT a duplicate
+    if (!isDuplicate) {
+      setItems(items.map(item => {
+        if (item.id === itemId) {
+          return {
+            ...item,
+            item_name: value,
+            master_item_id: undefined, // Clear master reference when manually editing
+            is_new: true // Mark as new/custom when manually edited
+          };
+        }
+        return item;
+      }));
+    }
 
     // Open dropdown if there's text
     if (value.trim()) {
@@ -1602,6 +1850,45 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     return masterItems.filter(item =>
       item.item_name.toLowerCase().includes(term)
     ).slice(0, 10); // Limit to 10 results
+  };
+
+  // Buyer catalog filter helpers
+  const getFilteredCatalogItems = (searchTerm: string): CatalogItem[] => {
+    if (!searchTerm) return catalogTree.slice(0, 10);
+    const term = searchTerm.toLowerCase();
+    return catalogTree.filter(ci =>
+      ci.item_name.toLowerCase().includes(term)
+    ).slice(0, 10);
+  };
+
+  const getCatalogSubItemsForItem = (itemName: string, searchTerm: string): CatalogSubItem[] => {
+    if (!itemName.trim()) return [];
+    const matchingItem = catalogTree.find(ci =>
+      ci.item_name.toLowerCase() === itemName.trim().toLowerCase()
+    );
+    if (!matchingItem?.sub_items) return [];
+    if (!searchTerm) return matchingItem.sub_items.slice(0, 10);
+    const term = searchTerm.toLowerCase();
+    return matchingItem.sub_items.filter(si =>
+      si.sub_item_name.toLowerCase().includes(term)
+    ).slice(0, 10);
+  };
+
+  const getCatalogMaterialsForSubItem = (itemName: string, subItemName: string, searchTerm: string): CatalogLinkedMaterial[] => {
+    if (!itemName.trim() || !subItemName.trim()) return [];
+    const matchingItem = catalogTree.find(ci =>
+      ci.item_name.toLowerCase() === itemName.trim().toLowerCase()
+    );
+    if (!matchingItem?.sub_items) return [];
+    const matchingSub = matchingItem.sub_items.find(si =>
+      si.sub_item_name.toLowerCase() === subItemName.trim().toLowerCase()
+    );
+    if (!matchingSub?.materials) return [];
+    if (!searchTerm) return matchingSub.materials.slice(0, 10);
+    const term = searchTerm.toLowerCase();
+    return matchingSub.materials.filter(mat =>
+      mat.material_name.toLowerCase().includes(term)
+    ).slice(0, 10);
   };
 
   const removeItem = async (itemId: string, itemName: string) => {
@@ -1739,6 +2026,96 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     }));
   };
 
+  // Select existing sub-item from database and populate its data including materials and labour
+  const selectExistingSubItem = async (itemId: string, subItemId: string, subItemName: string) => {
+    try {
+      console.log('Fetching sub-item data for:', subItemName);
+      const result = await estimatorService.getSubItemByName(subItemName);
+
+      if (result.success && result.sub_item) {
+        const masterSubItem = result.sub_item;
+        console.log('Loaded sub-item data:', masterSubItem);
+
+        // Map materials from database to form format
+        const mappedMaterials: BOQMaterialForm[] = masterSubItem.materials.map((mat) => ({
+          id: `mat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          material_name: mat.material_name,
+          description: mat.description || '',
+          brand: mat.brand || '',
+          size: mat.size || '',
+          specification: mat.specification || '',
+          quantity: mat.quantity || 1,
+          unit: mat.unit || 'nos',
+          unit_price: mat.unit_price || 0,
+          vat_percentage: 0,
+          master_material_id: mat.material_id,
+          is_from_master: true,
+          is_new: false
+        }));
+
+        // Map labour from database to form format
+        const mappedLabour: BOQLabourForm[] = masterSubItem.labour.map((lab) => ({
+          id: `lab-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          labour_role: lab.labour_role,
+          work_type: (lab.work_type as 'piece_rate' | 'contract' | 'daily_wages') || 'daily_wages',
+          hours: lab.hours || 8,
+          rate_per_hour: lab.rate_per_hour || 0,
+          master_labour_id: lab.labour_id,
+          is_from_master: true,
+          is_new: false
+        }));
+
+        // Update the sub-item with all the fetched data
+        setItems(items.map(item => {
+          if (item.id === itemId) {
+            const updatedSubItems = item.sub_items.map(si => {
+              if (si.id === subItemId) {
+                return {
+                  ...si,
+                  sub_item_name: masterSubItem.sub_item_name,
+                  scope: masterSubItem.scope || masterSubItem.description || '',
+                  size: masterSubItem.size || '',
+                  location: masterSubItem.location || '',
+                  brand: masterSubItem.brand || '',
+                  unit: masterSubItem.unit || 'nos',
+                  quantity: masterSubItem.quantity || 1,
+                  rate: masterSubItem.rate || 0,
+                  misc_percentage: masterSubItem.misc_percentage || 10,
+                  overhead_profit_percentage: masterSubItem.overhead_profit_percentage || 25,
+                  transport_percentage: masterSubItem.transport_percentage || 5,
+                  materials: mappedMaterials,
+                  labour: mappedLabour,
+                  master_sub_item_id: masterSubItem.sub_item_id,
+                  is_new: false
+                };
+              }
+              return si;
+            });
+
+            // Auto-calculate item rate from sub-items total
+            const subItemsTotal = updatedSubItems.reduce((sum, si) => sum + (si.quantity * si.rate), 0);
+
+            return {
+              ...item,
+              sub_items: updatedSubItems,
+              rate: subItemsTotal
+            };
+          }
+          return item;
+        }));
+
+        showSuccess(`Loaded "${subItemName}" with ${mappedMaterials.length} materials and ${mappedLabour.length} labour entries`);
+      } else {
+        // If not found in database, just update the name
+        updateSubItem(itemId, subItemId, 'sub_item_name', subItemName);
+      }
+    } catch (error) {
+      console.error('Error loading sub-item data:', error);
+      // Fallback: just update the name
+      updateSubItem(itemId, subItemId, 'sub_item_name', subItemName);
+    }
+  };
+
   // Sub-item material management
   const addSubItemMaterial = (itemId: string, subItemId: string) => {
     const newMaterial: BOQMaterialForm = {
@@ -1804,6 +2181,27 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     ));
   };
 
+  // Batch update multiple fields of a material at once
+  const updateSubItemMaterialBatch = (itemId: string, subItemId: string, materialId: string, updates: Partial<BOQMaterialForm>) => {
+    setItems(items.map(item =>
+      item.id === itemId
+        ? {
+            ...item,
+            sub_items: item.sub_items.map(si =>
+              si.id === subItemId
+                ? {
+                    ...si,
+                    materials: si.materials.map(m =>
+                      m.id === materialId ? { ...m, ...updates } : m
+                    )
+                  }
+                : si
+            )
+          }
+        : item
+    ));
+  };
+
   const addMaterial = (itemId: string) => {
     const newMaterial: BOQMaterialForm = {
       id: Date.now().toString(),
@@ -1852,16 +2250,107 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
     }));
   };
 
+  // MODIFIED: Now returns raw materials from procurement-managed catalog
+  // instead of item-specific materials from BOQ
   const getAvailableMaterials = (itemId: string) => {
-    const item = items.find(i => i.id === itemId);
-    if (!item?.master_item_id) return [];
-    return itemMaterials[item.master_item_id] || [];
+    // Map raw materials to MasterMaterial format for compatibility with existing UI
+    return rawMaterialsCatalog.map(rawMat => ({
+      material_id: rawMat.id || 0,
+      material_name: rawMat.material_name,
+      description: rawMat.description || '',
+      brand: rawMat.brand || '',
+      size: rawMat.size || '',
+      specification: rawMat.specification || '',
+      default_unit: rawMat.unit || 'unit',
+      current_market_price: rawMat.unit_price || 0, // Use unit_price from raw materials catalog
+      item_id: null,
+      sub_item_id: null,
+      quantity: 0,
+      total_price: 0
+    }));
   };
 
   const getAvailableLabour = (itemId: string) => {
     const item = items.find(i => i.id === itemId);
     if (!item?.master_item_id) return [];
     return itemLabours[item.master_item_id] || [];
+  };
+
+  // Debounced global material search with race condition protection
+  const searchGlobalMaterials = (dropdownId: string, query: string) => {
+    // Clear previous timer for this dropdown
+    if (globalSearchTimers.current[dropdownId]) {
+      clearTimeout(globalSearchTimers.current[dropdownId]);
+    }
+
+    if (query.trim().length < 1) {
+      setGlobalMaterialResults(prev => ({ ...prev, [dropdownId]: [] }));
+      setGlobalMaterialLoading(prev => ({ ...prev, [dropdownId]: false }));
+      return;
+    }
+
+    setGlobalMaterialLoading(prev => ({ ...prev, [dropdownId]: true }));
+    const counter = (globalSearchCounters.current[dropdownId] || 0) + 1;
+    globalSearchCounters.current[dropdownId] = counter;
+
+    globalSearchTimers.current[dropdownId] = setTimeout(async () => {
+      const results = await estimatorService.searchMaterials(query, 20);
+      // Only update if this is still the latest request
+      if (globalSearchCounters.current[dropdownId] === counter) {
+        setGlobalMaterialResults(prev => ({ ...prev, [dropdownId]: results }));
+        setGlobalMaterialLoading(prev => ({ ...prev, [dropdownId]: false }));
+      }
+    }, 300);
+  };
+
+  // Debounced global labour search with race condition protection
+  const searchGlobalLabours = (dropdownId: string, query: string) => {
+    const timerId = `labour-${dropdownId}`;
+    if (globalSearchTimers.current[timerId]) {
+      clearTimeout(globalSearchTimers.current[timerId]);
+    }
+
+    if (query.trim().length < 1) {
+      setGlobalLabourResults(prev => ({ ...prev, [dropdownId]: [] }));
+      setGlobalLabourLoading(prev => ({ ...prev, [dropdownId]: false }));
+      return;
+    }
+
+    setGlobalLabourLoading(prev => ({ ...prev, [dropdownId]: true }));
+    const counter = (globalSearchCounters.current[timerId] || 0) + 1;
+    globalSearchCounters.current[timerId] = counter;
+
+    globalSearchTimers.current[timerId] = setTimeout(async () => {
+      const results = await estimatorService.searchLabours(query, 20);
+      if (globalSearchCounters.current[timerId] === counter) {
+        setGlobalLabourResults(prev => ({ ...prev, [dropdownId]: results }));
+        setGlobalLabourLoading(prev => ({ ...prev, [dropdownId]: false }));
+      }
+    }, 300);
+  };
+
+  // Get all unique sub-item names from database and current form (for autocomplete suggestions)
+  const getAllSubItemNames = (excludeSubItemId?: string): string[] => {
+    const namesSet = new Set<string>();
+
+    // Add names from database (master sub-item names)
+    masterSubItemNames.forEach(name => {
+      if (name.trim()) {
+        namesSet.add(name.trim());
+      }
+    });
+
+    // Add names from current form items (in case user added new ones not in DB yet)
+    items.forEach(item => {
+      item.sub_items.forEach(subItem => {
+        // Exclude the current sub-item being edited and only add non-empty names
+        if (subItem.id !== excludeSubItemId && subItem.sub_item_name.trim()) {
+          namesSet.add(subItem.sub_item_name.trim());
+        }
+      });
+    });
+
+    return Array.from(namesSet).sort();
   };
 
   const selectMasterLabour = (itemId: string, labourId: string, masterLabour: MasterLabour) => {
@@ -3921,14 +4410,32 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                 </div>
 
                                 {/* Item Name Input - Takes remaining space */}
+                                {(() => {
+                                  // Check for duplicate item names (ignore spaces and case)
+                                  const normalizeItemName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+                                  const searchValue = itemSearchTerms[item.id] || item.item_name;
+                                  const usedItemNames = items
+                                    .filter(i => i.id !== item.id && i.item_name.trim())
+                                    .map(i => normalizeItemName(i.item_name));
+                                  const isDuplicateItemName = searchValue.trim() && usedItemNames.includes(normalizeItemName(searchValue));
+
+                                  return (
                                 <div className="flex-1 relative item-dropdown-container">
                                   <div className="relative">
                                     <input
                                       type="text"
                                       value={itemSearchTerms[item.id] || item.item_name}
                                       onChange={(e) => handleItemNameChange(item.id, e.target.value)}
+                                      onBlur={() => {
+                                        // On blur, sync search term back to actual value
+                                        setItemSearchTerms(prev => ({ ...prev, [item.id]: item.item_name }));
+                                      }}
                                       maxLength={BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME}
-                                      className="w-full px-3 py-2 pr-8 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                      className={`w-full px-3 py-2 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 bg-white ${
+                                        isDuplicateItemName
+                                          ? 'border-red-400 focus:ring-red-500 bg-red-50'
+                                          : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+                                      }`}
                                       placeholder="Search or type item name"
                                       disabled={isSubmitting || loadingItemData[item.id]}
                                       onFocus={() => {
@@ -3944,47 +4451,130 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                     )}
                                   </div>
-                                  <div className="flex justify-end mt-1">
-                                    <span className={`text-xs ${(itemSearchTerms[item.id] || item.item_name).length >= BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME ? 'text-red-500' : 'text-gray-400'}`}>
+                                  <div className="flex justify-between items-center mt-1">
+                                    {isDuplicateItemName && (
+                                      <span className="text-xs text-red-500 font-medium">Item already exists - cannot add duplicate</span>
+                                    )}
+                                    <span className={`text-xs ml-auto ${(itemSearchTerms[item.id] || item.item_name).length >= BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME ? 'text-red-500' : 'text-gray-400'}`}>
                                       {(itemSearchTerms[item.id] || item.item_name).length}/{BOQ_CONFIG.FIELD_LIMITS.ITEM_NAME}
                                     </span>
                                   </div>
                                   {itemDropdownOpen[item.id] && (
-                                    <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl" style={{ maxHeight: '320px', overflowY: 'auto', height: 'auto' }}>
+                                    <div className="absolute z-[100] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl" style={{ maxHeight: '280px', overflowY: 'auto', height: 'auto' }}>
                                       {(() => {
                                         const filtered = getFilteredItems(itemSearchTerms[item.id] || '');
                                         const showNewOption = itemSearchTerms[item.id] &&
                                           !filtered.some(i => i.item_name.toLowerCase() === itemSearchTerms[item.id].toLowerCase());
 
-                                        if (filtered.length === 0 && !showNewOption) {
+                                        // Get already used item names (ignore spaces and case)
+                                        const normalizeItemName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+                                        const usedItemNames = items
+                                          .filter(i => i.id !== item.id && i.item_name.trim())
+                                          .map(i => normalizeItemName(i.item_name));
+
+                                        // Check if new option would be duplicate
+                                        const isNewOptionDuplicate = itemSearchTerms[item.id] &&
+                                          usedItemNames.includes(normalizeItemName(itemSearchTerms[item.id]));
+
+                                        const catalogFiltered = getFilteredCatalogItems(itemSearchTerms[item.id] || '');
+
+                                        if (filtered.length === 0 && catalogFiltered.length === 0 && !showNewOption) {
                                           return (
                                             <div className="px-3 py-2 text-sm text-gray-500">
-                                              {masterItems.length === 0 ? 'No master items available yet' : 'Type to search items or add new'}
+                                              {masterItems.length === 0 && catalogTree.length === 0 ? 'No items available yet' : 'Type to search items or add new'}
                                             </div>
                                           );
                                         }
 
                                         return (
                                           <>
-                                            {filtered.map(masterItem => (
+                                            {/* Master Items Section */}
+                                            {filtered.length > 0 && (
+                                              <div className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border-b border-blue-100 sticky top-0 z-10">
+                                                Master Items
+                                              </div>
+                                            )}
+                                            {filtered.map(masterItem => {
+                                              const isAlreadyUsed = usedItemNames.includes(normalizeItemName(masterItem.item_name));
+                                              return (
                                               <button
                                                 key={masterItem.item_id}
                                                 type="button"
-                                                onClick={() => selectMasterItem(item.id, masterItem)}
-                                                className={`w-full px-3 text-left text-sm hover:bg-blue-50 transition-colors flex items-center justify-between group border-b border-gray-100 last:border-b-0 ${masterItem.description ? 'py-2' : 'py-1.5'}`}
+                                                onClick={() => {
+                                                  if (isAlreadyUsed) return;
+                                                  selectMasterItem(item.id, masterItem);
+                                                }}
+                                                disabled={isAlreadyUsed}
+                                                className={`w-full px-3 text-left text-sm transition-colors flex items-center justify-between group border-b border-gray-100 last:border-b-0 ${masterItem.description ? 'py-2' : 'py-1.5'} ${
+                                                  isAlreadyUsed
+                                                    ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                    : 'hover:bg-blue-50 cursor-pointer'
+                                                }`}
                                               >
                                                 <div className="flex-1 min-w-0">
-                                                  <div className="font-medium text-gray-900 text-sm">{masterItem.item_name}</div>
+                                                  <div className={`font-medium text-sm ${isAlreadyUsed ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                                    {masterItem.item_name}
+                                                    {isAlreadyUsed && <span className="ml-2 text-xs text-red-500 no-underline">(Already added)</span>}
+                                                  </div>
                                                   {masterItem.description && (
                                                     <div className="text-xs text-gray-500 truncate">{masterItem.description}</div>
                                                   )}
                                                 </div>
-                                                <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity ml-2 flex-shrink-0">
-                                                  Select
-                                                </span>
+                                                {!isAlreadyUsed && (
+                                                  <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity ml-2 flex-shrink-0">
+                                                    Select
+                                                  </span>
+                                                )}
                                               </button>
-                                            ))}
-                                            {showNewOption && (
+                                              );
+                                            })}
+
+                                            {/* Buyer Catalog Section */}
+                                            {catalogFiltered.length > 0 && (
+                                              <>
+                                                <div className="px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 border-y border-amber-100 sticky top-0 z-10">
+                                                  Buyer Catalog
+                                                </div>
+                                                {catalogFiltered.map(catItem => {
+                                                  const isAlreadyUsed = usedItemNames.includes(normalizeItemName(catItem.item_name));
+                                                  return (
+                                                    <button
+                                                      key={`cat-${catItem.id}`}
+                                                      type="button"
+                                                      onMouseDown={(e) => e.preventDefault()}
+                                                      onClick={() => {
+                                                        if (isAlreadyUsed) return;
+                                                        selectCatalogItem(item.id, catItem);
+                                                      }}
+                                                      disabled={isAlreadyUsed}
+                                                      className={`w-full px-3 py-2 text-left text-sm transition-colors flex items-center justify-between group border-b border-amber-50 last:border-b-0 ${
+                                                        isAlreadyUsed
+                                                          ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                          : 'hover:bg-amber-50 cursor-pointer'
+                                                      }`}
+                                                    >
+                                                      <div className="flex-1 min-w-0">
+                                                        <div className={`font-medium text-sm ${isAlreadyUsed ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                                          {catItem.item_name}
+                                                          {isAlreadyUsed && <span className="ml-2 text-xs text-red-500 no-underline">(Already added)</span>}
+                                                        </div>
+                                                        <div className="text-xs text-amber-600">
+                                                          {catItem.sub_items_count || 0} sub-item{(catItem.sub_items_count || 0) !== 1 ? 's' : ''}
+                                                          {catItem.description && <span className="text-gray-500 ml-2">{catItem.description}</span>}
+                                                        </div>
+                                                      </div>
+                                                      {!isAlreadyUsed && (
+                                                        <span className="text-xs text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity ml-2 flex-shrink-0">
+                                                          Import
+                                                        </span>
+                                                      )}
+                                                    </button>
+                                                  );
+                                                })}
+                                              </>
+                                            )}
+
+                                            {showNewOption && !isNewOptionDuplicate && (
                                               <button
                                                 type="button"
                                                 onClick={() => {
@@ -4002,12 +4592,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 </div>
                                               </button>
                                             )}
+                                            {showNewOption && isNewOptionDuplicate && (
+                                              <div className="w-full px-3 py-2 text-left text-sm bg-red-50 border-t border-gray-200">
+                                                <div className="flex items-center gap-2">
+                                                  <span className="text-red-500">✗</span>
+                                                  <span className="font-medium text-red-600">
+                                                    "{itemSearchTerms[item.id]}" already exists
+                                                  </span>
+                                                </div>
+                                              </div>
+                                            )}
                                           </>
                                         );
                                       })()}
                                     </div>
                                   )}
                                 </div>
+                                  );
+                                })()}
 
                                 {/* Delete Button - On the Right */}
                                 <button
@@ -4094,16 +4696,174 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                     <label className="block text-xs font-medium text-gray-700 mb-1">
                                       Sub Item Name <span className="text-red-500">*</span>
                                     </label>
-                                    <input
-                                      type="text"
-                                      value={subItem.sub_item_name}
-                                      onChange={(e) => updateSubItem(item.id, subItem.id, 'sub_item_name', e.target.value)}
-                                      maxLength={BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME}
-                                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                                      placeholder="e.g., Flooring Work"
-                                      required
-                                      disabled={isSubmitting}
-                                    />
+                                    {(() => {
+                                      const subItemNameDropdownId = `${item.id}-${subItem.id}-name`;
+                                      const existingSubItemNames = getAllSubItemNames(subItem.id);
+                                      const searchTerm = subItemNameSearchTerms[subItemNameDropdownId] ?? subItem.sub_item_name;
+                                      const filteredNames = existingSubItemNames.filter(name =>
+                                        !searchTerm || name.toLowerCase().includes(searchTerm.toLowerCase())
+                                      );
+
+                                      // Normalize function to ignore spaces and case
+                                      const normalizeSubItemName = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+
+                                      // Check which sub-item names are already used in THIS item (excluding current sub-item)
+                                      const usedInThisItem = item.sub_items
+                                        .filter(si => si.id !== subItem.id && si.sub_item_name.trim())
+                                        .map(si => normalizeSubItemName(si.sub_item_name));
+
+                                      // Check if a value would be duplicate
+                                      const checkSubItemIsDuplicate = (value: string) => {
+                                        if (!value.trim()) return false;
+                                        return usedInThisItem.includes(normalizeSubItemName(value));
+                                      };
+
+                                      const isDuplicateInItem = checkSubItemIsDuplicate(searchTerm);
+
+                                      return (
+                                        <div className="relative">
+                                          <input
+                                            type="text"
+                                            value={subItemNameSearchTerms[subItemNameDropdownId] ?? subItem.sub_item_name}
+                                            onChange={(e) => {
+                                              const newValue = e.target.value;
+                                              // Always update search term for filtering dropdown
+                                              setSubItemNameSearchTerms(prev => ({ ...prev, [subItemNameDropdownId]: newValue }));
+                                              // Only update actual value if NOT a duplicate
+                                              if (!checkSubItemIsDuplicate(newValue)) {
+                                                updateSubItem(item.id, subItem.id, 'sub_item_name', newValue);
+                                              }
+                                              if (existingSubItemNames.length > 0) {
+                                                setSubItemNameDropdownOpen(prev => ({ ...prev, [subItemNameDropdownId]: true }));
+                                              }
+                                            }}
+                                            onFocus={() => {
+                                              if (existingSubItemNames.length > 0) {
+                                                setSubItemNameDropdownOpen(prev => ({ ...prev, [subItemNameDropdownId]: true }));
+                                              }
+                                            }}
+                                            onBlur={() => {
+                                              // On blur, sync search term back to actual value
+                                              setSubItemNameSearchTerms(prev => ({ ...prev, [subItemNameDropdownId]: subItem.sub_item_name }));
+                                              // Delay closing to allow click on dropdown item
+                                              setTimeout(() => {
+                                                setSubItemNameDropdownOpen(prev => ({ ...prev, [subItemNameDropdownId]: false }));
+                                              }, 200);
+                                            }}
+                                            maxLength={BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME}
+                                            className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
+                                              isDuplicateInItem
+                                                ? 'border-red-400 focus:ring-red-500 bg-red-50'
+                                                : 'border-gray-300 focus:ring-green-500'
+                                            } ${existingSubItemNames.length > 0 ? 'pr-8' : ''}`}
+                                            placeholder={existingSubItemNames.length > 0 ? "Type or select existing sub-item" : "e.g., Flooring Work"}
+                                            required
+                                            disabled={isSubmitting}
+                                          />
+                                          {existingSubItemNames.length > 0 && (
+                                            <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                          )}
+
+                                          {/* Warning if duplicate in this item */}
+                                          {isDuplicateInItem && (
+                                            <div className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                                              <span>⚠</span> Sub-item already exists - cannot add duplicate
+                                            </div>
+                                          )}
+
+                                          {/* Dropdown for existing sub-item names + buyer catalog */}
+                                          {(() => {
+                                            const catalogSubItems = getCatalogSubItemsForItem(item.item_name, searchTerm);
+                                            const showSubDropdown = subItemNameDropdownOpen[subItemNameDropdownId] && (filteredNames.length > 0 || catalogSubItems.length > 0);
+
+                                            if (!showSubDropdown) return null;
+                                            return (
+                                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[280px] overflow-y-auto">
+                                                {/* Existing sub-items section */}
+                                                {filteredNames.length > 0 && (
+                                                  <>
+                                                    <div className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border-b border-blue-100 sticky top-0 z-10">
+                                                      Existing Sub-Items
+                                                    </div>
+                                                    {filteredNames.map((existingName, idx) => {
+                                                      const isAlreadyInThisItem = usedInThisItem.includes(normalizeSubItemName(existingName));
+                                                      return (
+                                                        <div
+                                                          key={idx}
+                                                          onMouseDown={(e) => e.preventDefault()}
+                                                          onClick={() => {
+                                                            if (isAlreadyInThisItem) return;
+                                                            selectExistingSubItem(item.id, subItem.id, existingName);
+                                                            setSubItemNameSearchTerms(prev => ({ ...prev, [subItemNameDropdownId]: existingName }));
+                                                            setSubItemNameDropdownOpen(prev => ({ ...prev, [subItemNameDropdownId]: false }));
+                                                          }}
+                                                          className={`w-full px-3 py-2 text-left text-sm transition-colors flex items-center gap-2 ${
+                                                            isAlreadyInThisItem
+                                                              ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                              : 'hover:bg-green-50 cursor-pointer'
+                                                          }`}
+                                                        >
+                                                          {isAlreadyInThisItem ? (
+                                                            <span className="text-gray-400">✗</span>
+                                                          ) : (
+                                                            <span className="text-green-600">✓</span>
+                                                          )}
+                                                          <span className={isAlreadyInThisItem ? 'text-gray-400 line-through' : 'text-gray-700'}>
+                                                            {existingName}
+                                                          </span>
+                                                          <span className={`ml-auto text-xs text-gray-400`}>
+                                                            {isAlreadyInThisItem ? 'Already added' : 'Click to load'}
+                                                          </span>
+                                                        </div>
+                                                      );
+                                                    })}
+                                                  </>
+                                                )}
+
+                                                {/* Buyer Catalog Sub-Items section */}
+                                                {catalogSubItems.length > 0 && (
+                                                  <>
+                                                    <div className="px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 border-y border-amber-100 sticky top-0 z-10">
+                                                      Buyer Catalog
+                                                    </div>
+                                                    {catalogSubItems.map(catSub => {
+                                                      const isAlreadyInThisItem = usedInThisItem.includes(normalizeSubItemName(catSub.sub_item_name));
+                                                      return (
+                                                        <div
+                                                          key={`cat-sub-${catSub.id}`}
+                                                          onMouseDown={(e) => e.preventDefault()}
+                                                          onClick={() => {
+                                                            if (isAlreadyInThisItem) return;
+                                                            selectCatalogSubItem(item.id, subItem.id, catSub);
+                                                          }}
+                                                          className={`w-full px-3 py-2 text-left text-sm transition-colors flex items-center gap-2 ${
+                                                            isAlreadyInThisItem
+                                                              ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                              : 'hover:bg-amber-50 cursor-pointer'
+                                                          }`}
+                                                        >
+                                                          {isAlreadyInThisItem ? (
+                                                            <span className="text-gray-400">✗</span>
+                                                          ) : (
+                                                            <span className="text-amber-600">✓</span>
+                                                          )}
+                                                          <span className={isAlreadyInThisItem ? 'text-gray-400 line-through' : 'text-gray-700'}>
+                                                            {catSub.sub_item_name}
+                                                          </span>
+                                                          <span className="ml-auto text-xs text-amber-600">
+                                                            {isAlreadyInThisItem ? 'Already added' : `${catSub.materials_count || 0} material${(catSub.materials_count || 0) !== 1 ? 's' : ''}`}
+                                                          </span>
+                                                        </div>
+                                                      );
+                                                    })}
+                                                  </>
+                                                )}
+                                              </div>
+                                            );
+                                          })()}
+                                        </div>
+                                      );
+                                    })()}
                                     <div className="flex justify-end mt-1">
                                       <span className={`text-xs ${subItem.sub_item_name.length >= BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME ? 'text-red-500' : 'text-gray-400'}`}>
                                         {subItem.sub_item_name.length}/{BOQ_CONFIG.FIELD_LIMITS.SUB_ITEM_NAME}
@@ -4414,9 +5174,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       </label>
                                       <input
                                         type="number"
-                                        value={subItem.quantity}
+                                        value={subItem.quantity || ''}
                                         onChange={(e) => updateSubItem(item.id, subItem.id, 'quantity', parseFloat(e.target.value) || 0)}
                                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                                        placeholder="0"
                                         min="0"
                                         step="0.01"
                                         required
@@ -4457,9 +5218,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       </label>
                                       <input
                                         type="number"
-                                        value={subItem.rate}
+                                        value={subItem.rate || ''}
                                         onChange={(e) => updateSubItem(item.id, subItem.id, 'rate', parseFloat(e.target.value) || 0)}
                                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                                        placeholder="0.00"
                                         min="0"
                                         step="0.01"
                                         required
@@ -4504,6 +5266,28 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       {subItem.materials.map((material, materialIndex) => {
                                         const materialDropdownId = `${item.id}-${subItem.id}-${material.id}`;
                                         const availableMaterials = getAvailableMaterials(item.id);
+                                        const globalResults = globalMaterialResults[materialDropdownId] || [];
+                                        const isGlobalLoading = globalMaterialLoading[materialDropdownId] || false;
+
+                                        // Filter raw materials catalog locally
+                                        const dropdownMaterials = availableMaterials.filter(mat =>
+                                          !materialSearchTerms[materialDropdownId] ||
+                                          mat.material_name.toLowerCase().includes(materialSearchTerms[materialDropdownId]!.toLowerCase())
+                                        );
+                                        const catalogMats = getCatalogMaterialsForSubItem(item.item_name, subItem.sub_item_name, materialSearchTerms[materialDropdownId] || '');
+                                        const showDropdown = materialDropdownOpen[materialDropdownId] && (dropdownMaterials.length > 0 || globalResults.length > 0 || catalogMats.length > 0 || isGlobalLoading);
+
+                                        // Check for duplicate material names within this sub-item (ignore spaces and case)
+                                        const normalizeForComparison = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+                                        const usedMaterialNamesInSubItem = subItem.materials
+                                          .filter(m => m.id !== material.id && m.material_name.trim())
+                                          .map(m => normalizeForComparison(m.material_name));
+
+                                        // Check if new value would be duplicate
+                                        const checkIsDuplicate = (value: string) => {
+                                          if (!value.trim()) return false;
+                                          return usedMaterialNamesInSubItem.includes(normalizeForComparison(value));
+                                        };
 
                                         return (
                                           <div key={material.id} className="space-y-1">
@@ -4514,83 +5298,281 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               <div className="flex-1 relative">
                                                 <input
                                                   type="text"
-                                                  value={materialSearchTerms[materialDropdownId] || material.material_name}
+                                                  value={materialSearchTerms[materialDropdownId] !== undefined ? materialSearchTerms[materialDropdownId] : material.material_name}
                                                   onChange={(e) => {
-                                                    setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: e.target.value }));
-                                                    if (!material.is_from_master) {
-                                                      updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', e.target.value);
+                                                    const newValue = e.target.value;
+                                                    // Always update search term for filtering dropdown
+                                                    setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: newValue }));
+
+                                                    // Allow manual typing only if NOT from master (to allow searching for different material)
+                                                    if (!material.is_from_master && !checkIsDuplicate(newValue)) {
+                                                      updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', newValue);
                                                     }
-                                                    if (availableMaterials.length > 0) {
-                                                      setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
-                                                    }
+
+                                                    // Always open dropdown and trigger global search for master materials
+                                                    setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
+                                                    searchGlobalMaterials(materialDropdownId, newValue);
+                                                  }}
+                                                  onBlur={() => {
+                                                    // Delay to allow dropdown click to register
+                                                    setTimeout(() => {
+                                                      setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: undefined }));
+                                                      setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
+                                                    }, 200);
                                                   }}
                                                   onFocus={() => {
-                                                    if (availableMaterials.length > 0) {
-                                                      setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
+                                                    setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
+                                                    if (material.material_name.trim()) {
+                                                      searchGlobalMaterials(materialDropdownId, material.material_name);
                                                     }
                                                   }}
                                                   maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME}
                                                   className={`w-full px-3 py-1.5 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
-                                                    material.is_from_master
-                                                      ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-                                                      : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
+                                                    checkIsDuplicate(materialSearchTerms[materialDropdownId] || '')
+                                                      ? 'border-red-500 bg-red-50 focus:ring-red-500 focus:border-red-500'
+                                                      : material.is_from_master
+                                                        ? 'bg-blue-50 border-blue-300'
+                                                        : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
                                                   }`}
-                                                  placeholder={availableMaterials.length > 0 ? "Search materials or type new" : "Material name"}
-                                                  disabled={isSubmitting || material.is_from_master}
-                                                  title={material.is_from_master ? 'Material name from master data cannot be edited' : ''}
+                                                  placeholder={availableMaterials.length > 0 ? "Search from raw materials catalog" : "Loading catalog..."}
+                                                  disabled={isSubmitting}
+                                                  title={material.is_from_master ? 'From catalog - Click to select different material' : ''}
                                                 />
-                                                {availableMaterials.length > 0 && (
-                                                  <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
-                                                )}
-                                                <div className="flex justify-end mt-0.5">
-                                                  <span className={`text-xs ${(materialSearchTerms[materialDropdownId] || material.material_name).length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME ? 'text-red-500' : 'text-gray-400'}`}>
-                                                    {(materialSearchTerms[materialDropdownId] || material.material_name).length}/{BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME}
+                                                <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                                                <div className="flex justify-between items-center mt-0.5">
+                                                  {checkIsDuplicate(materialSearchTerms[materialDropdownId] || '') && (
+                                                    <span className="text-xs text-red-600 font-medium">Material already exists - cannot add duplicate</span>
+                                                  )}
+                                                  <span className={`text-xs ml-auto ${((materialSearchTerms[materialDropdownId] !== undefined ? materialSearchTerms[materialDropdownId] : material.material_name) || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME ? 'text-red-500' : 'text-gray-400'}`}>
+                                                    {((materialSearchTerms[materialDropdownId] !== undefined ? materialSearchTerms[materialDropdownId] : material.material_name) || '').length}/{BOQ_CONFIG.FIELD_LIMITS.MATERIAL_NAME}
                                                   </span>
                                                 </div>
 
-                                                {materialDropdownOpen[materialDropdownId] && availableMaterials.length > 0 && (
-                                                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-32 overflow-y-auto">
-                                                    {availableMaterials
-                                                      .filter(mat =>
-                                                        !materialSearchTerms[materialDropdownId] ||
-                                                        mat.material_name.toLowerCase().includes(materialSearchTerms[materialDropdownId].toLowerCase())
-                                                      )
-                                                      .map(masterMaterial => (
-                                                        <button
-                                                          key={masterMaterial.material_id}
-                                                          type="button"
-                                                          onClick={() => {
-                                                            // Update sub-item material with master data
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', masterMaterial.material_name);
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'description', masterMaterial.description || '');
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'brand', masterMaterial.brand || '');
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'size', masterMaterial.size || '');
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'specification', masterMaterial.specification || '');
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'unit', masterMaterial.default_unit);
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'unit_price', masterMaterial.current_market_price);
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'master_material_id', masterMaterial.material_id);
-                                                            updateSubItemMaterial(item.id, subItem.id, material.id, 'is_from_master', true);
-                                                            setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
-                                                            setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: masterMaterial.material_name }));
-                                                          }}
-                                                          className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors"
-                                                        >
-                                                          <div className="font-medium text-gray-900">{masterMaterial.material_name}</div>
-                                                          <div className="text-xs text-gray-500">
-                                                            AED{masterMaterial.current_market_price}/{masterMaterial.default_unit}
-                                                          </div>
-                                                        </button>
-                                                      ))
+                                                {showDropdown && (
+                                                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg" style={{ maxHeight: 280, overflowY: 'auto' }}>
+                                                    {isGlobalLoading && (
+                                                      <div className="px-3 py-2 text-xs text-gray-500 text-center">Searching materials...</div>
+                                                    )}
+
+                                                    {/* Raw Materials Catalog section */}
+                                                    {dropdownMaterials.length > 0 && (
+                                                      <div className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border-b border-blue-100 sticky top-0 z-10">
+                                                        Raw Materials Catalog
+                                                      </div>
+                                                    )}
+                                                    {dropdownMaterials.map(masterMaterial => {
+                                                        const isAlreadyInSubItem = usedMaterialNamesInSubItem.includes(normalizeForComparison(masterMaterial.material_name));
+
+                                                        return (
+                                                          <button
+                                                            key={masterMaterial.material_id}
+                                                            type="button"
+                                                            onMouseDown={(e) => e.preventDefault()}
+                                                            onClick={() => {
+                                                              if (isAlreadyInSubItem) return;
+
+                                                              updateSubItemMaterialBatch(item.id, subItem.id, material.id, {
+                                                                material_name: masterMaterial.material_name,
+                                                                description: masterMaterial.description || '',
+                                                                brand: masterMaterial.brand || '',
+                                                                size: masterMaterial.size || '',
+                                                                specification: masterMaterial.specification || '',
+                                                                unit: masterMaterial.default_unit,
+                                                                unit_price: masterMaterial.current_market_price,
+                                                                master_material_id: masterMaterial.material_id,
+                                                                is_from_master: true
+                                                              });
+
+                                                              setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
+                                                              setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: undefined }));
+                                                            }}
+                                                            className={`w-full px-3 py-2 text-left text-sm border-b border-gray-100 last:border-b-0 transition-colors ${
+                                                              isAlreadyInSubItem
+                                                                ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                                : 'hover:bg-blue-50 cursor-pointer'
+                                                            }`}
+                                                            disabled={isAlreadyInSubItem}
+                                                          >
+                                                            <div className={`font-semibold text-sm ${isAlreadyInSubItem ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                                              {masterMaterial.material_name}
+                                                              {isAlreadyInSubItem && <span className="ml-2 text-xs text-red-500 no-underline">(Already added)</span>}
+                                                            </div>
+
+                                                            {masterMaterial.description && (
+                                                              <div className="text-xs text-gray-600 mt-1 line-clamp-1">
+                                                                {masterMaterial.description}
+                                                              </div>
+                                                            )}
+
+                                                            <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                                              {masterMaterial.brand && (
+                                                                <span className="flex items-center gap-1">
+                                                                  <span className="font-medium">Brand:</span> {masterMaterial.brand}
+                                                                </span>
+                                                              )}
+                                                              {masterMaterial.size && (
+                                                                <span className="flex items-center gap-1">
+                                                                  <span className="font-medium">Size:</span> {masterMaterial.size}
+                                                                </span>
+                                                              )}
+                                                              {masterMaterial.default_unit && (
+                                                                <span className="flex items-center gap-1">
+                                                                  <span className="font-medium">Unit:</span> {masterMaterial.default_unit}
+                                                                </span>
+                                                              )}
+                                                              {masterMaterial.current_market_price != null && masterMaterial.current_market_price > 0 && (
+                                                                <span className="flex items-center gap-1 text-green-600 font-semibold">
+                                                                  <span className="font-medium">Price:</span> AED {masterMaterial.current_market_price.toFixed(2)}
+                                                                </span>
+                                                              )}
+                                                            </div>
+
+                                                            {masterMaterial.specification && (
+                                                              <div className="text-xs text-gray-500 mt-1 line-clamp-1">
+                                                                <span className="font-medium">Spec:</span> {masterMaterial.specification}
+                                                              </div>
+                                                            )}
+                                                          </button>
+                                                        );
+                                                      })
                                                     }
+
+                                                    {/* Buyer Catalog Materials section */}
+                                                    {catalogMats.length > 0 && (
+                                                      <>
+                                                        <div className="px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 border-y border-amber-100 sticky top-0 z-10">
+                                                          Buyer Catalog
+                                                        </div>
+                                                        {catalogMats.map(catMat => {
+                                                          const isAlreadyInSubItem = usedMaterialNamesInSubItem.includes(normalizeForComparison(catMat.material_name));
+                                                          return (
+                                                            <button
+                                                              key={`cat-mat-${catMat.id}`}
+                                                              type="button"
+                                                              onMouseDown={(e) => e.preventDefault()}
+                                                              onClick={() => {
+                                                                if (isAlreadyInSubItem) return;
+                                                                selectCatalogMaterial(item.id, subItem.id, material.id, catMat);
+                                                              }}
+                                                              className={`w-full px-3 py-2 text-left text-sm border-b border-amber-50 last:border-b-0 transition-colors ${
+                                                                isAlreadyInSubItem
+                                                                  ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                                  : 'hover:bg-amber-50 cursor-pointer'
+                                                              }`}
+                                                              disabled={isAlreadyInSubItem}
+                                                            >
+                                                              <div className={`font-semibold text-sm ${isAlreadyInSubItem ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                                                {catMat.material_name}
+                                                                {isAlreadyInSubItem && <span className="ml-2 text-xs text-red-500 no-underline">(Already added)</span>}
+                                                              </div>
+                                                              <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                                                {catMat.brand && (
+                                                                  <span className="flex items-center gap-1">
+                                                                    <span className="font-medium">Brand:</span> {catMat.brand}
+                                                                  </span>
+                                                                )}
+                                                                {catMat.size && (
+                                                                  <span className="flex items-center gap-1">
+                                                                    <span className="font-medium">Size:</span> {catMat.size}
+                                                                  </span>
+                                                                )}
+                                                                {catMat.unit && (
+                                                                  <span className="flex items-center gap-1">
+                                                                    <span className="font-medium">Unit:</span> {catMat.unit}
+                                                                  </span>
+                                                                )}
+                                                                {catMat.unit_price > 0 && (
+                                                                  <span className="flex items-center gap-1 text-green-600 font-semibold">
+                                                                    <span className="font-medium">Price:</span> AED {catMat.unit_price.toFixed(2)}
+                                                                  </span>
+                                                                )}
+                                                              </div>
+                                                            </button>
+                                                          );
+                                                        })}
+                                                      </>
+                                                    )}
+
+                                                    {/* Master Materials section (from existing BOQs) */}
+                                                    {globalResults.length > 0 && (
+                                                      <>
+                                                        <div className="px-3 py-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border-y border-purple-100 sticky top-0 z-10">
+                                                          Master Materials
+                                                        </div>
+                                                        {globalResults.map(gMat => {
+                                                          const isAlreadyInSubItem = usedMaterialNamesInSubItem.includes(normalizeForComparison(gMat.material_name));
+                                                          return (
+                                                            <button
+                                                              key={`global-${gMat.material_id}`}
+                                                              type="button"
+                                                              onMouseDown={(e) => e.preventDefault()}
+                                                              onClick={() => {
+                                                                if (isAlreadyInSubItem) return;
+                                                                updateSubItemMaterialBatch(item.id, subItem.id, material.id, {
+                                                                  material_name: gMat.material_name,
+                                                                  description: gMat.description || '',
+                                                                  brand: gMat.brand || '',
+                                                                  size: gMat.size || '',
+                                                                  specification: gMat.specification || '',
+                                                                  unit: gMat.default_unit,
+                                                                  unit_price: gMat.current_market_price,
+                                                                  master_material_id: gMat.material_id,
+                                                                  is_from_master: true
+                                                                });
+                                                                setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
+                                                                setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: undefined }));
+                                                              }}
+                                                              className={`w-full px-3 py-2 text-left text-sm border-b border-purple-50 last:border-b-0 transition-colors ${
+                                                                isAlreadyInSubItem
+                                                                  ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                                  : 'hover:bg-purple-50 cursor-pointer'
+                                                              }`}
+                                                              disabled={isAlreadyInSubItem}
+                                                            >
+                                                              <div className={`font-semibold text-sm ${isAlreadyInSubItem ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                                                {gMat.material_name}
+                                                                {isAlreadyInSubItem && <span className="ml-2 text-xs text-red-500 no-underline">(Already added)</span>}
+                                                              </div>
+                                                              <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                                                {gMat.brand && (
+                                                                  <span className="flex items-center gap-1">
+                                                                    <span className="font-medium">Brand:</span> {gMat.brand}
+                                                                  </span>
+                                                                )}
+                                                                {gMat.size && (
+                                                                  <span className="flex items-center gap-1">
+                                                                    <span className="font-medium">Size:</span> {gMat.size}
+                                                                  </span>
+                                                                )}
+                                                                {gMat.default_unit && (
+                                                                  <span className="flex items-center gap-1">
+                                                                    <span className="font-medium">Unit:</span> {gMat.default_unit}
+                                                                  </span>
+                                                                )}
+                                                                {gMat.current_market_price > 0 && (
+                                                                  <span className="flex items-center gap-1 text-green-600 font-semibold">
+                                                                    <span className="font-medium">Price:</span> AED {gMat.current_market_price.toFixed(2)}
+                                                                  </span>
+                                                                )}
+                                                              </div>
+                                                            </button>
+                                                          );
+                                                        })}
+                                                      </>
+                                                    )}
+
+                                                    {!isGlobalLoading && dropdownMaterials.length === 0 && globalResults.length === 0 && catalogMats.length === 0 && materialSearchTerms[materialDropdownId]?.trim() && (
+                                                      <div className="px-3 py-2 text-xs text-gray-400 text-center">No matching materials found</div>
+                                                    )}
                                                   </div>
                                                 )}
                                               </div>
                                               <input
                                                 type="number"
-                                                value={material.quantity}
+                                                value={material.quantity || ''}
                                                 onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'quantity', parseFloat(e.target.value) || 0)}
                                                 className="w-20 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                placeholder="Qty"
+                                                placeholder="0"
                                                 min="0"
                                                 step="0.01"
                                                 disabled={isSubmitting}
@@ -4617,10 +5599,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               </datalist>
                                               <input
                                                 type="number"
-                                                value={material.unit_price}
+                                                value={material.unit_price || ''}
                                                 onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'unit_price', parseFloat(e.target.value) || 0)}
                                                 className="w-24 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                placeholder="Rate"
+                                                placeholder="0.00"
                                                 min="0"
                                                 step="0.01"
                                                 disabled={isSubmitting}
@@ -4639,14 +5621,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             </div>
                                             {/* Description field */}
                                             <div className="ml-0">
-                                              <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+                                              <label className="block text-xs font-medium text-gray-600 mb-1">
+                                                Description
+                                                {material.is_from_master && (
+                                                  <span className="ml-1 text-xs text-blue-600">(From Catalog)</span>
+                                                )}
+                                              </label>
                                               <textarea
                                                 value={material.description || ''}
                                                 onChange={(e) => {
-                                                  updateSubItemMaterial(item.id, subItem.id, material.id, 'description', e.target.value);
-                                                  // Auto-resize textarea
-                                                  e.target.style.height = 'auto';
-                                                  e.target.style.height = e.target.scrollHeight + 'px';
+                                                  if (!material.is_from_master) {
+                                                    updateSubItemMaterial(item.id, subItem.id, material.id, 'description', e.target.value);
+                                                    // Auto-resize textarea
+                                                    e.target.style.height = 'auto';
+                                                    e.target.style.height = e.target.scrollHeight + 'px';
+                                                  }
                                                 }}
                                                 onFocus={(e) => {
                                                   // Auto-resize on focus
@@ -4654,11 +5643,17 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   e.target.style.height = e.target.scrollHeight + 'px';
                                                 }}
                                                 maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_DESCRIPTION}
-                                                className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50 resize-none overflow-hidden"
+                                                className={`w-full px-3 py-1 text-xs border rounded-lg focus:outline-none focus:ring-1 resize-none overflow-hidden ${
+                                                  material.is_from_master
+                                                    ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
+                                                    : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
+                                                }`}
                                                 placeholder="Description (optional)"
                                                 disabled={isSubmitting}
+                                                readOnly={material.is_from_master}
                                                 rows={1}
                                                 style={{ minHeight: '30px' }}
+                                                title={material.is_from_master ? 'From catalog - cannot edit' : ''}
                                               />
                                               <div className="flex justify-end mt-0.5">
                                                 <span className={`text-xs ${(material.description || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_DESCRIPTION ? 'text-red-500' : 'text-gray-400'}`}>
@@ -4670,15 +5665,30 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             {/* Material Detail Fields - Brand, Size, Specification */}
                                             <div className="ml-0 grid grid-cols-2 gap-2 mt-2">
                                               <div>
-                                                <label className="block text-xs font-medium text-gray-600 mb-1">Brand</label>
+                                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                                  Brand
+                                                  {material.is_from_master && (
+                                                    <span className="ml-1 text-xs text-blue-600">(Catalog)</span>
+                                                  )}
+                                                </label>
                                                 <input
                                                   type="text"
                                                   value={material.brand || ''}
-                                                  onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'brand', e.target.value)}
+                                                  onChange={(e) => {
+                                                    if (!material.is_from_master) {
+                                                      updateSubItemMaterial(item.id, subItem.id, material.id, 'brand', e.target.value);
+                                                    }
+                                                  }}
                                                   maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_BRAND}
-                                                  className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50"
+                                                  className={`w-full px-3 py-1 text-xs border rounded-lg focus:outline-none focus:ring-1 ${
+                                                    material.is_from_master
+                                                      ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
+                                                      : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
+                                                  }`}
                                                   placeholder="Brand (optional)"
                                                   disabled={isSubmitting}
+                                                  readOnly={material.is_from_master}
+                                                  title={material.is_from_master ? 'From catalog - cannot edit' : ''}
                                                 />
                                                 <div className="flex justify-end mt-0.5">
                                                   <span className={`text-xs ${(material.brand || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_BRAND ? 'text-red-500' : 'text-gray-400'}`}>
@@ -4687,15 +5697,30 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 </div>
                                               </div>
                                               <div>
-                                                <label className="block text-xs font-medium text-gray-600 mb-1">Size</label>
+                                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                                  Size
+                                                  {material.is_from_master && (
+                                                    <span className="ml-1 text-xs text-blue-600">(Catalog)</span>
+                                                  )}
+                                                </label>
                                                 <input
                                                   type="text"
                                                   value={material.size || ''}
-                                                  onChange={(e) => updateSubItemMaterial(item.id, subItem.id, material.id, 'size', e.target.value)}
+                                                  onChange={(e) => {
+                                                    if (!material.is_from_master) {
+                                                      updateSubItemMaterial(item.id, subItem.id, material.id, 'size', e.target.value);
+                                                    }
+                                                  }}
                                                   maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SIZE}
-                                                  className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50"
+                                                  className={`w-full px-3 py-1 text-xs border rounded-lg focus:outline-none focus:ring-1 ${
+                                                    material.is_from_master
+                                                      ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
+                                                      : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
+                                                  }`}
                                                   placeholder="Size (optional)"
                                                   disabled={isSubmitting}
+                                                  readOnly={material.is_from_master}
+                                                  title={material.is_from_master ? 'From catalog - cannot edit' : ''}
                                                 />
                                                 <div className="flex justify-end mt-0.5">
                                                   <span className={`text-xs ${(material.size || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SIZE ? 'text-red-500' : 'text-gray-400'}`}>
@@ -4704,14 +5729,21 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 </div>
                                               </div>
                                               <div className="col-span-2">
-                                                <label className="block text-xs font-medium text-gray-600 mb-1">Specification</label>
+                                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                                  Specification
+                                                  {material.is_from_master && (
+                                                    <span className="ml-1 text-xs text-blue-600">(From Catalog)</span>
+                                                  )}
+                                                </label>
                                                 <textarea
                                                   value={material.specification || ''}
                                                   onChange={(e) => {
-                                                    updateSubItemMaterial(item.id, subItem.id, material.id, 'specification', e.target.value);
-                                                    // Auto-resize textarea
-                                                    e.target.style.height = 'auto';
-                                                    e.target.style.height = e.target.scrollHeight + 'px';
+                                                    if (!material.is_from_master) {
+                                                      updateSubItemMaterial(item.id, subItem.id, material.id, 'specification', e.target.value);
+                                                      // Auto-resize textarea
+                                                      e.target.style.height = 'auto';
+                                                      e.target.style.height = e.target.scrollHeight + 'px';
+                                                    }
                                                   }}
                                                   onFocus={(e) => {
                                                     // Auto-resize on focus
@@ -4719,10 +5751,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                     e.target.style.height = e.target.scrollHeight + 'px';
                                                   }}
                                                   maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SPECIFICATION}
-                                                  className="w-full px-3 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50 resize-none overflow-hidden"
+                                                  className={`w-full px-3 py-1 text-xs border rounded-lg focus:outline-none focus:ring-1 resize-none overflow-hidden ${
+                                                    material.is_from_master
+                                                      ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
+                                                      : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
+                                                  }`}
                                                   placeholder="Specification (optional)"
                                                   rows={1}
                                                   disabled={isSubmitting}
+                                                  readOnly={material.is_from_master}
+                                                  title={material.is_from_master ? 'From catalog - cannot edit' : ''}
                                                   style={{ minHeight: '30px' }}
                                                 />
                                                 <div className="flex justify-end mt-0.5">
@@ -4791,45 +5829,157 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                         </div>
                                       )}
 
-                                      {subItem.labour.map((labour, labourIndex) => (
+                                      {subItem.labour.map((labour, labourIndex) => {
+                                        const labourInputId = `${item.id}-${subItem.id}-${labour.id}`;
+                                        const labourGlobalResults = globalLabourResults[labourInputId] || [];
+                                        const isLabourGlobalLoading = globalLabourLoading[labourInputId] || false;
+                                        const showLabourDropdown = labourDropdownOpenState[labourInputId] && (labourGlobalResults.length > 0 || isLabourGlobalLoading);
+
+                                        // Check for duplicate labour roles within this sub-item (ignore spaces and case)
+                                        const normalizeLabourRole = (str: string) => str.trim().toLowerCase().replace(/\s+/g, '');
+                                        const usedLabourRolesInSubItem = subItem.labour
+                                          .filter(l => l.id !== labour.id && l.labour_role.trim())
+                                          .map(l => normalizeLabourRole(l.labour_role));
+
+                                        // Check if a value would be duplicate
+                                        const checkLabourIsDuplicate = (value: string) => {
+                                          if (!value.trim()) return false;
+                                          return usedLabourRolesInSubItem.includes(normalizeLabourRole(value));
+                                        };
+
+                                        // Check the current input value (what user is typing)
+                                        const currentInputValue = labourSearchTerms[labourInputId] ?? labour.labour_role;
+                                        const isDuplicateLabourInSubItem = checkLabourIsDuplicate(currentInputValue);
+
+                                        return (
                                         <div key={labour.id} className="space-y-1">
                                           <div className="flex items-center gap-2">
                                             <div className="w-10 flex items-center justify-center text-xs font-medium text-gray-600">
                                               {labourIndex + 1}
                                             </div>
-                                            <div className="flex-1 flex flex-col">
+                                            <div className="flex-1 flex flex-col relative">
                                               <input
                                                 type="text"
-                                                value={labour.labour_role}
+                                                value={labourSearchTerms[labourInputId] !== undefined ? labourSearchTerms[labourInputId] : labour.labour_role}
                                                 onChange={(e) => {
-                                                  setItems(items.map(itm =>
-                                                    itm.id === item.id
-                                                      ? {
-                                                          ...itm,
-                                                          sub_items: itm.sub_items.map(si =>
-                                                            si.id === subItem.id
-                                                              ? {
-                                                                  ...si,
-                                                                  labour: si.labour.map(l =>
-                                                                    l.id === labour.id ? { ...l, labour_role: e.target.value } : l
-                                                                  )
-                                                                }
-                                                              : si
-                                                          )
-                                                        }
-                                                      : itm
-                                                  ));
+                                                  const newValue = e.target.value;
+                                                  // Always update the search term (what user sees)
+                                                  setLabourSearchTerms(prev => ({ ...prev, [labourInputId]: newValue }));
+                                                  // Only update actual value if NOT a duplicate
+                                                  if (!checkLabourIsDuplicate(newValue)) {
+                                                    setItems(items.map(itm =>
+                                                      itm.id === item.id
+                                                        ? {
+                                                            ...itm,
+                                                            sub_items: itm.sub_items.map(si =>
+                                                              si.id === subItem.id
+                                                                ? {
+                                                                    ...si,
+                                                                    labour: si.labour.map(l =>
+                                                                      l.id === labour.id ? { ...l, labour_role: newValue } : l
+                                                                    )
+                                                                  }
+                                                                : si
+                                                            )
+                                                          }
+                                                        : itm
+                                                    ));
+                                                  }
+                                                  // Open dropdown and trigger global search
+                                                  setLabourDropdownOpenState(prev => ({ ...prev, [labourInputId]: true }));
+                                                  searchGlobalLabours(labourInputId, newValue);
+                                                }}
+                                                onBlur={() => {
+                                                  setTimeout(() => {
+                                                    setLabourSearchTerms(prev => ({ ...prev, [labourInputId]: undefined }));
+                                                    setLabourDropdownOpenState(prev => ({ ...prev, [labourInputId]: false }));
+                                                  }, 200);
+                                                }}
+                                                onFocus={() => {
+                                                  setLabourDropdownOpenState(prev => ({ ...prev, [labourInputId]: true }));
+                                                  if (labour.labour_role.trim()) {
+                                                    searchGlobalLabours(labourInputId, labour.labour_role);
+                                                  }
                                                 }}
                                                 maxLength={BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE}
-                                                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                                placeholder="Labour role (e.g., Fabricator, Installer)"
+                                                className={`w-full px-3 py-1.5 pr-8 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
+                                                  isDuplicateLabourInSubItem
+                                                    ? 'border-red-500 bg-red-50 focus:ring-red-500 focus:border-red-500'
+                                                    : 'border-gray-300 focus:ring-orange-500 focus:border-orange-500'
+                                                }`}
+                                                placeholder="Search labour roles or type new"
                                                 disabled={isSubmitting}
+                                                title={isDuplicateLabourInSubItem ? 'This labour role is already added in this sub-item' : ''}
                                               />
-                                              <div className="flex justify-end">
-                                                <span className={`text-xs ${labour.labour_role.length >= BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE ? 'text-red-500' : 'text-gray-400'}`}>
-                                                  {labour.labour_role.length}/{BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE}
+                                              <Search className="absolute right-2 top-2 w-3 h-3 text-gray-400" />
+                                              <div className="flex justify-between items-center">
+                                                {isDuplicateLabourInSubItem && (
+                                                  <span className="text-xs text-red-600 font-medium">Labour role already exists - cannot add duplicate</span>
+                                                )}
+                                                <span className={`text-xs ml-auto ${currentInputValue.length >= BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE ? 'text-red-500' : 'text-gray-400'}`}>
+                                                  {currentInputValue.length}/{BOQ_CONFIG.FIELD_LIMITS.LABOUR_ROLE}
                                                 </span>
                                               </div>
+
+                                              {showLabourDropdown && (
+                                                <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg shadow-lg" style={{ maxHeight: 280, overflowY: 'auto', top: '100%', marginTop: 4 }}>
+                                                  {isLabourGlobalLoading && (
+                                                    <div className="px-3 py-2 text-xs text-gray-500 text-center">Searching labour roles...</div>
+                                                  )}
+                                                  {labourGlobalResults.map(labourResult => {
+                                                    const isAlreadyInSubItem = usedLabourRolesInSubItem.includes(normalizeLabourRole(labourResult.labour_role));
+                                                    return (
+                                                      <button
+                                                        key={labourResult.labour_id}
+                                                        type="button"
+                                                        onMouseDown={(e) => e.preventDefault()}
+                                                        onClick={() => {
+                                                          if (isAlreadyInSubItem) return;
+                                                          setItems(items.map(itm =>
+                                                            itm.id === item.id
+                                                              ? {
+                                                                  ...itm,
+                                                                  sub_items: itm.sub_items.map(si =>
+                                                                    si.id === subItem.id
+                                                                      ? {
+                                                                          ...si,
+                                                                          labour: si.labour.map(l =>
+                                                                            l.id === labour.id
+                                                                              ? { ...l, labour_role: labourResult.labour_role, work_type: labourResult.work_type, hours: labourResult.hours, rate_per_hour: labourResult.rate_per_hour }
+                                                                              : l
+                                                                          )
+                                                                        }
+                                                                      : si
+                                                                  )
+                                                                }
+                                                              : itm
+                                                          ));
+                                                          setLabourDropdownOpenState(prev => ({ ...prev, [labourInputId]: false }));
+                                                          setLabourSearchTerms(prev => ({ ...prev, [labourInputId]: undefined }));
+                                                        }}
+                                                        className={`w-full px-3 py-2 text-left text-sm transition-colors ${
+                                                          isAlreadyInSubItem
+                                                            ? 'bg-gray-100 cursor-not-allowed opacity-60'
+                                                            : 'hover:bg-orange-50 cursor-pointer'
+                                                        }`}
+                                                        disabled={isAlreadyInSubItem}
+                                                      >
+                                                        <div className={`font-medium ${isAlreadyInSubItem ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                                          {labourResult.labour_role}
+                                                          {isAlreadyInSubItem && <span className="ml-2 text-xs text-red-500 no-underline">(Already added)</span>}
+                                                        </div>
+                                                        <div className="text-xs text-gray-500">
+                                                          AED {labourResult.rate_per_hour}/hr
+                                                          {labourResult.work_type && <span className="ml-2 capitalize">{labourResult.work_type.replace('_', ' ')}</span>}
+                                                        </div>
+                                                      </button>
+                                                    );
+                                                  })}
+                                                  {!isLabourGlobalLoading && labourGlobalResults.length === 0 && labourSearchTerms[labourInputId]?.trim() && (
+                                                    <div className="px-3 py-2 text-xs text-gray-400 text-center">No matching labour roles found</div>
+                                                  )}
+                                                </div>
+                                              )}
                                             </div>
                                             <select
                                               value={labour.work_type || 'daily_wages'}
@@ -4861,7 +6011,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             </select>
                                             <input
                                               type="number"
-                                              value={labour.hours}
+                                              value={labour.hours || ''}
                                               onChange={(e) => {
                                                 setItems(items.map(itm =>
                                                   itm.id === item.id
@@ -4882,14 +6032,14 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 ));
                                               }}
                                               className="w-20 px-2 py-1.5 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
-                                              placeholder="Hours"
+                                              placeholder="0"
                                               min="0"
                                               step="0.5"
                                               disabled={isSubmitting}
                                             />
                                             <input
                                               type="number"
-                                              value={labour.rate_per_hour}
+                                              value={labour.rate_per_hour || ''}
                                               onChange={(e) => {
                                                 setItems(items.map(itm =>
                                                   itm.id === item.id
@@ -4910,7 +6060,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 ));
                                               }}
                                               className="w-24 px-2 py-1.5 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
-                                              placeholder="Rate/hr"
+                                              placeholder="0.00"
                                               min="0"
                                               step="0.01"
                                               disabled={isSubmitting}
@@ -4941,7 +6091,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             </button>
                                           </div>
                                         </div>
-                                      ))}
+                                        );
+                                      })}
                                       {subItem.labour.length === 0 && (
                                         <div className="text-center py-3 text-xs text-gray-500 bg-orange-50/30 rounded-lg">
                                           No labour added yet. Click "+ Add Labour" to add one.
@@ -5381,8 +6532,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                 </div>
               )}
 
-              {/* Add Item Button - Positioned at bottom */}
-              <div className="mt-4">
+              {/* Add Item / Import Buttons - Positioned at bottom */}
+              <div className="mt-4 flex gap-3">
                 <button
                   type="button"
                   onClick={addItem}
@@ -6217,6 +7368,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         </div>,
         document.body
       )}
+
     </>
   );
 };

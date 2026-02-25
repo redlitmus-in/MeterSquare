@@ -117,32 +117,34 @@ def get_inventory_config():
 
 def get_project_managers(project):
     """Get project manager details for a project"""
-    managers = []
-    if project.user_id:
-        for user_id in project.user_id:
-            user = User.query.get(user_id)
-            if user:
-                managers.append({
-                    'user_id': user.user_id,
-                    'name': f"{user.first_name or ''} {user.last_name or ''}".strip() or user.email,
-                    'email': user.email
-                })
-    return managers
+    if not project.user_id:
+        return []
+    ids = list(project.user_id)
+    users = {u.user_id: u for u in User.query.filter(User.user_id.in_(ids)).all()}
+    return [
+        {
+            'user_id': uid,
+            'name': f"{users[uid].first_name or ''} {users[uid].last_name or ''}".strip() or users[uid].email,
+            'email': users[uid].email
+        }
+        for uid in ids if uid in users
+    ]
 
 
 def get_mep_supervisors(project):
     """Get MEP supervisor details for a project"""
-    supervisors = []
-    if project.mep_supervisor_id:
-        for user_id in project.mep_supervisor_id:
-            user = User.query.get(user_id)
-            if user:
-                supervisors.append({
-                    'user_id': user.user_id,
-                    'name': f"{user.first_name or ''} {user.last_name or ''}".strip() or user.email,
-                    'email': user.email
-                })
-    return supervisors
+    if not project.mep_supervisor_id:
+        return []
+    ids = list(project.mep_supervisor_id)
+    users = {u.user_id: u for u in User.query.filter(User.user_id.in_(ids)).all()}
+    return [
+        {
+            'user_id': uid,
+            'name': f"{users[uid].first_name or ''} {users[uid].last_name or ''}".strip() or users[uid].email,
+            'email': users[uid].email
+        }
+        for uid in ids if uid in users
+    ]
 
 
 def get_site_supervisor(project):

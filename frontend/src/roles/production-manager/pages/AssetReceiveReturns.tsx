@@ -3,12 +3,13 @@
  * PM processes returned assets - verify condition and decide fate
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, CheckCircle, Package, RefreshCw, AlertTriangle,
-  Wrench, Trash2, Check, X, Eye
+  Wrench, Trash2, Check, X, Eye, ChevronLeft, ChevronRight
 } from 'lucide-react';
+import { PAGINATION } from '@/lib/inventoryConstants';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import {
   getReturnNotes,
@@ -67,6 +68,27 @@ const AssetReceiveReturns: React.FC = () => {
   const [selectedReturn, setSelectedReturn] = useState<AssetReturnDeliveryNote | null>(null);
   const [processingItems, setProcessingItems] = useState<ProcessingItem[]>([]);
   const [showProcessModal, setShowProcessModal] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Pagination calculations
+  const currentItems = activeTab === 'pending' ? pendingReturns : processedReturns;
+  const totalPages = Math.ceil(currentItems.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedItems = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return currentItems.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [currentItems, currentPage]);
+
+  // Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Clamp page when total pages decreases
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   useEffect(() => {
     fetchData();
@@ -267,7 +289,7 @@ const AssetReceiveReturns: React.FC = () => {
             </div>
           ) : (
             <div className="divide-y">
-              {pendingReturns.map(rn => (
+              {paginatedItems.map(rn => (
                 <div key={rn.ardn_id} className="p-4 hover:bg-gray-50">
                   <div className="flex items-center justify-between">
                     <div>
@@ -307,7 +329,13 @@ const AssetReceiveReturns: React.FC = () => {
                       )}
                       <button
                         onClick={() => fetchReturnDetails(rn.ardn_id)}
-                        className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg"
+                        disabled={rn.status === 'IN_TRANSIT'}
+                        className={`p-2 rounded-lg ${
+                          rn.status === 'IN_TRANSIT'
+                            ? 'text-gray-300 cursor-not-allowed opacity-50'
+                            : 'text-gray-500 hover:bg-gray-100'
+                        }`}
+                        title={rn.status === 'IN_TRANSIT' ? 'Receive the items first to view details' : 'View details'}
                       >
                         <Eye className="w-4 h-4" />
                       </button>
@@ -345,7 +373,7 @@ const AssetReceiveReturns: React.FC = () => {
             </div>
           ) : (
             <div className="divide-y">
-              {processedReturns.map(rn => (
+              {paginatedItems.map(rn => (
                 <div key={rn.ardn_id} className="p-4 hover:bg-gray-50">
                   <div className="flex items-center justify-between">
                     <div>
@@ -392,6 +420,38 @@ const AssetReceiveReturns: React.FC = () => {
             </div>
           )
         )}
+
+        {/* Pagination */}
+        {currentItems.length > 0 && (
+          <div className="px-4 py-3 bg-gray-50 border-t flex items-center justify-between text-sm">
+            <span className="text-gray-600">
+              Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, currentItems.length)} of {currentItems.length} returns
+            </span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </button>
+                <span className="text-sm text-gray-600">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Process/View Modal */}
@@ -399,23 +459,76 @@ const AssetReceiveReturns: React.FC = () => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
             {/* Modal Header */}
-            <div className={`p-4 border-b flex items-center justify-between ${
+            <div className={`p-4 border-b ${
               selectedReturn.status === 'PROCESSED' ? 'bg-green-50' : 'bg-purple-50'
             }`}>
-              <div>
-                <h2 className="text-lg font-semibold">
-                  {selectedReturn.status === 'PROCESSED' ? 'Return Details' : 'Process Return'}: {selectedReturn.ardn_number}
-                </h2>
-                <p className="text-sm text-gray-500">
-                  {selectedReturn.project_name || `Project #${selectedReturn.project_id}`} • {selectedReturn.total_items} items
-                  {selectedReturn.status === 'PROCESSED' && selectedReturn.processed_at && (
-                    <span className="ml-2">• Processed: {new Date(selectedReturn.processed_at).toLocaleDateString()}</span>
-                  )}
-                </p>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-lg font-semibold">
+                    {selectedReturn.status === 'PROCESSED' ? 'Return Details' : 'Process Return'}: {selectedReturn.ardn_number}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    {selectedReturn.project_name || `Project #${selectedReturn.project_id}`} • {selectedReturn.total_items} items
+                    {selectedReturn.status === 'PROCESSED' && selectedReturn.processed_at && (
+                      <span className="ml-2">• Processed: {new Date(selectedReturn.processed_at).toLocaleDateString()}</span>
+                    )}
+                  </p>
+                </div>
+                <button onClick={closeModal} className="p-2 hover:bg-gray-200 rounded-lg">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button onClick={closeModal} className="p-2 hover:bg-gray-200 rounded-lg">
-                <X className="w-5 h-5" />
-              </button>
+
+              {/* Transport & Delivery Info */}
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                {/* Transport Details */}
+                {(selectedReturn.vehicle_number || selectedReturn.driver_name || selectedReturn.driver_contact || (selectedReturn.transport_fee !== undefined && selectedReturn.transport_fee !== null)) && (
+                  <div className="mb-3 pb-3 border-b border-gray-200">
+                    <p className="text-xs text-gray-500 mb-2 font-medium">Transport Details:</p>
+                    <div className="grid grid-cols-4 gap-4 text-xs">
+                      {selectedReturn.vehicle_number && (
+                        <div>
+                          <span className="text-gray-500">Vehicle:</span>
+                          <span className="ml-1 text-gray-900 font-medium">{selectedReturn.vehicle_number}</span>
+                        </div>
+                      )}
+                      {selectedReturn.driver_name && (
+                        <div>
+                          <span className="text-gray-500">Driver:</span>
+                          <span className="ml-1 text-gray-900 font-medium">{selectedReturn.driver_name}</span>
+                        </div>
+                      )}
+                      {selectedReturn.driver_contact && (
+                        <div>
+                          <span className="text-gray-500">Contact:</span>
+                          <span className="ml-1 text-gray-900 font-medium">{selectedReturn.driver_contact}</span>
+                        </div>
+                      )}
+                      {(selectedReturn.transport_fee !== undefined && selectedReturn.transport_fee !== null) && (
+                        <div>
+                          <span className="text-gray-500">Transport Fee:</span>
+                          <span className="ml-1 text-gray-900 font-medium">
+                            AED {Number(selectedReturn.transport_fee).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    {selectedReturn.delivery_note_url && (
+                      <div className="mt-2">
+                        <a
+                          href={selectedReturn.delivery_note_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View Delivery Note Document
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Modal Body */}

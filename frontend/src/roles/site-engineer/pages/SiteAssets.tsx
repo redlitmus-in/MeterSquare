@@ -20,10 +20,12 @@ import {
   PrinterIcon,
   PencilIcon,
   PlusIcon,
+  XCircleIcon,
 } from '@heroicons/react/24/outline';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { showError, showSuccess } from '@/utils/toastHelper';
 import { apiClient, API_BASE_URL } from '@/api/config';
+import { PAGINATION } from '@/lib/constants';
 import {
   AssetRequisition,
   CreateRequisitionPayload,
@@ -184,7 +186,15 @@ const SiteAssets: React.FC = () => {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnADN, setReturnADN] = useState<GroupedADN | null>(null);
   const [returnItems, setReturnItems] = useState<DispatchedAsset[]>([]);
-  const [returnItemConditions, setReturnItemConditions] = useState<Record<number, { condition: string; damage_description: string; quantity: number }>>({});
+  const [returnItemConditions, setReturnItemConditions] = useState<Record<number, {
+    good: number;
+    fair: number;
+    poor: number;
+    damaged: number;
+    damage_description_fair: string;
+    damage_description_poor: string;
+    damage_description_damaged: string;
+  }>>({});
   const [returnNotes, setReturnNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -212,6 +222,10 @@ const SiteAssets: React.FC = () => {
   const [dispatchDriverName, setDispatchDriverName] = useState('');
   const [dispatchVehicleNumber, setDispatchVehicleNumber] = useState('');
   const [dispatchDriverContact, setDispatchDriverContact] = useState('');
+  const [dispatchTransportFee, setDispatchTransportFee] = useState('');
+  const [dispatchNotes, setDispatchNotes] = useState('');
+  const [dispatchDeliveryNoteFile, setDispatchDeliveryNoteFile] = useState<File | null>(null);
+  const [uploadingDeliveryNote, setUploadingDeliveryNote] = useState(false);
 
   // Asset Requisition state
   const [requisitions, setRequisitions] = useState<AssetRequisition[]>([]);
@@ -289,7 +303,7 @@ const SiteAssets: React.FC = () => {
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
   // Tab state for organized navigation
-  type TabType = 'assets' | 'requisitions' | 'returns' | 'history';
+  type TabType = 'assets' | 'requisitions' | 'rejected' | 'returns' | 'history';
   const [activeTab, setActiveTab] = useState<TabType>('assets');
 
   // Loading states for each tab
@@ -297,6 +311,13 @@ const SiteAssets: React.FC = () => {
   const [loadingReturns, setLoadingReturns] = useState(false);
   const [requisitionsLoaded, setRequisitionsLoaded] = useState(false);
   const [returnsLoaded, setReturnsLoaded] = useState(false);
+
+  // Pagination state for each tab
+  const [assetsPage, setAssetsPage] = useState(1);
+  const [requisitionsPage, setRequisitionsPage] = useState(1);
+  const [rejectedPage, setRejectedPage] = useState(1);
+  const [returnsPage, setReturnsPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
 
   const fetchAssets = useCallback(async () => {
     try {
@@ -377,7 +398,9 @@ const SiteAssets: React.FC = () => {
       showError('Please select a category');
       return;
     }
-    if (requisitionForm.quantity < 1) {
+
+    const qtyToAdd = requisitionForm.quantity ?? 1;
+    if (qtyToAdd < 1) {
       showError('Quantity must be at least 1');
       return;
     }
@@ -390,7 +413,7 @@ const SiteAssets: React.FC = () => {
     // Check if category already in list - if so, update quantity
     const existingItem = requisitionItems.find(item => item.category_id === requisitionForm.category_id);
     if (existingItem) {
-      const newQty = existingItem.quantity + requisitionForm.quantity;
+      const newQty = existingItem.quantity + qtyToAdd;
 
       // Validate against available quantity
       if (newQty > availableQty) {
@@ -406,7 +429,7 @@ const SiteAssets: React.FC = () => {
       ));
     } else {
       // Validate quantity against available for new item
-      if (requisitionForm.quantity > availableQty) {
+      if (qtyToAdd > availableQty) {
         showError(`Cannot exceed available quantity (${availableQty}) for ${category.category_name}`);
         return;
       }
@@ -416,7 +439,7 @@ const SiteAssets: React.FC = () => {
         category_id: category.category_id,
         category_code: category.category_code,
         category_name: category.category_name,
-        quantity: requisitionForm.quantity,
+        quantity: qtyToAdd,
         available_quantity: availableQty
       };
       setRequisitionItems(prev => [...prev, newItem]);
@@ -429,9 +452,62 @@ const SiteAssets: React.FC = () => {
     setCategorySearch('');
   };
 
-  // Check if category is already in list
+  // Add item to edit requisition list (reuses requisitionForm for selected category/qty)
+  const addItemToEditRequisition = () => {
+    if (!requisitionForm.category_id) {
+      showError('Please select a category');
+      return;
+    }
+
+    const qtyToAdd = requisitionForm.quantity ?? 1;
+    if (qtyToAdd < 1) {
+      showError('Quantity must be at least 1');
+      return;
+    }
+
+    const category = assetCategories.find(c => c.category_id === requisitionForm.category_id);
+    if (!category) return;
+
+    const availableQty = category.available_quantity ?? 0;
+
+    const existingIndex = editItems.findIndex(item => item.category_id === requisitionForm.category_id);
+    if (existingIndex !== -1) {
+      const newQty = editItems[existingIndex].quantity + qtyToAdd;
+      if (newQty > availableQty) {
+        showError(`Cannot exceed available quantity (${availableQty}) for ${category.category_name}`);
+        return;
+      }
+      setEditItems(prev => prev.map((item, i) =>
+        i === existingIndex ? { ...item, quantity: newQty } : item
+      ));
+      showSuccess(`Updated ${category.category_name} quantity to ${newQty}`);
+    } else {
+      if (qtyToAdd > availableQty) {
+        showError(`Cannot exceed available quantity (${availableQty}) for ${category.category_name}`);
+        return;
+      }
+      setEditItems(prev => [...prev, {
+        category_id: category.category_id,
+        category_name: category.category_name,
+        quantity: qtyToAdd
+      }]);
+      showSuccess(`Added ${category.category_name} to requisition`);
+    }
+
+    // Reset for next item
+    setRequisitionForm(prev => ({ ...prev, category_id: 0, quantity: 1 }));
+    setCategorySearch('');
+  };
+
+  // Check if category is already in create list
   const getCategoryInListQty = (categoryId: number): number | null => {
     const item = requisitionItems.find(i => i.category_id === categoryId);
+    return item ? item.quantity : null;
+  };
+
+  // Check if category is already in edit list
+  const getEditCategoryInListQty = (categoryId: number): number | null => {
+    const item = editItems.find(i => i.category_id === categoryId);
     return item ? item.quantity : null;
   };
 
@@ -464,7 +540,8 @@ const SiteAssets: React.FC = () => {
 
     // Check if we have items in the list OR a single item selected
     const hasListItems = requisitionItems.length > 0;
-    const hasSingleItem = requisitionForm.category_id > 0;
+    const categoryId = requisitionForm.category_id ?? 0;
+    const hasSingleItem = categoryId > 0;
 
     if (!hasListItems && !hasSingleItem) {
       showError('Please add at least one item to your request');
@@ -481,15 +558,15 @@ const SiteAssets: React.FC = () => {
       let itemsToSubmit = [...requisitionItems];
 
       // If there's a current selection but not added to list, add it now
-      if (hasSingleItem && !requisitionItems.some(item => item.category_id === requisitionForm.category_id)) {
-        const category = assetCategories.find(c => c.category_id === requisitionForm.category_id);
+      if (hasSingleItem && !requisitionItems.some(item => item.category_id === categoryId)) {
+        const category = assetCategories.find(c => c.category_id === categoryId);
         if (category) {
           itemsToSubmit.push({
             id: Date.now(),
             category_id: category.category_id,
             category_code: category.category_code,
             category_name: category.category_name,
-            quantity: requisitionForm.quantity,
+            quantity: requisitionForm.quantity ?? 1,
             available_quantity: category.available_quantity ?? 0
           });
         }
@@ -565,18 +642,23 @@ const SiteAssets: React.FC = () => {
 
   // Open edit requisition modal
   const openEditReqModal = (req: AssetRequisition) => {
+    fetchRequisitionFormData(); // Load categories & projects for dropdown
     setEditRequisition(req);
     setEditProjectId(req.project_id || 0);
     setEditPurpose(req.purpose);
     setEditRequiredDate(req.required_date?.split('T')[0] || '');
     setEditUrgency(req.urgency);
     setEditSiteLocation(req.site_location || '');
+    setCategorySearch('');
+    setShowCategoryDropdown(false);
+    // Reset the add-item row (reuse requisitionForm since modals are mutually exclusive)
+    setRequisitionForm(prev => ({ ...prev, category_id: 0, quantity: 1 }));
 
     // Initialize items for editing
     const items = req.items && req.items.length > 0
       ? req.items.map(item => ({
           category_id: item.category_id,
-          category_name: item.category_name,
+          category_name: item.category_name || '',
           quantity: item.quantity
         }))
       : [{
@@ -705,18 +787,59 @@ const SiteAssets: React.FC = () => {
     setDispatchDriverName(ardn.driver_name || '');
     setDispatchVehicleNumber(ardn.vehicle_number || '');
     setDispatchDriverContact(ardn.driver_contact || '');
+    setDispatchTransportFee(ardn.transport_fee ? String(ardn.transport_fee) : '');
+    setDispatchNotes(ardn.notes || '');
+    setDispatchDeliveryNoteFile(null);
     setShowDispatchModal(true);
   };
 
   // Dispatch return note with driver details
   const handleDispatchARDN = async () => {
     if (!dispatchARDN) return;
+
+    // Validate required fields
+    if (!dispatchDriverName.trim()) {
+      showError('Driver name is required');
+      return;
+    }
+    if (!dispatchVehicleNumber.trim()) {
+      showError('Vehicle number is required');
+      return;
+    }
+    if (!dispatchDriverContact.trim()) {
+      showError('Driver contact is required');
+      return;
+    }
+
     setProcessingARDN(dispatchARDN.ardn_id);
     try {
+      let deliveryNoteUrl = '';
+
+      // Upload delivery note file if provided
+      if (dispatchDeliveryNoteFile) {
+        setUploadingDeliveryNote(true);
+        const formData = new FormData();
+        formData.append('file', dispatchDeliveryNoteFile);
+        formData.append('ardn_id', String(dispatchARDN.ardn_id));
+
+        const uploadResponse = await apiClient.post('/assets/return-notes/upload-delivery-note', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        if (uploadResponse.data.success) {
+          deliveryNoteUrl = uploadResponse.data.data.delivery_note_url;
+        }
+        setUploadingDeliveryNote(false);
+      }
+
+      // Dispatch the return note
       await apiClient.put(`/assets/return-notes/${dispatchARDN.ardn_id}/dispatch`, {
         vehicle_number: dispatchVehicleNumber,
         driver_name: dispatchDriverName,
-        driver_contact: dispatchDriverContact
+        driver_contact: dispatchDriverContact,
+        transport_fee: dispatchTransportFee ? parseFloat(dispatchTransportFee) : 0,
+        notes: dispatchNotes,
+        delivery_note_url: deliveryNoteUrl
       });
       showSuccess(`Return note ${dispatchARDN.ardn_number} dispatched`);
       setShowDispatchModal(false);
@@ -727,6 +850,7 @@ const SiteAssets: React.FC = () => {
       showError(error.response?.data?.error || 'Failed to dispatch return note');
     } finally {
       setProcessingARDN(null);
+      setUploadingDeliveryNote(false);
     }
   };
 
@@ -847,6 +971,91 @@ const SiteAssets: React.FC = () => {
     );
   }, [received]);
 
+  // Combined assets for pagination (pending + received ADNs)
+  const allAssetsADNs = useMemo(() => {
+    return [...groupedPendingADNs, ...groupedReceivedADNs];
+  }, [groupedPendingADNs, groupedReceivedADNs]);
+
+  // Paginated assets
+  const assetsTotalPages = Math.ceil(allAssetsADNs.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedPendingADNs = useMemo(() => {
+    const startIdx = (assetsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    const endIdx = startIdx + PAGINATION.DEFAULT_PAGE_SIZE;
+    // Filter pending from sliced window
+    const pendingIds = new Set(groupedPendingADNs.map(a => a.adn_id));
+    return allAssetsADNs.slice(startIdx, endIdx).filter(a => pendingIds.has(a.adn_id));
+  }, [allAssetsADNs, groupedPendingADNs, assetsPage]);
+
+  const paginatedReceivedADNs = useMemo(() => {
+    const startIdx = (assetsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    const endIdx = startIdx + PAGINATION.DEFAULT_PAGE_SIZE;
+    // Filter received from sliced window
+    const receivedIds = new Set(groupedReceivedADNs.map(a => a.adn_id));
+    return allAssetsADNs.slice(startIdx, endIdx).filter(a => receivedIds.has(a.adn_id));
+  }, [allAssetsADNs, groupedReceivedADNs, assetsPage]);
+
+  // Paginated requisitions
+  const requisitionsTotalPages = Math.ceil(filteredRequisitions.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequisitions = useMemo(() => {
+    const startIdx = (requisitionsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredRequisitions.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequisitions, requisitionsPage]);
+
+  // Rejected requisitions (for standalone Rejected tab)
+  const rejectedRequisitions = useMemo(() => {
+    return requisitions.filter(r => ['pm_rejected', 'prod_mgr_rejected'].includes(r.status));
+  }, [requisitions]);
+
+  const rejectedTotalPages = Math.ceil(rejectedRequisitions.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRejectedRequisitions = useMemo(() => {
+    const startIdx = (rejectedPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return rejectedRequisitions.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [rejectedRequisitions, rejectedPage]);
+
+  // Paginated return notes
+  const returnsTotalPages = Math.ceil(myReturnNotes.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedReturnNotes = useMemo(() => {
+    const startIdx = (returnsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return myReturnNotes.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [myReturnNotes, returnsPage]);
+
+  // Group history by project first, then paginate the groups
+  const groupedHistory = useMemo(() => {
+    const groups: Record<string, { project_name: string; movements: typeof history }> = {};
+    history.forEach(h => {
+      const key = `${h.project_id}-${h.project_name}`;
+      if (!groups[key]) {
+        groups[key] = { project_name: h.project_name, movements: [] };
+      }
+      groups[key].movements.push(h);
+    });
+    return Object.entries(groups);
+  }, [history]);
+
+  // Paginated history (by project groups, not individual movements)
+  const historyTotalPages = Math.ceil(groupedHistory.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedHistoryGroups = useMemo(() => {
+    const startIdx = (historyPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return groupedHistory.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [groupedHistory, historyPage]);
+
+  // Reset pagination when tab changes or data changes
+  useEffect(() => {
+    setAssetsPage(1);
+  }, [groupedPendingADNs.length, groupedReceivedADNs.length]);
+
+  useEffect(() => {
+    setRequisitionsPage(1);
+  }, [reqSubTab, filteredRequisitions.length]);
+
+  useEffect(() => {
+    setReturnsPage(1);
+  }, [myReturnNotes.length]);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [groupedHistory.length]);
+
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
@@ -867,9 +1076,9 @@ const SiteAssets: React.FC = () => {
     fetchAssets();
   }, [fetchAssets]);
 
-  // Auto-fetch requisitions when requisitions tab is selected
+  // Auto-fetch requisitions when requisitions or rejected tab is selected
   useEffect(() => {
-    if (activeTab === 'requisitions' && !requisitionsLoaded && !loadingRequisitions) {
+    if ((activeTab === 'requisitions' || activeTab === 'rejected') && !requisitionsLoaded && !loadingRequisitions) {
       fetchRequisitions();
     }
   }, [activeTab, requisitionsLoaded, loadingRequisitions]);
@@ -1095,10 +1304,10 @@ const SiteAssets: React.FC = () => {
       return;
     }
 
-    // Initialize conditions for each item with quantity
-    const conditions: Record<number, { condition: string; damage_description: string; quantity: number }> = {};
+    // Initialize multi-condition split for each item (all qty defaults to good)
+    const conditions: Record<number, { good: number; fair: number; poor: number; damaged: number; damage_description_fair: string; damage_description_poor: string; damage_description_damaged: string }> = {};
     selectedItems.forEach(item => {
-      conditions[item.adn_item_id] = { condition: 'good', damage_description: '', quantity: item.quantity };
+      conditions[item.adn_item_id] = { good: item.quantity, fair: 0, poor: 0, damaged: 0, damage_description_fair: '', damage_description_poor: '', damage_description_damaged: '' };
     });
 
     setReturnADN(adn);
@@ -1110,8 +1319,8 @@ const SiteAssets: React.FC = () => {
 
   // Open return modal for single item
   const openSingleReturnModal = (adn: GroupedADN, item: DispatchedAsset) => {
-    const conditions: Record<number, { condition: string; damage_description: string; quantity: number }> = {
-      [item.adn_item_id]: { condition: 'good', damage_description: '', quantity: item.quantity }
+    const conditions: Record<number, { good: number; fair: number; poor: number; damaged: number; damage_description_fair: string; damage_description_poor: string; damage_description_damaged: string }> = {
+      [item.adn_item_id]: { good: item.quantity, fair: 0, poor: 0, damaged: 0, damage_description_fair: '', damage_description_poor: '', damage_description_damaged: '' }
     };
 
     setReturnADN(adn);
@@ -1121,8 +1330,8 @@ const SiteAssets: React.FC = () => {
     setShowReturnModal(true);
   };
 
-  // Update condition for a specific item
-  const updateItemCondition = (itemId: number, field: 'condition' | 'damage_description' | 'quantity', value: string | number) => {
+  // Update a specific condition quantity or description for an item
+  const updateReturnSplit = (itemId: number, field: string, value: number | string) => {
     setReturnItemConditions(prev => ({
       ...prev,
       [itemId]: {
@@ -1135,54 +1344,86 @@ const SiteAssets: React.FC = () => {
   const handleBulkReturnRequest = async () => {
     if (!returnADN || returnItems.length === 0) return;
 
-    // Validate - if any item is not 'good', it needs a damage description
-    const invalidItems = returnItems.filter(item => {
+    // Validate each item's condition split
+    for (const item of returnItems) {
       const cond = returnItemConditions[item.adn_item_id];
-      return cond.condition !== 'good' && !cond.damage_description.trim();
-    });
+      if (!cond) continue;
+      const totalQty = cond.good + cond.fair + cond.poor + cond.damaged;
 
-    if (invalidItems.length > 0) {
-      showError(`Please provide damage description for items with condition other than "good"`);
-      return;
-    }
-
-    // Validate quantity
-    const invalidQuantityItems = returnItems.filter(item => {
-      const cond = returnItemConditions[item.adn_item_id];
-      return !cond.quantity || cond.quantity <= 0 || cond.quantity > item.quantity;
-    });
-
-    if (invalidQuantityItems.length > 0) {
-      showError(`Please enter valid return quantity (1 to available quantity)`);
-      return;
+      if (totalQty === 0) {
+        showError(`Please enter at least 1 unit to return for "${item.category_name}"`);
+        return;
+      }
+      if (totalQty > item.quantity) {
+        showError(`Total return quantity (${totalQty}) exceeds available (${item.quantity}) for "${item.category_name}"`);
+        return;
+      }
+      if (cond.fair > 0 && !cond.damage_description_fair.trim()) {
+        showError(`Please provide description for Fair condition on "${item.category_name}"`);
+        return;
+      }
+      if (cond.poor > 0 && !cond.damage_description_poor.trim()) {
+        showError(`Please provide description for Poor condition on "${item.category_name}"`);
+        return;
+      }
+      if (cond.damaged > 0 && !cond.damage_description_damaged.trim()) {
+        showError(`Please provide description for Damaged condition on "${item.category_name}"`);
+        return;
+      }
     }
 
     try {
       setSubmitting(true);
 
-      // Create return note via ARDN flow with multiple items
+      // Build items array - one entry per condition with qty > 0
+      const items: Array<{
+        category_id: number;
+        asset_item_id: number | null;
+        original_adn_item_id: number;
+        quantity: number;
+        reported_condition: string;
+        damage_description?: string;
+        notes?: string;
+      }> = [];
+
+      for (const item of returnItems) {
+        const cond = returnItemConditions[item.adn_item_id];
+        if (!cond) continue;
+
+        const conditionEntries: Array<{ key: 'good' | 'fair' | 'poor' | 'damaged'; descKey?: 'damage_description_fair' | 'damage_description_poor' | 'damage_description_damaged' }> = [
+          { key: 'good' },
+          { key: 'fair', descKey: 'damage_description_fair' },
+          { key: 'poor', descKey: 'damage_description_poor' },
+          { key: 'damaged', descKey: 'damage_description_damaged' },
+        ];
+
+        for (const { key, descKey } of conditionEntries) {
+          if (cond[key] > 0) {
+            items.push({
+              category_id: item.category_id,
+              asset_item_id: item.asset_item_id ?? null,
+              original_adn_item_id: item.adn_item_id,
+              quantity: cond[key],
+              reported_condition: key,
+              damage_description: descKey ? cond[descKey] : undefined,
+              notes: returnNotes
+            });
+          }
+        }
+      }
+
       const payload = {
         project_id: returnADN.project_id,
         original_adn_id: returnADN.adn_id,
         return_reason: returnNotes || 'Return request',
         notes: returnNotes,
-        items: returnItems.map(item => {
-          const cond = returnItemConditions[item.adn_item_id];
-          return {
-            category_id: item.category_id,
-            asset_item_id: item.asset_item_id,
-            original_adn_item_id: item.adn_item_id,
-            quantity: cond.quantity,
-            reported_condition: cond.condition,
-            damage_description: cond.condition !== 'good' ? cond.damage_description : undefined,
-            notes: returnNotes
-          };
-        })
+        items
       };
 
       const response = await apiClient.post('/assets/return-notes', payload);
 
-      showSuccess(`Return note created: ${response.data.data?.ardn_number || 'Success'} with ${returnItems.length} item(s)`);
+      const totalReturnQty = items.reduce((sum, i) => sum + i.quantity, 0);
+      showSuccess(`Return note created: ${response.data.data?.ardn_number || 'Success'} with ${items.length} item(s), ${totalReturnQty} total units`);
       setShowReturnModal(false);
       setReturnADN(null);
       setReturnItems([]);
@@ -1206,7 +1447,7 @@ const SiteAssets: React.FC = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 flex items-center justify-center">
-        <ModernLoadingSpinners variant="pulse-wave" />
+        <ModernLoadingSpinners size="lg" />
       </div>
     );
   }
@@ -1283,6 +1524,24 @@ const SiteAssets: React.FC = () => {
               )}
             </button>
             <button
+              onClick={() => setActiveTab('rejected')}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                activeTab === 'rejected'
+                  ? 'bg-white text-red-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
+            >
+              <XCircleIcon className="w-4 h-4" />
+              <span>Rejected</span>
+              {rejectedRequisitions.length > 0 && (
+                <span className={`px-2 py-0.5 text-xs rounded-full ${
+                  activeTab === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-red-100 text-red-600'
+                }`}>
+                  {rejectedRequisitions.length}
+                </span>
+              )}
+            </button>
+            <button
               onClick={() => setActiveTab('returns')}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
                 activeTab === 'returns'
@@ -1320,7 +1579,7 @@ const SiteAssets: React.FC = () => {
         {activeTab === 'assets' && (
           <>
             {/* Pending Receipt Section - Grouped by ADN */}
-        {groupedPendingADNs.length > 0 && (
+        {paginatedPendingADNs.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1337,7 +1596,7 @@ const SiteAssets: React.FC = () => {
             </div>
 
             <div className="divide-y divide-gray-200">
-              {groupedPendingADNs.map((adn) => {
+              {paginatedPendingADNs.map((adn) => {
                 const isExpanded = expandedADNs.has(adn.adn_id);
                 const allChecked = isAllCheckedInADN(adn);
                 const someChecked = isSomeCheckedInADN(adn);
@@ -1515,7 +1774,7 @@ const SiteAssets: React.FC = () => {
         )}
 
         {/* Received Section - Grouped by ADN */}
-        {groupedReceivedADNs.length > 0 && (
+        {paginatedReceivedADNs.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1530,7 +1789,7 @@ const SiteAssets: React.FC = () => {
             </div>
 
             <div className="divide-y divide-gray-200">
-              {groupedReceivedADNs.map((adn) => {
+              {paginatedReceivedADNs.map((adn) => {
                 const isExpanded = expandedADNs.has(adn.adn_id);
                 const allReturnChecked = isAllReturnCheckedInADN(adn);
                 const someReturnChecked = isSomeReturnCheckedInADN(adn);
@@ -1741,6 +2000,61 @@ const SiteAssets: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Pagination for Assets Tab - Always show count */}
+        {allAssetsADNs.length > 0 && (
+          <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm">
+            <div className="text-sm text-gray-700">
+              Showing {(assetsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(assetsPage * PAGINATION.DEFAULT_PAGE_SIZE, allAssetsADNs.length)} of {allAssetsADNs.length} delivery notes
+              {assetsTotalPages > 1 && (
+                <span className="text-gray-500 ml-2">(Page {assetsPage} of {assetsTotalPages})</span>
+              )}
+            </div>
+            {assetsTotalPages > 1 && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setAssetsPage(p => Math.max(1, p - 1))}
+                  disabled={assetsPage === 1}
+                  className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                {Array.from({ length: Math.min(assetsTotalPages, 5) }, (_, i) => {
+                  let pageNum: number;
+                  if (assetsTotalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (assetsPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (assetsPage >= assetsTotalPages - 2) {
+                    pageNum = assetsTotalPages - 4 + i;
+                  } else {
+                    pageNum = assetsPage - 2 + i;
+                  }
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setAssetsPage(pageNum)}
+                      className={`px-3 py-1 rounded ${
+                        assetsPage === pageNum
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => setAssetsPage(p => Math.min(assetsTotalPages, p + 1))}
+                  disabled={assetsPage === assetsTotalPages}
+                  className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </div>
+        )}
           </>
         )}
 
@@ -1779,7 +2093,7 @@ const SiteAssets: React.FC = () => {
             </div>
 
             <div className="divide-y divide-gray-200">
-              {myReturnNotes.map(ardn => {
+              {paginatedReturnNotes.map(ardn => {
                 const isExpanded = expandedARDNs.has(ardn.ardn_id);
                 const isProcessing = processingARDN === ardn.ardn_id;
 
@@ -1944,6 +2258,61 @@ const SiteAssets: React.FC = () => {
           </motion.div>
         )}
 
+            {/* Pagination for Returns Tab - Always show count */}
+            {!loadingReturns && myReturnNotes.length > 0 && (
+              <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm">
+                <div className="text-sm text-gray-700">
+                  Showing {(returnsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(returnsPage * PAGINATION.DEFAULT_PAGE_SIZE, myReturnNotes.length)} of {myReturnNotes.length} return notes
+                  {returnsTotalPages > 1 && (
+                    <span className="text-gray-500 ml-2">(Page {returnsPage} of {returnsTotalPages})</span>
+                  )}
+                </div>
+                {returnsTotalPages > 1 && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setReturnsPage(p => Math.max(1, p - 1))}
+                      disabled={returnsPage === 1}
+                      className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    {Array.from({ length: Math.min(returnsTotalPages, 5) }, (_, i) => {
+                      let pageNum: number;
+                      if (returnsTotalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (returnsPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (returnsPage >= returnsTotalPages - 2) {
+                        pageNum = returnsTotalPages - 4 + i;
+                      } else {
+                        pageNum = returnsPage - 2 + i;
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setReturnsPage(pageNum)}
+                          className={`px-3 py-1 rounded ${
+                            returnsPage === pageNum
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                    <button
+                      onClick={() => setReturnsPage(p => Math.min(returnsTotalPages, p + 1))}
+                      disabled={returnsPage === returnsTotalPages}
+                      className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Empty State for Returns */}
             {!loadingReturns && myReturnNotes.length === 0 && (
               <motion.div
@@ -2035,7 +2404,7 @@ const SiteAssets: React.FC = () => {
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">
-                  {filteredRequisitions.map(req => {
+                  {paginatedRequisitions.map(req => {
                     // Get items - use items array if available, else fallback to single item
                     const reqItems = req.items && req.items.length > 0 ? req.items : (
                       req.category_id ? [{
@@ -2135,6 +2504,299 @@ const SiteAssets: React.FC = () => {
                   })}
                 </div>
               )}
+
+              {/* Pagination for Requisitions Tab - Always show count */}
+              {filteredRequisitions.length > 0 && (
+                <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200 bg-gray-50">
+                  <div className="text-sm text-gray-700">
+                    Showing {(requisitionsPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(requisitionsPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredRequisitions.length)} of {filteredRequisitions.length} requisitions
+                    {requisitionsTotalPages > 1 && (
+                      <span className="text-gray-500 ml-2">(Page {requisitionsPage} of {requisitionsTotalPages})</span>
+                    )}
+                  </div>
+                  {requisitionsTotalPages > 1 && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setRequisitionsPage(p => Math.max(1, p - 1))}
+                        disabled={requisitionsPage === 1}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      {Array.from({ length: Math.min(requisitionsTotalPages, 5) }, (_, i) => {
+                        let pageNum: number;
+                        if (requisitionsTotalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (requisitionsPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (requisitionsPage >= requisitionsTotalPages - 2) {
+                          pageNum = requisitionsTotalPages - 4 + i;
+                        } else {
+                          pageNum = requisitionsPage - 2 + i;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setRequisitionsPage(pageNum)}
+                            className={`px-3 py-1 rounded ${
+                              requisitionsPage === pageNum
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      <button
+                        onClick={() => setRequisitionsPage(p => Math.min(requisitionsTotalPages, p + 1))}
+                        disabled={requisitionsPage === requisitionsTotalPages}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </motion.div>
+            )}
+          </>
+        )}
+
+        {/* ==================== REJECTED TAB ==================== */}
+        {activeTab === 'rejected' && (
+          <>
+            {/* Loading State */}
+            {loadingRequisitions && (
+              <div className="flex justify-center items-center py-12">
+                <ModernLoadingSpinners size="md" />
+              </div>
+            )}
+
+            {!loadingRequisitions && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
+            >
+              {/* Header */}
+              <div className="px-5 py-4 flex items-center justify-between bg-red-50/50 border-b border-red-100">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-red-100 rounded-lg">
+                    <XCircleIcon className="w-5 h-5 text-red-600" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-semibold text-gray-900">Rejected Requisitions</h3>
+                    <p className="text-sm text-gray-500">Requests rejected by PM or Store. You can edit and resend them.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={fetchRequisitions}
+                  disabled={loadingRequisitions}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <ArrowPathIcon className={`w-4 h-4 ${loadingRequisitions ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
+
+              {/* Content */}
+              {rejectedRequisitions.length === 0 ? (
+                <div className="p-8 text-center">
+                  <div className="flex flex-col items-center">
+                    <div className="p-4 bg-gray-100 rounded-full mb-4">
+                      <CheckCircleIcon className="w-10 h-10 text-green-500" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      No rejected requisitions
+                    </h3>
+                    <p className="text-gray-500 max-w-md text-sm">
+                      All your requisitions are in good standing. Rejected requests will appear here for you to review and resend.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {paginatedRejectedRequisitions.map(req => {
+                    const reqItems = req.items && req.items.length > 0 ? req.items : (
+                      req.category_id ? [{
+                        category_id: req.category_id,
+                        category_code: req.category_code,
+                        category_name: req.category_name,
+                        quantity: req.quantity ?? 1
+                      }] : []
+                    );
+                    const totalItems = req.total_items ?? reqItems.length;
+                    const totalQty = req.total_quantity ?? reqItems.reduce((sum, item) => sum + (item.quantity ?? 1), 0);
+
+                    const rejectionReason = req.status === 'pm_rejected'
+                      ? req.pm_rejection_reason
+                      : req.prod_mgr_rejection_reason;
+                    const rejectedBy = req.status === 'pm_rejected'
+                      ? req.pm_reviewed_by_name
+                      : req.prod_mgr_reviewed_by_name;
+                    const rejectedAt = req.status === 'pm_rejected'
+                      ? req.pm_reviewed_at
+                      : req.prod_mgr_reviewed_at;
+
+                    return (
+                      <div key={req.requisition_id} className="p-4 hover:bg-gray-50">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-mono text-sm font-semibold text-gray-700">
+                                {req.requisition_code}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[req.status]}`}>
+                                {STATUS_LABELS[req.status]}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${URGENCY_COLORS[req.urgency]}`}>
+                                {URGENCY_LABELS[req.urgency]}
+                              </span>
+                              {totalItems > 1 && (
+                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                  {totalItems} items
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Multi-item display */}
+                            <div className="mt-2 space-y-1">
+                              {reqItems.map((item, idx) => (
+                                <div key={idx} className="flex items-center gap-2 text-sm">
+                                  <span className="text-gray-400">{idx + 1}.</span>
+                                  <span className="font-medium text-gray-900">{item.category_name || item.category_code}</span>
+                                  <span className="text-gray-500">&times;</span>
+                                  <span className="text-gray-700">{item.quantity}</span>
+                                </div>
+                              ))}
+                            </div>
+                            {totalItems > 1 && (
+                              <div className="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-500">
+                                Total: {totalQty} unit{totalQty !== 1 ? 's' : ''}
+                              </div>
+                            )}
+                            <p className="text-xs text-gray-500 mt-2">{req.project_name}</p>
+                            {req.site_location && (
+                              <p className="text-xs text-gray-400">Site: {req.site_location}</p>
+                            )}
+                            <p className="text-xs text-gray-400">Required: {new Date(req.required_date).toLocaleDateString()}</p>
+
+                            {/* Rejection Details */}
+                            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                              <div className="flex items-start gap-2">
+                                <ExclamationTriangleIcon className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+                                <div>
+                                  <p className="text-sm font-medium text-red-800">
+                                    Rejected by {rejectedBy || 'Manager'}
+                                  </p>
+                                  {rejectedAt && (
+                                    <p className="text-xs text-red-600 mt-0.5">
+                                      {new Date(rejectedAt).toLocaleDateString()} at {new Date(rejectedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </p>
+                                  )}
+                                  {rejectionReason && (
+                                    <p className="text-sm text-red-700 mt-1.5">
+                                      <span className="font-medium">Reason:</span> {rejectionReason}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-2 ml-4">
+                            {canSendToPM(req, currentUserId) && (
+                              <button
+                                onClick={() => handleSendToPM(req)}
+                                disabled={submittingRequisition}
+                                className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1 shadow-sm"
+                              >
+                                <PaperAirplaneIcon className="w-3 h-3" />
+                                Resend
+                              </button>
+                            )}
+                            {canEditRequisition(req, currentUserId) && (
+                              <button
+                                onClick={() => openEditReqModal(req)}
+                                className="px-3 py-1.5 text-gray-700 text-xs hover:bg-gray-100 rounded-lg flex items-center gap-1 border border-gray-200"
+                              >
+                                <PencilIcon className="w-3 h-3" />
+                                Edit
+                              </button>
+                            )}
+                            {canCancelRequisition(req, currentUserId) && (
+                              <button
+                                onClick={() => handleCancelRequisition(req.requisition_id)}
+                                className="px-3 py-1.5 text-red-600 text-xs hover:bg-red-50 rounded-lg border border-red-200"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Pagination */}
+              {rejectedRequisitions.length > 0 && (
+                <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200 bg-gray-50">
+                  <div className="text-sm text-gray-700">
+                    Showing {(rejectedPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(rejectedPage * PAGINATION.DEFAULT_PAGE_SIZE, rejectedRequisitions.length)} of {rejectedRequisitions.length} rejected
+                    {rejectedTotalPages > 1 && (
+                      <span className="text-gray-500 ml-2">(Page {rejectedPage} of {rejectedTotalPages})</span>
+                    )}
+                  </div>
+                  {rejectedTotalPages > 1 && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setRejectedPage(p => Math.max(1, p - 1))}
+                        disabled={rejectedPage === 1}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      {Array.from({ length: Math.min(rejectedTotalPages, 5) }, (_, i) => {
+                        let pageNum: number;
+                        if (rejectedTotalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (rejectedPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (rejectedPage >= rejectedTotalPages - 2) {
+                          pageNum = rejectedTotalPages - 4 + i;
+                        } else {
+                          pageNum = rejectedPage - 2 + i;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setRejectedPage(pageNum)}
+                            className={`px-3 py-1 rounded ${
+                              rejectedPage === pageNum
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      <button
+                        onClick={() => setRejectedPage(p => Math.min(rejectedTotalPages, p + 1))}
+                        disabled={rejectedPage === rejectedTotalPages}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </motion.div>
             )}
           </>
@@ -2180,16 +2842,9 @@ const SiteAssets: React.FC = () => {
                     <p className="text-sm">No movement history found for your projects</p>
                   </div>
                 ) : (
-                  <div className="h-[calc(100vh-350px)] min-h-[600px] overflow-y-auto">
-                    {/* Group by project */}
-                    {Object.entries(
-                      history.reduce((acc, h) => {
-                        const key = `${h.project_id}-${h.project_name}`;
-                        if (!acc[key]) acc[key] = { project_name: h.project_name, movements: [] };
-                        acc[key].movements.push(h);
-                        return acc;
-                      }, {} as Record<string, { project_name: string; movements: AssetHistory[] }>)
-                    ).map(([key, group]) => {
+                  <div className="overflow-y-auto">
+                    {/* Paginated project groups */}
+                    {paginatedHistoryGroups.map(([key, group]) => {
                       const isProjectExpanded = expandedProjects.has(key);
                       return (
                         <div key={key} className="border-b border-gray-200 last:border-b-0">
@@ -2289,6 +2944,61 @@ const SiteAssets: React.FC = () => {
                     })}
                   </div>
                 )}
+
+              {/* Pagination for History Tab - Always show count (by project groups) */}
+              {groupedHistory.length > 0 && (
+                <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200 bg-gray-50">
+                  <div className="text-sm text-gray-700">
+                    Showing {(historyPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(historyPage * PAGINATION.DEFAULT_PAGE_SIZE, groupedHistory.length)} of {groupedHistory.length} projects ({history.length} total movements)
+                    {historyTotalPages > 1 && (
+                      <span className="text-gray-500 ml-2">(Page {historyPage} of {historyTotalPages})</span>
+                    )}
+                  </div>
+                  {historyTotalPages > 1 && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
+                        disabled={historyPage === 1}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      {Array.from({ length: Math.min(historyTotalPages, 5) }, (_, i) => {
+                        let pageNum: number;
+                        if (historyTotalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (historyPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (historyPage >= historyTotalPages - 2) {
+                          pageNum = historyTotalPages - 4 + i;
+                        } else {
+                          pageNum = historyPage - 2 + i;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setHistoryPage(pageNum)}
+                            className={`px-3 py-1 rounded ${
+                              historyPage === pageNum
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      <button
+                        onClick={() => setHistoryPage(p => Math.min(historyTotalPages, p + 1))}
+                        disabled={historyPage === historyTotalPages}
+                        className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </motion.div>
           </>
         )}
@@ -2351,17 +3061,21 @@ const SiteAssets: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Items with Condition Selection */}
+                {/* Items with Multi-Condition Split */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Condition for Each Item
+                    Split Quantity by Condition
                   </label>
-                  <div className="space-y-3 max-h-[300px] overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
+                  <div className="space-y-4 max-h-[400px] overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
                     {returnItems.map((item) => {
-                      const cond = returnItemConditions[item.adn_item_id] || { condition: 'good', damage_description: '', quantity: item.quantity };
+                      const cond = returnItemConditions[item.adn_item_id] || { good: item.quantity, fair: 0, poor: 0, damaged: 0, damage_description_fair: '', damage_description_poor: '', damage_description_damaged: '' };
+                      const totalQty = cond.good + cond.fair + cond.poor + cond.damaged;
+                      const isOverLimit = totalQty > item.quantity;
+                      const isEmpty = totalQty === 0;
                       return (
-                        <div key={item.adn_item_id} className="bg-white rounded-lg p-3 border border-gray-200">
-                          <div className="flex items-start gap-3">
+                        <div key={item.adn_item_id} className="bg-white rounded-lg p-4 border border-gray-200">
+                          {/* Item Header */}
+                          <div className="flex items-center gap-3 mb-3">
                             <div className="p-2 bg-gray-100 rounded-lg flex-shrink-0">
                               <CubeIcon className="w-4 h-4 text-gray-700" />
                             </div>
@@ -2370,69 +3084,121 @@ const SiteAssets: React.FC = () => {
                               <p className="text-xs text-gray-500">
                                 Available: {item.quantity} unit(s) • {item.item_code || item.serial_number || item.category_code}
                               </p>
+                            </div>
+                          </div>
 
-                              {/* Quantity Input */}
-                              <div className="mt-2">
-                                <label className="block text-xs font-medium text-gray-700 mb-1">Return Quantity</label>
-                                <div>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max={item.quantity}
-                                    value={cond.quantity}
-                                    onChange={(e) => updateItemCondition(item.adn_item_id, 'quantity', parseInt(e.target.value) || 1)}
-                                    className={`w-24 px-2 py-1 text-sm border rounded focus:ring-1 ${
-                                      cond.quantity <= 0 || cond.quantity > item.quantity
-                                        ? 'border-gray-500 focus:ring-gray-500 focus:border-gray-500 bg-gray-50'
-                                        : 'border-gray-300 focus:ring-gray-500 focus:border-gray-500'
-                                    }`}
-                                  />
-                                  <span className="ml-2 text-xs text-gray-500">of {item.quantity} available</span>
-                                  {(cond.quantity <= 0 || cond.quantity > item.quantity) && (
-                                    <p className="text-xs text-gray-700 mt-1 font-medium">
-                                      {cond.quantity <= 0 ? '* Quantity must be at least 1' : `* Cannot exceed ${item.quantity} available`}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
+                          {/* Condition Split Grid */}
+                          <div className="space-y-2">
+                            {/* Good */}
+                            <div className="flex items-center gap-3">
+                              <span className="w-20 text-xs font-medium text-green-700 bg-green-50 px-2 py-1 rounded text-center">Good</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.quantity}
+                                value={cond.good || ''}
+                                placeholder="0"
+                                onChange={(e) => updateReturnSplit(item.adn_item_id, 'good', Math.max(0, parseInt(e.target.value) || 0))}
+                                className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 text-center"
+                              />
+                            </div>
 
-                              {/* Condition Buttons */}
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {['good', 'fair', 'poor', 'damaged'].map((condition) => (
-                                  <button
-                                    key={condition}
-                                    onClick={() => updateItemCondition(item.adn_item_id, 'condition', condition)}
-                                    className={`px-2 py-1 rounded text-xs font-medium border transition-all ${
-                                      cond.condition === condition
-                                        ? condition === 'good' ? 'bg-gray-100 border-gray-500 text-gray-800'
-                                          : condition === 'fair' ? 'bg-gray-100 border-gray-500 text-gray-800'
-                                          : condition === 'poor' ? 'bg-gray-100 border-gray-500 text-gray-800'
-                                          : 'bg-gray-100 border-gray-500 text-gray-800'
-                                        : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'
-                                    }`}
-                                  >
-                                    {condition.charAt(0).toUpperCase() + condition.slice(1)}
-                                  </button>
-                                ))}
-                              </div>
+                            {/* Fair */}
+                            <div className="flex items-start gap-3">
+                              <span className="w-20 text-xs font-medium text-yellow-700 bg-yellow-50 px-2 py-1 rounded text-center mt-0.5">Fair</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.quantity}
+                                value={cond.fair || ''}
+                                placeholder="0"
+                                onChange={(e) => updateReturnSplit(item.adn_item_id, 'fair', Math.max(0, parseInt(e.target.value) || 0))}
+                                className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 text-center"
+                              />
+                              {cond.fair > 0 && (
+                                <input
+                                  type="text"
+                                  value={cond.damage_description_fair}
+                                  onChange={(e) => updateReturnSplit(item.adn_item_id, 'damage_description_fair', e.target.value)}
+                                  placeholder="Describe fair condition..."
+                                  className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500"
+                                />
+                              )}
+                            </div>
 
-                              {/* Damage Description if not good */}
-                              {cond.condition !== 'good' && (
-                                <div className="mt-2">
-                                  <textarea
-                                    rows={3}
-                                    value={cond.damage_description}
-                                    onChange={(e) => updateItemCondition(item.adn_item_id, 'damage_description', e.target.value)}
-                                    placeholder={cond.condition === 'damaged' ? 'Describe damage...' : 'Describe condition...'}
-                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 resize-none"
-                                  />
-                                  {!cond.damage_description.trim() && (
-                                    <p className="text-xs text-gray-600 mt-1">* Required for non-good condition</p>
-                                  )}
-                                </div>
+                            {/* Poor */}
+                            <div className="flex items-start gap-3">
+                              <span className="w-20 text-xs font-medium text-orange-700 bg-orange-50 px-2 py-1 rounded text-center mt-0.5">Poor</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.quantity}
+                                value={cond.poor || ''}
+                                placeholder="0"
+                                onChange={(e) => updateReturnSplit(item.adn_item_id, 'poor', Math.max(0, parseInt(e.target.value) || 0))}
+                                className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 text-center"
+                              />
+                              {cond.poor > 0 && (
+                                <input
+                                  type="text"
+                                  value={cond.damage_description_poor}
+                                  onChange={(e) => updateReturnSplit(item.adn_item_id, 'damage_description_poor', e.target.value)}
+                                  placeholder="Describe poor condition..."
+                                  className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500"
+                                />
+                              )}
+                            </div>
+
+                            {/* Damaged */}
+                            <div className="flex items-start gap-3">
+                              <span className="w-20 text-xs font-medium text-red-700 bg-red-50 px-2 py-1 rounded text-center mt-0.5">Damaged</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.quantity}
+                                value={cond.damaged || ''}
+                                placeholder="0"
+                                onChange={(e) => updateReturnSplit(item.adn_item_id, 'damaged', Math.max(0, parseInt(e.target.value) || 0))}
+                                className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500 text-center"
+                              />
+                              {cond.damaged > 0 && (
+                                <input
+                                  type="text"
+                                  value={cond.damage_description_damaged}
+                                  onChange={(e) => updateReturnSplit(item.adn_item_id, 'damage_description_damaged', e.target.value)}
+                                  placeholder="Describe damage..."
+                                  className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-gray-500 focus:border-gray-500"
+                                />
                               )}
                             </div>
                           </div>
+
+                          {/* Total Row */}
+                          <div className={`mt-3 pt-2 border-t flex items-center justify-between text-xs font-medium ${isOverLimit ? 'border-red-300' : 'border-gray-200'}`}>
+                            <span className={isOverLimit ? 'text-red-600' : isEmpty ? 'text-amber-600' : 'text-gray-600'}>
+                              Total: {totalQty} of {item.quantity}
+                            </span>
+                            {isOverLimit && (
+                              <span className="text-red-600">Exceeds available quantity!</span>
+                            )}
+                            {isEmpty && (
+                              <span className="text-amber-600">Enter at least 1 unit</span>
+                            )}
+                            {!isOverLimit && !isEmpty && totalQty < item.quantity && (
+                              <span className="text-gray-400">Partial return ({item.quantity - totalQty} remaining)</span>
+                            )}
+                          </div>
+
+                          {/* Missing description warnings */}
+                          {cond.fair > 0 && !cond.damage_description_fair.trim() && (
+                            <p className="text-xs text-amber-600 mt-1">* Description required for Fair condition</p>
+                          )}
+                          {cond.poor > 0 && !cond.damage_description_poor.trim() && (
+                            <p className="text-xs text-amber-600 mt-1">* Description required for Poor condition</p>
+                          )}
+                          {cond.damaged > 0 && !cond.damage_description_damaged.trim() && (
+                            <p className="text-xs text-amber-600 mt-1">* Description required for Damaged condition</p>
+                          )}
                         </div>
                       );
                     })}
@@ -2457,7 +3223,20 @@ const SiteAssets: React.FC = () => {
               {/* Modal Footer */}
               <div className="px-5 py-4 border-t border-gray-200 flex justify-between items-center flex-shrink-0 bg-gray-50">
                 <p className="text-sm text-gray-500">
-                  RDN will be created for {returnItems.length} item{returnItems.length !== 1 ? 's' : ''}
+                  {(() => {
+                    let totalUnits = 0;
+                    let condCount = 0;
+                    returnItems.forEach(item => {
+                      const c = returnItemConditions[item.adn_item_id];
+                      if (!c) return;
+                      if (c.good > 0) condCount++;
+                      if (c.fair > 0) condCount++;
+                      if (c.poor > 0) condCount++;
+                      if (c.damaged > 0) condCount++;
+                      totalUnits += c.good + c.fair + c.poor + c.damaged;
+                    });
+                    return `${totalUnits} unit(s) across ${condCount} condition line(s)`;
+                  })()}
                 </p>
                 <div className="flex gap-3">
                   <button
@@ -2472,7 +3251,13 @@ const SiteAssets: React.FC = () => {
                       submitting ||
                       returnItems.some(item => {
                         const cond = returnItemConditions[item.adn_item_id];
-                        return !cond || cond.quantity <= 0 || cond.quantity > item.quantity;
+                        if (!cond) return true;
+                        const total = cond.good + cond.fair + cond.poor + cond.damaged;
+                        if (total === 0 || total > item.quantity) return true;
+                        if (cond.fair > 0 && !cond.damage_description_fair.trim()) return true;
+                        if (cond.poor > 0 && !cond.damage_description_poor.trim()) return true;
+                        if (cond.damaged > 0 && !cond.damage_description_damaged.trim()) return true;
+                        return false;
                       })
                     }
                     className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
@@ -2621,7 +3406,7 @@ const SiteAssets: React.FC = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+              className="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
@@ -2654,13 +3439,14 @@ const SiteAssets: React.FC = () => {
                 {/* Driver Name */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Driver Name
+                    Driver Name <span className="text-red-600">*</span>
                   </label>
                   <input
                     type="text"
                     value={dispatchDriverName}
                     onChange={(e) => setDispatchDriverName(e.target.value)}
                     placeholder="Enter driver name"
+                    required
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
@@ -2668,13 +3454,14 @@ const SiteAssets: React.FC = () => {
                 {/* Vehicle Number */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Vehicle Number
+                    Vehicle Number <span className="text-red-600">*</span>
                   </label>
                   <input
                     type="text"
                     value={dispatchVehicleNumber}
                     onChange={(e) => setDispatchVehicleNumber(e.target.value)}
                     placeholder="Enter vehicle number (e.g., KA-01-AB-1234)"
+                    required
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
                   />
                 </div>
@@ -2682,14 +3469,121 @@ const SiteAssets: React.FC = () => {
                 {/* Driver Contact */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Driver Contact
+                    Driver Contact <span className="text-red-600">*</span>
                   </label>
                   <input
                     type="tel"
                     value={dispatchDriverContact}
                     onChange={(e) => setDispatchDriverContact(e.target.value)}
                     placeholder="Enter driver phone number"
+                    required
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+                  />
+                </div>
+
+                {/* Transport Fee Calculation */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter total transport fee <span className="text-xs text-gray-500 font-normal">(Default: 1.00 AED per unit)</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={dispatchTransportFee || ''}
+                    onChange={(e) => setDispatchTransportFee(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1.5 flex items-start">
+                    <svg className="w-4 h-4 text-gray-400 mr-1 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    This is the total transport cost paid for material delivered.
+                  </p>
+
+                  {/* Total Transport Fee Display */}
+                  {parseFloat(dispatchTransportFee) > 0 && (
+                    <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-lg p-4 shadow-sm mt-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center">
+                          <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                          </svg>
+                          <span className="text-sm text-blue-900 font-semibold">
+                            Total Transport Fee:
+                          </span>
+                        </div>
+                        <span className="text-lg font-bold text-blue-900">
+                          AED {parseFloat(dispatchTransportFee).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="bg-white rounded-md p-2 border border-blue-200">
+                        <p className="text-xs text-blue-800 font-medium">
+                          📊 Calculation: 1 × {parseFloat(dispatchTransportFee).toFixed(2)} = <span className="font-bold">{parseFloat(dispatchTransportFee).toFixed(2)} AED</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-amber-600 italic mt-2">
+                    ⚡ Total transport fee will be calculated automatically when you enter the quantity
+                  </p>
+                </div>
+
+                {/* Delivery Note */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Delivery Note
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      id="delivery-note-upload"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          // Validate file size (max 10MB)
+                          if (file.size > 10 * 1024 * 1024) {
+                            showError('File too large. Maximum size is 10MB');
+                            e.target.value = '';
+                            return;
+                          }
+                          setDispatchDeliveryNoteFile(file);
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="delivery-note-upload"
+                      className="flex items-center justify-between w-full px-3 py-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                    >
+                      <span className="text-sm text-gray-600">
+                        {dispatchDeliveryNoteFile ? dispatchDeliveryNoteFile.name : 'No file selected.'}
+                      </span>
+                      <button
+                        type="button"
+                        className="px-3 py-1 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200 transition-colors"
+                      >
+                        Browse...
+                      </button>
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">Upload delivery note, invoice, or receipt (PDF, JPG, PNG, DOC - Max 10MB)</p>
+                </div>
+
+                {/* Delivery Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Delivery Notes
+                  </label>
+                  <textarea
+                    value={dispatchNotes}
+                    onChange={(e) => setDispatchNotes(e.target.value)}
+                    placeholder="Enter any additional notes about the return delivery"
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 resize-none"
                   />
                 </div>
 
@@ -2717,7 +3611,12 @@ const SiteAssets: React.FC = () => {
                 </button>
                 <button
                   onClick={handleDispatchARDN}
-                  disabled={processingARDN === dispatchARDN.ardn_id}
+                  disabled={
+                    processingARDN === dispatchARDN.ardn_id ||
+                    !dispatchDriverName.trim() ||
+                    !dispatchVehicleNumber.trim() ||
+                    !dispatchDriverContact.trim()
+                  }
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
                 >
                   {processingARDN === dispatchARDN.ardn_id ? (
@@ -2812,7 +3711,8 @@ const SiteAssets: React.FC = () => {
                       <div className="flex-1 relative">
                         <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
                         {(() => {
-                          const selectedInListQty = requisitionForm.category_id > 0 ? getCategoryInListQty(requisitionForm.category_id) : null;
+                          const categoryId = requisitionForm.category_id ?? 0;
+                          const selectedInListQty = categoryId > 0 ? getCategoryInListQty(categoryId) : null;
                           const isAlreadyInList = selectedInListQty !== null;
                           return (
                             <>
@@ -2833,8 +3733,8 @@ const SiteAssets: React.FC = () => {
                                 }`}
                               />
                               {isAlreadyInList && (
-                                <p className="text-xs text-gray-800 mt-1">
-                                  Already in list with qty {selectedInListQty}. Adding will update total.
+                                <p className="text-xs text-yellow-700 mt-1">
+                                  Already in list (qty: {selectedInListQty}). Click "+ Add" to add more.
                                 </p>
                               )}
                             </>
@@ -2862,49 +3762,19 @@ const SiteAssets: React.FC = () => {
                                     onClick={() => {
                                       if (isOutOfStock) return;
 
-                                      if (isInList) {
-                                        // If already in list, increase quantity by 1 if not maxed out
-                                        if (currentQty >= availableQty) {
-                                          showError(`Cannot exceed available quantity (${availableQty}) for ${c.category_name}`);
-                                          return;
-                                        }
-
-                                        setRequisitionItems(prev => prev.map(item =>
-                                          item.category_id === c.category_id
-                                            ? { ...item, quantity: currentQty + 1 }
-                                            : item
-                                        ));
-                                        showSuccess(`Increased ${c.category_name} quantity to ${currentQty + 1}`);
-                                      } else {
-                                        // Add new item with quantity 1
-                                        if (availableQty < 1) {
-                                          showError(`No stock available for ${c.category_name}`);
-                                          return;
-                                        }
-
-                                        const newItem: RequisitionItem = {
-                                          id: Date.now() + itemIdCounter,
-                                          category_id: c.category_id,
-                                          category_code: c.category_code,
-                                          category_name: c.category_name,
-                                          quantity: 1,
-                                          available_quantity: availableQty
-                                        };
-                                        setRequisitionItems(prev => [...prev, newItem]);
-                                        setItemIdCounter(prev => prev + 1);
-                                        showSuccess(`Added ${c.category_name} to requisition`);
-                                      }
-
+                                      // Just select the category - user will use + Add button to add it
+                                      setRequisitionForm(prev => ({
+                                        ...prev,
+                                        category_id: c.category_id
+                                      }));
                                       setCategorySearch('');
                                       setShowCategoryDropdown(false);
                                     }}
                                     className={`w-full px-3 py-2 text-left text-sm flex justify-between items-center gap-2 ${
                                       isOutOfStock
                                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-60'
-                                        : isMaxedOut
-                                        ? 'bg-gray-50 opacity-60 cursor-not-allowed'
                                         : isInList
-                                        ? 'bg-gray-50 border-l-2 border-gray-400 hover:bg-gray-100'
+                                        ? 'bg-yellow-50 border-l-2 border-yellow-400 hover:bg-yellow-100'
                                         : 'hover:bg-gray-50'
                                     }`}
                                   >
@@ -2913,10 +3783,8 @@ const SiteAssets: React.FC = () => {
                                         {c.category_code} - {c.category_name}
                                       </span>
                                       {isInList && !isOutOfStock && (
-                                        <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
-                                          isMaxedOut ? 'text-gray-800 bg-gray-100' : 'text-gray-800 bg-gray-100'
-                                        }`}>
-                                          {currentQty} / {availableQty} {isMaxedOut ? '(Max)' : ''}
+                                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800">
+                                          In list: {currentQty}
                                         </span>
                                       )}
                                       {isOutOfStock && (
@@ -2947,7 +3815,8 @@ const SiteAssets: React.FC = () => {
                         <input
                           type="number"
                           min={1}
-                          value={requisitionForm.quantity}
+                          value={requisitionForm.quantity || ''}
+                          placeholder="1"
                           onChange={(e) => setRequisitionForm(prev => ({ ...prev, quantity: Number(e.target.value) }))}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 text-sm"
                         />
@@ -2955,7 +3824,8 @@ const SiteAssets: React.FC = () => {
 
                       {/* Add/Update Button */}
                       {(() => {
-                        const isUpdate = requisitionForm.category_id > 0 && getCategoryInListQty(requisitionForm.category_id) !== null;
+                        const categoryId = requisitionForm.category_id ?? 0;
+                        const isUpdate = categoryId > 0 && getCategoryInListQty(categoryId) !== null;
                         return (
                           <button
                             type="button"
@@ -2993,7 +3863,8 @@ const SiteAssets: React.FC = () => {
                                 <input
                                   type="number"
                                   min={1}
-                                  value={item.quantity}
+                                  value={item.quantity || ''}
+                                  placeholder="1"
                                   onChange={(e) => updateItemQuantity(item.id, Number(e.target.value))}
                                   className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
                                 />
@@ -3203,16 +4074,16 @@ const SiteAssets: React.FC = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto"
+              className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
+              <div className="px-5 py-4 border-b border-gray-200 bg-gray-50 sticky top-0 z-10">
                 <h3 className="text-lg font-semibold text-gray-900">Edit Requisition</h3>
                 <p className="text-sm text-gray-500">{editRequisition.requisition_code}</p>
               </div>
 
               <form onSubmit={handleUpdateRequisition} className="p-5 space-y-4">
-                {/* Project Selection - Same as Create Modal */}
+                {/* Project Selection */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Project <span className="text-gray-600">*</span>
@@ -3223,7 +4094,6 @@ const SiteAssets: React.FC = () => {
                       const projectId = Number(e.target.value);
                       const selectedProject = projects.find(p => p.project_id === projectId);
                       setEditProjectId(projectId);
-                      // Auto-fetch location from project
                       setEditSiteLocation(selectedProject?.location || '');
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
@@ -3238,126 +4108,166 @@ const SiteAssets: React.FC = () => {
                   </select>
                 </div>
 
-                {/* Show rejection reason if pm_rejected */}
+                {/* Show rejection reason */}
                 {editRequisition.status === 'pm_rejected' && editRequisition.pm_rejection_reason && (
-                  <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                    <p className="text-sm font-medium text-gray-800">PM Rejection Reason:</p>
-                    <p className="text-sm text-gray-700 mt-1">{editRequisition.pm_rejection_reason}</p>
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm font-medium text-red-800">PM Rejection Reason:</p>
+                    <p className="text-sm text-red-700 mt-1">{editRequisition.pm_rejection_reason}</p>
+                  </div>
+                )}
+                {editRequisition.status === 'prod_mgr_rejected' && editRequisition.prod_mgr_rejection_reason && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm font-medium text-red-800">Store Rejection Reason:</p>
+                    <p className="text-sm text-red-700 mt-1">{editRequisition.prod_mgr_rejection_reason}</p>
                   </div>
                 )}
 
-                {/* Add Items to Request - same format as Request Assets modal */}
-                <div className="border border-gray-200 rounded-lg p-3">
-                  <div className="flex items-center gap-2 mb-3">
-                    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                    </svg>
-                    <h3 className="text-sm font-semibold text-gray-700">Add Items to Request</h3>
-                  </div>
+                {/* Items Section - Same as Create modal */}
+                <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <CubeIcon className="w-4 h-4" />
+                    Add Items to Request
+                  </h4>
 
-                  <div className="grid grid-cols-12 gap-2 mb-3">
-                    <div className="col-span-8">
+                  {/* Add Item Row */}
+                  <div className="flex gap-2 items-end mb-3">
+                    {/* Category Search */}
+                    <div className="flex-1 relative">
                       <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          placeholder="Search category..."
-                          value={categorySearch}
-                          onChange={(e) => {
-                            setCategorySearch(e.target.value);
-                            setShowCategoryDropdown(true);
-                          }}
-                          onFocus={() => setShowCategoryDropdown(true)}
-                          onBlur={() => setTimeout(() => setShowCategoryDropdown(false), 200)}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
-                        />
-                        {showCategoryDropdown && (
-                          <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                            {assetCategories
-                              .filter(cat =>
-                                (cat.category_name.toLowerCase().includes(categorySearch.toLowerCase()) ||
-                                cat.category_code.toLowerCase().includes(categorySearch.toLowerCase())) &&
-                                (cat.available_quantity ?? 0) > 0
-                              )
-                              .map(cat => {
-                                const existingItemIndex = editItems.findIndex(item => item.category_id === cat.category_id);
-                                const isAlreadyAdded = existingItemIndex !== -1;
-                                const currentQty = isAlreadyAdded ? editItems[existingItemIndex].quantity : 0;
-                                const availableQty = cat.available_quantity ?? 0;
-                                const isMaxedOut = isAlreadyAdded && currentQty >= availableQty;
+                      {(() => {
+                        const categoryId = requisitionForm.category_id ?? 0;
+                        const selectedInListQty = categoryId > 0 ? getEditCategoryInListQty(categoryId) : null;
+                        const isAlreadyInList = selectedInListQty !== null;
+                        return (
+                          <>
+                            <input
+                              type="text"
+                              placeholder={assetCategories.length === 0 ? 'Loading categories...' : 'Search category...'}
+                              value={requisitionForm.category_id ? selectedCategoryName : categorySearch}
+                              onChange={(e) => {
+                                setCategorySearch(e.target.value);
+                                setShowCategoryDropdown(true);
+                                if (requisitionForm.category_id) {
+                                  setRequisitionForm(prev => ({ ...prev, category_id: 0 }));
+                                }
+                              }}
+                              onFocus={() => setShowCategoryDropdown(true)}
+                              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 text-sm ${
+                                isAlreadyInList ? 'border-gray-400 bg-gray-50' : 'border-gray-300'
+                              }`}
+                            />
+                            {isAlreadyInList && (
+                              <p className="text-xs text-yellow-700 mt-1">
+                                Already in list (qty: {selectedInListQty}). Click "+ Add" to add more.
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
+                      {/* Dropdown */}
+                      {showCategoryDropdown && (
+                        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                          {assetCategories.length === 0 ? (
+                            <div className="px-3 py-4 text-center">
+                              <ModernLoadingSpinners size="sm" />
+                              <p className="text-xs text-gray-500 mt-2">Loading categories...</p>
+                            </div>
+                          ) : (() => {
+                            const filtered = assetCategories.filter(c =>
+                              !categorySearch.trim() ||
+                              c.category_code.toLowerCase().includes(categorySearch.toLowerCase()) ||
+                              c.category_name.toLowerCase().includes(categorySearch.toLowerCase())
+                            );
+                            if (filtered.length === 0) {
+                              return <div className="px-3 py-2 text-sm text-gray-500">No categories found</div>;
+                            }
+                            return filtered.map(c => {
+                              const existingItem = editItems.find(item => item.category_id === c.category_id);
+                              const isInList = existingItem !== undefined;
+                              const currentQty = existingItem?.quantity || 0;
+                              const availableQty = c.available_quantity ?? 0;
+                              const isOutOfStock = availableQty === 0;
 
-                                return (
-                                  <div
-                                    key={cat.category_id}
-                                    onClick={() => {
-                                      if (isAlreadyAdded) {
-                                        // If already added, increase quantity by 1 if not maxed out
-                                        if (currentQty >= availableQty) {
-                                          showError(`Cannot exceed available quantity (${availableQty}) for ${cat.category_name}`);
-                                          return;
-                                        }
-
-                                        const newQty = currentQty + 1;
-                                        setEditItems(prevItems => {
-                                          const newItems = [...prevItems];
-                                          newItems[existingItemIndex] = {
-                                            ...newItems[existingItemIndex],
-                                            quantity: newQty
-                                          };
-                                          return newItems;
-                                        });
-                                        showSuccess(`Increased ${cat.category_name} quantity to ${newQty}`);
-                                      } else {
-                                        // Add new item with quantity 1
-                                        if (availableQty < 1) {
-                                          showError(`No stock available for ${cat.category_name}`);
-                                          return;
-                                        }
-                                        setEditItems(prevItems => [...prevItems, {
-                                          category_id: cat.category_id,
-                                          category_name: cat.category_name,
-                                          quantity: 1
-                                        }]);
-                                        showSuccess(`Added ${cat.category_name} to requisition`);
-                                      }
-                                      setCategorySearch('');
-                                      setShowCategoryDropdown(false);
-                                    }}
-                                    className={`px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 ${
-                                      isMaxedOut ? 'bg-gray-50 opacity-60 cursor-not-allowed' : isAlreadyAdded ? 'bg-gray-50' : ''
-                                    }`}
-                                  >
-                                    <div className="flex items-center justify-between">
-                                      <span className="text-sm font-medium text-gray-900">{cat.category_name}</span>
-                                      <div className="flex items-center gap-2">
-                                        {isAlreadyAdded && (
-                                          <span className={`text-xs px-1.5 py-0.5 rounded ${
-                                            isMaxedOut ? 'text-gray-800 bg-gray-100' : 'text-gray-800 bg-gray-100'
-                                          }`}>
-                                            {currentQty} / {availableQty} {isMaxedOut ? '(Max)' : ''}
-                                          </span>
-                                        )}
-                                        <span className="text-xs text-gray-700">Avail: {availableQty}</span>
-                                      </div>
-                                    </div>
-                                    <p className="text-xs text-gray-500">{cat.category_code}</p>
+                              return (
+                                <button
+                                  key={c.category_id}
+                                  type="button"
+                                  disabled={isOutOfStock}
+                                  onClick={() => {
+                                    if (isOutOfStock) return;
+                                    setRequisitionForm(prev => ({
+                                      ...prev,
+                                      category_id: c.category_id
+                                    }));
+                                    setCategorySearch('');
+                                    setShowCategoryDropdown(false);
+                                  }}
+                                  className={`w-full px-3 py-2 text-left text-sm flex justify-between items-center gap-2 ${
+                                    isOutOfStock
+                                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-60'
+                                      : isInList
+                                      ? 'bg-yellow-50 border-l-2 border-yellow-400 hover:bg-yellow-100'
+                                      : 'hover:bg-gray-50'
+                                  }`}
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <span className={`font-medium ${isOutOfStock ? 'line-through' : ''}`}>
+                                      {c.category_code} - {c.category_name}
+                                    </span>
+                                    {isInList && !isOutOfStock && (
+                                      <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800">
+                                        In list: {currentQty}
+                                      </span>
+                                    )}
+                                    {isOutOfStock && (
+                                      <span className="ml-2 text-xs text-gray-600">Out of stock</span>
+                                    )}
                                   </div>
-                                );
-                              })}
-                          </div>
-                        )}
-                      </div>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
+                                    isOutOfStock ? 'bg-gray-100 text-gray-600' : 'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {isOutOfStock ? 'Unavailable' : `Avail: ${availableQty}`}
+                                  </span>
+                                </button>
+                              );
+                            });
+                          })()}
+                        </div>
+                      )}
+                      {showCategoryDropdown && (
+                        <div className="fixed inset-0 z-40" onClick={() => setShowCategoryDropdown(false)} />
+                      )}
                     </div>
-                    <div className="col-span-4">
+
+                    {/* Quantity */}
+                    <div className="w-24">
                       <label className="block text-xs font-medium text-gray-600 mb-1">Qty</label>
                       <input
                         type="number"
-                        min="1"
-                        value="1"
-                        readOnly
-                        className="w-full px-3 py-2 text-sm text-center border border-gray-300 rounded-lg bg-gray-50"
+                        min={1}
+                        value={requisitionForm.quantity || ''}
+                          placeholder="1"
+                        onChange={(e) => setRequisitionForm(prev => ({ ...prev, quantity: Number(e.target.value) }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 text-sm"
                       />
                     </div>
+
+                    {/* Add Button */}
+                    {(() => {
+                      const categoryId = requisitionForm.category_id ?? 0;
+                      const isUpdate = categoryId > 0 && getEditCategoryInListQty(categoryId) !== null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={addItemToEditRequisition}
+                          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1 shadow-sm"
+                          title={isUpdate ? 'Update quantity' : 'Add to list'}
+                        >
+                          <PlusIcon className="w-4 h-4" />
+                          <span className="hidden sm:inline">{isUpdate ? 'Update' : 'Add'}</span>
+                        </button>
+                      );
+                    })()}
                   </div>
 
                   {/* Items List */}
@@ -3373,7 +4283,8 @@ const SiteAssets: React.FC = () => {
                             <input
                               type="number"
                               min="1"
-                              value={item.quantity}
+                              value={item.quantity || ''}
+                              placeholder="1"
                               onChange={(e) => {
                                 const newValue = Math.max(1, parseInt(e.target.value) || 1);
                                 const category = assetCategories.find(c => c.category_id === item.category_id);

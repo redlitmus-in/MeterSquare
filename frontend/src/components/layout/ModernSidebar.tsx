@@ -24,6 +24,7 @@ import {
   DocumentPlusIcon,
   DocumentTextIcon,
   CubeIcon,
+  RectangleGroupIcon,
   UserGroupIcon,
   PencilSquareIcon as PencilIcon,
   BugAntIcon,
@@ -34,7 +35,9 @@ import {
   CalendarDaysIcon,
   ClipboardDocumentListIcon,
   BanknotesIcon,
-  DocumentChartBarIcon
+  DocumentChartBarIcon,
+  ShieldCheckIcon,
+  Cog6ToothIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -47,13 +50,16 @@ import {
   BuildingOfficeIcon as BuildingOfficeSolid,
   ClipboardDocumentCheckIcon as ClipboardDocumentCheckSolid,
   CubeIcon as CubeSolid,
+  RectangleGroupIcon as RectangleGroupSolid,
   PencilSquareIcon as PencilSolid,
   ExclamationTriangleIcon as ExclamationTriangleSolid,
   ClockIcon as ClockSolid,
   UserPlusIcon as UserPlusSolid,
   CalendarDaysIcon as CalendarDaysSolid,
   ClipboardDocumentListIcon as ClipboardDocumentListSolid,
-  BanknotesIcon as BanknotesSolid
+  BanknotesIcon as BanknotesSolid,
+  ShieldCheckIcon as ShieldCheckSolid,
+  Cog6ToothIcon as Cog6ToothSolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
@@ -394,7 +400,23 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         href: buildPath('/purchase-orders'),
         icon: DocumentPlusIcon,
         iconSolid: DocumentPlusSolid,
-        color: 'text-amber-600'
+        color: 'text-amber-600',
+        children: [
+          {
+            name: 'All Orders',
+            href: buildPath('/purchase-orders'),
+            icon: DocumentPlusIcon,
+            iconSolid: DocumentPlusSolid,
+            color: 'text-amber-600'
+          },
+          {
+            name: 'Return Approvals',
+            href: buildPath('/return-approvals'),
+            icon: ArrowUturnLeftIcon,
+            iconSolid: ArrowUturnLeftIcon,
+            color: 'text-orange-600'
+          }
+        ]
       },
       // ========== OPERATIONS & PRODUCTION ==========
       {
@@ -469,6 +491,10 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       }
     ];
 
+    // MEP Manager specific navigation items - Same as PM (includes Labour)
+    // MEP sees labour requisitions from their assigned SEs only
+    const mepManagerItems: NavigationItem[] = [...projectManagerItems];
+
     // Estimator specific navigation items
     const estimatorItems: NavigationItem[] = [
       {
@@ -479,7 +505,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-blue-600'
       },
       {
-        name: 'Change Requests',
+        name: 'Purchase Request',
         href: buildPath('/change-requests'),
         icon: DocumentPlusIcon,
         iconSolid: DocumentPlusSolid,
@@ -570,7 +596,53 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         href: buildPath('/store'),
         icon: BuildingOfficeIcon,
         iconSolid: BuildingOfficeSolid,
-        color: 'text-blue-600'
+        color: 'text-blue-600',
+        children: [
+          {
+            name: 'Store Items',
+            href: buildPath('/store'),
+            icon: CubeIcon,
+            iconSolid: CubeSolid,
+            color: 'text-blue-500'
+          },
+          {
+            name: 'Material Transfer',
+            href: buildPath('/material-transfer'),
+            icon: ShoppingCartIcon,
+            iconSolid: ShoppingSolid,
+            color: 'text-orange-500'
+          },
+          {
+            name: 'Raw Materials',
+            href: buildPath('/raw-materials'),
+            icon: RectangleGroupIcon,
+            iconSolid: RectangleGroupSolid,
+            color: 'text-indigo-500'
+          }
+        ]
+      },
+      {
+        name: 'Vendor Returns',
+        href: buildPath('/rejected-deliveries'),
+        icon: ArrowUturnLeftIcon,
+        iconSolid: ArrowUturnLeftIcon,
+        color: 'text-orange-600',
+        children: [
+          {
+            name: 'Rejected Deliveries',
+            href: buildPath('/rejected-deliveries'),
+            icon: ExclamationTriangleIcon,
+            iconSolid: ExclamationTriangleSolid,
+            color: 'text-red-500'
+          },
+          {
+            name: 'Return Requests',
+            href: buildPath('/return-requests'),
+            icon: ClipboardDocumentListIcon,
+            iconSolid: ClipboardDocumentListSolid,
+            color: 'text-amber-500'
+          }
+        ]
       }
     ];
 
@@ -649,7 +721,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             color: 'text-blue-600'
           },
           {
-            name: 'Dispatch (DN)',
+            name: 'Stock Out',
             href: buildPath('/returnable-assets/dispatch'),
             icon: ArrowUpTrayIcon,
             iconSolid: ArrowUpTrayIcon,
@@ -718,7 +790,23 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         href: buildPath('/signature-upload'),
         icon: PencilIcon,
         iconSolid: PencilSolid,
-        color: 'text-indigo-600'
+        color: 'text-indigo-600',
+        children: [
+          {
+            name: 'Signatures',
+            href: buildPath('/signature-upload'),
+            icon: PencilIcon,
+            iconSolid: PencilSolid,
+            color: 'text-indigo-500'
+          },
+          {
+            name: 'CC & Email Settings',
+            href: buildPath('/settings'),
+            icon: Cog6ToothIcon,
+            iconSolid: Cog6ToothSolid,
+            color: 'text-gray-500'
+          }
+        ]
       },
       {
         name: 'Payroll Processing',
@@ -726,6 +814,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: BanknotesIcon,
         iconSolid: BanknotesSolid,
         color: 'text-green-600'
+      },
+      {
+        name: 'Security Dashboard',
+        href: buildPath('/security'),
+        icon: ShieldCheckIcon,
+        iconSolid: ShieldCheckSolid,
+        color: 'text-red-600'
       }
     ];
 
@@ -845,7 +940,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             navigation.push(...projectManagerItems);
             break;
           case 'mep':
-            navigation.push(...projectManagerItems); // MEP shares PM menu items
+            navigation.push(...mepManagerItems); // MEP has no Labour menu
             break;
           case 'siteEngineer':
             navigation.push(...siteEngineerItems);
@@ -921,21 +1016,30 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
       // Estimator gets Projects page, not Procurement
       navigation.push(...estimatorItems);
     } else if (
-      userRole === 'projectmanager' ||
-      userRole === 'project manager' ||
-      userRole === 'project_manager' ||
       userRole === 'mep' ||
       userRole === 'mep manager' ||
       userRole === 'mep_manager' ||
-      user?.role_id === UserRole.PROJECT_MANAGER ||
-      currentRole === UserRole.PROJECT_MANAGER ||
+      userRole === 'mep supervisor' ||
+      userRole === 'mep_supervisor' ||
       user?.role_id === UserRole.MEP ||
       currentRole === UserRole.MEP ||
       currentRole === 'mep' ||
       roleIdLower === 'mep' ||
+      roleIdLower === 'mep supervisor' ||
+      roleIdLower === 'mep_supervisor' ||
       getRoleDisplayName(roleId || '') === 'MEP Manager'
     ) {
-      // Project Manager AND MEP Manager get the same specialized menu items - SHARED CODE
+      // MEP Manager gets menu items WITHOUT Labour menu
+      // Labour requisitions go to the assigned PM, not MEP
+      navigation.push(...mepManagerItems);
+    } else if (
+      userRole === 'projectmanager' ||
+      userRole === 'project manager' ||
+      userRole === 'project_manager' ||
+      user?.role_id === UserRole.PROJECT_MANAGER ||
+      currentRole === UserRole.PROJECT_MANAGER
+    ) {
+      // Project Manager gets full menu including Labour
       navigation.push(...projectManagerItems);
     } else if (isSiteEngineer) {
       // Site Engineer gets Projects menu with submenu (Assigned, Ongoing, Completed)
@@ -1302,9 +1406,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                     </Link>
 
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         const { logout } = useAuthStore.getState();
-                        logout();
+                        await logout();
                       }}
                       className="w-full flex items-center px-4 py-3.5 md:py-3 text-sm md:text-xs font-medium text-gray-700 hover:bg-red-50 hover:text-red-700 transition-colors duration-200 border-t border-gray-100"
                     >
@@ -1320,7 +1424,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
 
         {/* Version Info */}
         <div className="mt-4 px-4 text-center">
-          <p className="text-xs text-gray-400">Version 1.0.1.5</p>
+          <p className="text-xs text-gray-400">Version 1.0.3.1</p>
           <div className="mt-2 w-full h-0.5 bg-gradient-to-r from-transparent via-[#243d8a]/30 to-transparent"></div>
         </div>
       </div>

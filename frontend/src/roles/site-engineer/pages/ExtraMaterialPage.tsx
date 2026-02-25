@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { PAGINATION } from '@/lib/constants';
 import {
   PlusIcon,
   CubeIcon,
@@ -54,9 +56,97 @@ interface ExtraMaterialRequest {
   purchase_completion_date?: string;
 }
 
+// Pagination Component for reuse across tabs
+interface PaginationControlsProps {
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  onPageChange: (page: number) => void;
+  itemLabel?: string;
+}
+
+const PaginationControls: React.FC<PaginationControlsProps> = ({
+  currentPage,
+  totalPages,
+  totalItems,
+  onPageChange,
+  itemLabel = 'items'
+}) => {
+  if (totalItems === 0) return null;
+
+  return (
+    <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm mt-4">
+      <div className="text-sm text-gray-700">
+        Showing {(currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalItems)} of {totalItems} {itemLabel}
+        {totalPages > 1 && (
+          <span className="text-gray-500 ml-2">(Page {currentPage} of {totalPages})</span>
+        )}
+      </div>
+      {totalPages > 1 && (
+        <div className="flex gap-2">
+          <button
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            disabled={currentPage === 1}
+            className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Previous
+          </button>
+          {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+            let pageNum: number;
+            if (totalPages <= 5) {
+              pageNum = i + 1;
+            } else if (currentPage <= 3) {
+              pageNum = i + 1;
+            } else if (currentPage >= totalPages - 2) {
+              pageNum = totalPages - 4 + i;
+            } else {
+              pageNum = currentPage - 2 + i;
+            }
+            return (
+              <button
+                key={pageNum}
+                onClick={() => onPageChange(pageNum)}
+                className={`px-3 py-1 rounded ${
+                  currentPage === pageNum
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                {pageNum}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ExtraMaterialPage: React.FC = () => {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'pending' | 'request' | 'approved' | 'rejected' | 'complete'>('pending');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Get tab and cr_id from URL query parameters (for notification redirects)
+  const urlTab = searchParams.get('tab');
+  const urlCrId = searchParams.get('cr_id');
+
+  const [activeTab, setActiveTab] = useState<'pending' | 'request' | 'approved' | 'rejected' | 'complete'>(() => {
+    // Priority: URL tab param > default
+    if (urlTab) {
+      const validTabs = ['pending', 'request', 'approved', 'rejected', 'complete'];
+      if (validTabs.includes(urlTab)) {
+        return urlTab as 'pending' | 'request' | 'approved' | 'rejected' | 'complete';
+      }
+    }
+    return 'pending';
+  });
   const [viewMode, setViewMode] = useState<'table' | 'card'>('card');
   const [showForm, setShowForm] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
@@ -65,6 +155,16 @@ const ExtraMaterialPage: React.FC = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteRequestId, setDeleteRequestId] = useState<number | null>(null);
   const [sendingRequestId, setSendingRequestId] = useState<number | null>(null); // Prevents double-clicks
+
+  // Track if we've already auto-opened modal from URL (to prevent reopening on close)
+  const hasAutoOpenedRef = useRef<string | null>(null);
+
+  // Pagination state for each tab
+  const [pendingPage, setPendingPage] = useState(1);
+  const [requestPage, setRequestPage] = useState(1);
+  const [approvedPage, setApprovedPage] = useState(1);
+  const [rejectedPage, setRejectedPage] = useState(1);
+  const [completePage, setCompletePage] = useState(1);
 
   // Real-time auto-sync for extra materials
   const { data: materialsData, isLoading: loading, refetch } = useExtraMaterialsAutoSync(
@@ -96,7 +196,7 @@ const ExtraMaterialPage: React.FC = () => {
           boq_item_id: cr.item_id,
           boq_item_name: cr.item_name,
           sub_item_id: firstMat.master_material_id,
-          sub_item_name: firstMat.material_name,
+          sub_item_name: firstMat.sub_item_name,
           quantity: firstMat.quantity,
           unit_rate: firstMat.unit_price,
           total_cost: materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0),
@@ -128,7 +228,7 @@ const ExtraMaterialPage: React.FC = () => {
           boq_item_id: cr.item_id,
           boq_item_name: cr.item_name,
           sub_item_id: firstMat.master_material_id,
-          sub_item_name: firstMat.material_name,
+          sub_item_name: firstMat.sub_item_name,
           quantity: firstMat.quantity,
           unit_rate: firstMat.unit_price,
           total_cost: materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0),
@@ -143,10 +243,12 @@ const ExtraMaterialPage: React.FC = () => {
         };
       });
 
+      // Statuses that indicate an approved/in-progress CR (shared between Approved and Completed filters)
+      const approvedStatuses = ['approved', 'approved_by_pm', 'approved_by_estimator', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'send_to_est', 'pending_td_approval', 'split_to_sub_crs', 'vendor_approved'];
+
       // Transform approved materials (only SE's own approved requests WITHOUT purchase completion)
       const filteredApproved = seRequests
         .filter((cr: any) => {
-          const approvedStatuses = ['approved', 'approved_by_pm', 'approved_by_estimator', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'send_to_est', 'pending_td_approval', 'split_to_sub_crs'];
           return approvedStatuses.includes(cr.status?.trim()) && !cr.purchase_completion_date;
         });
 
@@ -163,7 +265,7 @@ const ExtraMaterialPage: React.FC = () => {
           boq_item_id: cr.item_id,
           boq_item_name: cr.item_name,
           sub_item_id: firstMat.master_material_id,
-          sub_item_name: firstMat.material_name,
+          sub_item_name: firstMat.sub_item_name,
           quantity: firstMat.quantity,
           unit_rate: firstMat.unit_price,
           total_cost: materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0),
@@ -195,7 +297,7 @@ const ExtraMaterialPage: React.FC = () => {
           boq_item_id: cr.item_id,
           boq_item_name: cr.item_name,
           sub_item_id: firstMat.master_material_id,
-          sub_item_name: firstMat.material_name,
+          sub_item_name: firstMat.sub_item_name,
           quantity: firstMat.quantity,
           unit_rate: firstMat.unit_price,
           total_cost: materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0),
@@ -213,9 +315,14 @@ const ExtraMaterialPage: React.FC = () => {
         };
       });
 
-      // Transform completed materials (purchase completed by buyer - status is 'purchase_completed')
+      // Transform completed materials (purchase completed by buyer - status is 'purchase_completed' or 'routed_to_store')
+      // Also include CRs where purchase_completion_date is set but status wasn't properly updated (data inconsistency fallback)
       const filteredCompleted = seRequests
-        .filter((cr: any) => cr.status?.trim() === 'purchase_completed');
+        .filter((cr: any) => {
+          const status = cr.status?.trim();
+          return status === 'purchase_completed' || status === 'routed_to_store' ||
+            (cr.purchase_completion_date && approvedStatuses.includes(status));
+        });
 
       const transformedCompleted = filteredCompleted.map((cr: any) => {
         const materials = cr.materials_data || [];
@@ -230,7 +337,7 @@ const ExtraMaterialPage: React.FC = () => {
           boq_item_id: cr.item_id,
           boq_item_name: cr.item_name,
           sub_item_id: firstMat.master_material_id,
-          sub_item_name: firstMat.material_name,
+          sub_item_name: firstMat.sub_item_name,
           quantity: firstMat.quantity,
           unit_rate: firstMat.unit_price,
           total_cost: materials.reduce((sum: number, m: any) => sum + (m.total_price || 0), 0),
@@ -263,9 +370,102 @@ const ExtraMaterialPage: React.FC = () => {
   const rejectedMaterials = useMemo(() => materialsData?.rejected || [], [materialsData]);
   const completedMaterials = useMemo(() => materialsData?.completed || [], [materialsData]);
 
+  // Pagination calculations
+  const pendingTotalPages = Math.ceil(pendingMaterials.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const requestTotalPages = Math.ceil(underReviewMaterials.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const approvedTotalPages = Math.ceil(approvedMaterials.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const rejectedTotalPages = Math.ceil(rejectedMaterials.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const completeTotalPages = Math.ceil(completedMaterials.length / PAGINATION.DEFAULT_PAGE_SIZE);
+
+  // Paginated data
+  const paginatedPending = useMemo(() => {
+    const startIdx = (pendingPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return pendingMaterials.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [pendingMaterials, pendingPage]);
+
+  const paginatedRequest = useMemo(() => {
+    const startIdx = (requestPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return underReviewMaterials.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [underReviewMaterials, requestPage]);
+
+  const paginatedApproved = useMemo(() => {
+    const startIdx = (approvedPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return approvedMaterials.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [approvedMaterials, approvedPage]);
+
+  const paginatedRejected = useMemo(() => {
+    const startIdx = (rejectedPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return rejectedMaterials.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [rejectedMaterials, rejectedPage]);
+
+  const paginatedComplete = useMemo(() => {
+    const startIdx = (completePage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return completedMaterials.slice(startIdx, startIdx + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [completedMaterials, completePage]);
+
+  // Reset pagination when data changes
   useEffect(() => {
-    refetch();
-  }, [activeTab]);
+    setPendingPage(1);
+  }, [pendingMaterials.length]);
+
+  useEffect(() => {
+    setRequestPage(1);
+  }, [underReviewMaterials.length]);
+
+  useEffect(() => {
+    setApprovedPage(1);
+  }, [approvedMaterials.length]);
+
+  useEffect(() => {
+    setRejectedPage(1);
+  }, [rejectedMaterials.length]);
+
+  useEffect(() => {
+    setCompletePage(1);
+  }, [completedMaterials.length]);
+
+  // Update active tab when URL parameter changes (for notification navigation)
+  useEffect(() => {
+    if (urlTab) {
+      const validTabs = ['pending', 'request', 'approved', 'rejected', 'complete'];
+      if (validTabs.includes(urlTab)) {
+        setActiveTab(urlTab as 'pending' | 'request' | 'approved' | 'rejected' | 'complete');
+      }
+    }
+  }, [urlTab]);
+
+  // Auto-open material request details when cr_id is in URL (from notification redirect)
+  useEffect(() => {
+    // Only auto-open if we haven't already opened for this specific urlCrId
+    if (urlCrId && !showViewModal && hasAutoOpenedRef.current !== urlCrId) {
+      const crIdNum = parseInt(urlCrId, 10);
+      // Check if the request exists in any of the arrays
+      const allMaterials = [
+        ...pendingMaterials,
+        ...underReviewMaterials,
+        ...approvedMaterials,
+        ...rejectedMaterials,
+        ...completedMaterials
+      ];
+      const targetRequest = allMaterials.find((req: ExtraMaterialRequest) => req.id === crIdNum);
+      if (targetRequest) {
+        // Use handleViewDetails to fetch complete data from API (same as clicking View button)
+        handleViewDetails(crIdNum);
+        // Mark this urlCrId as already opened
+        hasAutoOpenedRef.current = urlCrId;
+      }
+    }
+    // Reset the ref when urlCrId is cleared
+    if (!urlCrId) {
+      hasAutoOpenedRef.current = null;
+    }
+  }, [urlCrId, pendingMaterials, underReviewMaterials, approvedMaterials, rejectedMaterials, completedMaterials, showViewModal]);
+
+  // REMOVED: Unnecessary refetch on tab change - data is already cached and fresh
+  // The auto-sync hook handles refetching when needed
+  // useEffect(() => {
+  //   refetch();
+  // }, [activeTab]);
 
   const handleSubmitExtraMaterial = async (data: any) => {
     try {
@@ -360,10 +560,30 @@ const ExtraMaterialPage: React.FC = () => {
         icon: <XCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
         label: 'Rejected'
       },
+      assigned_to_buyer: {
+        color: 'bg-purple-100 text-purple-700 border-purple-300',
+        icon: <ClockIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
+        label: 'Awaiting Purchase'
+      },
+      vendor_approved: {
+        color: 'bg-teal-100 text-teal-700 border-teal-300',
+        icon: <CheckCircleIcon className="w-3 sm:w-4 h-3 sm:h-4" />,
+        label: 'Vendor Approved'
+      },
       split_to_sub_crs: {
         color: 'bg-purple-100 text-purple-700 border-purple-300',
         icon: <CheckCircleIcon className="w-4 h-4" />,
         label: 'Split to Vendors'
+      },
+      purchase_completed: {
+        color: 'bg-green-100 text-green-700 border-green-300',
+        icon: <CheckBadgeIcon className="w-4 h-4" />,
+        label: 'Purchase Complete'
+      },
+      routed_to_store: {
+        color: 'bg-green-100 text-green-700 border-green-300',
+        icon: <CheckBadgeIcon className="w-4 h-4" />,
+        label: 'Sent to M2 Store'
       }
     };
 
@@ -468,11 +688,11 @@ const ExtraMaterialPage: React.FC = () => {
       // Switch to Request tab immediately to show the moved item
       setActiveTab('request');
 
-      // Remove cache and refetch fresh data
+      // Invalidate cache - auto-sync will handle refetch automatically
+      // No need for manual refetch() - prevents duplicate API calls
       removeQueries(['change-requests']);
       removeQueries(['extra-materials']);
       removeQueries(['se-change-requests']);
-      await refetch();
     } catch (error: any) {
       console.error('Error sending request:', error);
       showError(error.response?.data?.error || 'Failed to send request');
@@ -498,11 +718,11 @@ const ExtraMaterialPage: React.FC = () => {
       setShowDeleteModal(false);
       setDeleteRequestId(null);
 
-      // Remove cache and refetch fresh data
+      // Invalidate cache - auto-sync will handle refetch automatically
+      // No need for manual refetch() - prevents duplicate API calls
       removeQueries(['change-requests']);
       removeQueries(['extra-materials']);
       removeQueries(['se-change-requests']);
-      await refetch();
     } catch (error: any) {
       console.error('Error deleting request:', error);
       showError(error.response?.data?.error || 'Failed to delete request');
@@ -724,8 +944,9 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-xs sm:text-base text-gray-500">Click "MATERIAL PURCHASE" to create your first request</p>
               </div>
             ) : viewMode === 'card' ? (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {pendingMaterials.map((request: ExtraMaterialRequest) => (
+                {paginatedPending.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -789,7 +1010,15 @@ const ExtraMaterialPage: React.FC = () => {
                   </motion.div>
                 ))}
               </div>
+              <PaginationControls
+                currentPage={pendingPage}
+                totalPages={pendingTotalPages}
+                totalItems={pendingMaterials.length}
+                onPageChange={setPendingPage}
+              />
+              </>
             ) : (
+              <>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -819,7 +1048,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {pendingMaterials.map((request: ExtraMaterialRequest) => (
+                      {paginatedPending.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -876,6 +1105,13 @@ const ExtraMaterialPage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <PaginationControls
+                currentPage={pendingPage}
+                totalPages={pendingTotalPages}
+                totalItems={pendingMaterials.length}
+                onPageChange={setPendingPage}
+              />
+              </>
             )}
           </motion.div>
         ) : activeTab === 'request' ? (
@@ -897,8 +1133,9 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-xs sm:text-base text-gray-500">Requests sent to PM will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {underReviewMaterials.map((request: ExtraMaterialRequest) => (
+                {paginatedRequest.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -941,7 +1178,15 @@ const ExtraMaterialPage: React.FC = () => {
                   </motion.div>
                 ))}
               </div>
+              <PaginationControls
+                currentPage={requestPage}
+                totalPages={requestTotalPages}
+                totalItems={underReviewMaterials.length}
+                onPageChange={setRequestPage}
+              />
+              </>
             ) : (
+              <>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -977,7 +1222,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {underReviewMaterials.map((request: ExtraMaterialRequest) => (
+                      {paginatedRequest.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1023,6 +1268,13 @@ const ExtraMaterialPage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <PaginationControls
+                currentPage={requestPage}
+                totalPages={requestTotalPages}
+                totalItems={underReviewMaterials.length}
+                onPageChange={setRequestPage}
+              />
+              </>
             )}
           </motion.div>
         ) : activeTab === 'approved' ? (
@@ -1045,8 +1297,9 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-xs sm:text-base text-gray-500">Approved extra material requests will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {approvedMaterials.map((request: ExtraMaterialRequest) => (
+                {paginatedApproved.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -1089,7 +1342,15 @@ const ExtraMaterialPage: React.FC = () => {
                   </motion.div>
                 ))}
               </div>
+              <PaginationControls
+                currentPage={approvedPage}
+                totalPages={approvedTotalPages}
+                totalItems={approvedMaterials.length}
+                onPageChange={setApprovedPage}
+              />
+              </>
             ) : (
+              <>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -1122,7 +1383,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {approvedMaterials.map((request: ExtraMaterialRequest) => (
+                      {paginatedApproved.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1165,6 +1426,13 @@ const ExtraMaterialPage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <PaginationControls
+                currentPage={approvedPage}
+                totalPages={approvedTotalPages}
+                totalItems={approvedMaterials.length}
+                onPageChange={setApprovedPage}
+              />
+              </>
             )}
           </motion.div>
         ) : activeTab === 'rejected' ? (
@@ -1186,8 +1454,9 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-xs sm:text-base text-gray-500">Rejected extra material requests will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {rejectedMaterials.map((request: ExtraMaterialRequest) => (
+                {paginatedRejected.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -1252,7 +1521,15 @@ const ExtraMaterialPage: React.FC = () => {
                   </motion.div>
                 ))}
               </div>
+              <PaginationControls
+                currentPage={rejectedPage}
+                totalPages={rejectedTotalPages}
+                totalItems={rejectedMaterials.length}
+                onPageChange={setRejectedPage}
+              />
+              </>
             ) : (
+              <>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -1288,7 +1565,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {rejectedMaterials.map((request: ExtraMaterialRequest) => (
+                      {paginatedRejected.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1345,6 +1622,13 @@ const ExtraMaterialPage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <PaginationControls
+                currentPage={rejectedPage}
+                totalPages={rejectedTotalPages}
+                totalItems={rejectedMaterials.length}
+                onPageChange={setRejectedPage}
+              />
+              </>
             )}
           </motion.div>
         ) : activeTab === 'complete' ? (
@@ -1366,8 +1650,9 @@ const ExtraMaterialPage: React.FC = () => {
                 <p className="text-xs sm:text-base text-gray-500">Purchases completed by buyer will appear here</p>
               </div>
             ) : viewMode === 'card' ? (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {completedMaterials.map((request: ExtraMaterialRequest) => (
+                {paginatedComplete.map((request: ExtraMaterialRequest) => (
                   <motion.div
                     key={request.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -1434,7 +1719,15 @@ const ExtraMaterialPage: React.FC = () => {
                   </motion.div>
                 ))}
               </div>
+              <PaginationControls
+                currentPage={completePage}
+                totalPages={completeTotalPages}
+                totalItems={completedMaterials.length}
+                onPageChange={setCompletePage}
+              />
+              </>
             ) : (
+              <>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -1470,7 +1763,7 @@ const ExtraMaterialPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {completedMaterials.map((request: ExtraMaterialRequest) => (
+                      {paginatedComplete.map((request: ExtraMaterialRequest) => (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-xs font-semibold text-black">
@@ -1518,6 +1811,13 @@ const ExtraMaterialPage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <PaginationControls
+                currentPage={completePage}
+                totalPages={completeTotalPages}
+                totalItems={completedMaterials.length}
+                onPageChange={setCompletePage}
+              />
+              </>
             )}
           </motion.div>
          ) : null}
@@ -1560,6 +1860,8 @@ const ExtraMaterialPage: React.FC = () => {
           onClose={() => {
             setShowViewModal(false);
             setSelectedRequest(null);
+            // Clear URL parameters to prevent auto-reopen
+            setSearchParams({});
           }}
           changeRequest={selectedRequest}
           canApprove={false}
@@ -1572,6 +1874,8 @@ const ExtraMaterialPage: React.FC = () => {
             onClose={() => {
               setShowEditModal(false);
               setSelectedRequest(null);
+              // Clear URL parameters to prevent auto-reopen
+              setSearchParams({});
             }}
             changeRequest={selectedRequest}
             onSuccess={handleEditSuccess}

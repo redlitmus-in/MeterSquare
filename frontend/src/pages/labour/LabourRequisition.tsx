@@ -8,6 +8,8 @@ import { motion } from 'framer-motion';
 import { labourService, LabourRequisition as RequisitionType, CreateRequisitionData } from '@/services/labourService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import { apiClient } from '@/api/config';
+import { TimePicker } from '@/components/TimePicker';
+import { PAGINATION } from '@/lib/constants';
 import {
   PlusIcon,
   ClipboardDocumentListIcon,
@@ -112,10 +114,31 @@ interface GroupedLabour {
 
 // Selected labour item with workers count for multi-select
 interface SelectedLabour extends LabourItem {
-  workers_count: number;
+  workers_count?: number;
   uniqueKey: string;
   // Status tracking
   requisition_status?: 'pending' | 'approved' | 'rejected' | 'assigned' | 'completed';
+}
+
+// Reassign Workers types
+interface WorkerConflict {
+  worker_id: number;
+  full_name: string;
+  reason: string;
+  conflicting_requisition?: string;
+  time_range?: string;
+}
+
+interface ConflictCheckResult {
+  available_workers: number[];
+  unavailable_workers: WorkerConflict[];
+  message?: string;
+}
+
+interface ReassignFormData {
+  required_date: string;
+  start_time: string;
+  end_time: string;
 }
 
 // Tab configuration
@@ -139,6 +162,18 @@ const tabs: TabConfig[] = [
 // Available skill options for labour requisitions
 const skillOptions = ['Mason', 'Carpenter', 'Helper', 'Electrician', 'Plumber', 'Welder', 'Painter', 'Fitter'];
 
+// Helper function to convert 24-hour time to 12-hour format with AM/PM
+const formatTimeTo12Hour = (time24: string): string => {
+  if (!time24) return '';
+
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+
+  return `${hour12}:${minutes} ${period}`;
+};
+
 const LabourRequisition: React.FC = () => {
   const [requisitions, setRequisitions] = useState<RequisitionType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,7 +181,14 @@ const LabourRequisition: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('pending');
   const [currentPage, setCurrentPage] = useState(1);
   const [pagination, setPagination] = useState<any>(null);
-  const perPage = 15;
+  const perPage = PAGINATION.DEFAULT_PAGE_SIZE;
+
+  // Get current user role
+  const [userRole, setUserRole] = useState<string>('');
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    setUserRole(user.role?.toUpperCase() || '');
+  }, []);
 
   // Tab counts
   const [tabCounts, setTabCounts] = useState<Record<TabType, number>>({
@@ -175,10 +217,25 @@ const LabourRequisition: React.FC = () => {
     work_description: '',
     skill_required: '',
     workers_count: 1,
-    required_date: ''
+    required_date: '',
+    start_time: '',
+    end_time: '',
+    preferred_workers_notes: ''
   });
   const [editLabourItems, setEditLabourItems] = useState<any[]>([]);
   const [resubmitting, setResubmitting] = useState(false);
+
+  // Reassign Workers modal
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignRequisition, setReassignRequisition] = useState<RequisitionType | null>(null);
+  const [reassignFormData, setReassignFormData] = useState<ReassignFormData>({
+    required_date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
+    start_time: '',
+    end_time: ''
+  });
+  const [reassigning, setReassigning] = useState(false);
+  const [conflictCheck, setConflictCheck] = useState<ConflictCheckResult | null>(null);
+  const [timeError, setTimeError] = useState<string | null>(null);
 
   // Projects and BOQ data
   const [projects, setProjects] = useState<Project[]>([]);
@@ -195,13 +252,22 @@ const LabourRequisition: React.FC = () => {
   // Labour status tracking - map of labour_id to status info
   const [labourStatusMap, setLabourStatusMap] = useState<Record<string, LabourItemStatus>>({});
 
+  // Worker selection for preferred workers
+  const [availableWorkers, setAvailableWorkers] = useState<any[]>([]);
+  const [workersLoading, setWorkersLoading] = useState(false);
+  const [selectedWorkers, setSelectedWorkers] = useState<any[]>([]);
+  const [workerSearchQuery, setWorkerSearchQuery] = useState('');
+
   const [formData, setFormData] = useState<CreateRequisitionData>({
     project_id: 0,
     site_name: '',
     work_description: '',
     skill_required: '',
     workers_count: 1,
-    required_date: new Date().toISOString().split('T')[0]
+    required_date: new Date().toISOString().split('T')[0],
+    start_time: '',
+    end_time: '',
+    preferred_workers_notes: ''
   });
 
   // Fetch SE's assigned projects
@@ -218,6 +284,60 @@ const LabourRequisition: React.FC = () => {
       setProjectsLoading(false);
     }
   };
+
+  // Fetch available workers based on selected labour skills
+  const fetchWorkers = async () => {
+    setWorkersLoading(true);
+    try {
+      // Get unique skills from selected labours
+      // Use labour_role (from BOQ) or skill_required (from manual entry)
+      const selectedSkills = Array.from(new Set(
+        selectedLabours
+          .map(labour => (labour as any).labour_role || labour.skill_required)
+          .filter(skill => skill != null && skill !== '')
+      ));
+
+      if (selectedSkills.length === 0) {
+        setAvailableWorkers([]);
+        setWorkersLoading(false);
+        return;
+      }
+
+      // Fetch workers for all selected skills
+      const allWorkers: any[] = [];
+      const workerIds = new Set<number>();
+
+      for (const skill of selectedSkills) {
+        const response = await labourService.getWorkers({
+          status: 'active',
+          per_page: 100,
+          skill: skill
+        });
+
+        if (response.success && response.data) {
+          // Add workers, avoiding duplicates
+          response.data.forEach((worker: any) => {
+            if (!workerIds.has(worker.worker_id)) {
+              allWorkers.push(worker);
+              workerIds.add(worker.worker_id);
+            }
+          });
+        }
+      }
+
+      setAvailableWorkers(allWorkers);
+    } catch (error) {
+      console.error('Failed to load workers:', error);
+      showError('Failed to load workers');
+    } finally {
+      setWorkersLoading(false);
+    }
+  };
+
+  // Auto-fetch workers when selected labours change
+  useEffect(() => {
+    fetchWorkers();
+  }, [selectedLabours]);
 
   // Toggle item expansion
   const toggleItemExpand = (itemId: string) => {
@@ -300,10 +420,10 @@ const LabourRequisition: React.FC = () => {
       // Remove from selection
       setSelectedLabours(prev => prev.filter(s => s.uniqueKey !== key));
     } else {
-      // Add to selection with default workers count
+      // Add to selection with undefined workers count (will show placeholder)
       setSelectedLabours(prev => [...prev, {
         ...labour,
-        workers_count: 1,
+        workers_count: undefined,
         uniqueKey: key
       }]);
     }
@@ -330,7 +450,7 @@ const LabourRequisition: React.FC = () => {
       if (!selectedLabours.some(s => s.uniqueKey === key) && !isLabourItemProcessed(labour)) {
         newSelections.push({
           ...labour,
-          workers_count: 1,
+          workers_count: undefined,
           uniqueKey: key
         });
       }
@@ -367,6 +487,20 @@ const LabourRequisition: React.FC = () => {
       return;
     }
 
+    // Validate time range: end time must be after start time
+    if (formData.start_time && formData.end_time) {
+      const [startHour, startMin] = formData.start_time.split(':').map(Number);
+      const [endHour, endMin] = formData.end_time.split(':').map(Number);
+
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+
+      if (endMinutes <= startMinutes) {
+        showError('End Time must be after Start Time');
+        return;
+      }
+    }
+
     setSubmitting(true);
 
     try {
@@ -374,7 +508,7 @@ const LabourRequisition: React.FC = () => {
       const labour_items = selectedLabours.map((labour) => ({
         work_description: `${labour.item_name} - ${labour.sub_item_name || labour.labour_role}`,
         skill_required: labour.labour_role,
-        workers_count: labour.workers_count,
+        workers_count: labour.workers_count || 1,
         boq_id: labour.boq_id,
         item_id: labour.item_id,
         labour_id: labour.labour_id ? String(labour.labour_id) : undefined
@@ -384,6 +518,9 @@ const LabourRequisition: React.FC = () => {
         project_id: formData.project_id,
         site_name: formData.site_name,
         required_date: formData.required_date,
+        start_time: formData.start_time || undefined,
+        end_time: formData.end_time || undefined,
+        preferred_worker_ids: selectedWorkers.map(w => w.worker_id),
         labour_items: labour_items
       };
 
@@ -410,28 +547,29 @@ const LabourRequisition: React.FC = () => {
     setLoading(true);
     // Map tab to API status filter
     let statusFilter: string | undefined;
+    // Map activeTab to status and assignment_status filters
+    let assignmentStatusFilter: string | undefined = undefined;
+
     if (activeTab === 'assigned') {
       // For assigned tab, fetch approved requisitions with assignment_status = 'assigned'
       statusFilter = 'approved';
+      assignmentStatusFilter = 'assigned';
     } else if (activeTab === 'pending') {
       // For pending tab, fetch all requisitions that haven't been approved/rejected yet
       // This includes both 'pending' (not yet sent) and 'send_to_pm' (sent to PM)
       statusFilter = 'pending,send_to_pm';
+    } else if (activeTab === 'approved') {
+      // For approved tab, fetch approved requisitions that haven't been assigned yet
+      statusFilter = 'approved';
+      assignmentStatusFilter = 'unassigned';
     } else {
       statusFilter = activeTab;
     }
 
-    const result = await labourService.getMyRequisitions(statusFilter, currentPage, perPage);
+    const result = await labourService.getMyRequisitions(statusFilter, currentPage, perPage, assignmentStatusFilter);
     if (result.success) {
-      let data = result.data;
-      // Additional filtering for assigned tab
-      if (activeTab === 'assigned') {
-        data = data.filter((req: RequisitionType) => req.assignment_status === 'assigned');
-      } else if (activeTab === 'approved') {
-        // For approved tab, exclude requisitions that have been assigned workers
-        data = data.filter((req: RequisitionType) => req.assignment_status !== 'assigned');
-      }
-      setRequisitions(data);
+      // No need for client-side filtering anymore - backend handles it
+      setRequisitions(result.data);
       setPagination(result.pagination);
     } else {
       showError(result.message || 'Failed to fetch requisitions');
@@ -507,6 +645,20 @@ const LabourRequisition: React.FC = () => {
   useEffect(() => {
     fetchRequisitions();
   }, [activeTab, currentPage]);
+
+  // Keyboard support for modals (Escape to close)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showReassignModal) {
+          handleCloseReassignModal();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showReassignModal]);
 
   // When project is selected - auto-fill form with project data
   const handleProjectSelect = async (projectId: number) => {
@@ -584,13 +736,19 @@ const LabourRequisition: React.FC = () => {
       work_description: '',
       skill_required: '',
       workers_count: 1,
-      required_date: new Date().toISOString().split('T')[0]
+      required_date: new Date().toISOString().split('T')[0],
+      start_time: '',
+      end_time: '',
+      preferred_workers_notes: ''
     });
     setSelectedProject(null);
     setGroupedLabours([]);
     setExpandedItems(new Set());
     setSelectedLabours([]);
     setLabourStatusMap({});
+    setSelectedWorkers([]);
+    setWorkerSearchQuery('');
+    setAvailableWorkers([]);
   };
 
   // Handle opening edit modal for rejected requisition
@@ -601,7 +759,10 @@ const LabourRequisition: React.FC = () => {
       work_description: requisition.work_description || '',
       skill_required: requisition.skill_required || '',
       workers_count: requisition.workers_count || 1,
-      required_date: requisition.required_date?.split('T')[0] || new Date().toISOString().split('T')[0]
+      required_date: requisition.required_date?.split('T')[0] || new Date().toISOString().split('T')[0],
+      start_time: requisition.start_time || '',
+      end_time: requisition.end_time || '',
+      preferred_workers_notes: requisition.preferred_workers_notes || ''
     });
 
     // Initialize labour items for editing
@@ -683,6 +844,28 @@ const LabourRequisition: React.FC = () => {
     );
   };
 
+  // Handle send to production (PM only)
+  const handleSendToProduction = (requisitionId: number) => {
+    showConfirm(
+      'Send to Production',
+      'Send this requisition to Production Manager for worker assignment?',
+      async () => {
+        try {
+          const result = await labourService.sendToProduction(requisitionId);
+          if (result.success) {
+            showSuccess(result.message || 'Requisition sent to production successfully');
+            fetchRequisitions();
+            fetchTabCounts();
+          } else {
+            showError(result.message || 'Failed to send requisition');
+          }
+        } catch (error: any) {
+          showError('Failed to send requisition to production');
+        }
+      }
+    );
+  };
+
   // Update labour item field
   const updateLabourItemField = (index: number, field: string, value: any) => {
     setEditLabourItems(prev => {
@@ -740,12 +923,29 @@ const LabourRequisition: React.FC = () => {
       }
     }
 
+    // Validate time range: end time must be after start time
+    if (editFormData.start_time && editFormData.end_time) {
+      const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+      const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+
+      if (endMinutes <= startMinutes) {
+        showError('End Time must be after Start Time');
+        return;
+      }
+    }
+
     setResubmitting(true);
 
     try {
       const payload = {
         site_name: editFormData.site_name,
         required_date: editFormData.required_date,
+        start_time: editFormData.start_time || undefined,
+        end_time: editFormData.end_time || undefined,
+        preferred_workers_notes: editFormData.preferred_workers_notes || undefined,
         labour_items: editLabourItems
       };
 
@@ -765,6 +965,166 @@ const LabourRequisition: React.FC = () => {
       showError(error.response?.data?.error || 'Failed to update requisition');
     } finally {
       setResubmitting(false);
+    }
+  };
+
+  // Reassign Workers handlers
+  const handleCloseReassignModal = () => {
+    setShowReassignModal(false);
+    setReassignRequisition(null);
+    setConflictCheck(null);
+    setTimeError(null);
+    setReassignFormData({
+      required_date: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+      start_time: '',
+      end_time: ''
+    });
+  };
+
+  const validateTimeRange = (start: string, end: string): boolean => {
+    if (!start || !end) {
+      setTimeError(null);
+      return true; // Optional fields
+    }
+
+    // Convert time strings to minutes for proper comparison
+    const [startHours, startMinutes] = start.split(':').map(Number);
+    const [endHours, endMinutes] = end.split(':').map(Number);
+    const startTotalMinutes = startHours * 60 + startMinutes;
+    const endTotalMinutes = endHours * 60 + endMinutes;
+
+    // Allow overnight shifts (e.g., 22:00 to 02:00 next day)
+    // If end time is less than start time, it means it crosses midnight
+    // This is valid for overnight shifts
+    if (startTotalMinutes === endTotalMinutes) {
+      setTimeError('End time must be different from start time');
+      return false;
+    }
+
+    setTimeError(null);
+    return true;
+  };
+
+  const handleReassignWorkers = (requisition: RequisitionType) => {
+    setReassignRequisition(requisition);
+    setReassignFormData({
+      required_date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
+      start_time: requisition.start_time || '',
+      end_time: requisition.end_time || ''
+    });
+    setConflictCheck(null);
+    setTimeError(null);
+    setShowReassignModal(true);
+  };
+
+  const handleReassignFormChange = (field: keyof ReassignFormData, value: string) => {
+    const newData = { ...reassignFormData, [field]: value };
+    setReassignFormData(newData);
+
+    // Validate times when either time field changes
+    if (field === 'start_time' || field === 'end_time') {
+      validateTimeRange(newData.start_time, newData.end_time);
+    }
+  };
+
+  const handleCheckConflicts = async () => {
+    if (!reassignRequisition) return;
+
+    // Validate inputs
+    if (!reassignFormData.required_date) {
+      showError('Please select a date');
+      return;
+    }
+
+    // Validate time range
+    if (!validateTimeRange(reassignFormData.start_time, reassignFormData.end_time)) {
+      return;
+    }
+
+    setReassigning(true);
+    try {
+      const result = await labourService.reassignWorkers(reassignRequisition.requisition_id, {
+        required_date: reassignFormData.required_date,
+        start_time: reassignFormData.start_time || undefined,
+        end_time: reassignFormData.end_time || undefined,
+        check_only: true // Preview mode
+      });
+
+      if (result.success && result.data) {
+        const checkResult: ConflictCheckResult = {
+          available_workers: result.data.available_workers || [],
+          unavailable_workers: result.data.unavailable_workers || [],
+          message: result.message
+        };
+        setConflictCheck(checkResult);
+
+        if (checkResult.unavailable_workers.length > 0) {
+          showError(`${checkResult.unavailable_workers.length} worker(s) have conflicts`);
+        } else {
+          showSuccess('All workers are available!');
+        }
+      } else {
+        showError(result.message || 'Failed to check conflicts');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to check conflicts';
+      showError(errorMessage);
+    } finally {
+      setReassigning(false);
+    }
+  };
+
+  const buildReassignSuccessMessage = (availableCount: number, unavailableCount: number): string => {
+    let message = `✓ New requisition created with ${availableCount} worker(s)`;
+    if (unavailableCount > 0) {
+      message += ` (${unavailableCount} worker(s) had conflicts and were not assigned)`;
+    }
+    return message;
+  };
+
+  const handleConfirmReassign = async () => {
+    if (!reassignRequisition) return;
+
+    // Prevent duplicate submissions
+    if (reassigning) return;
+
+    // Validate inputs
+    if (!reassignFormData.required_date) {
+      showError('Please select a date');
+      return;
+    }
+
+    // Validate time range
+    if (!validateTimeRange(reassignFormData.start_time, reassignFormData.end_time)) {
+      return;
+    }
+
+    setReassigning(true);
+    try {
+      const result = await labourService.reassignWorkers(reassignRequisition.requisition_id, {
+        required_date: reassignFormData.required_date,
+        start_time: reassignFormData.start_time || undefined,
+        end_time: reassignFormData.end_time || undefined,
+        check_only: false // Create actual requisition
+      });
+
+      if (result.success) {
+        const availableCount = result.available_workers?.length || 0;
+        const unavailableCount = result.unavailable_workers?.length || 0;
+        const message = buildReassignSuccessMessage(availableCount, unavailableCount);
+
+        showSuccess(message);
+        handleCloseReassignModal();
+        fetchRequisitions();
+        fetchTabCounts();
+      } else {
+        showError(result.message || 'Failed to reassign workers');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to reassign workers';
+      showError(errorMessage);
+    } finally {
+      setReassigning(false);
     }
   };
 
@@ -859,7 +1219,10 @@ const LabourRequisition: React.FC = () => {
           <p className="text-gray-600">Create and manage labour requisitions for your projects</p>
         </div>
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={() => {
+            setShowAddModal(true);
+            fetchWorkers();
+          }}
           className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
         >
           <PlusIcon className="w-5 h-5" />
@@ -925,6 +1288,16 @@ const LabourRequisition: React.FC = () => {
                   <span className="font-semibold text-gray-900 text-sm">{req.requisition_code}</span>
                   {getStatusBadge(req.status)}
                   {req.status === 'approved' && getAssignmentBadge(req.assignment_status)}
+                  {/* Show requester role badge */}
+                  {req.requester_role && (
+                    <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                      req.requester_role === 'PM'
+                        ? 'bg-indigo-100 text-indigo-700'
+                        : 'bg-teal-100 text-teal-700'
+                    }`}>
+                      {req.requester_role === 'PM' ? 'PM Request' : 'SE Request'}
+                    </span>
+                  )}
                   <span className="text-xs text-gray-400 hidden sm:inline">|</span>
                   {req.labour_items && req.labour_items.length > 0 ? (
                     <div className="flex items-center gap-1 flex-wrap">
@@ -954,6 +1327,20 @@ const LabourRequisition: React.FC = () => {
                     <span className="hidden sm:inline">View</span>
                   </button>
 
+                  {/* Reassign Workers button for assigned requisitions */}
+                  {req.status === 'approved' && req.assignment_status === 'assigned' && (
+                    <button
+                      onClick={() => handleReassignWorkers(req)}
+                      className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-teal-600 border border-teal-200 rounded hover:bg-teal-50 transition-colors"
+                      title="Reassign Workers for Another Day"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                      </svg>
+                      <span className="hidden sm:inline">Reassign</span>
+                    </button>
+                  )}
+
                   {/* Actions for pending requisitions */}
                   {req.status === 'pending' && (
                     <>
@@ -965,14 +1352,26 @@ const LabourRequisition: React.FC = () => {
                         <PencilSquareIcon className="w-3.5 h-3.5" />
                         <span className="hidden sm:inline">Edit</span>
                       </button>
-                      <button
-                        onClick={() => handleResendRequisition(req.requisition_id)}
-                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-green-600 border border-green-200 rounded hover:bg-green-50 transition-colors"
-                        title="Send to PM"
-                      >
-                        <PaperAirplaneIcon className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Send to PM</span>
-                      </button>
+                      {/* Show "Send to Production" for PM requisitions, "Send to PM" for SE requisitions */}
+                      {req.requester_role === 'PM' && userRole === 'PM' ? (
+                        <button
+                          onClick={() => handleSendToProduction(req.requisition_id)}
+                          className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-purple-600 border border-purple-200 rounded hover:bg-purple-50 transition-colors"
+                          title="Send to Production"
+                        >
+                          <PaperAirplaneIcon className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Send to Production</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleResendRequisition(req.requisition_id)}
+                          className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-green-600 border border-green-200 rounded hover:bg-green-50 transition-colors"
+                          title="Send to PM"
+                        >
+                          <PaperAirplaneIcon className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Send to PM</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDeleteRequisition(req.requisition_id)}
                         className="flex items-center justify-center gap-1 px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50 transition-colors"
@@ -1019,62 +1418,65 @@ const LabourRequisition: React.FC = () => {
       )}
 
       {/* Pagination */}
-      {pagination && pagination.pages > 1 && (
-        <div className="mt-6 flex items-center justify-between bg-white px-4 py-3 border border-gray-200 rounded-lg">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-700">
-              Showing <span className="font-medium">{(currentPage - 1) * perPage + 1}</span> to{' '}
-              <span className="font-medium">{Math.min(currentPage * perPage, pagination.total)}</span> of{' '}
-              <span className="font-medium">{pagination.total}</span> results
-            </span>
+      {pagination && pagination.total > 0 && (
+        <div className="mt-6 flex items-center justify-between bg-white px-4 py-3 border border-gray-200 rounded-lg shadow-sm">
+          <div className="text-sm text-gray-700">
+            Showing <span className="font-medium">{(currentPage - 1) * perPage + 1}</span> to{' '}
+            <span className="font-medium">{Math.min(currentPage * perPage, pagination.total)}</span> of{' '}
+            <span className="font-medium">{pagination.total}</span> requisitions
+            {pagination.pages > 1 && (
+              <span className="text-gray-500 ml-2">(Page {currentPage} of {pagination.pages})</span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Previous
-            </button>
-            <div className="flex items-center gap-1">
-              {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => {
-                // Show first page, last page, current page, and pages around current
-                const showPage =
-                  page === 1 ||
-                  page === pagination.pages ||
-                  (page >= currentPage - 1 && page <= currentPage + 1);
+          {pagination.pages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Previous
+              </button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => {
+                  // Show first page, last page, current page, and pages around current
+                  const showPage =
+                    page === 1 ||
+                    page === pagination.pages ||
+                    (page >= currentPage - 1 && page <= currentPage + 1);
 
-                if (!showPage) {
-                  // Show ellipsis
-                  if (page === currentPage - 2 || page === currentPage + 2) {
-                    return <span key={page} className="px-2 text-gray-500">...</span>;
+                  if (!showPage) {
+                    // Show ellipsis
+                    if (page === currentPage - 2 || page === currentPage + 2) {
+                      return <span key={page} className="px-2 text-gray-500">...</span>;
+                    }
+                    return null;
                   }
-                  return null;
-                }
 
-                return (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                      currentPage === page
-                        ? 'bg-purple-600 text-white font-medium'
-                        : 'border border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    {page}
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                        currentPage === page
+                          ? 'bg-purple-600 text-white font-medium'
+                          : 'border border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                onClick={() => setCurrentPage(Math.min(pagination.pages, currentPage + 1))}
+                disabled={currentPage === pagination.pages}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
             </div>
-            <button
-              onClick={() => setCurrentPage(Math.min(pagination.pages, currentPage + 1))}
-              disabled={currentPage === pagination.pages}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Next
-            </button>
-          </div>
+          )}
         </div>
       )}
 
@@ -1147,6 +1549,204 @@ const LabourRequisition: React.FC = () => {
                     onChange={(e) => setFormData({ ...formData, required_date: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white"
                   />
+                </div>
+
+                {/* Work Shift Times */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                    <TimePicker
+                      value={formData.start_time || ''}
+                      onChange={(value) => {
+                        setFormData({ ...formData, start_time: value });
+                      }}
+                      placeholder="HH:MM"
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                    <TimePicker
+                      value={formData.end_time || ''}
+                      onChange={(value) => {
+                        setFormData({ ...formData, end_time: value });
+                      }}
+                      placeholder="HH:MM"
+                      className="w-full"
+                      minTime={formData.start_time || undefined}
+                    />
+                  </div>
+                </div>
+
+                {/* Time validation error */}
+                {formData.start_time && formData.end_time && (() => {
+                  const [startHour, startMin] = formData.start_time.split(':').map(Number);
+                  const [endHour, endMin] = formData.end_time.split(':').map(Number);
+                  const startMinutes = startHour * 60 + startMin;
+                  const endMinutes = endHour * 60 + endMin;
+                  return endMinutes <= startMinutes;
+                })() && (
+                  <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-sm text-red-700">End Time must be after Start Time</p>
+                  </div>
+                )}
+
+                <div>
+                  {(() => {
+                    const totalWorkersNeeded = selectedLabours.reduce((sum, labour) => sum + (labour.workers_count || 1), 0);
+                    const remainingSlots = totalWorkersNeeded - selectedWorkers.length;
+
+                    return (
+                      <>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Preferred Workers
+                          {totalWorkersNeeded > 0 && (
+                            <span className="ml-2 text-xs text-gray-500">
+                              ({selectedWorkers.length}/{totalWorkersNeeded} selected)
+                            </span>
+                          )}
+                        </label>
+
+                        {/* Search input with chips inside */}
+                        <div className="relative">
+                          <div className="w-full min-h-[42px] max-h-[200px] overflow-y-auto px-3 py-2 border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-purple-500 bg-white">
+                            {/* Selected workers as chips inside input */}
+                            <div className="flex flex-wrap gap-2 items-center">
+                              {selectedWorkers.map(worker => (
+                                <div
+                                  key={worker.worker_id}
+                                  className="flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs"
+                                >
+                                  <span className="font-medium">{worker.full_name} ({worker.worker_code})</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedWorkers(prev => prev.filter(w => w.worker_id !== worker.worker_id))}
+                                    className="hover:text-purple-900"
+                                  >
+                                    <XMarkIcon className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                              <input
+                                type="text"
+                                placeholder={
+                                  selectedWorkers.length === 0
+                                    ? totalWorkersNeeded > 0
+                                      ? `Select up to ${totalWorkersNeeded} workers...`
+                                      : "Search workers by name or code..."
+                                    : remainingSlots > 0
+                                      ? `${remainingSlots} more...`
+                                      : ""
+                                }
+                                value={workerSearchQuery}
+                                onChange={(e) => setWorkerSearchQuery(e.target.value)}
+                                className="flex-1 min-w-[200px] outline-none bg-transparent text-sm"
+                                disabled={totalWorkersNeeded > 0 && selectedWorkers.length >= totalWorkersNeeded}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Dropdown - only visible when typing */}
+                          {workerSearchQuery && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {workersLoading ? (
+                          <div className="text-sm text-gray-500 p-3 text-center">Loading workers...</div>
+                        ) : (
+                          <>
+                            {(() => {
+                              // Get unique skills from selected labour items (filter out undefined/null)
+                              // Use labour_role (from BOQ) or skill_required (from manual entry)
+                              const selectedSkills = selectedLabours
+                                .map(labour => (labour as any).labour_role || labour.skill_required)
+                                .filter(skill => skill != null && skill !== '');
+                              const totalWorkersNeeded = selectedLabours.reduce((sum, labour) => sum + (labour.workers_count || 1), 0);
+
+                              // Filter workers by search query AND selected skills
+                              const filteredWorkers = availableWorkers.filter(worker => {
+                                // Match search query (name or code)
+                                const matchesSearch = (worker.full_name || '').toLowerCase().includes(workerSearchQuery.toLowerCase()) ||
+                                  (worker.worker_code || '').toLowerCase().includes(workerSearchQuery.toLowerCase());
+
+                                // ONLY show workers if labour is selected AND worker has matching skill
+                                // Worker skills can be a string (comma-separated) or array
+                                const matchesSkill = selectedSkills.length > 0 && selectedSkills.some(skill => {
+                                  if (!worker.skills || !skill) return false;
+
+                                  // Handle comma-separated skills (e.g., "Carpenter, Mason, Painter")
+                                  const workerSkills = typeof worker.skills === 'string'
+                                    ? worker.skills.split(',').map(s => s.trim().toLowerCase()).filter(s => s)
+                                    : Array.isArray(worker.skills)
+                                      ? worker.skills.map(s => String(s).toLowerCase()).filter(s => s)
+                                      : [];
+
+                                  // Check if any worker skill matches the required skill
+                                  const skillLower = skill.toLowerCase();
+                                  return workerSkills.some(ws =>
+                                    ws.includes(skillLower) || skillLower.includes(ws)
+                                  );
+                                });
+
+                                return matchesSearch && matchesSkill;
+                              });
+
+                              return (
+                                <>
+                                  {filteredWorkers.slice(0, 10).map(worker => {
+                                    const isSelected = selectedWorkers.some(w => w.worker_id === worker.worker_id);
+                                    const limitReached = totalWorkersNeeded > 0 && selectedWorkers.length >= totalWorkersNeeded;
+                                    const canSelect = isSelected || !limitReached;
+
+                                    return (
+                                      <div
+                                        key={worker.worker_id}
+                                        onClick={() => {
+                                          if (isSelected) {
+                                            setSelectedWorkers(prev => prev.filter(w => w.worker_id !== worker.worker_id));
+                                          } else if (canSelect) {
+                                            setSelectedWorkers(prev => [...prev, worker]);
+                                            setWorkerSearchQuery('');
+                                          } else {
+                                            showError(`Maximum ${totalWorkersNeeded} workers allowed`);
+                                          }
+                                        }}
+                                        className={`p-3 cursor-pointer hover:bg-purple-50 transition-colors border-b border-gray-100 last:border-b-0 ${
+                                          isSelected ? 'bg-purple-100' : !canSelect ? 'opacity-50 cursor-not-allowed' : ''
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <div>
+                                            <p className="text-sm font-medium text-gray-900">{worker.full_name}</p>
+                                            <p className="text-xs text-gray-500">Code: {worker.worker_code}</p>
+                                          </div>
+                                          {isSelected && (
+                                            <CheckCircleIcon className="w-5 h-5 text-purple-600" />
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                  {filteredWorkers.length === 0 && (
+                                    <div className="text-sm text-gray-500 p-3 text-center">
+                                      No workers found matching "{workerSearchQuery}"
+                                      {selectedLabours.length > 0 && (
+                                        <span> with skills: {selectedSkills.join(', ')}</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </>
+                        )}
+                      </div>
+                    )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {selectedLabours.length > 0 && (
@@ -1344,7 +1944,8 @@ const LabourRequisition: React.FC = () => {
                           <input
                             type="number"
                             min="1"
-                            value={labour.workers_count}
+                            value={labour.workers_count || ''}
+                            placeholder="1"
                             onChange={(e) => updateWorkersCount(labour.uniqueKey, parseInt(e.target.value) || 1)}
                             onClick={(e) => e.stopPropagation()}
                             className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-500"
@@ -1384,9 +1985,26 @@ const LabourRequisition: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleBulkSubmit}
-                    disabled={selectedLabours.length === 0 || !formData.project_id || submitting}
+                    disabled={
+                      selectedLabours.length === 0 ||
+                      !formData.project_id ||
+                      submitting ||
+                      // Disable if times are invalid
+                      (formData.start_time && formData.end_time && (() => {
+                        const [startHour, startMin] = formData.start_time.split(':').map(Number);
+                        const [endHour, endMin] = formData.end_time.split(':').map(Number);
+                        return (endHour * 60 + endMin) <= (startHour * 60 + startMin);
+                      })())
+                    }
                     className={`px-6 py-2 rounded-lg font-medium flex items-center gap-2 ${
-                      selectedLabours.length === 0 || !formData.project_id || submitting
+                      selectedLabours.length === 0 ||
+                      !formData.project_id ||
+                      submitting ||
+                      (formData.start_time && formData.end_time && (() => {
+                        const [startHour, startMin] = formData.start_time.split(':').map(Number);
+                        const [endHour, endMin] = formData.end_time.split(':').map(Number);
+                        return (endHour * 60 + endMin) <= (startHour * 60 + startMin);
+                      })())
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : 'bg-purple-600 text-white hover:bg-purple-700'
                     }`}
@@ -1606,6 +2224,46 @@ const LabourRequisition: React.FC = () => {
                             })}
                           </p>
                         </div>
+                        <div>
+                          <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Work Shift</h4>
+                          <p className="text-gray-900">
+                            {requisition.start_time && requisition.end_time ? (
+                              <span className="text-purple-600 font-medium">
+                                {formatTimeTo12Hour(requisition.start_time)} - {formatTimeTo12Hour(requisition.end_time)}
+                              </span>
+                            ) : requisition.start_time ? (
+                              <span className="text-purple-600 font-medium">
+                                From {formatTimeTo12Hour(requisition.start_time)}
+                              </span>
+                            ) : requisition.end_time ? (
+                              <span className="text-purple-600 font-medium">
+                                Until {formatTimeTo12Hour(requisition.end_time)}
+                              </span>
+                            ) : (
+                              <span className="text-gray-500">Not specified</span>
+                            )}
+                          </p>
+                        </div>
+                        {(requisition.preferred_workers && requisition.preferred_workers.length > 0) && (
+                          <div className="col-span-2">
+                            <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Preferred Workers</h4>
+                            <div className="flex flex-wrap gap-2">
+                              {requisition.preferred_workers.map((worker: any) => (
+                                <div key={worker.worker_id} className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-full text-sm font-medium border border-purple-200">
+                                  {worker.full_name} ({worker.worker_code})
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {requisition.preferred_workers_notes && (
+                          <div className="col-span-2">
+                            <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Preferred Workers (Additional Notes)</h4>
+                            <p className="text-gray-900 text-sm whitespace-pre-wrap bg-gray-50 p-2 rounded border border-gray-200">
+                              {requisition.preferred_workers_notes}
+                            </p>
+                          </div>
+                        )}
                         {relatedRequisitions.length === 1 && (
                           <>
                             <div>
@@ -1735,6 +2393,57 @@ const LabourRequisition: React.FC = () => {
                   />
                 </div>
 
+                {/* Work Shift Times */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                    <TimePicker
+                      value={editFormData.start_time || ''}
+                      onChange={(value) => setEditFormData({ ...editFormData, start_time: value })}
+                      placeholder="HH:MM"
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                    <TimePicker
+                      value={editFormData.end_time || ''}
+                      onChange={(value) => setEditFormData({ ...editFormData, end_time: value })}
+                      placeholder="HH:MM"
+                      className="w-full"
+                      minTime={editFormData.start_time || undefined}
+                    />
+                  </div>
+                </div>
+
+                {/* Time validation error */}
+                {editFormData.start_time && editFormData.end_time && (() => {
+                  const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+                  const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+                  const startMinutes = startHour * 60 + startMin;
+                  const endMinutes = endHour * 60 + endMin;
+                  return endMinutes <= startMinutes;
+                })() && (
+                  <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-sm text-red-700">End Time must be after Start Time</p>
+                  </div>
+                )}
+
+                {/* Preferred Workers Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Preferred Workers (Details/Notes)</label>
+                  <textarea
+                    value={editFormData.preferred_workers_notes}
+                    onChange={(e) => setEditFormData({ ...editFormData, preferred_workers_notes: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    rows={3}
+                    placeholder="Enter preferred worker names with Emp. numbers or other notes"
+                  />
+                </div>
+
                 {/* Labour Items */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -1789,7 +2498,8 @@ const LabourRequisition: React.FC = () => {
                           <input
                             type="number"
                             min="1"
-                            value={item.workers_count || 1}
+                            value={item.workers_count || ''}
+                            placeholder="1"
                             onChange={(e) => updateLabourItemField(index, 'workers_count', Math.max(1, parseInt(e.target.value) || 1))}
                             className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                           />
@@ -1817,9 +2527,22 @@ const LabourRequisition: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleResubmit}
-                  disabled={resubmitting}
+                  disabled={
+                    resubmitting ||
+                    // Disable if times are invalid
+                    (editFormData.start_time && editFormData.end_time && (() => {
+                      const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+                      const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+                      return (endHour * 60 + endMin) <= (startHour * 60 + startMin);
+                    })())
+                  }
                   className={`flex-1 px-4 py-2 rounded-lg font-medium flex items-center justify-center gap-2 ${
-                    resubmitting
+                    resubmitting ||
+                    (editFormData.start_time && editFormData.end_time && (() => {
+                      const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+                      const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+                      return (endHour * 60 + endMin) <= (startHour * 60 + startMin);
+                    })())
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                       : 'bg-orange-600 text-white hover:bg-orange-700'
                   } transition-colors`}
@@ -1837,6 +2560,247 @@ const LabourRequisition: React.FC = () => {
                   )}
                 </button>
               </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Reassign Workers Modal */}
+      {showReassignModal && reassignRequisition && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reassign-modal-title"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden"
+          >
+            {/* Header */}
+            <div className="p-6 bg-gradient-to-r from-teal-600 to-teal-700">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 id="reassign-modal-title" className="text-xl font-semibold text-white">Reassign Workers</h3>
+                  <p className="text-teal-100 text-sm mt-1">
+                    Duplicate requisition {reassignRequisition.requisition_code} with{' '}
+                    <strong className="text-white">
+                      {reassignRequisition.assigned_worker_ids?.length || 0} worker(s)
+                    </strong>
+                  </p>
+                </div>
+                <button
+                  onClick={handleCloseReassignModal}
+                  aria-label="Close modal"
+                  className="text-white/80 hover:text-white transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-6">
+              {/* Original Requisition Info */}
+              <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                <h4 className="font-medium text-gray-900 text-sm">Original Requisition</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-500">Date:</span>
+                    <span className="ml-2 text-gray-900 font-medium">
+                      {new Date(reassignRequisition.required_date).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Workers:</span>
+                    <span className="ml-2 text-gray-900 font-medium">
+                      {reassignRequisition.assigned_worker_ids?.length || 0}
+                    </span>
+                  </div>
+                  {reassignRequisition.start_time && reassignRequisition.end_time && (
+                    <div className="col-span-2">
+                      <span className="text-gray-500">Time:</span>
+                      <span className="ml-2 text-gray-900 font-medium">
+                        {reassignRequisition.start_time} - {reassignRequisition.end_time}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* New Requisition Form */}
+              <div className="space-y-4">
+                <h4 className="font-medium text-gray-900 text-sm">New Requisition Details</h4>
+
+                {/* Date Input */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Required Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={reassignFormData.required_date}
+                    onChange={(e) => handleReassignFormChange('required_date', e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  />
+                </div>
+
+                {/* Work Shift Times */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Start Time
+                    </label>
+                    <TimePicker
+                      value={reassignFormData.start_time || ''}
+                      onChange={(value) => handleReassignFormChange('start_time', value)}
+                      placeholder="HH:MM"
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      End Time
+                    </label>
+                    <TimePicker
+                      value={reassignFormData.end_time || ''}
+                      onChange={(value) => handleReassignFormChange('end_time', value)}
+                      placeholder="HH:MM"
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                {/* Overnight shift hint */}
+                {!timeError && reassignFormData.start_time && reassignFormData.end_time && (
+                  <div className="text-xs text-gray-500 -mt-2">
+                    <svg className="inline w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {reassignFormData.start_time > reassignFormData.end_time
+                      ? "Overnight shift (end time is next day)"
+                      : "Same-day shift"}
+                  </div>
+                )}
+
+
+                {/* Time Error */}
+                {timeError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+                    <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-sm text-red-700">{timeError}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Check Conflicts Button */}
+              <button
+                onClick={handleCheckConflicts}
+                disabled={reassigning || !reassignFormData.required_date || !!timeError}
+                className="w-full px-4 py-2.5 text-sm font-medium text-teal-700 bg-teal-50 border border-teal-200 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {reassigning && (
+                  <svg className="animate-spin h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                )}
+                {reassigning ? 'Checking...' : 'Check Worker Availability'}
+              </button>
+
+              {/* Conflict Check Results */}
+              {conflictCheck && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-3"
+                >
+                  {/* Available Workers */}
+                  {conflictCheck.available_workers && conflictCheck.available_workers.length > 0 && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <h5 className="font-medium text-green-900 text-sm">
+                          Available Workers ({conflictCheck.available_workers.length})
+                        </h5>
+                      </div>
+                      <p className="text-sm text-green-700">
+                        These workers will be assigned to the new requisition
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Unavailable Workers */}
+                  {conflictCheck.unavailable_workers && conflictCheck.unavailable_workers.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <h5 className="font-medium text-amber-900 text-sm">
+                          Unavailable Workers ({conflictCheck.unavailable_workers.length})
+                        </h5>
+                      </div>
+                      <div className="space-y-2">
+                        {conflictCheck.unavailable_workers.map((worker: any, idx: number) => (
+                          <div key={idx} className="bg-white rounded p-3 text-sm">
+                            <div className="font-medium text-gray-900">{worker.full_name}</div>
+                            <div className="text-amber-700 mt-1">{worker.reason}</div>
+                            {worker.conflicting_requisition && (
+                              <div className="text-gray-600 text-xs mt-1">
+                                Conflict: {worker.conflicting_requisition}
+                                {worker.time_range && ` (${worker.time_range})`}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Summary for confirmation */}
+                  {conflictCheck.available_workers.length > 0 && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <p className="text-sm text-blue-900 font-medium">
+                        Ready to create requisition with {conflictCheck.available_workers.length} worker(s)
+                        {conflictCheck.unavailable_workers.length > 0 &&
+                          ` (${conflictCheck.unavailable_workers.length} excluded due to conflicts)`
+                        }
+                      </p>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 flex gap-3 justify-end border-t border-gray-200">
+              <button
+                onClick={handleCloseReassignModal}
+                className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmReassign}
+                disabled={reassigning || !reassignFormData.required_date || !!timeError}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-teal-600 to-teal-700 rounded-lg hover:from-teal-700 hover:to-teal-800 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {reassigning && (
+                  <svg className="animate-spin h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                )}
+                {reassigning ? 'Sending to PM...' : 'Send to PM for Approval'}
+              </button>
             </div>
           </motion.div>
         </div>

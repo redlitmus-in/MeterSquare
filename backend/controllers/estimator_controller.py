@@ -34,7 +34,7 @@ def confirm_client_approval(boq_id):
         estimator_name = current_user.get('full_name', 'Estimator') if current_user else 'Estimator'
         estimator_id = current_user.get('user_id') if current_user else None
 
-        # Update status to Client_Confirmed
+        # Update status to Client_Confirmed (lowercase for frontend consistency)
         boq.status = "Client_Confirmed"
         boq.client_status = True
         boq.last_modified_at = datetime.utcnow()
@@ -115,30 +115,91 @@ def confirm_client_approval(boq_id):
             )
             db.session.add(boq_history)
 
+        # Cache fields BEFORE commit to avoid SQLAlchemy lazy-loading issues
+        cached_project_name = project.project_name if project else "project"
+
         db.session.commit()
 
         # Send notification to TD about client approval using comprehensive service
+        notification_sent = False
         try:
             from utils.comprehensive_notification_service import ComprehensiveNotificationService
             ComprehensiveNotificationService.notify_client_confirmed(
                 boq_id=boq_id,
-                project_name=project.project_name if project else "project",
+                project_name=cached_project_name,
                 estimator_id=estimator_id,
                 estimator_name=estimator_name,
                 client_name=client_name
             )
+            notification_sent = True
         except Exception as notif_error:
-            log.error(f"Failed to send client approval notification: {notif_error}")
+            log.error(f"[confirm_client_approval] Failed to send notification: {notif_error}")
             import traceback
             log.error(traceback.format_exc())
+
+            # Fallback: create notification directly in DB
+            if not notification_sent:
+                try:
+                    from utils.notification_utils import NotificationManager
+                    from socketio_server import send_notification_to_user
+                    from models.role import Role as RoleModel
+                    td_role = RoleModel.query.filter(RoleModel.role.ilike('%technical%director%')).first()
+                    if td_role:
+                        td_users = User.query.filter_by(role_id=td_role.role_id, is_active=True, is_deleted=False).all()
+                        for td in td_users:
+                            fallback_notif = NotificationManager.create_notification(
+                                user_id=td.user_id,
+                                type='success',
+                                title='Client Approved BOQ',
+                                message=f'BOQ for {cached_project_name} has been approved. Confirmed by {estimator_name}',
+                                priority='high',
+                                category='boq',
+                                action_label='View BOQ',
+                                metadata={'boq_id': boq_id, 'client_confirmed': True},
+                                sender_id=estimator_id,
+                                sender_name=estimator_name
+                            )
+                            send_notification_to_user(td.user_id, fallback_notif.to_dict())
+                            notification_sent = True
+                except Exception as fallback_err:
+                    log.error(f"[confirm_client_approval] Fallback also failed: {fallback_err}")
+
+        # Send email to offline TDs only — reuse the same role/user query from the fallback block above
+        try:
+            from models.role import Role as RoleModel
+            boq_email_service = BOQEmailService()
+            # Reuse td_role and td_users if already fetched; otherwise fetch now
+            if 'td_role' not in dir() or td_role is None:
+                td_role = RoleModel.query.filter(RoleModel.role.ilike('%technical%director%')).first()
+            td_role_obj = td_role
+            if td_role_obj:
+                if 'td_users' not in dir() or td_users is None:
+                    td_users = User.query.filter_by(role_id=td_role_obj.role_id, is_active=True, is_deleted=False).all()
+                for td in td_users:
+                    td_status = str(td.user_status).lower().strip() if td.user_status else "unknown"
+                    if td_status == "offline":
+                        email_sent = boq_email_service.send_client_confirmed_to_td(
+                            boq_id=boq_id,
+                            boq_name=boq.boq_name,
+                            project_name=cached_project_name,
+                            estimator_name=estimator_name,
+                            client_name=client_name,
+                            td_email=td.email,
+                            td_name=td.full_name
+                        )
+                    else:
+                        log.info(f"[confirm_client_approval] TD {td.user_id} is ONLINE - Email skipped")
+        except Exception as email_err:
+            log.error(f"[confirm_client_approval] Failed to send email to TD: {email_err}")
 
         return jsonify({
             "success": True,
             "message": "Client approval confirmed successfully",
             "boq_id": boq_id,
-            "status": boq.status,
+            "status": "Client_Confirmed",
             "client_status": True,
-            "action_appended": True
+            "action_appended": True,
+            "notification_sent": notification_sent
         }), 200
 
     except Exception as e:
@@ -167,7 +228,7 @@ def reject_client_approval(boq_id):
                 "error": f"BOQ must be in 'Sent_for_Confirmation' status. Current status: {boq.status}"
             }), 400
 
-        # Update status to Client_Rejected
+        # Update status to client_rejected (lowercase for frontend consistency)
         boq.status = "Client_Rejected"
         boq.client_status = False
         boq.client_rejection_reason = rejection_reason  # Store rejection reason in client_rejection_reason
@@ -180,6 +241,8 @@ def reject_client_approval(boq_id):
             boq.last_modified_by = current_user.get('email', 'Unknown')
 
         project = boq.project
+        # Cache fields BEFORE commit to avoid SQLAlchemy lazy-loading issues
+        cached_project_name = project.project_name if project else "project"
 
         db.session.commit()
 
@@ -188,13 +251,13 @@ def reject_client_approval(boq_id):
             from utils.comprehensive_notification_service import ComprehensiveNotificationService
             ComprehensiveNotificationService.notify_client_rejected(
                 boq_id=boq_id,
-                project_name=project.project_name if project else "project",
+                project_name=cached_project_name,
                 estimator_id=estimator_id,
                 estimator_name=estimator_name,
                 rejection_reason=rejection_reason
             )
         except Exception as notif_error:
-            log.error(f"Failed to send client rejection notification: {notif_error}")
+            log.error(f"[reject_client_approval] Failed to send notification: {notif_error}")
             import traceback
             log.error(traceback.format_exc())
 
@@ -202,7 +265,7 @@ def reject_client_approval(boq_id):
             "success": True,
             "message": "Client rejection recorded successfully",
             "boq_id": boq_id,
-            "status": boq.status,
+            "status": "Client_Rejected",
             "client_status": False,
             "rejection_reason": rejection_reason
         }), 200
@@ -270,7 +333,6 @@ def cancel_boq(boq_id):
                         sender_name=estimator_name
                     )
                     send_notification_to_user(td_user.user_id, notification.to_dict())
-                    log.info(f"Sent BOQ cancellation notification to TD {td_user.user_id}")
         except Exception as notif_error:
             log.error(f"Failed to send BOQ cancellation notification: {notif_error}")
 
@@ -368,22 +430,29 @@ def get_boq_details_history(boq_id):
             except Exception as e:
                 log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
 
-            # Fetch sub_item images from database
+            # Batch-fetch sub_item images (single query for all sub_items)
             try:
                 items = enriched.get('items', [])
-                for item in items:
-                    if item.get('sub_items'):
-                        for sub_item in item['sub_items']:
-                            sub_item_id = sub_item.get('sub_item_id')
-                            if sub_item_id:
-                                # Fetch image from master_sub_items table
-                                master_sub_item = MasterSubItem.query.filter_by(
-                                    sub_item_id=sub_item_id,
-                                    is_deleted=False
-                                ).first()
-
-                                if master_sub_item and master_sub_item.sub_item_image:
-                                    sub_item['sub_item_image'] = master_sub_item.sub_item_image
+                _all_sids = [
+                    sub_item.get('sub_item_id')
+                    for item in items if item.get('sub_items')
+                    for sub_item in item['sub_items']
+                    if sub_item.get('sub_item_id')
+                ]
+                if _all_sids:
+                    _sid_map = {
+                        row.sub_item_id: row for row in MasterSubItem.query.filter(
+                            MasterSubItem.sub_item_id.in_(_all_sids),
+                            MasterSubItem.is_deleted == False
+                        ).all()
+                    }
+                    for item in items:
+                        for sub_item in item.get('sub_items', []):
+                            sid = sub_item.get('sub_item_id')
+                            if sid:
+                                db_row = _sid_map.get(sid)
+                                if db_row and db_row.sub_item_image:
+                                    sub_item['sub_item_image'] = db_row.sub_item_image
             except Exception as e:
                 log.error(f"Error fetching images for BOQ {boq_id}: {str(e)}")
 
@@ -513,31 +582,35 @@ def send_boq_to_project_manager():
         items_summary['items'] = items
 
         # Initialize email service
-        # boq_email_service = BOQEmailService()
+        boq_email_service = BOQEmailService()
 
-        # Prepare projects data for PM assignment notification
-        projects_data = [{
-            'project_id': project.project_id,
-            'project_name': project.project_name,
-            'boq_id': boq.boq_id,
-            'boq_name': boq.boq_name,
-            'client': project.client if hasattr(project, 'client') else 'N/A',
-            'location': project.location if hasattr(project, 'location') else 'N/A',
-            'total_cost': items_summary.get('total_cost', 0),
-            'status': boq.status
-        }]
+        # Send email only when PM is offline (case-insensitive, handles None)
+        pm_status = (pm.user_status or "").lower().strip()
+        email_sent = False
+        log.info(f"📧 PM {pm.full_name} user_status={repr(pm.user_status)} → normalized='{pm_status}'")
 
-        # Send email to the SPECIFIC Project Manager using existing method
-        # email_sent = boq_email_service.send_pm_assignment_notification(
-        #     pm.email, pm.full_name, current_user_name, projects_data
-        # )
+        if pm_status == "offline":
+            email_sent = boq_email_service.send_boq_approval_to_pm(
+                boq_data=boq_data,
+                project_data=project_data,
+                items_summary=items_summary,
+                pm_email=pm.email,
+                comments=None,
+                estimator_name=current_user_name,
+                pm_name=pm.full_name
+            )
+            if email_sent:
+                log.info(f"✅ BOQ approval email sent to offline PM {pm.full_name} ({pm.email})")
+            else:
+                log.error(f"❌ Failed to send BOQ approval email to PM {pm.full_name} ({pm.email})")
+        else:
+            log.info(f"⏭️  PM {pm.full_name} is '{pm.user_status}' - skipping email, in-app notification only")
 
-        # if email_sent:
-            # Update BOQ status to indicate it's sent to PM for approval (NOT assignment)
+        # Update BOQ status
         boq.status = 'Pending_PM_Approval'
         boq.last_modified_by = current_user_name
         boq.last_modified_at = datetime.utcnow()
-        boq.email_sent = True
+        boq.email_sent = email_sent
         boq.last_pm_user_id = pm_id  # Store which PM this BOQ was sent to
 
         # NOTE: PM is NOT assigned to project here - only after client approval and TD assignment
@@ -757,25 +830,36 @@ def send_boq_to_technical_director():
         # Initialize email service
         boq_email_service = BOQEmailService()
 
-        # Prepare projects data for TD notification
-        projects_data = [{
-            'project_id': project.project_id,
-            'project_name': project.project_name,
-            'boq_id': boq.boq_id,
-            'boq_name': boq.boq_name,
-            'client': project.client if hasattr(project, 'client') else 'N/A',
-            'location': project.location if hasattr(project, 'location') else 'N/A',
-            'total_cost': items_summary.get('total_cost', 0),
-            'status': 'Pending TD Approval'
-        }]
+        # Add project_code to project_data
+        project_data['project_code'] = getattr(project, 'project_code', 'N/A')
 
-        # Send email to Technical Director
-        # ✅ PERFORMANCE FIX: Use async email sending (15s → 0.1s response time)
-        email_sent = boq_email_service.send_pm_assignment_notification_async(
-            td.email, td.full_name, current_user_name, projects_data
-        )
+        # Send email to TD ONLY if they are OFFLINE
+        # If online, they will receive in-app notification only
+        email_sent = False
 
-        if email_sent:
+        # Normalize status to lowercase for comparison
+        td_status = str(td.user_status).lower().strip() if td.user_status else "unknown"
+
+        if td_status == "offline":
+            # Send professional BOQ submission email to TD (similar to estimator → PM)
+            email_sent = boq_email_service.send_boq_approval_to_pm(
+                boq_data=boq_data,
+                project_data=project_data,
+                items_summary=items_summary,
+                pm_email=td.email,
+                comments=None,
+                estimator_name=current_user_name,
+                pm_name=td.full_name
+            )
+
+            if email_sent:
+                log.info(f"📧 ✅ SUCCESS: BOQ submission email sent to TD {td.email}")
+            else:
+                log.error(f"📧 ❌ FAILED: Could not send email to TD {td.email}")
+        else:
+            log.info(f"📧 ⏭️  TD is ONLINE (status='{td_status}') - Email skipped, in-app notification will be sent")
+
+        if email_sent or td_status != "offline":
             # Update BOQ status to Pending_TD_Approval
             boq.status = 'Pending_TD_Approval'
             boq.last_modified_by = current_user_name
@@ -871,11 +955,6 @@ def send_boq_to_technical_director():
 
             # Send notification to TD about BOQ requiring final approval
             try:
-                log.info(f"=== SENDING NOTIFICATION TO TD ===")
-                log.info(f"BOQ ID: {boq_id}, Project: {project.project_name}")
-                log.info(f"From Estimator: {current_user_name} (ID: {current_user_id})")
-                log.info(f"To TD: {td.full_name} (ID: {td.user_id})")
-
                 notification_service.notify_boq_sent_to_td(
                     boq_id=boq_id,
                     project_name=project.project_name,
@@ -883,7 +962,6 @@ def send_boq_to_technical_director():
                     estimator_name=current_user_name,
                     td_user_id=td.user_id
                 )
-                log.info(f"=== NOTIFICATION SENT SUCCESSFULLY ===")
             except Exception as notif_error:
                 log.error(f"=== NOTIFICATION FAILED ===")
                 log.error(f"Failed to send BOQ to TD notification: {notif_error}")

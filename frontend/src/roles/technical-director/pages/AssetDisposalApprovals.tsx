@@ -14,7 +14,9 @@ import {
   XCircle,
   Clock,
   Image as ImageIcon,
-  Wrench
+  Wrench,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import {
   getAssetDisposalRequests,
@@ -25,6 +27,7 @@ import {
 } from '@/roles/production-manager/services/assetDnService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { PAGINATION } from '@/lib/constants';
 
 interface AssetDisposal {
   disposal_id: number;
@@ -67,6 +70,7 @@ const AssetDisposalApprovals: React.FC = () => {
   const [reviewNotes, setReviewNotes] = useState('');
   const [rejectAction, setRejectAction] = useState<'return_to_stock' | 'send_to_repair' | null>(null);
   const [saving, setSaving] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     fetchDisposalRequests();
@@ -128,6 +132,19 @@ const AssetDisposalApprovals: React.FC = () => {
 
     return filtered;
   }, [searchTerm, statusFilter, disposalRequests]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, searchTerm]);
+
+  // Pagination calculations
+  const totalRecords = filteredRequests.length;
+  const totalPages = Math.ceil(totalRecords / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedRequests = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredRequests.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredRequests, currentPage]);
 
   const handleViewDetails = async (disposal: AssetDisposal) => {
     try {
@@ -442,8 +459,8 @@ const AssetDisposalApprovals: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
-                {filteredRequests.length > 0 ? (
-                  filteredRequests.map((request) => (
+                {paginatedRequests.length > 0 ? (
+                  paginatedRequests.map((request) => (
                     <tr key={request.disposal_id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
                         <div>
@@ -523,10 +540,57 @@ const AssetDisposalApprovals: React.FC = () => {
           </div>
         </div>
 
-        {/* Results count */}
-        {filteredRequests.length > 0 && (
-          <div className="mt-6 text-sm text-gray-600 text-center">
-            Showing {filteredRequests.length} of {disposalRequests.length} asset disposal requests
+        {/* Pagination */}
+        {totalRecords > 0 && (
+          <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-sm text-gray-600">
+              Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} to {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)} of {totalRecords} asset disposal requests
+            </p>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                  if (
+                    page === 1 ||
+                    page === totalPages ||
+                    (page >= currentPage - 1 && page <= currentPage + 1)
+                  ) {
+                    return (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          currentPage === page
+                            ? 'bg-red-600 text-white'
+                            : 'border border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    );
+                  } else if (
+                    page === currentPage - 2 ||
+                    page === currentPage + 2
+                  ) {
+                    return <span key={page} className="px-1">...</span>;
+                  }
+                  return null;
+                })}
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -556,12 +620,11 @@ const AssetDisposalApprovals: React.FC = () => {
               <div className="space-y-6">
                 {/* Status Banner */}
                 {selectedDisposal.status === 'pending_review' && (
-                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                    <div className="flex items-start gap-3">
-                      <AlertTriangle className="w-6 h-6 text-orange-600 mt-0.5 flex-shrink-0" />
+                  <div className="border-l-4 border-amber-500 bg-amber-50 px-4 py-3 rounded-r">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                       <div>
-                        <h3 className="font-semibold text-orange-900">Pending Your Review</h3>
-                        <p className="text-sm text-orange-700 mt-1">
+                        <p className="text-sm text-amber-800">
                           This asset disposal request requires your approval before the asset quantity can be reduced from inventory.
                         </p>
                       </div>
@@ -569,131 +632,132 @@ const AssetDisposalApprovals: React.FC = () => {
                   </div>
                 )}
 
-                {/* Asset Details */}
-                <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <Package className="w-5 h-5 text-blue-600" />
-                    Asset Information
-                  </h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">Asset Category</p>
-                      <p className="text-base font-semibold text-gray-900 mt-1">
-                        {selectedDisposal.category_name || 'N/A'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">Category Code</p>
-                      <p className="text-base font-mono text-gray-900 mt-1">
-                        {selectedDisposal.category_code || 'N/A'}
-                      </p>
-                    </div>
-                    {selectedDisposal.item_name && (
+                {/* Combined Details Container */}
+                <div className="border border-gray-200 rounded-lg divide-y divide-gray-200">
+                  {/* Asset Information */}
+                  <div className="p-6">
+                    <h3 className="text-sm font-medium text-gray-900 mb-4">
+                      Asset Information
+                    </h3>
+                    <div className="grid grid-cols-3 gap-4">
                       <div>
-                        <p className="text-sm font-medium text-gray-600">Item Name</p>
-                        <p className="text-base text-gray-900 mt-1">
-                          {selectedDisposal.item_name}
+                        <p className="text-sm font-medium text-gray-600">Asset Category</p>
+                        <p className="text-base font-semibold text-gray-900 mt-1">
+                          {selectedDisposal.category_name || 'N/A'}
                         </p>
                       </div>
-                    )}
-                    {selectedDisposal.serial_number && (
                       <div>
-                        <p className="text-sm font-medium text-gray-600">Serial Number</p>
+                        <p className="text-sm font-medium text-gray-600">Category Code</p>
                         <p className="text-base font-mono text-gray-900 mt-1">
-                          {selectedDisposal.serial_number}
+                          {selectedDisposal.category_code || 'N/A'}
                         </p>
+                      </div>
+                      {selectedDisposal.item_name && (
+                        <div>
+                          <p className="text-sm font-medium text-gray-600">Item Name</p>
+                          <p className="text-base text-gray-900 mt-1">
+                            {selectedDisposal.item_name}
+                          </p>
+                        </div>
+                      )}
+                      {selectedDisposal.serial_number && (
+                        <div>
+                          <p className="text-sm font-medium text-gray-600">Serial Number</p>
+                          <p className="text-base font-mono text-gray-900 mt-1">
+                            {selectedDisposal.serial_number}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Disposal Request Details */}
+                  <div className="p-6">
+                    <h3 className="text-sm font-medium text-gray-900 mb-4">
+                      Disposal Request Details
+                    </h3>
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Quantity to Dispose</p>
+                        <p className="text-xl font-bold text-gray-900 mt-1">
+                          {selectedDisposal.quantity}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Estimated Value</p>
+                        <p className="text-xl font-bold text-gray-900 mt-1">
+                          AED {selectedDisposal.estimated_value?.toLocaleString() || '0'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Source</p>
+                        <p className="text-base text-gray-900 mt-1">
+                          {getSourceLabel(selectedDisposal.source_type)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Disposal Reason</p>
+                        <p className="text-base text-gray-900 mt-1">
+                          {getDisposalReasonLabel(selectedDisposal.disposal_reason)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Justification */}
+                    {selectedDisposal.justification && (
+                      <div className="pt-4 border-t border-gray-200">
+                        <p className="text-sm font-medium text-gray-600 mb-2">Justification</p>
+                        <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                          <p className="text-sm text-gray-900 whitespace-pre-wrap">
+                            {selectedDisposal.justification}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Disposal Image */}
+                    {selectedDisposal.image_url && (
+                      <div className="pt-4 border-t border-gray-200">
+                        <p className="text-sm font-medium text-gray-600 mb-2">Disposal Evidence Image</p>
+                        <div className="bg-gray-50 rounded-lg p-2 border border-gray-200">
+                          <img
+                            src={selectedDisposal.image_url}
+                            alt="Disposal evidence"
+                            className="max-h-48 w-auto mx-auto rounded-lg cursor-pointer hover:opacity-80 transition-opacity"
+                            onClick={() => setShowImageModal(true)}
+                          />
+                          <p className="text-xs text-center text-gray-500 mt-2">
+                            Click to view full size
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>
-                </div>
 
-                {/* Disposal Request Details */}
-                <div className="bg-red-50 rounded-lg p-6 border border-red-200">
-                  <h3 className="text-lg font-semibold text-red-900 mb-4 flex items-center gap-2">
-                    <Trash2 className="w-5 h-5 text-red-600" />
-                    Disposal Request Details
-                  </h3>
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                      <p className="text-sm font-medium text-red-700">Quantity to Dispose</p>
-                      <p className="text-xl font-bold text-red-900 mt-1">
-                        {selectedDisposal.quantity}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-red-700">Estimated Value</p>
-                      <p className="text-xl font-bold text-red-900 mt-1">
-                        AED {selectedDisposal.estimated_value?.toLocaleString() || '0'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-red-700">Source</p>
-                      <p className="text-base text-red-900 mt-1">
-                        {getSourceLabel(selectedDisposal.source_type)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-red-700">Disposal Reason</p>
-                      <p className="text-base text-red-900 mt-1">
-                        {getDisposalReasonLabel(selectedDisposal.disposal_reason)}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Justification */}
-                  {selectedDisposal.justification && (
-                    <div className="pt-4 border-t border-red-200">
-                      <p className="text-sm font-medium text-red-700 mb-2">Justification</p>
-                      <div className="bg-white rounded-lg p-4 border border-red-200">
-                        <p className="text-sm text-gray-900 whitespace-pre-wrap">
-                          {selectedDisposal.justification}
-                        </p>
+                  {/* Request Information */}
+                  <div className="p-4">
+                    <h3 className="text-sm font-medium text-gray-900 mb-3">Request Information</h3>
+                    <div className="grid grid-cols-3 gap-3 text-sm">
+                      <div>
+                        <span className="text-gray-600">Requested By:</span>
+                        <span className="ml-2 font-medium text-gray-900">{selectedDisposal.requested_by || 'Unknown'}</span>
                       </div>
-                    </div>
-                  )}
-
-                  {/* Disposal Image */}
-                  {selectedDisposal.image_url && (
-                    <div className="pt-4 border-t border-red-200">
-                      <p className="text-sm font-medium text-red-700 mb-2">Disposal Evidence Image</p>
-                      <div className="bg-white rounded-lg p-2 border border-red-200">
-                        <img
-                          src={selectedDisposal.image_url}
-                          alt="Disposal evidence"
-                          className="max-h-48 w-auto mx-auto rounded-lg cursor-pointer hover:opacity-80 transition-opacity"
-                          onClick={() => setShowImageModal(true)}
-                        />
-                        <p className="text-xs text-center text-gray-500 mt-2">
-                          Click to view full size
-                        </p>
+                      <div>
+                        <span className="text-gray-600">Request Date:</span>
+                        <span className="ml-2 font-medium text-gray-900">
+                          {selectedDisposal.requested_at ? new Date(selectedDisposal.requested_at).toLocaleString() : 'N/A'}
+                        </span>
                       </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Requester Information */}
-                <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                  <h3 className="text-sm font-semibold text-blue-900 mb-2">Request Information</h3>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <span className="text-blue-700">Requested By:</span>
-                      <span className="ml-2 font-medium text-blue-900">{selectedDisposal.requested_by || 'Unknown'}</span>
-                    </div>
-                    <div>
-                      <span className="text-blue-700">Request Date:</span>
-                      <span className="ml-2 font-medium text-blue-900">
-                        {selectedDisposal.requested_at ? new Date(selectedDisposal.requested_at).toLocaleString() : 'N/A'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-blue-700">Reference:</span>
-                      <span className="ml-2 font-mono text-blue-900">
-                        ADISP-{selectedDisposal.disposal_id}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-blue-700">Status:</span>
-                      <span className="ml-2">{getStatusBadge(selectedDisposal.status)}</span>
+                      <div>
+                        <span className="text-gray-600">Reference:</span>
+                        <span className="ml-2 font-mono text-gray-900">
+                          ADISP-{selectedDisposal.disposal_id}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Status:</span>
+                        <span className="ml-2">{getStatusBadge(selectedDisposal.status)}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -816,9 +880,9 @@ const AssetDisposalApprovals: React.FC = () => {
 
                 {/* Show review details if already reviewed */}
                 {selectedDisposal.status !== 'pending_review' && selectedDisposal.reviewed_by && (
-                  <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                    <h3 className="text-sm font-semibold text-gray-900 mb-2">Review Details</h3>
-                    <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <h3 className="text-sm font-medium text-gray-900 mb-3">Review Details</h3>
+                    <div className="space-y-2 text-sm">
                       <div>
                         <span className="text-gray-600">Reviewed By:</span>
                         <span className="ml-2 font-medium text-gray-900">{selectedDisposal.reviewed_by}</span>
@@ -830,7 +894,7 @@ const AssetDisposalApprovals: React.FC = () => {
                         </span>
                       </div>
                       {selectedDisposal.review_notes && (
-                        <div className="col-span-2">
+                        <div>
                           <span className="text-gray-600">Review Notes:</span>
                           <p className="mt-1 text-gray-900">{selectedDisposal.review_notes}</p>
                         </div>

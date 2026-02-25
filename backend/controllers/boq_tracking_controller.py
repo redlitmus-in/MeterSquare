@@ -8,6 +8,7 @@ from decimal import Decimal
 import json
 from models.change_request import ChangeRequest
 from models.lpo_customization import LPOCustomization
+from utils.get_actual_transport_fee import get_actual_transport_for_project
 
 log = get_logger()
 
@@ -55,11 +56,75 @@ def get_boq_planned_vs_actual(boq_id):
         preliminary_transport_amount = Decimal(str(preliminary_cost_details.get('transport_amount', 0) or 0))
         preliminary_planned_profit = Decimal(str(preliminary_cost_details.get('planned_profit', 0) or 0))
 
+        # If internal_cost is not provided, calculate it by excluding O&P from the amount
+        # Internal Cost = Amount - O&P (since Amount includes O&P)
+        if preliminary_internal_cost == 0 and preliminary_amount > 0:
+            # If overhead_profit_amount is provided, use it
+            if preliminary_overhead_profit_amount > 0:
+                preliminary_internal_cost = preliminary_amount - preliminary_overhead_profit_amount
+            else:
+                # Otherwise, assume Amount includes misc, transport, and O&P, so internal cost is the base
+                # Internal Cost = Amount / (1 + misc% + overhead_profit% + transport%)
+                # For simplicity, if no breakdown is provided, use Amount as-is (will be corrected in future updates)
+                preliminary_internal_cost = preliminary_amount
+
         # Fetch ALL change requests (regardless of status) to show in comparison
         change_requests = ChangeRequest.query.filter_by(
             boq_id=boq_id,
             is_deleted=False
         ).all()
+
+        # Load POChildren for all CRs to get actual vendor purchase prices
+        # When buyer selects a vendor and sets prices, the amounts go into POChild.materials_data
+        # The parent CR's materials_data may still have 0 prices
+        from models.po_child import POChild
+        cr_ids_all = [cr.cr_id for cr in change_requests]
+        po_children_all = []
+        if cr_ids_all:
+            po_children_all = POChild.query.filter(
+                POChild.parent_cr_id.in_(cr_ids_all),
+                POChild.is_deleted == False
+            ).all()
+
+        # Build a map: cr_id -> list of (material_name_lower, unit_price, total_price)
+        # from POChild materials_data so we can look up actual purchase prices per material
+        po_child_prices_by_cr = {}  # {cr_id: {mat_name_lower: {'unit_price': x, 'total_price': y}}}
+        for poc in po_children_all:
+            cr_id = poc.parent_cr_id
+            if cr_id not in po_child_prices_by_cr:
+                po_child_prices_by_cr[cr_id] = {}
+            mats = poc.materials_data or []
+            if isinstance(mats, str):
+                import json as _j
+                try:
+                    mats = _j.loads(mats)
+                except Exception:
+                    mats = []
+            for m in mats:
+                m_name = (m.get('material_name') or m.get('sub_item_name') or '').lower().strip()
+                neg_price = m.get('negotiated_price') or m.get('unit_price') or 0
+                qty = float(m.get('quantity', 0) or 0)
+                unit_price = float(neg_price or 0)
+                total_price = float(m.get('total_price', 0) or unit_price * qty)
+                if m_name and (unit_price > 0 or total_price > 0):
+                    # Keep the highest total_price across all POChildren for this material
+                    existing = po_child_prices_by_cr[cr_id].get(m_name, {})
+                    if total_price > existing.get('total_price', 0):
+                        po_child_prices_by_cr[cr_id][m_name] = {
+                            'unit_price': unit_price,
+                            'quantity': qty,
+                            'total_price': total_price,
+                        }
+
+        # Fetch VAT percent from LPOCustomization for each CR (for profit comparison display)
+        lpo_vat_lookup = {}  # {cr_id: vat_percent}
+        if cr_ids_all:
+            lpo_customs = LPOCustomization.query.filter(
+                LPOCustomization.cr_id.in_(cr_ids_all),
+                LPOCustomization.po_child_id == None  # Parent CR VAT only
+            ).all()
+            for lpo in lpo_customs:
+                lpo_vat_lookup[lpo.cr_id] = float(lpo.vat_percent or 5.0)
 
         # Merge CR materials into BOQ data as sub-items
         # IMPORTANT: Only add truly NEW materials, not updates to existing materials
@@ -172,10 +237,296 @@ def get_boq_planned_vs_actual(boq_id):
             MaterialPurchaseTracking.purchase_tracking_id == latest_tracking_subquery.c.latest_id
         ).all()
 
-        # Get actual labour tracking from LabourTracking
-        actual_labour = LabourTracking.query.filter_by(
-            boq_id=boq_id, is_deleted=False
+        # Get actual labour tracking from DailyAttendance (new workflow)
+        # Import required models
+        from models.labour_requisition import LabourRequisition
+        from models.worker_assignment import WorkerAssignment
+        from models.daily_attendance import DailyAttendance
+        from models.worker import Worker
+        from sqlalchemy.orm import selectinload
+        from sqlalchemy import func
+        from collections import defaultdict
+
+        # Get all labour requisitions for this BOQ
+        # Note: Cannot use selectinload on 'assignments' because it's lazy='dynamic'
+        # IMPORTANT: boq_id can be in the deprecated boq_id column OR in labour_items JSONB array
+        from sqlalchemy import or_, cast, Integer
+        from sqlalchemy.dialects.postgresql import JSONB
+        import re
+
+        # First, try the straightforward queries (deprecated boq_id or explicit boq_id in JSONB)
+        requisitions = LabourRequisition.query.filter(
+            or_(
+                # Check deprecated boq_id column
+                LabourRequisition.boq_id == boq_id,
+                # Check labour_items JSONB array for boq_id
+                LabourRequisition.labour_items.op('@>')(
+                    cast([{"boq_id": boq_id}], JSONB)
+                )
+            ),
+            LabourRequisition.is_deleted == False
         ).all()
+
+        # If no requisitions found, check labour_id pattern: lab_{boq_id}_...
+        if not requisitions:
+            all_requisitions = LabourRequisition.query.filter(
+                LabourRequisition.is_deleted == False,
+                LabourRequisition.labour_items.isnot(None)
+            ).all()
+
+            # Filter requisitions that have labour_id matching pattern lab_{boq_id}_
+            matching_requisitions = []
+            for req in all_requisitions:
+                if req.labour_items:
+                    for item in req.labour_items:
+                        labour_id = item.get('labour_id', '')
+                        # Pattern: lab_{boq_id}_... (e.g., lab_843_1_2_1)
+                        match = re.match(r'^lab_(\d+)_', labour_id)
+                        if match and int(match.group(1)) == boq_id:
+                            matching_requisitions.append(req)
+                            break
+
+            requisitions = matching_requisitions
+
+        # Aggregate actual labour by labour_role (skill_required)
+        # Group attendance records by labour role
+        labour_aggregates = defaultdict(lambda: {
+            'total_hours': Decimal('0'),
+            'total_cost': Decimal('0'),
+            'work_entries': [],
+            'labour_role': None,
+            'master_labour_id': None
+        })
+
+        # Preload all assignments and attendance for efficiency
+        # Note: WorkerAssignment.attendance_records is lazy='dynamic', so we can't eager load it
+        if requisitions:
+            req_ids = [r.requisition_id for r in requisitions]
+
+            # Query assignments separately (without attendance eager loading)
+            assignments_with_data = WorkerAssignment.query.options(
+                selectinload(WorkerAssignment.worker)
+            ).filter(
+                WorkerAssignment.requisition_id.in_(req_ids),
+                WorkerAssignment.is_deleted == False
+            ).all()
+
+            # Query attendance records separately
+            from models.daily_attendance import DailyAttendance
+            from models.worker import Worker
+            assignment_ids = [a.assignment_id for a in assignments_with_data]
+
+            # IMPORTANT: Attendance can be linked via assignment_id OR requisition_id
+            # Some attendance records have assignment_id=NULL but requisition_id set
+            attendance_records_all = []
+
+            # First, try to get attendance by assignment_id
+            if assignment_ids:
+                attendance_by_assignment_id = DailyAttendance.query.filter(
+                    DailyAttendance.assignment_id.in_(assignment_ids),
+                    DailyAttendance.is_deleted == False,
+                    DailyAttendance.approval_status == 'locked'
+                ).all()
+                attendance_records_all.extend(attendance_by_assignment_id)
+
+            # Also get attendance directly by requisition_id (for records where assignment_id is NULL)
+            attendance_by_req_id = DailyAttendance.query.filter(
+                DailyAttendance.requisition_id.in_(req_ids),
+                DailyAttendance.is_deleted == False,
+                DailyAttendance.approval_status == 'locked'
+            ).all()
+
+            # Add only records not already included (avoid duplicates)
+            existing_att_ids = {att.attendance_id for att in attendance_records_all}
+            for att in attendance_by_req_id:
+                if att.attendance_id not in existing_att_ids:
+                    attendance_records_all.append(att)
+
+            # Batch pre-fetch all Workers needed by attendance records (eliminates N+1 in loop below)
+            _att_worker_ids = list({att.worker_id for att in attendance_records_all if att.worker_id})
+            batch_attendance_workers = {
+                w.worker_id: w
+                for w in Worker.query.filter(Worker.worker_id.in_(_att_worker_ids)).all()
+            } if _att_worker_ids else {}
+
+            # Group attendance by assignment_id (for records with assignment_id)
+            attendance_by_assignment = defaultdict(list)
+            # Also group by requisition_id (for records without assignment_id)
+            attendance_by_requisition = defaultdict(list)
+
+            for att in attendance_records_all:
+                if att.assignment_id:
+                    attendance_by_assignment[att.assignment_id].append(att)
+                if att.requisition_id:
+                    attendance_by_requisition[att.requisition_id].append(att)
+
+            # Attach attendance to assignments manually
+            for assignment in assignments_with_data:
+                assignment._preloaded_attendance = attendance_by_assignment.get(assignment.assignment_id, [])
+
+            # Group assignments by requisition_id for easy lookup
+            assignments_by_req = defaultdict(list)
+            for assignment in assignments_with_data:
+                assignments_by_req[assignment.requisition_id].append(assignment)
+
+            for req in requisitions:
+                # Process EACH labour_item in the requisition separately
+                # This ensures each labour role gets its own aggregate entry
+                labour_items_to_process = req.labour_items or []
+
+                # If no labour_items, use the requisition's skill_required
+                if not labour_items_to_process and req.skill_required:
+                    labour_items_to_process = [{
+                        'skill_required': req.skill_required,
+                        'master_labour_id': None
+                    }]
+
+                for labour_item in labour_items_to_process:
+                    labour_role = labour_item.get('skill_required') or labour_item.get('labour_role')
+                    master_labour_id = labour_item.get('master_labour_id')
+
+                    if not labour_role:
+                        continue
+
+                    # Initialize this labour_role in aggregates
+                    labour_aggregates[labour_role]['labour_role'] = labour_role
+                    labour_aggregates[labour_role]['master_labour_id'] = master_labour_id
+
+                # Use the primary labour role for this requisition (first item or skill_required)
+                primary_labour_role = None
+                if labour_items_to_process:
+                    primary_labour_role = labour_items_to_process[0].get('skill_required') or labour_items_to_process[0].get('labour_role')
+                if not primary_labour_role:
+                    primary_labour_role = req.skill_required
+
+                # CHANGED: Get attendance records DIRECTLY by requisition_id
+                # This handles the case where attendance has requisition_id but no assignment_id
+                req_attendance_records = attendance_by_requisition.get(req.requisition_id, [])
+
+                # Build a lookup of labour roles from labour_items (case-insensitive)
+                labour_role_lookup = {}
+                for labour_item in labour_items_to_process:
+                    role_name = labour_item.get('skill_required') or labour_item.get('labour_role')
+                    if role_name:
+                        labour_role_lookup[role_name.lower().strip()] = role_name
+
+                # Process each attendance record directly
+                for attendance in req_attendance_records:
+                    # Get worker info (pre-fetched — no DB query)
+                    worker = batch_attendance_workers.get(attendance.worker_id) if attendance.worker_id else None
+
+                    hours = Decimal(str(attendance.total_hours or 0))
+                    cost = Decimal(str(attendance.total_cost or 0))
+                    rate = Decimal(str(attendance.hourly_rate or 0))
+
+                    # Determine the labour role for this attendance record
+                    # Priority: 1) attendance.labour_role (direct), 2) assignment's role_at_site, 3) worker's skills, 4) primary_labour_role
+                    determined_labour_role = None
+
+                    # FIRST: Check if attendance record has labour_role set directly
+                    if hasattr(attendance, 'labour_role') and attendance.labour_role:
+                        # Check if it matches any labour_item (case-insensitive)
+                        role_key = attendance.labour_role.lower().strip()
+                        if role_key in labour_role_lookup:
+                            determined_labour_role = labour_role_lookup[role_key]
+                        else:
+                            determined_labour_role = attendance.labour_role
+
+                    # Try to get role from assignment
+                    if not determined_labour_role and attendance.assignment_id:
+                        assignment = next(
+                            (a for a in assignments_with_data if a.assignment_id == attendance.assignment_id),
+                            None
+                        )
+                        if assignment and assignment.role_at_site:
+                            # Check if role_at_site matches any labour_item
+                            role_key = assignment.role_at_site.lower().strip()
+                            if role_key in labour_role_lookup:
+                                determined_labour_role = labour_role_lookup[role_key]
+                            else:
+                                determined_labour_role = assignment.role_at_site
+
+                    # Try to match worker's skills to labour_items
+                    if not determined_labour_role and worker and worker.skills:
+                        for skill in worker.skills:
+                            skill_key = skill.lower().strip() if isinstance(skill, str) else ''
+                            if skill_key in labour_role_lookup:
+                                determined_labour_role = labour_role_lookup[skill_key]
+                                break
+
+                    # Fallback to primary_labour_role
+                    if not determined_labour_role:
+                        determined_labour_role = primary_labour_role
+
+                    # Add to aggregates using determined_labour_role
+                    if determined_labour_role:
+                        labour_aggregates[determined_labour_role]['total_hours'] += hours
+                        labour_aggregates[determined_labour_role]['total_cost'] += cost
+                        labour_aggregates[determined_labour_role]['labour_role'] = determined_labour_role
+                        labour_aggregates[determined_labour_role]['work_entries'].append({
+                            'work_date': attendance.attendance_date.isoformat() if attendance.attendance_date else None,
+                            'hours': float(hours),
+                            'rate_per_hour': float(rate),
+                            'total_cost': float(cost),
+                            'worker_name': worker.full_name if worker else 'Unknown',
+                            'notes': attendance.entry_notes
+                        })
+
+        # ALSO fetch old labour_tracking data for backward compatibility
+        # Some BOQs may have data in the deprecated labour_tracking table
+        old_labour_tracking = LabourTracking.query.filter_by(
+            boq_id=boq_id,
+            is_deleted=False
+        ).all()
+
+        # Merge old labour_tracking data into labour_aggregates
+        for old_labour in old_labour_tracking:
+            labour_role = old_labour.labour_role
+            hours = Decimal(str(old_labour.total_hours or 0))
+            cost = Decimal(str(old_labour.total_cost or 0))
+
+            # Add to existing aggregate or create new
+            labour_aggregates[labour_role]['total_hours'] += hours
+            labour_aggregates[labour_role]['total_cost'] += cost
+            labour_aggregates[labour_role]['labour_role'] = labour_role
+            labour_aggregates[labour_role]['master_labour_id'] = labour_aggregates[labour_role]['master_labour_id'] or old_labour.master_labour_id
+
+            # Add labour history entries if available
+            if hasattr(old_labour, 'labour_history') and old_labour.labour_history:
+                for entry in old_labour.labour_history:
+                    labour_aggregates[labour_role]['work_entries'].append({
+                        'work_date': entry.get('work_date'),
+                        'hours': entry.get('hours', 0),
+                        'rate_per_hour': entry.get('rate_per_hour', 0),
+                        'total_cost': entry.get('total_cost', 0),
+                        'worker_name': entry.get('worker_name', 'Unknown'),
+                        'notes': entry.get('notes')
+                    })
+
+        # Convert aggregates to LabourTracking-like objects for compatibility
+        # Create a mock object that has the same interface as LabourTracking
+        class ActualLabourData:
+            def __init__(self, labour_role, master_labour_id, master_item_id, total_hours, total_cost, work_entries):
+                self.labour_role = labour_role
+                self.master_labour_id = master_labour_id
+                self.master_item_id = master_item_id
+                self.total_hours_worked = float(total_hours)
+                self.total_cost = float(total_cost)
+                self.labour_history = work_entries
+
+        actual_labour = []
+        for labour_role, data in labour_aggregates.items():
+            # Include all labour roles that have data (even if hours = 0)
+            # This shows the labour roles from requisitions in the actual column
+            if data['labour_role']:  # Only need a valid labour_role
+                actual_labour.append(ActualLabourData(
+                    labour_role=data['labour_role'],
+                    master_labour_id=data['master_labour_id'],
+                    master_item_id=None,  # We don't have item-level granularity from attendance
+                    total_hours=data['total_hours'],
+                    total_cost=data['total_cost'],
+                    work_entries=data['work_entries']
+                ))
 
         # Build comparison
         comparison = {
@@ -223,6 +574,24 @@ def get_boq_planned_vs_actual(boq_id):
                         sub_item_base_total = sub_item_materials_cost + sub_item_labour_cost
 
                 total_items_base_cost += sub_item_base_total
+
+        # Calculate total ACTUAL transport for this project (ONCE for entire BOQ)
+        # This is the REAL transport spending from all delivery/return notes
+        try:
+            total_actual_transport_for_project = get_actual_transport_for_project(boq.project_id)
+            # Ensure it's a Decimal
+            if not isinstance(total_actual_transport_for_project, Decimal):
+                total_actual_transport_for_project = Decimal(str(total_actual_transport_for_project))
+        except Exception as e:
+            log.error(f"Error getting actual transport for project {boq.project_id}: {e}")
+            total_actual_transport_for_project = Decimal('0')
+
+        # Calculate total PLANNED transport across all items for proportional distribution
+        total_planned_transport_for_boq = Decimal('0')
+        for item in boq_data.get('items', []):
+            for sub_item in item.get('sub_items', []):
+                transport_amt = sub_item.get('transport_amount', 0) or 0
+                total_planned_transport_for_boq += Decimal(str(transport_amt))
 
         # Process each item
         for planned_item in boq_data.get('items', []):
@@ -392,10 +761,38 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # If this material has been updated by a CR, use CR data for actual values
                 if cr_update_data:
-                    # Use CR data for actual values
-                    actual_quantity = Decimal(str(cr_update_data.get('quantity', 0)))
-                    actual_avg_unit_price = Decimal(str(cr_update_data.get('unit_price', 0)))
-                    actual_total = Decimal(str(cr_update_data.get('total_price', 0)))
+                    cr_upd_mat_name = (material_name or '').lower().strip()
+                    # Priority 1: POChild prices
+                    po_upd_prices = po_child_prices_by_cr.get(cr_update_id, {}).get(cr_upd_mat_name, {})
+                    # Priority 2: material_vendor_selections.negotiated_price
+                    cr_upd_record = next((cr for cr in change_requests if cr.cr_id == cr_update_id), None)
+                    upd_vendor_price = 0.0
+                    if cr_upd_record:
+                        upd_mvs = cr_upd_record.material_vendor_selections or {}
+                        upd_mvs_entry = upd_mvs.get(material_name) or upd_mvs.get(cr_upd_mat_name)
+                        if not upd_mvs_entry:
+                            for k, v in upd_mvs.items():
+                                if k.lower().strip() == cr_upd_mat_name:
+                                    upd_mvs_entry = v
+                                    break
+                        if upd_mvs_entry:
+                            upd_vendor_price = float(upd_mvs_entry.get('negotiated_price', 0) or 0)
+
+                    if po_upd_prices and po_upd_prices.get('total_price', 0) > 0:
+                        actual_quantity = Decimal(str(po_upd_prices.get('quantity', cr_update_data.get('quantity', 0))))
+                        actual_avg_unit_price = Decimal(str(po_upd_prices['unit_price']))
+                        actual_total = Decimal(str(po_upd_prices['total_price']))
+                    elif upd_vendor_price > 0:
+                        actual_quantity = Decimal(str(cr_update_data.get('quantity', 0)))
+                        actual_avg_unit_price = Decimal(str(upd_vendor_price))
+                        actual_total = actual_quantity * actual_avg_unit_price
+                    else:
+                        # Fallback: use CR materials_data values
+                        actual_quantity = Decimal(str(cr_update_data.get('quantity', 0)))
+                        actual_avg_unit_price = Decimal(str(cr_update_data.get('unit_price', 0)))
+                        actual_total = Decimal(str(cr_update_data.get('total_price', 0)))
+                        if actual_total == 0 and actual_quantity > 0 and actual_avg_unit_price > 0:
+                            actual_total = actual_quantity * actual_avg_unit_price
 
                     # Add purchase history from CR
                     purchase_history.append({
@@ -739,10 +1136,50 @@ def get_boq_planned_vs_actual(boq_id):
                 planned_unit_price = Decimal('0')
                 planned_total = Decimal('0')
 
-                # Actual values from CR
-                actual_quantity = Decimal(str(cr_mat_data.get('quantity', 0)))
-                actual_avg_unit_price = Decimal(str(cr_mat_data.get('unit_price', 0)))
-                actual_total = Decimal(str(cr_mat_data.get('total_price', 0)))
+                # Actual values: look up from multiple sources in priority order:
+                # 1. POChild.materials_data (vendor's actual purchase price)
+                # 2. CR.material_vendor_selections[material_name].negotiated_price
+                # 3. CR materials_data unit_price/total_price (may be 0 if estimator didn't set price)
+                mat_name_lower = (material_name or '').lower().strip()
+
+                # Priority 1: POChild prices
+                po_prices = po_child_prices_by_cr.get(cr_id, {}).get(mat_name_lower, {})
+
+                # Priority 2: CR.material_vendor_selections - this stores negotiated_price per material
+                cr_record = next((cr for cr in change_requests if cr.cr_id == cr_id), None)
+                vendor_selection_price = 0.0
+                vendor_name_label = f"Change Request #{cr_id}"
+                if cr_record:
+                    mvs = cr_record.material_vendor_selections or {}
+                    # Try exact material name key first, then case-insensitive match
+                    mvs_entry = mvs.get(material_name) or mvs.get(mat_name_lower)
+                    if not mvs_entry:
+                        # Try case-insensitive match
+                        for k, v in mvs.items():
+                            if k.lower().strip() == mat_name_lower:
+                                mvs_entry = v
+                                break
+                    if mvs_entry:
+                        vendor_selection_price = float(mvs_entry.get('negotiated_price', 0) or 0)
+                        vendor_name_label = mvs_entry.get('vendor_name', vendor_name_label)
+
+                if po_prices and po_prices.get('total_price', 0) > 0:
+                    # Use actual vendor purchase price from POChild
+                    actual_quantity = Decimal(str(po_prices.get('quantity', cr_mat_data.get('quantity', 0))))
+                    actual_avg_unit_price = Decimal(str(po_prices['unit_price']))
+                    actual_total = Decimal(str(po_prices['total_price']))
+                elif vendor_selection_price > 0:
+                    # Use negotiated price from material_vendor_selections
+                    actual_quantity = Decimal(str(cr_mat_data.get('quantity', 0)))
+                    actual_avg_unit_price = Decimal(str(vendor_selection_price))
+                    actual_total = actual_quantity * actual_avg_unit_price
+                else:
+                    # Fallback: use CR materials_data values
+                    actual_quantity = Decimal(str(cr_mat_data.get('quantity', 0)))
+                    actual_avg_unit_price = Decimal(str(cr_mat_data.get('unit_price', 0)))
+                    actual_total = Decimal(str(cr_mat_data.get('total_price', 0)))
+                    if actual_total == 0 and actual_quantity > 0 and actual_avg_unit_price > 0:
+                        actual_total = actual_quantity * actual_avg_unit_price
 
                 # Add to totals
                 actual_materials_total += actual_total
@@ -754,15 +1191,18 @@ def get_boq_planned_vs_actual(boq_id):
                     "unit": cr_mat_data.get('unit'),
                     "unit_price": float(actual_avg_unit_price),
                     "total_price": float(actual_total),
-                    "purchased_by": f"Change Request #{cr_id}"
+                    "purchased_by": vendor_name_label
                 }]
 
-                # Get justification
+                # Get justification (cr_record already fetched above)
                 justification_text = cr_mat_data.get('justification')
-                if not justification_text and cr_id:
-                    cr_record = next((cr for cr in change_requests if cr.cr_id == cr_id), None)
-                    if cr_record:
-                        justification_text = cr_record.justification
+                if not justification_text and cr_record:
+                    justification_text = cr_record.justification
+
+                # Calculate VAT for this CR material (proportional: material_amount × vat_percent / 100)
+                cr_vat_percent = lpo_vat_lookup.get(cr_id, 5.0)
+                vat_amount = round(float(actual_total) * cr_vat_percent / 100, 2)
+                total_with_vat = float(actual_total) + vat_amount
 
                 materials_comparison.append({
                     "material_name": material_name,
@@ -780,6 +1220,8 @@ def get_boq_planned_vs_actual(boq_id):
                         "unit": cr_mat_data.get('unit'),
                         "unit_price": float(actual_avg_unit_price),
                         "total": float(actual_total),
+                        "vat_amount": vat_amount,
+                        "total_with_vat": total_with_vat,
                         "purchase_history": purchase_history
                     },
                     "variance": {
@@ -812,8 +1254,9 @@ def get_boq_planned_vs_actual(boq_id):
 
             for planned_lab in all_labour:
                 master_labour_id = planned_lab.get('master_labour_id')
+                planned_labour_role = planned_lab.get('labour_role', '').lower().strip()
 
-                # Find actual labour tracking for this role - Try exact match first
+                # Find actual labour tracking for this role - Try exact match first by master_labour_id and master_item_id
                 actual_lab = next(
                     (al for al in actual_labour
                      if al.master_labour_id == master_labour_id
@@ -821,11 +1264,19 @@ def get_boq_planned_vs_actual(boq_id):
                     None
                 )
 
-                # Fallback: match by labour_id only
-                if not actual_lab:
+                # Fallback 1: match by master_labour_id only
+                if not actual_lab and master_labour_id:
                     actual_lab = next(
                         (al for al in actual_labour
                          if al.master_labour_id == master_labour_id),
+                        None
+                    )
+
+                # Fallback 2: match by labour_role name (case-insensitive)
+                if not actual_lab and planned_labour_role:
+                    actual_lab = next(
+                        (al for al in actual_labour
+                         if al.labour_role and al.labour_role.lower().strip() == planned_labour_role),
                         None
                     )
 
@@ -863,12 +1314,8 @@ def get_boq_planned_vs_actual(boq_id):
 
                 planned_labour_total += planned_total
 
-                # For actual total: use actual if recorded, otherwise use planned (for pending items)
-                if actual_total > 0:
-                    actual_labour_total += actual_total
-                else:
-                    # Labour is pending - assume planned cost
-                    actual_labour_total += planned_total
+                # For actual total: always use actual (0 if no locked attendance)
+                actual_labour_total += actual_total
 
                 # Calculate variances
                 hours_variance = actual_hours - planned_hours
@@ -1088,31 +1535,18 @@ def get_boq_planned_vs_actual(boq_id):
                         matching_labour = None
 
                     if matching_labour:
-                        # Use actual if available, otherwise use planned for pending labour
+                        # Only use actual cost if there's actual work done (assigned workers)
+                        # Do NOT include planned cost for unassigned labour in actual spending
                         if matching_labour.get('actual') and matching_labour['actual'].get('total', 0) > 0:
                             lab_cost = Decimal(str(matching_labour['actual']['total']))
-                        else:
-                            # Pending labour - use planned cost
-                            lab_cost = Decimal(str(matching_labour['planned']['total']))
-                        sub_actual_labour_cost += lab_cost
-                        # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
-                        if labour_id:
-                            item_level_labour_ids_processed.add(labour_id)
-                        if labour_role:
-                            item_level_labour_roles_processed.add(labour_role)
-                    else:
-                        # If no tracking data found, use planned from sub_item
-                        lab_cost = Decimal(str(planned_labour_entry.get('total_cost', 0)))
-                        if lab_cost == 0:
-                            lab_hours = Decimal(str(planned_labour_entry.get('hours', 0)))
-                            lab_rate = Decimal(str(planned_labour_entry.get('rate_per_hour', 0)))
-                            lab_cost = lab_hours * lab_rate
-                        sub_actual_labour_cost += lab_cost
-                        # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
-                        if labour_id:
-                            item_level_labour_ids_processed.add(labour_id)
-                        if labour_role:
-                            item_level_labour_roles_processed.add(labour_role)
+                            sub_actual_labour_cost += lab_cost
+                        # else: Skip unassigned labour - don't add to actual costs
+
+                    # Track this labour ID and role at ITEM level to avoid double-counting across sub-items
+                    if labour_id:
+                        item_level_labour_ids_processed.add(labour_id)
+                    if labour_role:
+                        item_level_labour_roles_processed.add(labour_role)
 
                 # Case 2: If this is the first non-CR sub-item and item-level labour hasn't been assigned yet,
                 # assign item-level labour to this sub-item
@@ -1149,31 +1583,19 @@ def get_boq_planned_vs_actual(boq_id):
                             matching_labour = None
 
                         if matching_labour:
-                            # Use actual if available, otherwise use planned for pending labour
+                            # Only use actual cost if there's actual work done (assigned workers)
+                            # Do NOT include planned cost for unassigned labour in actual spending
                             if matching_labour.get('actual') and matching_labour['actual'].get('total', 0) > 0:
                                 lab_cost = Decimal(str(matching_labour['actual']['total']))
-                            else:
-                                # Pending labour - use planned cost
-                                lab_cost = Decimal(str(matching_labour['planned']['total']))
-                            sub_actual_labour_cost += lab_cost
+                                sub_actual_labour_cost += lab_cost
+                            # else: Skip unassigned labour - don't add to actual costs
+
                             # Track this labour to prevent processing in future sub-items
                             if labour_id:
                                 item_level_labour_ids_processed.add(labour_id)
                             if labour_role:
                                 item_level_labour_roles_processed.add(labour_role)
-                        else:
-                            # If no tracking data found, use planned from item
-                            lab_cost = Decimal(str(item_labour_entry.get('total_cost', 0)))
-                            if lab_cost == 0:
-                                lab_hours = Decimal(str(item_labour_entry.get('hours', 0)))
-                                lab_rate = Decimal(str(item_labour_entry.get('rate_per_hour', 0)))
-                                lab_cost = lab_hours * lab_rate
-                            sub_actual_labour_cost += lab_cost
-                            # Track this labour to prevent processing in future sub-items
-                            if labour_id:
-                                item_level_labour_ids_processed.add(labour_id)
-                            if labour_role:
-                                item_level_labour_roles_processed.add(labour_role)
+                        # else: If no tracking data found, skip (don't use planned cost)
 
                     # Mark that item-level labour has been assigned
                     item_level_labour_assigned = True
@@ -1182,17 +1604,43 @@ def get_boq_planned_vs_actual(boq_id):
 
                 # Actual percentages stay the same (based on base_total)
                 sub_actual_misc = sub_item_base_total * (misc_pct / 100)  # Same as planned
-                sub_actual_overhead = sub_planned_overhead  # Same as planned
-                sub_actual_transport = sub_planned_transport  # Same as planned
+                sub_actual_overhead = sub_planned_overhead  # Keep as allocation for tracking
 
-                # Actual profit = we don't calculate from percentages, it's what remains
-                # For now, use planned profit (will be adjusted by consumption flow later)
-                sub_negotiable_margin = sub_planned_profit
+                # ACTUAL TRANSPORT: Distribute total actual transport proportionally based on planned transport
+                # This uses REAL transport fees from all delivery/return notes (not just planned percentage)
+                try:
+                    if total_planned_transport_for_boq > 0:
+                        # Ensure all values are Decimals before calculation
+                        sub_planned_transport_decimal = Decimal(str(sub_planned_transport)) if not isinstance(sub_planned_transport, Decimal) else sub_planned_transport
+                        total_planned_transport_decimal = Decimal(str(total_planned_transport_for_boq)) if not isinstance(total_planned_transport_for_boq, Decimal) else total_planned_transport_for_boq
+                        total_actual_transport_decimal = Decimal(str(total_actual_transport_for_project)) if not isinstance(total_actual_transport_for_project, Decimal) else total_actual_transport_for_project
 
-                # CORRECT FORMULA: Total = Materials + Labour + Misc + Overhead + Profit + Transport - Discount
-                sub_actual_total = (sub_actual_materials_cost + sub_actual_labour_cost +
-                                  sub_actual_misc + sub_actual_overhead + sub_negotiable_margin +
-                                  sub_actual_transport - sub_discount_amount)
+                        # Distribute actual transport proportionally based on this sub-item's planned transport share
+                        transport_proportion = sub_planned_transport_decimal / total_planned_transport_decimal
+                        sub_actual_transport = total_actual_transport_decimal * transport_proportion
+                    else:
+                        # No planned transport, so no actual transport allocated to this sub-item
+                        sub_actual_transport = Decimal('0')
+                except Exception as e:
+                    log.error(f"Error calculating actual transport for sub-item: {e}. Types: sub_planned={type(sub_planned_transport)}, total_planned={type(total_planned_transport_for_boq)}, total_actual={type(total_actual_transport_for_project)}")
+                    # Fallback to planned value to avoid breaking the entire response
+                    sub_actual_transport = sub_planned_transport
+
+                # Calculate actual spending (NO O&P, NO Profit included in spending)
+                # Actual Spending = Materials + Labour + Misc + Transport
+                sub_actual_spending = (sub_actual_materials_cost + sub_actual_labour_cost +
+                                      sub_actual_misc + sub_actual_transport)
+
+                # Client amount for this sub-item (after discount)
+                sub_client_amount = sub_item_base_total - sub_discount_amount
+
+                # NEW CORRECT FORMULA: Negotiable Margin = Client Amount - Actual Spending
+                # This includes BOTH O&P allocation (25%) AND remaining profit
+                # Per client requirement: Negotiable Margin = CLIENT Quoted Price - (Materials + Labour + Misc + Transport)
+                sub_negotiable_margin = sub_client_amount - sub_actual_spending
+
+                # For compatibility, keep sub_actual_total for now but it's not used in margin calculation
+                sub_actual_total = sub_client_amount  # Client pays this amount (fixed)
 
                 # Aggregate to item level (planned)
                 planned_base += sub_item_base_total
@@ -1206,11 +1654,8 @@ def get_boq_planned_vs_actual(boq_id):
                 planned_total += sub_planned_total
 
                 # Aggregate to item level (actual) - using actual internal costs
-                # For CR sub-items, use actual internal cost instead of base_total (which is 0)
-                if is_cr_sub_item:
-                    actual_base += sub_actual_internal_cost  # CR items: use actual cost
-                else:
-                    actual_base += sub_item_base_total  # Regular items: client rate stays the same
+                # CORRECTED: actual_base should ALWAYS be materials + labour (internal cost), NOT client rate
+                actual_base += sub_actual_internal_cost  # Use actual materials + labour cost
                 actual_materials_total += sub_actual_materials_cost
                 actual_labour_total += sub_actual_labour_cost
                 actual_miscellaneous += sub_actual_misc  # Misc % stays the same
@@ -1262,7 +1707,8 @@ def get_boq_planned_vs_actual(boq_id):
                     },
                     'planned_total': float(sub_planned_total),
                     'actual_total': float(sub_actual_total),
-                    'calculation_note': 'Total = Materials + Labour + Misc + Overhead + Profit + Transport - Discount'
+                    'actual_spending': float(sub_actual_spending),
+                    'calculation_note': 'Negotiable Margin = Client Amount - (Materials + Labour + Misc + Transport). O&P is included in margin, not subtracted.'
                 })
 
             # Get overall percentages for display
@@ -1286,38 +1732,37 @@ def get_boq_planned_vs_actual(boq_id):
                 # Item's share of preliminaries
                 item_preliminary_share = preliminary_amount * item_proportion
 
-            # The selling price BEFORE discount includes item base cost + preliminary share
-            selling_price_before_discount = planned_base + item_preliminary_share
+            # The selling price BEFORE discount is the BOQ client amount (planned_base)
+            # NOT including preliminary share (preliminary is separate)
+            selling_price_before_discount = planned_base
 
-            # USE BOQ-LEVEL DISCOUNT (from top-level boq_data)
-            # If sub-item level discount exists, use that; otherwise use BOQ-level discount
+            # USE ITEM-LEVEL DISCOUNT (only if item has specific discount)
+            # NOTE: BOQ-level discount is applied at PROJECT level, NOT distributed to individual items
             item_discount_amount = planned_discount_amount if planned_discount_amount > 0 else Decimal('0')
             item_discount_percentage = Decimal('0')
 
-            # If no sub-item discount and BOQ has discount, calculate item's share
-            if item_discount_amount == 0 and boq_level_discount_percentage > 0:
-                # Apply BOQ-level discount PERCENTAGE to this item's selling price (including preliminary share)
-                item_discount_percentage = boq_level_discount_percentage
-                item_discount_amount = selling_price_before_discount * (item_discount_percentage / Decimal('100'))
-            elif item_discount_amount > 0 and selling_price_before_discount > 0:
-                # Calculate percentage from sub-item discount
+            # Calculate percentage from item-level discount (if any)
+            if item_discount_amount > 0 and selling_price_before_discount > 0:
                 item_discount_percentage = (item_discount_amount / selling_price_before_discount) * Decimal('100')
 
-            # If still no discount amount but have percentage, calculate it
-            if item_discount_amount == 0 and item_discount_percentage > 0 and selling_price_before_discount > 0:
-                item_discount_amount = selling_price_before_discount * (item_discount_percentage / Decimal('100'))
-
-            # Calculate Client Amount (Grand Total) after discount
-            # This is the actual amount client will pay
+            # Calculate Client Amount for this item (with item-level discount only)
+            # BOQ-level discount will be applied at the project summary level
             client_amount_after_discount = selling_price_before_discount - item_discount_amount
 
+            # Calculate actual spending (Materials + Labour + Misc + Transport)
+            # DO NOT include O&P or Profit - those are part of the Negotiable Margin
+            actual_spending = (actual_materials_total + actual_labour_total +
+                              actual_miscellaneous + actual_transport)
+
             # Calculate profit BEFORE giving discount to client
-            # This shows profit if we kept the discount as margin
-            profit_before_discount = selling_price_before_discount - actual_total
+            # Negotiable Margin = Selling Price - Actual Spending (includes O&P allocation)
+            profit_before_discount = selling_price_before_discount - actual_spending
 
             # Calculate actual profit after giving discount to client
-            # Actual Profit = Client Amount (after discount) - Total Actual Spending
-            after_discount_negotiable_margin = client_amount_after_discount - actual_total
+            # NEW CORRECT FORMULA: Negotiable Margin = Client Amount (after discount) - Actual Spending
+            # This includes BOTH O&P allocation (25%) AND remaining profit
+            # Per client requirement: Negotiable Margin = CLIENT Quoted Price - (Materials + Labour + Misc + Transport)
+            after_discount_negotiable_margin = client_amount_after_discount - actual_spending
 
             # The selling price shown to client (after discount)
             selling_price = client_amount_after_discount
@@ -1346,10 +1791,17 @@ def get_boq_planned_vs_actual(boq_id):
 
             # 2. Allocation Impact Analysis
             # NOTE: Miscellaneous, Overhead, and Transport are FIXED allocations
-            # Only the Negotiable Margin (profit) absorbs all variances
+            # The Negotiable Margin now INCLUDES O&P allocation PLUS remaining profit
+
+            # Calculate the planned negotiable margin correctly
+            # Planned spending = Materials + Labour + Misc + Transport (NO O&P)
+            planned_spending = (planned_materials_total + planned_labour_total +
+                               planned_miscellaneous + planned_transport)
+            planned_negotiable_margin = client_amount_after_discount - planned_spending
 
             # Calculate profit variance (how much profit was impacted)
-            profit_variance = after_discount_negotiable_margin - planned_profit
+            # This now compares the full negotiable margin (including O&P)
+            profit_variance = after_discount_negotiable_margin - planned_negotiable_margin
 
             # Determine if extra costs impacted profit
             profit_impact_from_extra_costs = Decimal('0')
@@ -1360,14 +1812,14 @@ def get_boq_planned_vs_actual(boq_id):
             # Calculate variances (allocations stay same, only profit changes)
             base_cost_variance = actual_base - planned_base
             misc_variance = Decimal('0')  # Miscellaneous stays at allocation
-            overhead_variance = Decimal('0')  # Overhead stays at allocation
+            overhead_variance = Decimal('0')  # Overhead stays at allocation (but included in margin now)
             transport_variance = Decimal('0')  # Transport stays at allocation
 
             # Calculate savings/overrun (use absolute values for display)
             cost_savings = abs(planned_base - actual_base)  # Always positive
             misc_diff = abs(planned_miscellaneous - actual_miscellaneous)  # Always positive
             overhead_diff = abs(planned_overhead - actual_overhead)  # Always positive
-            profit_diff = abs(planned_profit - negotiable_margin)  # Always positive
+            profit_diff = abs(planned_negotiable_margin - after_discount_negotiable_margin)  # Always positive
 
            # Calculate completion percentage
             total_materials = len(planned_item.get('materials', []))
@@ -1411,23 +1863,24 @@ def get_boq_planned_vs_actual(boq_id):
                 "planned": {
                     "materials_total": float(planned_materials_total),
                     "labour_total": float(planned_labour_total),
-                    "base_cost": float(planned_base),
+                    "base_cost": float(planned_materials_total + planned_labour_total),
                     "client_amount_before_discount": float(selling_price_before_discount),
                     "discount_amount": float(item_discount_amount),
                     "discount_percentage": float(item_discount_percentage),
                     "client_amount_after_discount": float(client_amount_after_discount),
                     "grand_total": float(client_amount_after_discount),
-                    "negotiable_margin": float(planned_profit),  # Planned profit/negotiable margin
+                    "negotiable_margin": float(planned_negotiable_margin),  # NEW: Includes O&P + profit
                     "miscellaneous_amount": float(planned_miscellaneous),
                     "miscellaneous_percentage": float(misc_pct),
                     "overhead_amount": float(planned_overhead),
                     "overhead_percentage": float(overhead_pct),
-                    "profit_amount": float(planned_profit),
+                    "profit_amount": float(planned_profit),  # Keep for reference (60% of O&P)
                     "profit_percentage": float(profit_pct),
                     "transport_amount": float(planned_transport),
                     "total": float(planned_total),
                     "selling_price": float(selling_price),
-                    "balance": float(planned_total - actual_total),  # Item-level balance
+                    "spending": float(planned_spending),  # NEW: Materials + Labour + Misc + Transport
+                    "balance": float(client_amount_after_discount - actual_spending),  # NEW: Actual balance
                     "materials_balance": float(planned_materials_total - actual_materials_total),
                     "labour_balance": float(planned_labour_total - actual_labour_total)
                 },
@@ -1441,15 +1894,16 @@ def get_boq_planned_vs_actual(boq_id):
                     "client_amount_after_discount": float(client_amount_after_discount),
                     "grand_total": float(client_amount_after_discount),
                     "profit_before_discount": float(profit_before_discount),
-                    "negotiable_margin": float(after_discount_negotiable_margin),
+                    "negotiable_margin": float(after_discount_negotiable_margin),  # NEW: Includes O&P + profit
                     "miscellaneous_amount": float(actual_miscellaneous),
                     "miscellaneous_percentage": float(misc_pct),
-                    "overhead_amount": float(actual_overhead),
+                    "overhead_amount": float(actual_overhead),  # Keep as allocation for tracking
                     "overhead_percentage": float(overhead_pct),
-                    "profit_amount": float(negotiable_margin),
-                    "profit_percentage": (float(negotiable_margin) / float(selling_price) * 100) if selling_price > 0 else 0,
+                    "profit_amount": float(after_discount_negotiable_margin),  # Same as negotiable margin now
+                    "profit_percentage": (float(after_discount_negotiable_margin) / float(selling_price) * 100) if selling_price > 0 else 0,
                     "transport_amount": float(actual_transport),
-                    "total": float(actual_total),
+                    "spending": float(actual_spending),  # NEW: Materials + Labour + Misc + Transport
+                    "total": float(client_amount_after_discount),  # Client pays this (after discount)
                     "selling_price": float(selling_price)
                 },
                 "consumption_flow": {
@@ -1512,6 +1966,8 @@ def get_boq_planned_vs_actual(boq_id):
         total_client_amount_before_discount = sum(float(item['planned']['client_amount_before_discount']) for item in comparison['items'])  # Includes preliminary shares
         total_planned = sum(float(item['planned']['total']) for item in comparison['items'])
         total_actual = sum(float(item['actual']['total']) for item in comparison['items'])
+        total_planned_spending = sum(float(item['planned']['spending']) for item in comparison['items'])  # NEW: Planned spending
+        total_actual_spending = sum(float(item['actual']['spending']) for item in comparison['items'])  # NEW: Actual spending
         total_discount_amount = sum(float(item['planned']['discount_amount']) for item in comparison['items'])
         total_client_amount_after_discount = sum(float(item['planned']['client_amount_after_discount']) for item in comparison['items'])
         total_profit_before_discount = sum(float(item['actual']['profit_before_discount']) for item in comparison['items'])
@@ -1560,14 +2016,15 @@ def get_boq_planned_vs_actual(boq_id):
         # Calculate net loss (costs that exceeded all buffers)
         total_loss_beyond_buffers = total_extra_costs - total_misc_consumed - total_overhead_consumed - total_profit_consumed
 
-        # Calculate actual profit using formula: Client Amount (After Discount) - Total Actual Spending
-        # This is the REAL profit/loss - what client pays minus what we spent
-        actual_project_profit = total_client_amount_after_discount - total_actual
+        # IMPORTANT: Add preliminaries' internal cost to total spending
+        # Total Planned Spending = BOQ Items Planned Spending + Preliminaries Internal Cost
+        total_planned_spending_with_preliminaries = total_planned_spending + float(preliminary_internal_cost)
 
-        # Calculate combined subtotal and discount
-        # NOTE: total_client_amount_before_discount already includes each item's preliminary share
-        # So we DON'T add preliminary_amount again (that would be double-counting)
-        combined_subtotal_before_discount = Decimal(str(total_client_amount_before_discount))
+        # Total Actual Spending = BOQ Items Spending + Preliminaries Internal Cost
+        total_actual_spending_with_preliminaries = total_actual_spending + float(preliminary_internal_cost)
+
+        # Calculate combined subtotal (Items + Preliminaries) BEFORE discount
+        combined_subtotal_before_discount = items_only_subtotal + Decimal(str(preliminary_amount))
 
         # Calculate discount on combined subtotal
         combined_discount_amount = Decimal('0')
@@ -1577,12 +2034,17 @@ def get_boq_planned_vs_actual(boq_id):
             combined_discount_percentage = boq_level_discount_percentage
             combined_discount_amount = combined_subtotal_before_discount * (combined_discount_percentage / Decimal('100'))
 
-        # Calculate grand total after discount
+        # Calculate grand total after discount (this is what client pays)
         combined_grand_total_after_discount = combined_subtotal_before_discount - combined_discount_amount
 
-        # Calculate profit impact on combined totals
-        combined_profit_before_discount = combined_subtotal_before_discount - Decimal(str(total_actual))
-        combined_profit_after_discount = combined_grand_total_after_discount - Decimal(str(total_actual))
+        # Calculate actual profit using formula: Grand Total (After Discount) - Total Actual Spending
+        # This is the REAL profit/loss - what client pays minus what we spent
+        actual_project_profit = float(combined_grand_total_after_discount) - total_actual_spending_with_preliminaries
+
+        # Calculate profit impact on combined totals (using PLANNED spending)
+        # This shows how discount affects the planned profitability
+        combined_profit_before_discount = combined_subtotal_before_discount - Decimal(str(total_planned_spending_with_preliminaries))
+        combined_profit_after_discount = combined_grand_total_after_discount - Decimal(str(total_planned_spending_with_preliminaries))
         combined_profit_reduction = combined_profit_before_discount - combined_profit_after_discount
 
         comparison['summary'] = {
@@ -1608,9 +2070,11 @@ def get_boq_planned_vs_actual(boq_id):
             },
             "planned_total": float(total_planned),
             "actual_total": float(total_actual),
-            "variance": float(abs(total_actual - total_planned)),  # Always positive number
-            "variance_percentage": float(abs((total_actual - total_planned) / total_planned * 100)) if total_planned > 0 else 0,
-            "status": "under_budget" if total_actual < total_planned else "over_budget" if total_actual > total_planned else "on_budget",
+            "planned_spending": float(total_planned_spending_with_preliminaries),  # NEW: Materials + Labour + Misc + Transport + Preliminaries Internal Cost
+            "actual_spending": float(total_actual_spending_with_preliminaries),  # NEW: Materials + Labour + Misc + Transport + Preliminaries Internal Cost
+            "variance": float(abs(total_actual_spending_with_preliminaries - total_planned_spending_with_preliminaries)),  # Spending variance
+            "variance_percentage": float(abs((total_actual_spending_with_preliminaries - total_planned_spending_with_preliminaries) / total_planned_spending_with_preliminaries * 100)) if total_planned_spending_with_preliminaries > 0 else 0,
+            "status": "under_budget" if total_actual_spending_with_preliminaries < total_planned_spending_with_preliminaries else "over_budget" if total_actual_spending_with_preliminaries > total_planned_spending_with_preliminaries else "on_budget",
 
             # Add materials and labour totals for variance calculations
             "planned_materials_total": float(total_planned_materials),
@@ -1644,7 +2108,7 @@ def get_boq_planned_vs_actual(boq_id):
             "total_overhead_consumed": float(total_overhead_consumed),
             "total_profit_consumed": float(total_profit_consumed),
             "total_loss_beyond_buffers": float(total_loss_beyond_buffers),
-            "calculation_note": "Client Amount (Before Discount) is the base selling price. Discount = Client Amount × Discount %. Grand Total (Client Amount After Discount) = Client Amount - Discount. Actual Profit = Grand Total - Actual Total Spending.",
+            "calculation_note": "Client Amount (Before Discount) is the base selling price. Discount = Client Amount × Discount %. Grand Total (Client Amount After Discount) = Client Amount - Discount. Negotiable Margin = Grand Total - Actual Spending (Materials + Labour + Misc + Transport). O&P is included in Negotiable Margin, not subtracted.",
 
             # Add preliminaries data
             "preliminaries": {
@@ -1808,9 +2272,22 @@ def get_purchase_comparision(project_id):
             if record.change_request_id:
                 cr_ids.add(record.change_request_id)
 
-        # Fetch all ChangeRequests for this project with status: vendor_approved, purchase_completed, pending_td_approval
-        # These are the only statuses that should show in actual materials
-        valid_statuses = ['vendor_approved', 'purchase_completed', 'pending_td_approval', 'split_to_sub_crs']
+        # Include all post-PM-approval statuses so any CR with confirmed pricing shows up
+        # This matches the Profit Comparison behavior (which shows all CRs regardless of status)
+        valid_statuses = [
+            'approved_by_pm',        # PM approved, may have estimator prices
+            'send_to_est',           # Sent to estimator for pricing
+            'approved',              # Estimator approved (STATUS_APPROVED in config)
+            'approved_by_estimator', # Estimator confirmed prices (legacy label)
+            'approved_by_td',        # TD approved
+            'pending_td_approval',   # Waiting for TD approval
+            'send_to_buyer',         # Sent to buyer for purchasing
+            'assigned_to_buyer',     # Assigned to a specific buyer
+            'vendor_approved',       # Vendor selected and approved
+            'purchase_completed',    # Purchase completed
+            'split_to_sub_crs',      # Split into sub change requests
+            'routed_to_store',       # Routed to M2 Store
+        ]
 
         all_project_crs = ChangeRequest.query.filter(
             ChangeRequest.project_id == project_id,
@@ -1848,9 +2325,10 @@ def get_purchase_comparision(project_id):
                     if isinstance(mvs, dict):
                         vendor_selections = mvs
 
-                # Parse sub_items_data (PRIMARY source with unit_price, total_price)
-                if cr.sub_items_data:
-                    sub_items_data = cr.sub_items_data
+                # Parse sub_items_data (PRIMARY source) with fallback to materials_data
+                raw_mats_source = cr.sub_items_data or cr.materials_data
+                if raw_mats_source:
+                    sub_items_data = raw_mats_source
                     if isinstance(sub_items_data, str):
                         sub_items_data = json.loads(sub_items_data)
 
@@ -1869,13 +2347,16 @@ def get_purchase_comparision(project_id):
                             # Use negotiated price if available, otherwise fall back to BOQ price
                             actual_unit_price = float(negotiated_price) if negotiated_price else boq_unit_price
 
+                            # is_new_material: check both 'is_new_material' and 'is_new' field names
+                            is_new_mat = bool(mat.get('is_new_material') or mat.get('is_new', False))
+
                             mat_info = {
                                 'master_material_id': mat.get('master_material_id'),
                                 'material_name': material_name,
                                 'amount': quantity * actual_unit_price,  # Calculate from qty * actual price
                                 'quantity': quantity,
                                 'unit_price': actual_unit_price,  # Use vendor price if available
-                                'is_new_material': mat.get('is_new', False),
+                                'is_new_material': is_new_mat,
                                 'item_name': cr_item_name,  # Use item_name from CR record
                                 'sub_item_name': mat.get('sub_item_name', ''),
                                 'master_item_id': mat.get('master_item_id') or cr.item_id,
@@ -2295,46 +2776,51 @@ def get_purchase_comparision(project_id):
 
 def get_all_purchase_comparision_projects():
     """
-    Get all projects that have at least one ChangeRequest with valid purchase status.
-    Valid statuses: vendor_approved, purchase_completed, pending_td_approval, split_to_sub_crs
+    Get all projects that have a BOQ (for purchase comparison).
+    Shows ALL projects so Live and Completed tabs both work correctly.
+    The comparison view will show planned materials vs actual purchases (actual may be 0 if no purchases yet).
     """
     try:
-        valid_statuses = ['vendor_approved', 'purchase_completed', 'pending_td_approval', 'split_to_sub_crs']
+        # Get all BOQs that are not deleted
+        boqs = BOQ.query.filter_by(is_deleted=False).all()
 
-        # Get distinct project_ids that have CRs with valid statuses
-        project_ids_with_purchases = db.session.query(ChangeRequest.project_id).filter(
-            ChangeRequest.is_deleted == False,
-            ChangeRequest.status.in_(valid_statuses)
-        ).distinct().all()
-
-        project_ids = [p[0] for p in project_ids_with_purchases]
-
-        if not project_ids:
+        if not boqs:
             return jsonify({
                 "success": True,
                 "data": [],
                 "count": 0
             }), 200
 
-        # Get projects with their BOQ info
+        # Collect project_ids from BOQs
+        project_ids = list({boq.project_id for boq in boqs if boq.project_id})
+
+        # Get all those projects
         projects = Project.query.filter(
             Project.project_id.in_(project_ids),
             Project.is_deleted == False
         ).all()
 
+        # Batch pre-fetch BOQs for all projects in one query
+        _bt_proj_ids = [p.project_id for p in projects]
+        _bt_first_boq_by_proj = {}
+        if _bt_proj_ids:
+            for _b in BOQ.query.filter(
+                BOQ.project_id.in_(_bt_proj_ids),
+                BOQ.is_deleted == False
+            ).all():
+                if _b.project_id not in _bt_first_boq_by_proj:
+                    _bt_first_boq_by_proj[_b.project_id] = _b
+
         project_list = []
         for project in projects:
-            # Get BOQ for this project
-            boq = BOQ.query.filter_by(
-                project_id=project.project_id,
-                is_deleted=False
-            ).first()
+            boq = _bt_first_boq_by_proj.get(project.project_id)  # dict lookup — no DB call
 
             project_list.append({
                 'project_id': project.project_id,
                 'project_name': project.project_name,
-                'boq_id': boq.boq_id if boq else None,
-                'boq_status': boq.status if boq else None,
+                'project_status': project.status,
+                'boq_id': boq.boq_id,
+                'boq_status': boq.status,
                 'end_date': project.end_date.isoformat() if project.end_date else None
             })
 
@@ -2346,4 +2832,941 @@ def get_all_purchase_comparision_projects():
 
     except Exception as e:
         log.error(f"Error in get_all_purchase_boq: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+def get_labour_workflow_details(boq_id):
+    """
+    Get comprehensive labour workflow details for a BOQ including:
+    - Labour requisitions (who requested, when, approval status)
+    - Worker assignments (which workers, rates, dates)
+    - Daily attendance records (clock times, hours, costs)
+    - Attendance locks (approval status, who locked, when)
+    - Payment status and locks
+
+    This endpoint provides complete visibility into the labour workflow
+    from requisition through to payment.
+    """
+    try:
+        from models.labour_requisition import LabourRequisition
+        from models.worker_assignment import WorkerAssignment
+        from models.daily_attendance import DailyAttendance
+        from models.worker import Worker
+        from sqlalchemy import func, and_
+        from sqlalchemy.orm import selectinload
+        from collections import defaultdict
+
+        # Input validation
+        try:
+            boq_id = int(boq_id)
+            if boq_id <= 0:
+                return jsonify({"error": "BOQ ID must be positive"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid BOQ ID"}), 400
+
+        # Verify BOQ exists
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        # Authorization check - verify user has access to this BOQ's project
+        current_user = g.user if hasattr(g, 'user') else None
+        if current_user:
+            user_role = current_user.get('role', '').strip().lower()
+            user_id = current_user.get('user_id')
+
+            # Admin and TD have access to all BOQs
+            # PM and MEP need to be assigned to the project
+            if user_role not in ['admin', 'technical director', 'technical_director', 'technicaldirector', 'td']:
+                # Check if user is assigned to this project
+                project = Project.query.filter_by(project_id=boq.project_id, is_deleted=False).first()
+                if not project:
+                    return jsonify({"error": "Project not found"}), 404
+
+                # Check PM assignment
+                if user_role in ['projectmanager', 'project_manager', 'project manager', 'pm']:
+                    if project.project_manager_id != user_id:
+                        return jsonify({"error": "Access denied. You are not assigned to this project."}), 403
+
+                # Check MEP assignment
+                elif user_role in ['mep', 'mep manager', 'mep_manager', 'mepmanager']:
+                    if project.mep_id != user_id:
+                        return jsonify({"error": "Access denied. You are not assigned to this project."}), 403
+
+        # Get all labour requisitions for this BOQ
+        # Note: Cannot use selectinload on 'assignments' because it's lazy='dynamic'
+        import re
+        from sqlalchemy import or_, cast
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        # First, try the straightforward queries (deprecated boq_id or explicit boq_id in JSONB)
+        requisitions = LabourRequisition.query.filter(
+            or_(
+                # Check deprecated boq_id column
+                LabourRequisition.boq_id == boq_id,
+                # Check labour_items JSONB array for boq_id
+                LabourRequisition.labour_items.op('@>')(
+                    cast([{"boq_id": boq_id}], JSONB)
+                )
+            ),
+            LabourRequisition.is_deleted == False
+        ).order_by(LabourRequisition.request_date.desc()).all()
+
+        # If no requisitions found, check labour_id pattern: lab_{boq_id}_...
+        if not requisitions:
+            all_requisitions = LabourRequisition.query.filter(
+                LabourRequisition.is_deleted == False,
+                LabourRequisition.labour_items.isnot(None)
+            ).order_by(LabourRequisition.request_date.desc()).all()
+
+            # Filter requisitions that have labour_id matching pattern lab_{boq_id}_
+            matching_requisitions = []
+            for req in all_requisitions:
+                if req.labour_items:
+                    for item in req.labour_items:
+                        labour_id = item.get('labour_id', '')
+                        # Pattern: lab_{boq_id}_... (e.g., lab_843_1_2_1)
+                        match = re.match(r'^lab_(\d+)_', labour_id)
+                        if match and int(match.group(1)) == boq_id:
+                            matching_requisitions.append(req)
+                            break
+
+            requisitions = matching_requisitions
+
+        # Preload all assignments and attendance for efficiency (prevents N+1 queries)
+        # Note: WorkerAssignment.attendance_records is also lazy='dynamic', so we can't eager load it
+        if requisitions:
+            req_ids = [r.requisition_id for r in requisitions]
+
+            # Query assignments separately (without attendance eager loading)
+            assignments_with_data = WorkerAssignment.query.options(
+                selectinload(WorkerAssignment.worker)
+            ).filter(
+                WorkerAssignment.requisition_id.in_(req_ids),
+                WorkerAssignment.is_deleted == False
+            ).all()
+
+            # Query attendance records separately
+            from models.daily_attendance import DailyAttendance
+            assignment_ids = [a.assignment_id for a in assignments_with_data]
+            attendance_records_all = DailyAttendance.query.filter(
+                DailyAttendance.assignment_id.in_(assignment_ids),
+                DailyAttendance.is_deleted == False
+            ).all()
+
+            # Group attendance by assignment_id
+            attendance_by_assignment = defaultdict(list)
+            for att in attendance_records_all:
+                attendance_by_assignment[att.assignment_id].append(att)
+
+            # Attach attendance to assignments manually
+            for assignment in assignments_with_data:
+                assignment._preloaded_attendance = attendance_by_assignment.get(assignment.assignment_id, [])
+
+            # Group assignments by requisition_id for easy lookup
+            assignments_by_req = defaultdict(list)
+            for assignment in assignments_with_data:
+                assignments_by_req[assignment.requisition_id].append(assignment)
+        else:
+            assignments_by_req = defaultdict(list)
+
+        labour_workflow_data = []
+
+        for req in requisitions:
+            # Get worker assignments for this requisition from preloaded data
+            assignments = assignments_by_req.get(req.requisition_id, [])
+
+            assignment_details = []
+            total_worked_hours = Decimal('0')
+            total_worked_cost = Decimal('0')
+            attendance_records_list = []
+
+            for assignment in assignments:
+                # Get worker details (already loaded via eager loading)
+                worker = assignment.worker
+
+                # Get attendance records for this assignment (preloaded manually)
+                attendance_records = getattr(assignment, '_preloaded_attendance', [])
+                attendance_records.sort(key=lambda x: x.attendance_date, reverse=True)
+
+                # Calculate totals for this worker
+                worker_total_hours = Decimal('0')
+                worker_total_cost = Decimal('0')
+                locked_count = 0
+                pending_count = 0
+
+                attendance_list = []
+                for attendance in attendance_records:
+                    hours = Decimal(str(attendance.total_hours or 0))
+                    cost = Decimal(str(attendance.total_cost or 0))
+                    worker_total_hours += hours
+                    worker_total_cost += cost
+
+                    # Count lock statuses
+                    if attendance.approval_status == 'locked':
+                        locked_count += 1
+                    elif attendance.approval_status == 'pending':
+                        pending_count += 1
+
+                    attendance_list.append({
+                        'attendance_id': attendance.attendance_id,
+                        'attendance_date': attendance.attendance_date.isoformat() if attendance.attendance_date else None,
+                        'clock_in_time': attendance.clock_in_time.strftime('%H:%M') if attendance.clock_in_time else '--',
+                        'clock_out_time': attendance.clock_out_time.strftime('%H:%M') if attendance.clock_out_time else '--',
+                        'total_hours': float(hours),
+                        'regular_hours': float(attendance.regular_hours or 0),
+                        'overtime_hours': float(attendance.overtime_hours or 0),
+                        'hourly_rate': float(attendance.hourly_rate or 0),
+                        'total_cost': float(cost),
+                        'attendance_status': attendance.attendance_status,
+                        'approval_status': attendance.approval_status,  # pending, locked, rejected
+                        'approved_by_name': attendance.approved_by_name,
+                        'approval_date': attendance.approval_date.isoformat() if attendance.approval_date else None,
+                        'is_locked': attendance.approval_status == 'locked'
+                    })
+
+                total_worked_hours += worker_total_hours
+                total_worked_cost += worker_total_cost
+
+                # Determine payment lock status
+                payment_locked = locked_count > 0
+                payment_status = 'locked' if payment_locked else 'pending'
+
+                assignment_details.append({
+                    'assignment_id': assignment.assignment_id,
+                    'worker_id': assignment.worker_id,
+                    'worker_name': worker.full_name if worker else 'Unknown',
+                    'worker_code': worker.worker_code if worker else None,
+                    'assignment_start_date': assignment.assignment_start_date.isoformat() if assignment.assignment_start_date else None,
+                    'assignment_end_date': assignment.assignment_end_date.isoformat() if assignment.assignment_end_date else None,
+                    'hourly_rate': float(assignment.hourly_rate_override or (worker.hourly_rate if worker else 0)),
+                    'role_at_site': assignment.role_at_site,
+                    'assignment_status': assignment.status,
+                    'total_hours_worked': float(worker_total_hours),
+                    'total_cost': float(worker_total_cost),
+                    'attendance_records': attendance_list,
+                    'attendance_locked_count': locked_count,
+                    'attendance_pending_count': pending_count,
+                    'payment_status': payment_status,
+                    'payment_locked': payment_locked
+                })
+
+                attendance_records_list.extend(attendance_list)
+
+            # Get labour items from requisition
+            labour_items_list = req.labour_items or []
+
+            # Calculate planned totals from labour items
+            planned_workers = sum(item.get('workers_count', 0) for item in labour_items_list)
+
+            # Determine overall lock status
+            total_attendance_records = len(attendance_records_list)
+            locked_attendance = sum(1 for a in attendance_records_list if a['is_locked'])
+            overall_lock_status = 'fully_locked' if locked_attendance == total_attendance_records and total_attendance_records > 0 else \
+                                  'partially_locked' if locked_attendance > 0 else 'unlocked'
+
+            labour_workflow_data.append({
+                'requisition_id': req.requisition_id,
+                'requisition_code': req.requisition_code,
+                'labour_items': labour_items_list,
+                'planned_workers_count': planned_workers,
+                'site_name': req.site_name,
+                'required_date': req.required_date.isoformat() if req.required_date else None,
+                'work_description': req.work_description,
+                'skill_required': req.skill_required,
+
+                # Requester info
+                'requested_by_user_id': req.requested_by_user_id,
+                'requested_by_name': req.requested_by_name,
+                'request_date': req.request_date.isoformat() if req.request_date else None,
+
+                # Approval workflow
+                'status': req.status,
+                'approved_by_user_id': req.approved_by_user_id,
+                'approved_by_name': req.approved_by_name,
+                'approval_date': req.approval_date.isoformat() if req.approval_date else None,
+                'rejection_reason': req.rejection_reason,
+
+                # Assignment tracking
+                'assignment_status': req.assignment_status,
+                'assigned_by_name': req.assigned_by_name,
+                'assignment_date': req.assignment_date.isoformat() if req.assignment_date else None,
+                'work_status': req.work_status,
+
+                # Worker assignments and attendance
+                'assignments': assignment_details,
+                'assigned_workers_count': len(assignment_details),
+
+                # Totals
+                'total_hours_worked': float(total_worked_hours),
+                'total_cost': float(total_worked_cost),
+
+                # Lock status
+                'overall_lock_status': overall_lock_status,
+                'total_attendance_records': total_attendance_records,
+                'locked_attendance_records': locked_attendance,
+                'pending_attendance_records': total_attendance_records - locked_attendance
+            })
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "boq_id": boq_id,
+                "boq_name": boq.boq_name,
+                "project_id": boq.project_id,
+                "labour_workflow": labour_workflow_data,
+                "total_requisitions": len(labour_workflow_data)
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error in get_labour_workflow_details: {str(e)}")
+        import traceback
+        log.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+
+def get_profit_report(boq_id):
+    """
+    Get profit report for a BOQ with transport, material, and item breakdown.
+    Used by the Report tab in the Profit Comparison page.
+
+    Returns:
+    - transport: planned vs actual with detailed rows (driver, vehicle, purpose)
+    - materials: planned vs actual per material
+    - items: planned vs actual per item
+    """
+    try:
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        boq_detail = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq_detail or not boq_detail.boq_details:
+            return jsonify({"error": "BOQ details not found"}), 404
+
+        boq_data = json.loads(boq_detail.boq_details) if isinstance(boq_detail.boq_details, str) else boq_detail.boq_details
+        project_id = boq.project_id
+
+        # ============================================================
+        # 1. PLANNED DATA from BOQ JSON
+        # ============================================================
+        planned_transport = Decimal('0')
+        materials_planned = {}
+        items_planned = []
+
+        for item in boq_data.get('items', []):
+            item_planned_materials = Decimal('0')
+            item_planned_transport = Decimal('0')
+
+            for sub_item in item.get('sub_items', []):
+                transport_amt = Decimal(str(sub_item.get('transport_amount', 0) or 0))
+                planned_transport += transport_amt
+                item_planned_transport += transport_amt
+
+                for mat in sub_item.get('materials', []):
+                    mat_name = (mat.get('material_name') or '').strip()
+                    if not mat_name:
+                        continue
+                    mat_qty = float(mat.get('quantity', 0) or 0)
+                    mat_rate = float(mat.get('unit_price', 0) or 0)
+                    mat_total = float(mat.get('total', mat_qty * mat_rate) or mat_qty * mat_rate)
+
+                    if mat_name not in materials_planned:
+                        materials_planned[mat_name] = {
+                            'material_name': mat_name,
+                            'unit': mat.get('unit', ''),
+                            'planned_quantity': 0.0,
+                            'planned_rate': mat_rate,
+                            'planned_amount': 0.0,
+                            'item_name': item.get('item_name', ''),
+                        }
+                    materials_planned[mat_name]['planned_quantity'] += mat_qty
+                    materials_planned[mat_name]['planned_amount'] += mat_total
+                    item_planned_materials += Decimal(str(mat_total))
+
+            items_planned.append({
+                'item_name': item.get('item_name', ''),
+                'master_item_id': item.get('master_item_id'),
+                'planned_amount': float(item_planned_materials),
+                'planned_transport': float(item_planned_transport),
+            })
+
+        # ============================================================
+        # 2. ACTUAL TRANSPORT DETAILS from delivery note tables
+        # ============================================================
+        from models.inventory import MaterialDeliveryNote, ReturnDeliveryNote, InventoryTransaction
+        from models.returnable_assets import AssetDeliveryNote, AssetReturnDeliveryNote
+        from models.labour_requisition import LabourRequisition
+        from models.user import User
+
+        transport_details = []
+        actual_transport_total = Decimal('0')
+
+        # Material Delivery Notes (Store → Site)
+        mdn_records = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.project_id == project_id,
+            MaterialDeliveryNote.transport_fee > 0
+        ).order_by(MaterialDeliveryNote.dispatched_at.desc()).all()
+
+        # Return Delivery Notes (Site → Store)
+        rdn_records = ReturnDeliveryNote.query.filter(
+            ReturnDeliveryNote.project_id == project_id,
+            ReturnDeliveryNote.transport_fee > 0
+        ).order_by(ReturnDeliveryNote.created_at.desc()).all()
+
+        # Batch-resolve dispatched_by email → user full_name for MDN and RDN
+        dispatcher_emails = set()
+        for m in mdn_records:
+            if m.dispatched_by:
+                dispatcher_emails.add(m.dispatched_by)
+        for r in rdn_records:
+            if r.dispatched_by:
+                dispatcher_emails.add(r.dispatched_by)
+        user_name_map = {}
+        if dispatcher_emails:
+            dispatcher_users = User.query.filter(User.email.in_(list(dispatcher_emails))).all()
+            for u in dispatcher_users:
+                if u.email not in user_name_map:
+                    user_name_map[u.email] = u.full_name
+
+        for m in mdn_records:
+            fee = Decimal(str(m.transport_fee or 0))
+            actual_transport_total += fee
+            dispatcher_name = user_name_map.get(m.dispatched_by, m.dispatched_by) if m.dispatched_by else '-'
+            transport_details.append({
+                'purpose': 'Store to Site',
+                'driver_name': m.driver_name or '-',
+                'vehicle_number': m.vehicle_number or '-',
+                'driver_contact': m.driver_contact or '-',
+                'vendor_name': dispatcher_name or '-',
+                'amount': float(fee),
+                'date': m.dispatched_at.isoformat() if m.dispatched_at else None,
+                'reference': m.delivery_note_number or '-',
+                'status': m.status or '-',
+                'notes': m.notes or '-',
+            })
+
+        for r in rdn_records:
+            fee = Decimal(str(r.transport_fee or 0))
+            actual_transport_total += fee
+            dispatcher_name = user_name_map.get(r.dispatched_by, r.dispatched_by) if r.dispatched_by else '-'
+            transport_details.append({
+                'purpose': 'Site to Store (Return)',
+                'driver_name': r.driver_name or '-',
+                'vehicle_number': r.vehicle_number or '-',
+                'driver_contact': r.driver_contact or '-',
+                'vendor_name': dispatcher_name or '-',
+                'amount': float(fee),
+                'date': r.created_at.isoformat() if r.created_at else None,
+                'reference': r.return_note_number or '-',
+                'status': r.status or '-',
+                'notes': '-',
+            })
+
+        # Inventory Transactions (Vendor → Store)
+        inv_records = InventoryTransaction.query.filter(
+            InventoryTransaction.project_id == project_id,
+            InventoryTransaction.transaction_type == 'PURCHASE',
+            InventoryTransaction.transport_fee > 0
+        ).order_by(InventoryTransaction.created_at.desc()).all()
+
+        for t in inv_records:
+            fee = Decimal(str(t.transport_fee or 0))
+            actual_transport_total += fee
+            ref_label = t.delivery_batch_ref or (t.material.material_name if t.material else '-')
+            transport_details.append({
+                'purpose': 'Vendor to Store',
+                'driver_name': t.driver_name or '-',
+                'vehicle_number': t.vehicle_number or '-',
+                'driver_contact': '-',
+                'vendor_name': '-',
+                'amount': float(fee),
+                'date': t.created_at.isoformat() if t.created_at else None,
+                'reference': ref_label,
+                'status': 'Completed',
+                'notes': t.notes or '-',
+            })
+
+        # Labour Requisitions (Labour Transport)
+        lab_records = LabourRequisition.query.filter(
+            LabourRequisition.project_id == project_id,
+            LabourRequisition.transport_fee > 0,
+            LabourRequisition.is_deleted == False
+        ).order_by(LabourRequisition.created_at.desc()).all()
+
+        for lr in lab_records:
+            fee = Decimal(str(lr.transport_fee or 0))
+            actual_transport_total += fee
+            transport_details.append({
+                'purpose': 'Labour Transport',
+                'driver_name': '-',
+                'vehicle_number': '-',
+                'driver_contact': '-',
+                'vendor_name': lr.skill_required or '-',
+                'amount': float(fee),
+                'date': lr.created_at.isoformat() if lr.created_at else None,
+                'reference': f'LR-{lr.requisition_id}',
+                'status': lr.status or '-',
+                'notes': '-',
+            })
+
+        # Asset Delivery Notes
+        adn_records = AssetDeliveryNote.query.filter(
+            AssetDeliveryNote.project_id == project_id,
+            AssetDeliveryNote.transport_fee > 0
+        ).order_by(AssetDeliveryNote.dispatched_at.desc()).all()
+
+        for a in adn_records:
+            fee = Decimal(str(a.transport_fee or 0))
+            actual_transport_total += fee
+            transport_details.append({
+                'purpose': 'Asset Delivery',
+                'driver_name': a.driver_name or '-',
+                'vehicle_number': a.vehicle_number or '-',
+                'driver_contact': a.driver_contact or '-',
+                'vendor_name': '-',
+                'amount': float(fee),
+                'date': a.dispatched_at.isoformat() if a.dispatched_at else None,
+                'reference': a.adn_number or '-',
+                'status': a.status or '-',
+                'notes': '-',
+            })
+
+        # Asset Return Delivery Notes
+        ardn_records = AssetReturnDeliveryNote.query.filter(
+            AssetReturnDeliveryNote.project_id == project_id,
+            AssetReturnDeliveryNote.transport_fee > 0
+        ).order_by(AssetReturnDeliveryNote.return_date.desc()).all()
+
+        for ar in ardn_records:
+            fee = Decimal(str(ar.transport_fee or 0))
+            actual_transport_total += fee
+            transport_details.append({
+                'purpose': 'Asset Return',
+                'driver_name': ar.driver_name or '-',
+                'vehicle_number': ar.vehicle_number or '-',
+                'driver_contact': ar.driver_contact or '-',
+                'vendor_name': '-',
+                'amount': float(fee),
+                'date': ar.return_date.isoformat() if ar.return_date else None,
+                'reference': ar.ardn_number or '-',
+                'status': ar.status or '-',
+                'notes': '-',
+            })
+
+        # Sort transport details by date descending
+        transport_details.sort(key=lambda x: x['date'] or '', reverse=True)
+
+        # ============================================================
+        # 3. ACTUAL MATERIAL DATA from purchase tracking
+        # ============================================================
+        from models.boq import MaterialPurchaseTracking
+
+        mat_records = MaterialPurchaseTracking.query.filter(
+            MaterialPurchaseTracking.boq_id == boq_id,
+            MaterialPurchaseTracking.is_deleted == False
+        ).all()
+
+        mat_actuals = {}
+        for r in mat_records:
+            name = (r.material_name or '').strip()
+            actual_amount = float(r.total_quantity_purchased or 0) * float(r.latest_unit_price or 0)
+            if name in mat_actuals:
+                mat_actuals[name]['actual_quantity'] += float(r.total_quantity_purchased or 0)
+                mat_actuals[name]['actual_amount'] += actual_amount
+            else:
+                mat_actuals[name] = {
+                    'actual_quantity': float(r.total_quantity_purchased or 0),
+                    'actual_rate': float(r.latest_unit_price or 0),
+                    'actual_amount': actual_amount,
+                    'unit': r.unit or '',
+                }
+
+        # ============================================================
+        # 3b. SUPPLEMENT actual material data from Change Requests
+        # CR new materials won't be in material_purchase_tracking yet —
+        # their prices are in material_vendor_selections (negotiated_price)
+        # or in sub_items_data/materials_data (unit_price, usually 0)
+        # ============================================================
+        cr_for_boq = ChangeRequest.query.filter(
+            ChangeRequest.boq_id == boq_id,
+            ChangeRequest.is_deleted == False
+        ).all()
+
+        # Fetch VAT percent from LPOCustomization for each CR
+        cr_ids_for_boq = [cr.cr_id for cr in cr_for_boq]
+        profit_lpo_vat_lookup = {}  # {cr_id: vat_percent}
+        if cr_ids_for_boq:
+            profit_lpo_customs = LPOCustomization.query.filter(
+                LPOCustomization.cr_id.in_(cr_ids_for_boq),
+                LPOCustomization.po_child_id == None
+            ).all()
+            for lpo in profit_lpo_customs:
+                profit_lpo_vat_lookup[lpo.cr_id] = float(lpo.vat_percent or 5.0)
+
+        for cr in cr_for_boq:
+            # Get negotiated prices from vendor selections
+            mvs = cr.material_vendor_selections or {}
+            if isinstance(mvs, str):
+                try:
+                    mvs = json.loads(mvs)
+                except Exception:
+                    mvs = {}
+
+            # Get materials list: prefer sub_items_data, fallback to materials_data
+            cr_mats = cr.sub_items_data or cr.materials_data or []
+            if isinstance(cr_mats, str):
+                try:
+                    cr_mats = json.loads(cr_mats)
+                except Exception:
+                    cr_mats = []
+            if not isinstance(cr_mats, list):
+                cr_mats = []
+
+            for mat in cr_mats:
+                mat_name = (mat.get('material_name') or '').strip()
+                if not mat_name:
+                    continue
+
+                is_new = bool(mat.get('is_new_material') or mat.get('is_new', False))
+                quantity = float(mat.get('quantity', 0) or 0)
+
+                # Price priority (highest to lowest):
+                # 1. material_vendor_selections.negotiated_price (vendor confirmed price)
+                # 2. materials_data.unit_price (estimator's proposed price at CR creation)
+                # 3. 0 (unknown, pending)
+                negotiated_price = 0.0
+                mvs_entry = mvs.get(mat_name)
+                if not mvs_entry:
+                    for k, v in mvs.items():
+                        if isinstance(v, dict) and k.lower().strip() == mat_name.lower().strip():
+                            mvs_entry = v
+                            break
+                if mvs_entry and isinstance(mvs_entry, dict):
+                    negotiated_price = float(mvs_entry.get('negotiated_price', 0) or 0)
+
+                # Fallback to materials_data unit_price when no vendor negotiated price yet
+                mat_unit_price = float(mat.get('unit_price', 0) or 0)
+                mat_total_price = float(mat.get('total_price', 0) or 0)
+                if negotiated_price == 0 and mat_unit_price > 0:
+                    negotiated_price = mat_unit_price
+
+                # Calculate actual amount
+                if mat_total_price > 0 and negotiated_price == mat_unit_price:
+                    # Use stored total_price directly (avoids rounding from qty × unit_price)
+                    actual_amount = mat_total_price
+                else:
+                    actual_amount = quantity * negotiated_price
+
+                # Only supplement if this material is NOT already tracked by purchase_tracking
+                if mat_name not in mat_actuals:
+                    # Show the material if it has any price or it's a new pending CR material
+                    if negotiated_price > 0 or is_new:
+                        mat_actuals[mat_name] = {
+                            'actual_quantity': quantity,
+                            'actual_rate': negotiated_price,
+                            'actual_amount': actual_amount,
+                            'unit': mat.get('unit', ''),
+                            'cr_id': cr.cr_id,
+                        }
+
+                # If it's a new CR material (not in BOQ), add it to materials_planned with 0 values
+                # so it appears as a row with planned=0, actual=CR amount
+                if is_new and mat_name not in materials_planned:
+                    materials_planned[mat_name] = {
+                        'material_name': mat_name,
+                        'unit': mat.get('unit', ''),
+                        'planned_quantity': 0.0,
+                        'planned_rate': 0.0,
+                        'planned_amount': 0.0,
+                        'item_name': cr.item_name or '',
+                        'is_new_cr_material': True,
+                        'cr_id': cr.cr_id,
+                        'cr_status': cr.status,
+                    }
+
+        all_mat_names = set(list(materials_planned.keys()) + list(mat_actuals.keys()))
+        materials_comparison = []
+        for mat_name in all_mat_names:
+            planned = materials_planned.get(mat_name, {})
+            actual = mat_actuals.get(mat_name, {})
+            planned_amt = float(planned.get('planned_amount', 0))
+            actual_amt = float(actual.get('actual_amount', 0))
+            is_new_cr = bool(planned.get('is_new_cr_material', False))
+            cr_id_val = planned.get('cr_id') or actual.get('cr_id')
+            cr_status_val = planned.get('cr_status', '')
+            # Compute VAT for CR new materials using LPOCustomization vat_percent
+            vat_pct = profit_lpo_vat_lookup.get(cr_id_val, 5.0) if (is_new_cr and cr_id_val) else 0.0
+            vat_amount = round(actual_amt * vat_pct / 100, 2) if is_new_cr else 0.0
+            actual_amount_with_vat = round(actual_amt + vat_amount, 2)
+            materials_comparison.append({
+                'material_name': mat_name,
+                'unit': planned.get('unit') or actual.get('unit', ''),
+                'item_name': planned.get('item_name', ''),
+                'planned_quantity': float(planned.get('planned_quantity', 0)),
+                'planned_rate': float(planned.get('planned_rate', 0)),
+                'planned_amount': planned_amt,
+                'actual_quantity': float(actual.get('actual_quantity', 0)),
+                'actual_rate': float(actual.get('actual_rate', 0)),
+                'actual_amount': actual_amt,
+                'vat_amount': vat_amount,
+                'actual_amount_with_vat': actual_amount_with_vat,
+                'variance': round(planned_amt - actual_amount_with_vat, 2),
+                'variance_pct': round((planned_amt - actual_amount_with_vat) / planned_amt * 100, 2) if planned_amt > 0 else 0,
+                'is_new_cr_material': is_new_cr,
+                'cr_id': cr_id_val,
+                'cr_status': cr_status_val,
+                'status': 'under' if actual_amount_with_vat < planned_amt else ('over' if actual_amount_with_vat > planned_amt else 'on_plan'),
+            })
+        materials_comparison.sort(key=lambda x: x['planned_amount'], reverse=True)
+
+        total_planned_materials = sum(m['planned_amount'] for m in materials_comparison)
+        total_actual_materials = sum(m['actual_amount_with_vat'] for m in materials_comparison)
+
+        # ============================================================
+        # 4. LABOUR COMPARISON
+        # ============================================================
+
+        # Planned labour from BOQ JSON (check both item-level and sub-item-level labour)
+        planned_labour_total = Decimal('0')
+        planned_workers = []
+        for item in boq_data.get('items', []):
+            item_name = item.get('item_name') or item.get('name', '')
+            # Item-level labour
+            for lab in item.get('labour', []):
+                role = lab.get('labour_role') or lab.get('role', '')
+                hours = float(lab.get('hours', 0) or lab.get('planned_hours', 0) or 0)
+                rate = float(lab.get('rate_per_hour', 0) or lab.get('rate', 0) or 0)
+                lab_total = float(lab.get('total', 0) or 0)
+                if lab_total == 0:
+                    lab_total = hours * rate
+                # Skip placeholder entries with no role and no meaningful cost
+                if not role and rate == 0 and lab_total == 0:
+                    continue
+                planned_labour_total += Decimal(str(lab_total))
+                planned_workers.append({
+                    'labour_role': role or '-',
+                    'hours': round(hours, 2),
+                    'rate_per_hour': round(rate, 2),
+                    'total': round(lab_total, 2),
+                    'item_name': item_name,
+                })
+            # Sub-item-level labour
+            for sub_item in item.get('sub_items', []):
+                sub_name = sub_item.get('sub_item_name') or sub_item.get('name', '')
+                for lab in sub_item.get('labour', []):
+                    role = lab.get('labour_role') or lab.get('role', '')
+                    hours = float(lab.get('hours', 0) or lab.get('planned_hours', 0) or 0)
+                    rate = float(lab.get('rate_per_hour', 0) or lab.get('rate', 0) or 0)
+                    lab_total = float(lab.get('total', 0) or 0)
+                    if lab_total == 0:
+                        lab_total = hours * rate
+                    # Skip placeholder entries with no role and no meaningful cost
+                    if not role and rate == 0 and lab_total == 0:
+                        continue
+                    planned_labour_total += Decimal(str(lab_total))
+                    planned_workers.append({
+                        'labour_role': role or '-',
+                        'hours': round(hours, 2),
+                        'rate_per_hour': round(rate, 2),
+                        'total': round(lab_total, 2),
+                        'item_name': (f"{item_name} / {sub_name}" if sub_name else item_name),
+                    })
+
+        # Actual labour: per-worker breakdown from daily_attendance
+        from sqlalchemy import func
+        from models.daily_attendance import DailyAttendance
+        from models.worker import Worker
+
+        total_cost_expr = func.sum(func.coalesce(DailyAttendance.total_cost, 0))
+
+        worker_rows = (
+            db.session.query(
+                Worker.worker_id,
+                Worker.worker_code,
+                Worker.full_name.label('worker_name'),
+                Worker.phone,
+                DailyAttendance.labour_role,
+                func.count(DailyAttendance.attendance_date.distinct()).label('working_days'),
+                func.sum(func.coalesce(DailyAttendance.regular_hours, 0)).label('regular_hours'),
+                func.sum(func.coalesce(DailyAttendance.overtime_hours, 0)).label('overtime_hours'),
+                func.sum(func.coalesce(DailyAttendance.total_hours, 0)).label('total_hours'),
+                func.avg(func.coalesce(DailyAttendance.hourly_rate, 0)).label('avg_hourly_rate'),
+                total_cost_expr.label('total_cost'),
+                func.min(DailyAttendance.attendance_date).label('first_date'),
+                func.max(DailyAttendance.attendance_date).label('last_date'),
+            )
+            .join(Worker, DailyAttendance.worker_id == Worker.worker_id)
+            .filter(
+                DailyAttendance.project_id == project_id,
+                DailyAttendance.is_deleted == False,
+                DailyAttendance.is_absent == False,
+            )
+            .group_by(
+                Worker.worker_id,
+                Worker.worker_code,
+                Worker.full_name,
+                Worker.phone,
+                DailyAttendance.labour_role,
+            )
+            .order_by(total_cost_expr.desc())
+            .all()
+        )
+
+        workers_list = []
+        total_actual_labour = Decimal('0')
+        total_actual_hours = 0.0
+        total_regular_hours = 0.0
+        total_overtime_hours = 0.0
+        total_working_days = 0
+
+        for r in worker_rows:
+            cost = float(r.total_cost or 0)
+            total_actual_labour += Decimal(str(cost))
+            total_actual_hours += float(r.total_hours or 0)
+            total_regular_hours += float(r.regular_hours or 0)
+            total_overtime_hours += float(r.overtime_hours or 0)
+            total_working_days += int(r.working_days or 0)
+            workers_list.append({
+                'worker_code': r.worker_code or '-',
+                'worker_name': r.worker_name or '-',
+                'phone': r.phone or '-',
+                'labour_role': r.labour_role or '-',
+                'working_days': int(r.working_days or 0),
+                'regular_hours': round(float(r.regular_hours or 0), 2),
+                'overtime_hours': round(float(r.overtime_hours or 0), 2),
+                'total_hours': round(float(r.total_hours or 0), 2),
+                'avg_hourly_rate': round(float(r.avg_hourly_rate or 0), 2),
+                'total_cost': round(cost, 2),
+                'first_date': r.first_date.isoformat() if r.first_date else None,
+                'last_date': r.last_date.isoformat() if r.last_date else None,
+            })
+
+        # Requisition summary for the project
+        from models.worker_assignment import WorkerAssignment
+
+        req_records = LabourRequisition.query.filter(
+            LabourRequisition.project_id == project_id,
+            LabourRequisition.is_deleted == False
+        ).order_by(LabourRequisition.required_date.desc()).all()
+
+        req_ids = [lr.requisition_id for lr in req_records]
+
+        # Batch: assigned worker count per requisition
+        assigned_counts = {}
+        if req_ids:
+            assign_agg = (
+                db.session.query(
+                    WorkerAssignment.requisition_id,
+                    func.count(WorkerAssignment.assignment_id).label('cnt')
+                )
+                .filter(
+                    WorkerAssignment.requisition_id.in_(req_ids),
+                    WorkerAssignment.is_deleted == False
+                )
+                .group_by(WorkerAssignment.requisition_id)
+                .all()
+            )
+            assigned_counts = {row.requisition_id: int(row.cnt) for row in assign_agg}
+
+        # Batch: attended count, total hours, total cost per requisition
+        attendance_agg = {}
+        if req_ids:
+            attend_rows = (
+                db.session.query(
+                    DailyAttendance.requisition_id,
+                    func.count(DailyAttendance.worker_id.distinct()).label('attended_count'),
+                    func.sum(func.coalesce(DailyAttendance.total_hours, 0)).label('total_hours'),
+                    func.sum(func.coalesce(DailyAttendance.total_cost, 0)).label('total_cost'),
+                )
+                .filter(
+                    DailyAttendance.requisition_id.in_(req_ids),
+                    DailyAttendance.is_deleted == False,
+                    DailyAttendance.is_absent == False,
+                )
+                .group_by(DailyAttendance.requisition_id)
+                .all()
+            )
+            attendance_agg = {row.requisition_id: row for row in attend_rows}
+
+        requisitions_list = []
+        for lr in req_records:
+            labour_items = lr.labour_items if lr.labour_items else []
+            if isinstance(labour_items, str):
+                try:
+                    labour_items = json.loads(labour_items)
+                except Exception:
+                    labour_items = []
+            skill_summary = ', '.join(
+                str(li.get('skill_required') or li.get('labour_role', ''))
+                for li in labour_items if isinstance(li, dict)
+            ) if labour_items else (lr.skill_required or '-')
+
+            agg = attendance_agg.get(lr.requisition_id)
+            requisitions_list.append({
+                'requisition_code': lr.requisition_code or '-',
+                'site_name': lr.site_name or '-',
+                'required_date': lr.required_date.isoformat() if lr.required_date else None,
+                'requested_by': lr.requested_by_name or '-',
+                'requester_role': lr.requester_role or '-',
+                'status': lr.status or '-',
+                'assignment_status': lr.assignment_status or '-',
+                'skill_summary': skill_summary,
+                'workers_requested': int(lr.workers_count or 0),
+                'workers_assigned': assigned_counts.get(lr.requisition_id, 0),
+                'workers_attended': int(agg.attended_count if agg else 0),
+                'approved_by': lr.approved_by_name or '-',
+                'approval_date': lr.approval_date.isoformat() if lr.approval_date else None,
+                'total_hours': round(float(agg.total_hours if agg else 0), 2),
+                'total_cost': round(float(agg.total_cost if agg else 0), 2),
+            })
+
+        labour_variance = float(planned_labour_total) - float(total_actual_labour)
+
+        transport_variance = float(planned_transport) - float(actual_transport_total)
+
+        return jsonify({
+            'success': True,
+            'boq_id': boq_id,
+            'project_id': project_id,
+            'project_name': boq.project.project_name if boq.project else '',
+            'boq_name': boq.boq_name,
+            'transport': {
+                'planned': float(planned_transport),
+                'actual': float(actual_transport_total),
+                'variance': round(transport_variance, 2),
+                'variance_pct': round(transport_variance / float(planned_transport) * 100, 2) if planned_transport > 0 else 0,
+                'details': transport_details,
+            },
+            'materials': {
+                'planned': round(total_planned_materials, 2),
+                'actual': round(total_actual_materials, 2),
+                'variance': round(total_planned_materials - total_actual_materials, 2),
+                'variance_pct': round((total_planned_materials - total_actual_materials) / total_planned_materials * 100, 2) if total_planned_materials > 0 else 0,
+                'details': materials_comparison,
+            },
+            'labour': {
+                'planned': round(float(planned_labour_total), 2),
+                'actual': round(float(total_actual_labour), 2),
+                'variance': round(labour_variance, 2),
+                'variance_pct': round(labour_variance / float(planned_labour_total) * 100, 2) if planned_labour_total > 0 else 0,
+                'summary': {
+                    'total_workers': len(workers_list),
+                    'total_working_days': total_working_days,
+                    'total_hours': round(total_actual_hours, 2),
+                    'regular_hours': round(total_regular_hours, 2),
+                    'overtime_hours': round(total_overtime_hours, 2),
+                    'total_requisitions': len(requisitions_list),
+                },
+                'planned_workers': planned_workers,
+                'workers': workers_list,
+                'requisitions': requisitions_list,
+            },
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error in get_profit_report: {str(e)}")
+        import traceback
+        log.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500

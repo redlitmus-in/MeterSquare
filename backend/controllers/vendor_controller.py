@@ -1,6 +1,6 @@
 from flask import request, jsonify, g
 from config.db import db
-from models.vendor import Vendor, VendorProduct
+from models.vendor import Vendor, VendorProduct, VendorCategory
 from models.user import User
 from config.logging import get_logger
 from datetime import datetime
@@ -30,6 +30,9 @@ def create_vendor():
                 "error": f"Vendor with email '{data['email']}' already exists"
             }), 409
 
+        # Handle category - get existing or create new one
+        category_value = get_or_create_category(data.get('category'))
+
         # Create new vendor
         new_vendor = Vendor(
             company_name=data['company_name'],
@@ -43,7 +46,7 @@ def create_vendor():
             country=data.get('country', 'UAE'),
             pin_code=data.get('pin_code'),
             gst_number=data.get('gst_number'),
-            category=data.get('category'),
+            category=category_value,
             status=data.get('status', 'active'),
             created_by=current_user['user_id'],
             last_modified_by=current_user['user_id']
@@ -144,9 +147,16 @@ def get_all_vendors():
 
         vendors_list = [vendor.to_dict() for vendor in paginated_vendors.items]
 
-        # Get statistics
-        total_active = Vendor.query.filter_by(status='active', is_deleted=False).count()
-        total_inactive = Vendor.query.filter_by(status='inactive', is_deleted=False).count()
+        # Get statistics — single GROUP BY query instead of 2 separate COUNTs
+        from sqlalchemy import func
+        _vendor_status_counts = dict(
+            db.session.query(Vendor.status, func.count(Vendor.vendor_id))
+            .filter(Vendor.is_deleted == False)
+            .group_by(Vendor.status)
+            .all()
+        )
+        total_active = _vendor_status_counts.get('active', 0)
+        total_inactive = _vendor_status_counts.get('inactive', 0)
 
         return jsonify({
             "success": True,
@@ -242,9 +252,16 @@ def get_all_vendors_with_products():
             vendor_data['products_count'] = len(vendor_data['products'])
             vendors_list.append(vendor_data)
 
-        # Get statistics
-        total_active = Vendor.query.filter_by(status='active', is_deleted=False).count()
-        total_inactive = Vendor.query.filter_by(status='inactive', is_deleted=False).count()
+        # Get statistics — single GROUP BY query instead of 2 separate COUNTs
+        from sqlalchemy import func
+        _status_counts = dict(
+            db.session.query(Vendor.status, func.count(Vendor.vendor_id))
+            .filter(Vendor.is_deleted == False)
+            .group_by(Vendor.status)
+            .all()
+        )
+        total_active = _status_counts.get('active', 0)
+        total_inactive = _status_counts.get('inactive', 0)
 
         return jsonify({
             "success": True,
@@ -272,17 +289,25 @@ def get_all_vendors_with_products():
 def get_vendor_by_id(vendor_id):
     """Get vendor by ID with products"""
     try:
-        vendor = Vendor.query.filter_by(vendor_id=vendor_id, is_deleted=False).first()
+        from sqlalchemy.orm import joinedload
+        # Single query: fetch vendor + products together (avoids second DB round-trip)
+        vendor = Vendor.query.options(
+            joinedload(Vendor.products)
+        ).filter_by(vendor_id=vendor_id, is_deleted=False).first()
 
         if not vendor:
             return jsonify({"success": False, "error": "Vendor not found"}), 404
 
         vendor_data = vendor.to_dict()
+        vendor_data['email'] = vendor.email
 
-        # Get vendor products
-        # ✅ PERFORMANCE: Limit to 200 products per vendor (use pagination for more)
-        products = VendorProduct.query.filter_by(vendor_id=vendor_id, is_deleted=False).order_by(VendorProduct.product_id.desc()).limit(200).all()
-        vendor_data['products'] = [product.to_dict() for product in products]
+        # Filter, sort, limit in Python — no extra DB query needed
+        products = sorted(
+            [p for p in vendor.products if not p.is_deleted],
+            key=lambda p: p.product_id,
+            reverse=True
+        )[:200]
+        vendor_data['products'] = [p.to_dict() for p in products]
         vendor_data['products_count'] = len(products)
 
         return jsonify({
@@ -343,7 +368,7 @@ def update_vendor(vendor_id):
         if 'gst_number' in data:
             vendor.gst_number = data['gst_number']
         if 'category' in data:
-            vendor.category = data['category']
+            vendor.category = get_or_create_category(data['category'])
         if 'status' in data:
             vendor.status = data['status']
 
@@ -536,29 +561,247 @@ def delete_vendor_product(vendor_id, product_id):
 
 
 def get_vendor_categories():
-    """Get list of vendor categories"""
+    """Get list of vendor categories from database"""
     try:
-        categories = [
-            'Construction Materials',
-            'Electrical Equipment',
-            'Plumbing Supplies',
-            'HVAC Equipment',
-            'Safety Equipment',
-            'Tools & Machinery',
-            'Furniture',
-            'IT Equipment',
-            'Office Supplies',
-            'Transportation',
-            'Consulting Services',
-            'Maintenance Services',
-            'Other'
-        ]
+        # Fetch active categories from database
+        db_categories = VendorCategory.query.filter_by(
+            is_active=True,
+            is_deleted=False
+        ).order_by(VendorCategory.name).all()
+
+        if db_categories:
+            # Return categories from database
+            categories = [cat.name for cat in db_categories]
+            categories_detailed = [cat.to_dict() for cat in db_categories]
+        else:
+            # Fallback to default list if table is empty
+            categories = [
+                'Construction Materials',
+                'Electrical Equipment',
+                'Plumbing Supplies',
+                'HVAC Equipment',
+                'Safety Equipment',
+                'Tools & Machinery',
+                'Furniture',
+                'IT Equipment',
+                'Office Supplies',
+                'Transportation',
+                'Consulting Services',
+                'Maintenance Services',
+                'Other'
+            ]
+            categories_detailed = [{'name': cat, 'is_default': True} for cat in categories]
 
         return jsonify({
             "success": True,
-            "categories": categories
+            "categories": categories,
+            "categories_detailed": categories_detailed
         }), 200
 
     except Exception as e:
         log.error(f"Error fetching categories: {str(e)}")
-        return jsonify({"success": False, "error": f"Failed to fetch categories: {str(e)}"}), 500
+        # Fallback to hardcoded list on error
+        fallback_categories = [
+            'Construction Materials', 'Electrical Equipment', 'Plumbing Supplies',
+            'HVAC Equipment', 'Safety Equipment', 'Tools & Machinery', 'Furniture',
+            'IT Equipment', 'Office Supplies', 'Transportation', 'Consulting Services',
+            'Maintenance Services', 'Other'
+        ]
+        return jsonify({
+            "success": True,
+            "categories": fallback_categories,
+            "fallback": True
+        }), 200
+
+
+def create_vendor_category():
+    """Create a new vendor category"""
+    try:
+        current_user = g.user
+        data = request.get_json()
+
+        category_name = data.get('name', '').strip()
+        if not category_name:
+            return jsonify({"success": False, "error": "Category name is required"}), 400
+
+        # Validate category name length (max 100 characters to match DB column)
+        if len(category_name) > 100:
+            return jsonify({"success": False, "error": "Category name must be 100 characters or less"}), 400
+
+        # Check if category already exists (case-insensitive)
+        existing = VendorCategory.query.filter(
+            func.lower(VendorCategory.name) == func.lower(category_name),
+            VendorCategory.is_deleted == False
+        ).first()
+
+        if existing:
+            if existing.is_active:
+                return jsonify({
+                    "success": False,
+                    "error": f"Category '{existing.name}' already exists"
+                }), 409
+            else:
+                # Reactivate if it was deactivated
+                existing.is_active = True
+                existing.last_modified_at = datetime.utcnow()
+                db.session.commit()
+                log.info(f"Vendor category reactivated: {existing.name}")
+                return jsonify({
+                    "success": True,
+                    "message": f"Category '{existing.name}' reactivated",
+                    "category": existing.to_dict()
+                }), 200
+
+        # Create new category
+        new_category = VendorCategory(
+            name=category_name,
+            description=data.get('description', ''),
+            is_default=False,
+            is_active=True,
+            created_by=current_user['user_id'] if current_user else None
+        )
+
+        db.session.add(new_category)
+        db.session.commit()
+
+        log.info(f"New vendor category created: {category_name}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Category '{category_name}' created successfully",
+            "category": new_category.to_dict()
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error creating category: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to create category. Please try again."}), 500
+
+
+def get_or_create_category(category_name):
+    """
+    Get existing category or create new one - used internally when creating vendors.
+
+    NOTE: This function uses flush() but does NOT commit. The calling function
+    must call db.session.commit() to persist changes.
+    """
+    if not category_name or not category_name.strip():
+        return None
+
+    category_name = category_name.strip()
+
+    # Validate length (max 100 chars to match DB column)
+    if len(category_name) > 100:
+        category_name = category_name[:100]
+
+    # Check if category exists (case-insensitive)
+    existing = VendorCategory.query.filter(
+        func.lower(VendorCategory.name) == func.lower(category_name),
+        VendorCategory.is_deleted == False
+    ).first()
+
+    if existing:
+        if not existing.is_active:
+            existing.is_active = True
+            existing.last_modified_at = datetime.utcnow()
+            db.session.flush()
+            log.info(f"Reactivated vendor category: {existing.name}")
+        return existing.name  # Return the actual name from DB to maintain casing
+
+    # Create new category
+    new_category = VendorCategory(
+        name=category_name,
+        is_default=False,
+        is_active=True
+    )
+    db.session.add(new_category)
+    db.session.flush()
+
+    log.info(f"Auto-created new vendor category: {category_name}")
+    return new_category.name
+
+
+def get_vendors_matching_materials():
+    """
+    POST /api/vendor/matching-vendors
+    Find vendors whose products match the given material names.
+    Returns only vendors that supply at least one of the requested materials,
+    with matching product details (including unit_price).
+
+    Request body:
+    {
+        "material_names": ["Cement 50kg", "Steel Rod 12mm"],
+        "exclude_vendor_id": 5  // optional - exclude the original vendor
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get('material_names'):
+            return jsonify({"success": False, "error": "material_names is required"}), 400
+
+        material_names = data['material_names']
+        exclude_vendor_id = data.get('exclude_vendor_id')
+
+        # Build ILIKE conditions for fuzzy matching on product_name
+        product_conditions = []
+        for name in material_names:
+            clean_name = name.strip()
+            if clean_name:
+                product_conditions.append(
+                    func.lower(VendorProduct.product_name).contains(clean_name.lower())
+                )
+
+        if not product_conditions:
+            return jsonify({"success": True, "vendors": []}), 200
+
+        # Find all matching products with their vendors
+        matching_products = VendorProduct.query.join(
+            Vendor, VendorProduct.vendor_id == Vendor.vendor_id
+        ).filter(
+            Vendor.is_deleted == False,
+            Vendor.status == 'active',
+            VendorProduct.is_deleted == False,
+            db.or_(*product_conditions)
+        )
+
+        if exclude_vendor_id:
+            matching_products = matching_products.filter(
+                Vendor.vendor_id != exclude_vendor_id
+            )
+
+        matching_products = matching_products.all()
+
+        if not matching_products:
+            return jsonify({"success": True, "vendors": [], "total": 0}), 200
+
+        # Group products by vendor_id
+        vendor_ids = set()
+        products_by_vendor = {}
+        for product in matching_products:
+            vendor_ids.add(product.vendor_id)
+            if product.vendor_id not in products_by_vendor:
+                products_by_vendor[product.vendor_id] = []
+            products_by_vendor[product.vendor_id].append(product.to_dict())
+
+        # Fetch vendor details
+        vendors = Vendor.query.filter(
+            Vendor.vendor_id.in_(vendor_ids)
+        ).order_by(Vendor.company_name.asc()).all()
+
+        vendors_list = []
+        for vendor in vendors:
+            vendor_data = vendor.to_dict()
+            vendor_data['vendor_name'] = vendor.company_name
+            vendor_data['matching_products'] = products_by_vendor.get(vendor.vendor_id, [])
+            vendor_data['matching_products_count'] = len(vendor_data['matching_products'])
+            vendors_list.append(vendor_data)
+
+        return jsonify({
+            "success": True,
+            "vendors": vendors_list,
+            "total": len(vendors_list)
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error finding matching vendors: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to find matching vendors"}), 500

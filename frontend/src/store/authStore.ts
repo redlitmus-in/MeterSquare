@@ -93,12 +93,29 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      logout: () => {
+      logout: async () => {
+        const state = get();
+        const user = state.user;
+        const token = localStorage.getItem('access_token');
+
+        // Call logout API to set user status to offline (fire and forget)
+        if (token && user?.user_id) {
+          try {
+            await apiWrapper.post(
+              API_ENDPOINTS.AUTH.LOGOUT,
+              { user_id: user.user_id }
+            );
+          } catch (error) {
+            // Don't block logout if API call fails
+            console.warn('Logout API call failed, continuing with local logout');
+          }
+        }
+
         // Clear all auth-related data from localStorage
         localStorage.removeItem('access_token');
         localStorage.removeItem('user');
         localStorage.removeItem('auth-storage');
-        
+
         // Reset state
         set({
           user: null,
@@ -121,25 +138,31 @@ export const useAuthStore = create<AuthState>()(
           if (cachedUser) {
             try {
               const user = JSON.parse(cachedUser);
-              set({
-                user,
-                isAuthenticated: true,
-                isLoading: false,
-                error: null,
-              });
+              // Only use cache if it has essential fields (user_id and email)
+              if (user && user.user_id && user.email) {
+                set({
+                  user,
+                  isAuthenticated: true,
+                  isLoading: false,
+                  error: null,
+                });
 
-              // Fetch fresh data in background (don't await)
-              apiWrapper.get<any>(API_ENDPOINTS.AUTH.ME).then(response => {
-                const freshUser = response.user || response;
-                localStorage.setItem('user', JSON.stringify(freshUser));
-                set({ user: freshUser });
-              }).catch(() => {
-                // Ignore errors for background refresh
-              });
+                // Fetch fresh data in background (don't await)
+                apiWrapper.get<any>(API_ENDPOINTS.AUTH.ME).then(response => {
+                  const freshUser = response.user || response;
+                  localStorage.setItem('user', JSON.stringify(freshUser));
+                  set({ user: freshUser });
+                }).catch(() => {
+                  // Ignore errors for background refresh
+                });
 
-              return;
+                return;
+              }
+              // Cache is incomplete/corrupted, fall through to API call
+              localStorage.removeItem('user');
             } catch (e) {
               // Invalid cached data, continue with API call
+              localStorage.removeItem('user');
             }
           }
 
@@ -180,14 +203,19 @@ export const useAuthStore = create<AuthState>()(
       updateProfile: async (userData: any) => {
         try {
           set({ isLoading: true, error: null });
-          
-          const updatedUser = await apiWrapper.put<User>(
+
+          await apiWrapper.put(
             API_ENDPOINTS.AUTH.ME,
             userData
           );
 
+          // Re-fetch fresh user data since backend returns only a message
+          const response = await apiWrapper.get<any>(API_ENDPOINTS.AUTH.ME);
+          const freshUser = response.user || response;
+          localStorage.setItem('user', JSON.stringify(freshUser));
+
           set({
-            user: updatedUser,
+            user: freshUser,
             isLoading: false,
             error: null,
           });

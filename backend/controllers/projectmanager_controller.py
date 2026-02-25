@@ -25,6 +25,12 @@ from sqlalchemy.orm import selectinload, joinedload, defer
 from config.db import db
 from models.project import Project
 from models.boq import *
+from models.po_child import POChild
+from models.change_request import ChangeRequest
+from models.labour_requisition import LabourRequisition
+from models.daily_attendance import DailyAttendance
+from models.asset_requisition import AssetRequisition
+from config.change_request_config import CR_CONFIG
 from config.logging import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils.boq_email_service import BOQEmailService
@@ -65,8 +71,17 @@ def create_pm():
         project_ids = data.get('project_ids', data.get('project_id', []))
         assigned_count = 0
         if project_ids:
+            # Batch fetch all projects once — reused in both the update loop and notification loop
+            batch_projects = {
+                p.project_id: p
+                for p in Project.query.filter(
+                    Project.project_id.in_(project_ids),
+                    Project.is_deleted == False
+                ).all()
+            }
+
             for proj_id in project_ids:
-                project = Project.query.filter_by(project_id=proj_id, is_deleted=False).first()
+                project = batch_projects.get(proj_id)
                 if project:
                     # Assign this PM to the project (convert to JSONB array format)
                     project.user_id = [new_user_id] if new_user_id else None
@@ -84,7 +99,7 @@ def create_pm():
                     assigner_name = current_user.get('full_name') or current_user.get('username') or 'Admin'
 
                     for proj_id in project_ids:
-                        project = Project.query.filter_by(project_id=proj_id, is_deleted=False).first()
+                        project = batch_projects.get(proj_id)  # Reuse already-fetched projects
                         if project:
                             notification_service.notify_pm_assigned_to_project(
                                 project_id=proj_id,
@@ -151,7 +166,6 @@ def get_all_pm():
             # Check online status based on user_status field
             # Only "online" is considered online, everything else (offline/NULL) is offline
             is_online = pm.user_status == 'online'
-            log.info(f"PM {pm.full_name}: user_status={pm.user_status}, is_online={is_online}")
 
             # ✅ Get projects from pre-loaded map (NO QUERY - uses pre-loaded dict)
             projects = pm_projects_map.get(pm.user_id, [])
@@ -254,9 +268,17 @@ def update_pm(user_id):
             # First remove PM from all current projects
             Project.query.filter_by(user_id=user_id).update({"user_id": None})
 
+            # Batch pre-fetch all assigned projects in one query (reused for both update + notification)
+            _assigned_proj_ids = data["assigned_projects"]
+            _batch_assigned_projects = {
+                p.project_id: p for p in Project.query.filter(
+                    Project.project_id.in_(_assigned_proj_ids)
+                ).all()
+            } if _assigned_proj_ids else {}
+
             # Assign PM to new projects
-            for project_id in data["assigned_projects"]:
-                project = Project.query.filter_by(project_id=project_id).first()
+            for project_id in _assigned_proj_ids:
+                project = _batch_assigned_projects.get(project_id)  # dict lookup — no DB call
                 if project:
                     # Convert to JSONB array format
                     project.user_id = [user_id] if user_id else None
@@ -271,7 +293,7 @@ def update_pm(user_id):
                 assigner_name = current_user.get('full_name') or current_user.get('username') or 'Admin'
 
                 for project_id in data["assigned_projects"]:
-                    project = Project.query.filter_by(project_id=project_id, is_deleted=False).first()
+                    project = _batch_assigned_projects.get(project_id)  # reuse pre-fetched dict
                     if project:
                         notification_service.notify_pm_assigned_to_project(
                             project_id=project_id,
@@ -402,6 +424,19 @@ def assign_projects():
         td_name = current_user.get('full_name', 'Technical Director') if current_user else 'Technical Director'
         td_id = current_user.get('user_id') if current_user else None
 
+        # ── Batch pre-fetch latest BOQHistory per BOQ for all projects ───────────
+        _all_boq_ids_for_hist = [
+            b.boq_id for p in projects for b in p.boqs if not b.is_deleted
+        ]
+        _batch_boq_history = {}
+        if _all_boq_ids_for_hist:
+            for _h in BOQHistory.query.filter(
+                BOQHistory.boq_id.in_(_all_boq_ids_for_hist)
+            ).order_by(BOQHistory.action_date.desc()).all():
+                if _h.boq_id not in _batch_boq_history:  # keep only latest per boq
+                    _batch_boq_history[_h.boq_id] = _h
+        # ─────────────────────────────────────────────────────────────────────────
+
         assigned_projects = []
         projects_data_for_email = []
         boq_histories_updated = 0
@@ -435,12 +470,12 @@ def assign_projects():
                 pm_names_list = ", ".join([pm.full_name for pm in pm_users])
 
                 for boq in boqs:
-                    # Get existing BOQ history
+                    # Get existing BOQ history from pre-fetched dict (no DB call)
                     status = boq.status
                     boq.status = "approved"
                     db.session.add(boq)
                     db.session.commit()
-                    existing_history = BOQHistory.query.filter_by(boq_id=boq.boq_id).order_by(BOQHistory.action_date.desc()).first()
+                    existing_history = _batch_boq_history.get(boq.boq_id)
 
                     # Handle existing actions - ensure it's always a list
                     if existing_history:
@@ -480,7 +515,6 @@ def assign_projects():
 
                     # Append new action
                     current_actions.append(new_action)
-                    log.info(f"Appending PM assignment action to BOQ {boq.boq_id} history. Total actions: {len(current_actions)}")
 
                     if existing_history:
                         # Update existing history
@@ -499,7 +533,6 @@ def assign_projects():
                         existing_history.last_modified_by = td_name
                         existing_history.last_modified_at = datetime.utcnow()
 
-                        log.info(f"Updated existing history for BOQ {boq.boq_id} with {len(current_actions)} actions")
                     else:
                         # Create new history entry
                         boq_history = BOQHistory(
@@ -516,12 +549,10 @@ def assign_projects():
                             created_by=td_name
                         )
                         db.session.add(boq_history)
-                        log.info(f"Created new history for BOQ {boq.boq_id} with {len(current_actions)} actions")
 
                     boq_histories_updated += 1
 
         db.session.commit()
-        log.info(f"Successfully assigned PM to {len(assigned_projects)} projects and updated {boq_histories_updated} BOQ histories")
 
         # Send notification to assigned PM(s) about project assignments
         try:
@@ -536,27 +567,25 @@ def assign_projects():
         except Exception as notif_error:
             log.error(f"Failed to send PM assignment notifications: {notif_error}")
 
-        # Send email notification to Project Manager
+        # Send email to offline PMs only
         email_sent = False
-        # if user.email and projects_data_for_email:
-            # try:
-            #     email_service = BOQEmailService()
-            #     email_sent = email_service.send_pm_assignment_notification(
-            #         pm_email=user.email,
-            #         pm_name=user.full_name,
-            #         td_name=td_name,
-            #         projects_data=projects_data_for_email
-            #     )
-
-            #     if email_sent:
-            #         log.info(f"Assignment notification email sent successfully to {user.email}")
-            #     else:
-            #         log.warning(f"Failed to send assignment notification email to {user.email}")
-            # except Exception as email_error:
-            #     log.error(f"Error sending assignment notification email: {email_error}")
-            #     # Don't fail the entire request if email fails
-            #     import traceback
-            #     log.error(f"Email error traceback: {traceback.format_exc()}")
+        try:
+            email_service = BOQEmailService()
+            for pm in pm_users:
+                pm_status = str(pm.user_status).lower().strip() if pm.user_status else "unknown"
+                if pm_status == "offline":
+                    sent = email_service.send_pm_assignment_notification(
+                        pm_email=pm.email,
+                        pm_name=pm.full_name,
+                        td_name=td_name,
+                        projects_data=projects_data_for_email
+                    )
+                    if sent:
+                        email_sent = True
+                else:
+                    log.info(f"[assign_projects] PM {pm.user_id} is ONLINE - Email skipped")
+        except Exception as email_error:
+            log.error(f"[assign_projects] Failed to send email to PM: {email_error}")
 
         # Prepare response with all assigned PMs
         assigned_pms_data = [
@@ -634,6 +663,24 @@ def assign_items_to_se():
         if not (is_pm or is_mep or is_admin):
             return jsonify({"error": "You are not assigned to this project"}), 403
 
+        # Determine who should be recorded as the assigner
+        # If admin is assigning, use the project's PM so CRs route correctly
+        if is_admin:
+            # Get the project's actual PM
+            pm_ids = project.user_id if isinstance(project.user_id, list) else ([project.user_id] if project.user_id else [])
+            if not pm_ids:
+                return jsonify({"error": "No Project Manager assigned to this project"}), 400
+            actual_pm_id = pm_ids[0]
+            actual_pm_user = User.query.get(actual_pm_id)
+            if not actual_pm_user:
+                return jsonify({"error": "Project Manager user record not found"}), 400
+            assigner_id = actual_pm_id
+            assigner_name = actual_pm_user.full_name
+        else:
+            # PM/MEP is assigning - use their ID
+            assigner_id = pm_user_id
+            assigner_name = pm_name
+
         # Validate SE exists
         se_user = User.query.get(se_user_id)
         if not se_user or not se_user.role or se_user.role.role != 'siteEngineer':
@@ -669,7 +716,7 @@ def assign_items_to_se():
 
             # Check if item is already assigned by another PM/MEP
             existing_pm_id = item.get('assigned_by_pm_user_id')
-            if existing_pm_id and existing_pm_id != pm_user_id:
+            if existing_pm_id and existing_pm_id != assigner_id:
                 skipped_items.append({
                     "index": item_index,
                     "item_code": item.get('item_code', 'N/A'),
@@ -679,8 +726,8 @@ def assign_items_to_se():
                 continue
 
             # Assign the item
-            item['assigned_by_pm_user_id'] = pm_user_id
-            item['assigned_by_pm_name'] = pm_name
+            item['assigned_by_pm_user_id'] = assigner_id
+            item['assigned_by_pm_name'] = assigner_name
             item['assigned_by_role'] = role_name  # Track if PM or MEP assigned this item
             item['assigned_to_se_user_id'] = se_user_id
             item['assigned_to_se_name'] = se_name
@@ -729,7 +776,7 @@ def assign_items_to_se():
         existing_assignment = PMAssignSS.query.filter_by(
             boq_id=boq_id,
             assigned_to_se_id=se_user_id,
-            assigned_by_pm_id=pm_user_id,
+            assigned_by_pm_id=assigner_id,
             is_deleted=False
         ).first()
 
@@ -744,7 +791,6 @@ def assign_items_to_se():
             existing_assignment.assignment_status = 'assigned'
             existing_assignment.last_modified_at = datetime.utcnow()
             existing_assignment.last_modified_by = pm_name
-            log.info(f"Updated existing assignment {existing_assignment.pm_assign_id} with new items")
         else:
             # Create new assignment record
             new_assignment = PMAssignSS(
@@ -753,15 +799,14 @@ def assign_items_to_se():
                 item_indices=[item['index'] for item in assigned_items],
                 item_details=item_details_for_db,
                 assignment_status='assigned',
-                assigned_by_pm_id=pm_user_id,
+                assigned_by_pm_id=assigner_id,
                 assigned_to_se_id=se_user_id,
                 assignment_date=datetime.utcnow(),
-                created_by=pm_name,
+                created_by=assigner_name,
                 created_at=datetime.utcnow(),
                 is_deleted=False
             )
             db.session.add(new_assignment)
-            log.info(f"Created new assignment record in pm_assign_ss for BOQ {boq_id}, SE {se_user_id}")
 
         # Check if all items are now assigned
         all_items_assigned = True
@@ -782,8 +827,6 @@ def assign_items_to_se():
                     assigned_count += 1
                 else:
                     all_items_assigned = False
-
-        log.info(f"BOQ {boq_id}: {assigned_count}/{total_items} non-extra items assigned. All assigned: {all_items_assigned}")
 
         # Update BOQ status based on item assignments
         if assigned_count > 0 and total_items > 0:
@@ -836,8 +879,6 @@ def assign_items_to_se():
 
         db.session.commit()
 
-        log.info(f"{role_name} {pm_name} assigned {len(assigned_items)} items to SE {se_name} for BOQ {boq_id}")
-
         # Send notification to SE about item assignment
         try:
             notification_service.notify_se_items_assigned(
@@ -850,6 +891,25 @@ def assign_items_to_se():
             )
         except Exception as notif_error:
             log.error(f"Failed to send item assignment notification: {notif_error}")
+
+        # Send email to SE only if offline
+        try:
+            se_status = str(se_user.user_status).lower().strip() if se_user.user_status else "unknown"
+            if se_status == "offline":
+                boq_email_service = BOQEmailService()
+                email_sent = boq_email_service.send_se_items_assigned_notification(
+                    boq_name=boq.boq_name,
+                    project_name=project.project_name,
+                    pm_name=pm_name,
+                    se_email=se_user.email,
+                    se_name=se_name,
+                    items_count=len(assigned_items),
+                    assigned_items=assigned_items
+                )
+            else:
+                log.info(f"[assign_items_to_se] SE {se_user_id} is ONLINE - Email skipped")
+        except Exception as email_err:
+            log.error(f"[assign_items_to_se] Failed to send email to SE: {email_err}")
 
         return jsonify({
             "success": True,
@@ -1118,8 +1178,6 @@ def unassign_items_from_se():
 
         db.session.commit()
 
-        log.info(f"{role_name} {pm_name} unassigned {len(unassigned_items)} items from SE for BOQ {boq_id}")
-
         return jsonify({
             "success": True,
             "message": f"Successfully unassigned {len(unassigned_items)} item(s)",
@@ -1244,35 +1302,41 @@ def send_boq_to_estimator():
         # Get BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq:
-            log.error(f"BOQ {boq_id} not found or deleted")
             return jsonify({"error": f"BOQ {boq_id} not found"}), 404
-
-        log.info(f"Found BOQ {boq_id} with project_id: {boq.project_id}")
 
         # Get BOQ details
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
         if not boq_details:
-            log.error(f"BOQ details not found for BOQ {boq_id}")
             return jsonify({"error": f"BOQ details not found for BOQ {boq_id}"}), 404
 
         # Get project (allow soft-deleted projects for BOQ approval flow)
         project = Project.query.filter_by(project_id=boq.project_id).first()
         if not project:
-            log.error(f"Project {boq.project_id} not found for BOQ {boq_id}")
             return jsonify({"error": f"Project not found (ID: {boq.project_id}) for BOQ {boq_id}"}), 404
 
-        log.info(f"Found project {project.project_id}: {project.project_name}")
+        # Get the SPECIFIC Estimator assigned to this project (NOT just any estimator!)
+        if not project.estimator_id:
+            return jsonify({
+                "error": f"No estimator assigned to project '{project.project_name}'",
+                "project_id": project.project_id,
+                "solution": "Please assign an estimator to this project first"
+            }), 400
 
-        # Get Estimator user
-        estimator_role = Role.query.filter_by(role='estimator').first()
-        if not estimator_role:
-            return jsonify({"error": "Estimator role not found"}), 404
-
-        estimator = User.query.filter_by(role_id=estimator_role.role_id, is_deleted=False).first()
+        # Fetch the specific estimator by user_id (from project.estimator_id)
+        estimator = User.query.filter_by(user_id=project.estimator_id, is_deleted=False).first()
         if not estimator:
-            return jsonify({"error": "Estimator not found"}), 404
+            return jsonify({
+                "error": f"Estimator (ID: {project.estimator_id}) not found or deleted",
+                "project_id": project.project_id
+            }), 404
+
+        # Verify this user is actually an estimator role (extra validation)
+        estimator_role = Role.query.filter_by(role='estimator').first()
+        if estimator_role and estimator.role_id != estimator_role.role_id:
+            log.warning(f"⚠️  User role_id: {estimator.role_id}, Expected estimator role_id: {estimator_role.role_id}")
 
         if not estimator.email:
+            log.error(f"❌ Estimator {estimator.full_name} has no email address")
             return jsonify({"error": f"Estimator {estimator.full_name} has no email address"}), 400
 
         # Prepare email service and data
@@ -1284,22 +1348,56 @@ def send_boq_to_estimator():
         projects_data = [{
             'project_id': project.project_id,
             'project_name': project.project_name,
+            'project_code': getattr(project, 'project_code', 'N/A'),
             'boq_id': boq.boq_id,
             'boq_name': boq.boq_name,
             'client': getattr(project, 'client', 'N/A'),
             'location': getattr(project, 'location', 'N/A'),
             'total_cost': items_summary.get('total_cost', 0),
-            'status': boq_status
+            'status': getattr(project, 'status', 'Active')
         }]
 
-        # Fallback: use existing email function (assuming it's general-purpose)
-        # email_sent = boq_email_service.send_pm_assignment_notification(
-        #     estimator.email, estimator.full_name, current_user_name, projects_data
-        # )
+        # Send email to Estimator ONLY if they are OFFLINE
+        # If online, they will receive in-app notification only
+        email_sent = False
 
-        # if email_sent:
-            # If PM approves, set to PM_Approved so estimator can send to TD
-            # If PM rejects, set to rejected
+        # Normalize status to lowercase for comparison
+        estimator_status = str(estimator.user_status).lower().strip() if estimator.user_status else "unknown"
+        if estimator_status == "offline":
+            # Prepare BOQ and Project data for email
+            boq_data = {
+                'boq_id': boq.boq_id,
+                'boq_name': boq.boq_name,
+                'status': boq.status
+            }
+
+            project_data = {
+                'project_id': project.project_id,
+                'project_name': project.project_name,
+                'project_code': getattr(project, 'project_code', 'N/A'),
+                'client': getattr(project, 'client', 'N/A'),
+                'location': getattr(project, 'location', 'N/A')
+            }
+
+            # Use CORRECT email template based on approval/rejection
+            if boq_status == 'rejected':
+                email_sent = boq_email_service.send_boq_rejection_to_estimator(
+                    boq_data, project_data, items_summary, estimator.email, rejection_reason,
+                    estimator_name=estimator.full_name, pm_name=current_user_name
+                )
+            else:  # approved
+                email_sent = boq_email_service.send_boq_approval_confirmation_to_estimator(
+                    boq_data, project_data, items_summary, estimator.email, comments,
+                    estimator_name=estimator.full_name, pm_name=current_user_name
+                )
+
+            if email_sent:
+                log.info(f"📧 ✅ SUCCESS: {boq_status.upper()} email sent to {estimator.email}")
+            else:
+                log.error(f"📧 ❌ FAILED: Could not send {boq_status} email to {estimator.email}")
+        else:
+            log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped, in-app notification will be sent")
+
         if boq_status == 'approved':
             boq.status = 'PM_Approved'
             boq.client_rejection_reason = None  # Clear any previous rejection reason
@@ -1308,7 +1406,7 @@ def send_boq_to_estimator():
             boq.client_rejection_reason = rejection_reason  # Save PM rejection reason
         boq.last_modified_by = current_user_name
         boq.last_modified_at = datetime.utcnow()
-        boq.email_sent = True
+        boq.email_sent = email_sent 
 
         # Add to BOQ history
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -1642,8 +1740,6 @@ def confirm_se_completion():
         se_user = User.query.get(se_user_id)
         se_name = se_user.full_name if se_user else "Site Engineer"
 
-        log.info(f"PM {pm_user_id} confirmed SE {se_user_id} completion for project {project_id}. Status: {confirmed_pairs}/{total_pairs}")
-
         # Send notification to SE about completion confirmation
         try:
             boq = BOQ.query.filter_by(project_id=project_id, is_deleted=False).first()
@@ -1731,15 +1827,21 @@ def get_project_completion_details(project_id):
         ).all()
 
         # Build detailed response
+        # Batch pre-fetch PM and SE users — avoid N+1 (two queries per pair)
+        _pair_pm_ids = list({p.assigned_by_pm_id for p in assignment_pairs if p.assigned_by_pm_id})
+        _pair_se_ids = list({p.assigned_to_se_id for p in assignment_pairs if p.assigned_to_se_id})
+        _all_pair_user_ids = list(set(_pair_pm_ids + _pair_se_ids))
+        _pair_users_map = {
+            u.user_id: u for u in User.query.filter(
+                User.user_id.in_(_all_pair_user_ids)
+            ).all()
+        } if _all_pair_user_ids else {}
+
         details = []
         for pair in assignment_pairs:
-            # Get PM and SE user details
-            pm_user = User.query.get(pair.assigned_by_pm_id)
-            se_user = User.query.get(pair.assigned_to_se_id)
-
-            # Log pair details for debugging
-            log.info(f"PM-SE pair: PM {pair.assigned_by_pm_id} -> SE {pair.assigned_to_se_id}, "
-                    f"completion_requested: {pair.completion_requested}, pm_confirmed: {pair.pm_confirmed}")
+            # Get PM and SE user details from pre-fetched map (no DB call)
+            pm_user = _pair_users_map.get(pair.assigned_by_pm_id)
+            se_user = _pair_users_map.get(pair.assigned_to_se_id)
 
             # Flatten and deduplicate item indices
             all_items = []
@@ -1926,7 +2028,7 @@ def get_pm_assign_project():
     """Get BOQs that the current PM has assigned to Site Supervisors - ONGOING (non-completed) - OPTIMIZED FOR SPEED"""
     try:
         from models.pm_assign_ss import PMAssignSS
-        from sqlalchemy import func, case
+        from sqlalchemy import func, case, and_
         from models.boq import BOQDetails
 
         page = request.args.get('page', type=int)
@@ -1973,7 +2075,10 @@ def get_pm_assign_project():
                     )
                 )).label('pending_se_requests')
             )
-            .filter(PMAssignSS.is_deleted == False)
+            .filter(
+                PMAssignSS.is_deleted == False,
+                PMAssignSS.boq_id.isnot(None)  # Ensure PMAssignSS record exists
+            )
             .group_by(PMAssignSS.boq_id)
             .subquery()
         )
@@ -2020,12 +2125,13 @@ def get_pm_assign_project():
                 Project.completion_requested
             )
             .join(BOQ, Project.project_id == BOQ.project_id)
-            .join(PMAssignSS, BOQ.boq_id == PMAssignSS.boq_id)
+            .join(PMAssignSS, BOQ.boq_id == PMAssignSS.boq_id)  # INNER JOIN - only show if PM has assignments
             .outerjoin(boq_items_count_subquery, BOQ.boq_id == boq_items_count_subquery.c.boq_id)
             .outerjoin(assignment_counts, BOQ.boq_id == assignment_counts.c.boq_id)
             .filter(
                 Project.is_deleted == False,
                 BOQ.is_deleted == False,
+                BOQ.status == 'items_assigned',  # Only show projects with items_assigned status
                 PMAssignSS.is_deleted == False,
                 # FILTER: Only show ongoing (non-completed) projects
                 ~Project.status.in_(['completed', 'Completed'])
@@ -2034,7 +2140,15 @@ def get_pm_assign_project():
 
         # PERFORMANCE: Apply role filter conditionally (no query duplication)
         if user_role != 'admin':
-            query = query.filter(PMAssignSS.assigned_by_pm_id == user_id)
+            # Filter to show only projects where current PM has made assignments in PMAssignSS table
+            pm_user_id = int(user_id) if user_id else None
+            if pm_user_id:
+                query = query.filter(
+                    and_(
+                        Project.user_id.contains([pm_user_id]),  # PM must be assigned to project
+                        PMAssignSS.assigned_by_pm_id == pm_user_id  # PM must have made assignments
+                    )
+                )
 
         query = query.group_by(
             Project.project_id, Project.project_code, Project.project_name, Project.client,
@@ -2177,7 +2291,7 @@ def get_pm_approved_boq():
             )
             .join(Project, BOQ.project_id == Project.project_id)
             .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
-            .filter(BOQ.is_deleted == False, Project.is_deleted == False)
+            .filter(BOQ.is_deleted == False, Project.is_deleted == False, ~BOQ.status.in_(['PM_Rejected', 'Pending_PM_Approval']))
         )
 
         # PERFORMANCE: Apply role filter early (reduces rows before sorting)
@@ -2263,9 +2377,11 @@ def get_pm_approved_boq():
         return jsonify({'error': 'Failed to retrieve PM Approval BOQs', 'details': str(e)}), 500
 
 def get_pm_pending_boq():
-    """Get pending projects - projects with approved BOQs not yet completed - OPTIMIZED FOR SPEED"""
+    """Get pending projects - projects with approved BOQs not yet completed + items_assigned projects where PM hasn't made assignments AND not all items are assigned - OPTIMIZED FOR SPEED"""
     try:
-        from sqlalchemy import func
+        from sqlalchemy import func, or_, and_, exists
+        from models.pm_assign_ss import PMAssignSS
+        from models.boq import BOQDetails
 
         page = request.args.get('page', type=int)
         page_size = request.args.get('page_size', default=20, type=int)
@@ -2276,6 +2392,27 @@ def get_pm_pending_boq():
             return jsonify({'error': 'Authentication required'}), 401
         user_id = current_user.get('user_id')
         user_role = current_user.get('role', '').lower() if current_user else ''
+
+        # Subquery to get total items in BOQ from BOQDetails
+        boq_items_count_subquery = (
+            db.session.query(
+                BOQDetails.boq_id,
+                func.coalesce(BOQDetails.total_items, 0).label('total_items')
+            )
+            .filter(BOQDetails.is_deleted == False)
+            .subquery()
+        )
+
+        # Subquery to get total items assigned by ALL PMs (not just current PM)
+        all_pm_assignments_count = (
+            db.session.query(
+                PMAssignSS.boq_id,
+                func.sum(func.coalesce(func.cardinality(PMAssignSS.item_indices), 0)).label('total_items_assigned')
+            )
+            .filter(PMAssignSS.is_deleted == False)
+            .group_by(PMAssignSS.boq_id)
+            .subquery()
+        )
 
         # OPTIMIZED: Select specific columns instead of entire Project object
         query = (
@@ -2302,17 +2439,55 @@ def get_pm_pending_boq():
                 BOQ.boq_name
             )
             .join(BOQ, Project.project_id == BOQ.project_id)
+            .outerjoin(boq_items_count_subquery, BOQ.boq_id == boq_items_count_subquery.c.boq_id)
+            .outerjoin(all_pm_assignments_count, BOQ.boq_id == all_pm_assignments_count.c.boq_id)
             .filter(
                 Project.is_deleted == False,
                 BOQ.is_deleted == False,
-                BOQ.status.in_(['approved', 'Approved']),
                 Project.status.notin_(['completed', 'Completed'])
             )
         )
 
         # PERFORMANCE: Apply role filter early
-        if user_role in ['projectmanager', 'project_manager']:
-            query = query.filter(Project.user_id.contains([user_id]))
+        # Filter projects where current PM's user_id is in the project's user_id array
+        pm_user_id = None
+        if user_role in ['projectmanager', 'project_manager', 'pm']:
+            # Ensure user_id is integer for JSONB array comparison
+            pm_user_id = int(user_id) if user_id else None
+            if pm_user_id:
+                query = query.filter(Project.user_id.contains([pm_user_id]))
+
+                # Create a subquery to check if PM has made ANY assignments for this BOQ
+                pm_has_assignments = exists().where(
+                    and_(
+                        PMAssignSS.boq_id == BOQ.boq_id,
+                        PMAssignSS.assigned_by_pm_id == pm_user_id,
+                        PMAssignSS.is_deleted == False
+                    )
+                )
+
+                # Add condition: Show projects with status 'approved' OR
+                # projects with status 'items_assigned' where:
+                #   - PM hasn't made ANY assignments AND
+                #   - NOT all items have been assigned by other PMs
+                query = query.filter(
+                    or_(
+                        BOQ.status.in_(['approved', 'Approved']),
+                        and_(
+                            BOQ.status == 'items_assigned',
+                            ~pm_has_assignments,  # NOT EXISTS - PM has no assignments for this BOQ
+                            or_(
+                                # Either no assignments exist at all
+                                all_pm_assignments_count.c.total_items_assigned == None,
+                                # Or total items assigned < total items in BOQ (items still available)
+                                func.coalesce(all_pm_assignments_count.c.total_items_assigned, 0) < func.coalesce(boq_items_count_subquery.c.total_items, 0)
+                            )
+                        )
+                    )
+                )
+        else:
+            # Admin sees all approved projects
+            query = query.filter(BOQ.status.in_(['approved', 'Approved']))
 
         query = query.distinct().order_by(Project.created_at.desc())
 
@@ -2641,12 +2816,17 @@ def get_pm_completed_project():
         return jsonify({'error': 'Failed to retrieve PM completed projects', 'details': str(e)}), 500
 
 def get_pm_dashboard():
-    """Get COMPREHENSIVE dashboard statistics - OPTIMIZED FOR SPEED (No N+1 queries)"""
+    """
+    Get COMPREHENSIVE dashboard statistics for the current user's projects
+    - Shows data based on BOQs where the PM is assigned (via last_pm_user_id)
+    - Each PM sees only their own BOQ statuses (approved, pending, rejected, completed)
+    - Admins can view all data or filter by specific PM
+    """
     try:
         from models.pm_assign_ss import PMAssignSS
         from models.boq import BOQ, BOQDetails
         from models.project import Project
-        from sqlalchemy import func, case
+        from sqlalchemy import func, case, and_, or_
         from sqlalchemy.dialects.postgresql import JSONB
         from sqlalchemy import cast
 
@@ -2654,27 +2834,92 @@ def get_pm_dashboard():
         user_id = current_user['user_id']
         user_role = current_user.get('role', '').lower()
 
-        # OPTIMIZED: Get only project IDs, not full objects
-        if user_role == 'admin':
-            project_ids_query = db.session.query(Project.project_id).filter(Project.is_deleted == False)
+        # Check if admin is viewing as a specific PM (from query params or context)
+        viewing_as_pm_id = request.args.get('viewing_as_pm_id', type=int)
+
+        # Determine the filter user ID
+        filter_user_id = viewing_as_pm_id if (user_role == 'admin' and viewing_as_pm_id) else user_id
+
+        # Get projects where current user is assigned as PM
+        if user_role == 'admin' and not viewing_as_pm_id:
+            # Admin viewing general dashboard - show ALL projects
+            project_ids_query = db.session.query(Project.project_id).filter(
+                Project.is_deleted == False
+            )
         else:
+            # Regular PM or admin viewing as specific PM - filter by PM's projects
             project_ids_query = db.session.query(Project.project_id).filter(
                 Project.is_deleted == False,
-                Project.user_id.op('@>')(cast([user_id], JSONB))
+                Project.user_id.op('@>')(cast([filter_user_id], JSONB))
             )
 
         project_ids = [row[0] for row in project_ids_query.all()]
 
+        # For admin viewing general PM dashboard, include ALL projects with PM-assigned BOQs
+        if user_role == 'admin' and not viewing_as_pm_id:
+            # Admin: Find ALL projects that have ANY BOQs with last_pm_user_id set
+            # EVEN IF PROJECT IS DELETED - we still want to count those BOQs
+            projects_with_any_pm_boqs = db.session.query(
+                Project.project_id, Project.project_name, Project.is_deleted
+            ).join(BOQ, Project.project_id == BOQ.project_id).filter(
+                BOQ.last_pm_user_id.isnot(None),
+                BOQ.is_deleted == False
+            ).distinct().all()
+
+            missing_projects = []
+            for p in projects_with_any_pm_boqs:
+                in_list = p.project_id in project_ids
+                if not in_list:
+                    missing_projects.append(p.project_id)
+
+            if missing_projects:
+                project_ids.extend(missing_projects)
+        else:
+            # Regular PM: Find projects that have BOQs assigned to this specific PM
+            projects_with_pm_boqs = db.session.query(
+                Project.project_id, Project.project_name, Project.user_id, Project.is_deleted
+            ).join(BOQ, Project.project_id == BOQ.project_id).filter(
+                BOQ.last_pm_user_id == filter_user_id,
+                BOQ.is_deleted == False
+            ).distinct().all()
+
+            missing_projects = []
+            for p in projects_with_pm_boqs:
+                in_list = p.project_id in project_ids
+                if not in_list and not p.is_deleted:
+                    missing_projects.append(p.project_id)
+
+            if missing_projects:
+                project_ids.extend(missing_projects)
+
         if not project_ids:
             return jsonify({
                 "success": True,
-                "stats": {"total_boq_items": 0, "items_assigned": 0, "pending_assignment": 0, "total_project_value": 0},
-                "boq_status": {"approved": 0, "pending": 0, "rejected": 0, "completed": 0},
-                "items_breakdown": {"materials": 0, "labour": 0},
-                "recent_activities": []
+                "stats": {
+                    "total_boq_items": 0,
+                    "items_assigned": 0,
+                    "pending_assignment": 0,
+                    "total_project_value": 0
+                },
+                "boq_status": {
+                    "for_approval": 0,
+                    "pending": 0,
+                    "assigned": 0,
+                    "approved": 0,
+                    "rejected": 0,
+                    "completed": 0
+                },
+                "items_breakdown": {
+                    "materials": 0,
+                    "labour": 0
+                },
+                "recent_activities": [],
+                "projects": []
             }), 200
 
         # OPTIMIZED: Single aggregated query for BOQ details statistics
+        # PM sees ALL BOQs in their assigned projects (not just BOQs where they are last_pm_user_id)
+        # This gives the PM a complete view of all work in their projects
         boq_stats = db.session.query(
             func.coalesce(func.sum(BOQDetails.total_items), 0).label('total_items'),
             func.coalesce(func.sum(BOQDetails.total_materials), 0).label('total_materials'),
@@ -2691,37 +2936,135 @@ def get_pm_dashboard():
         total_labour = int(boq_stats.total_labour) if boq_stats else 0
         total_project_value = float(boq_stats.total_cost) if boq_stats else 0.0
 
-        # OPTIMIZED: Single query for BOQ status counts using CASE
-        # Status categorization:
-        # - Approved: Approved, approved, Revision_Approved, Sent_for_Confirmation, items_assigned
-        # - Pending: Draft, Pending_Revision, Internal_Revision_Pending
-        # - Rejected: Rejected
-        # - Completed: completed, Completed
-        status_counts = db.session.query(
-            func.sum(case(
-                (BOQ.status.ilike('%approved%'), 1),
-                (BOQ.status.ilike('sent_for_confirmation'), 1),
-                (BOQ.status.ilike('items_assigned'), 1),
-                else_=0
-            )).label('approved'),
-            func.sum(case(
-                (BOQ.status.ilike('draft'), 1),
-                (BOQ.status.ilike('%pending%'), 1),
-                (BOQ.status.ilike('%revision%'), 1),
-                else_=0
-            )).label('pending'),
-            func.sum(case((BOQ.status.ilike('%rejected%'), 1), else_=0)).label('rejected'),
-            func.sum(case((BOQ.status.ilike('%completed%'), 1), else_=0)).label('completed')
-        ).filter(BOQ.project_id.in_(project_ids), BOQ.is_deleted == False).first()
+        # OPTIMIZED: Single query for BOQ status counts
+        # Status categorization matching the tab logic EXACTLY:
+        # - for_approval: BOQs with status = 'Pending_PM_Approval' where last_pm_user_id = current PM
+        # - pending: BOQs with status in ['approved', 'Approved'] OR (status='items_assigned' AND PM has no assignments)
+        # - assigned: BOQs with status = 'items_assigned' where PM has made assignments (count from PMAssignSS)
+        # - approved: BOQs where last_pm_user_id = current PM (all BOQs assigned to this PM)
+        # - rejected: BOQs with status = 'PM_Rejected' where last_pm_user_id = current PM
+        # - completed: Projects with status containing 'completed'
+
+        if user_role == 'admin' and not viewing_as_pm_id:
+            # Admin sees all BOQs across all projects
+            status_counts = db.session.query(
+                # For Approval: BOQs with Pending_PM_Approval status
+                func.sum(case(
+                    (BOQ.status == 'Pending_PM_Approval', 1),
+                    else_=0
+                )).label('for_approval'),
+                # Pending: BOQs with approved/Approved status
+                func.sum(case(
+                    (BOQ.status.in_(['approved', 'Approved']), 1),
+                    else_=0
+                )).label('pending'),
+                # Assigned: BOQs with items_assigned status
+                func.sum(case(
+                    (BOQ.status == 'items_assigned', 1),
+                    else_=0
+                )).label('assigned'),
+                # Approved: For admin, count ALL BOQs (matches "Approved" tab logic at line 2196)
+                # The /pm_approve_boq endpoint returns ALL BOQs for admin (no filter)
+                func.count(BOQ.boq_id).label('approved'),
+                # Rejected: BOQs with PM_Rejected status
+                func.sum(case(
+                    (BOQ.status == 'PM_Rejected', 1),
+                    else_=0
+                )).label('rejected'),
+                # Completed: BOQs with completed status
+                func.sum(case(
+                    (BOQ.status.ilike('%completed%'), 1),
+                    else_=0
+                )).label('completed')
+            ).filter(
+                BOQ.project_id.in_(project_ids),
+                BOQ.is_deleted == False
+            ).first()
+        else:
+            # Regular PM sees only their assigned BOQs
+            # Count BOQs where PM has made assignments using PMAssignSS
+            from models.pm_assign_ss import PMAssignSS
+
+            # Subquery to check if PM has assignments for a BOQ
+            pm_has_assignments_subquery = (
+                db.session.query(PMAssignSS.boq_id)
+                .filter(
+                    PMAssignSS.assigned_by_pm_id == filter_user_id,
+                    PMAssignSS.is_deleted == False
+                )
+                .distinct()
+                .subquery()
+            )
+
+            status_counts = db.session.query(
+                # For Approval: BOQs with Pending_PM_Approval status assigned to this PM
+                func.sum(case(
+                    (and_(
+                        BOQ.status == 'Pending_PM_Approval',
+                        BOQ.last_pm_user_id == filter_user_id
+                    ), 1),
+                    else_=0
+                )).label('for_approval'),
+                # Pending: BOQs with status 'approved/Approved' in PM's projects
+                # OR status 'items_assigned' where PM has NOT made assignments yet
+                func.sum(case(
+                    (or_(
+                        BOQ.status.in_(['approved', 'Approved']),
+                        and_(
+                            BOQ.status == 'items_assigned',
+                            BOQ.boq_id.notin_(db.session.query(pm_has_assignments_subquery.c.boq_id))
+                        )
+                    ), 1),
+                    else_=0
+                )).label('pending'),
+                # Assigned: BOQs with status 'items_assigned' where PM HAS made assignments
+                func.sum(case(
+                    (and_(
+                        BOQ.status == 'items_assigned',
+                        BOQ.boq_id.in_(db.session.query(pm_has_assignments_subquery.c.boq_id))
+                    ), 1),
+                    else_=0
+                )).label('assigned'),
+                # Approved: ALL BOQs where last_pm_user_id = current PM (matches "Approved" tab)
+                func.sum(case(
+                    (BOQ.last_pm_user_id == filter_user_id, 1),
+                    else_=0
+                )).label('approved'),
+                # Rejected: BOQs with PM_Rejected status where last_pm_user_id = current PM
+                func.sum(case(
+                    (and_(
+                        BOQ.status == 'PM_Rejected',
+                        BOQ.last_pm_user_id == filter_user_id
+                    ), 1),
+                    else_=0
+                )).label('rejected'),
+                # Completed: Projects with completed status (checked at project level)
+                func.sum(case(
+                    (and_(
+                        BOQ.status.ilike('%completed%'),
+                        or_(
+                            BOQ.last_pm_user_id == filter_user_id,
+                            BOQ.last_pm_user_id == None
+                        )
+                    ), 1),
+                    else_=0
+                )).label('completed')
+            ).filter(
+                BOQ.project_id.in_(project_ids),
+                BOQ.is_deleted == False
+            ).first()
 
         boq_status_counts = {
-            "approved": int(status_counts.approved) if status_counts.approved else 0,
+            "for_approval": int(status_counts.for_approval) if status_counts.for_approval else 0,
             "pending": int(status_counts.pending) if status_counts.pending else 0,
+            "assigned": int(status_counts.assigned) if status_counts.assigned else 0,
+            "approved": int(status_counts.approved) if status_counts.approved else 0,
             "rejected": int(status_counts.rejected) if status_counts.rejected else 0,
             "completed": int(status_counts.completed) if status_counts.completed else 0
         }
 
         # OPTIMIZED: Count assigned items using sum of cardinality (array length)
+        # Count ALL items assigned to Site Engineers in PM's projects
         items_assigned_result = db.session.query(
             func.coalesce(func.sum(func.cardinality(PMAssignSS.item_indices)), 0)
         ).join(BOQ, PMAssignSS.boq_id == BOQ.boq_id).filter(
@@ -2733,6 +3076,7 @@ def get_pm_dashboard():
         pending_assignment = max(0, total_boq_items - items_assigned)
 
         # OPTIMIZED: Single query for recent activities with join
+        # Show all recent BOQ activities in PM's projects
         recent_activities_data = db.session.query(
             BOQ.boq_id,
             BOQ.boq_name,
@@ -2763,12 +3107,19 @@ def get_pm_dashboard():
                 Project.is_deleted == False
             ).all()
 
+            # Batch pre-fetch all BOQs for all projects — avoid N+1 (one query per project)
+            _progress_project_ids = [p.project_id for p in projects_query]
+            _all_progress_boqs = BOQ.query.filter(
+                BOQ.project_id.in_(_progress_project_ids),
+                BOQ.is_deleted == False
+            ).all() if _progress_project_ids else []
+            _boqs_by_project = {}
+            for _b in _all_progress_boqs:
+                _boqs_by_project.setdefault(_b.project_id, []).append(_b)
+
             for project in projects_query:
-                # Calculate progress based on BOQ status
-                project_boqs = BOQ.query.filter(
-                    BOQ.project_id == project.project_id,
-                    BOQ.is_deleted == False
-                ).all()
+                # Calculate progress based on ALL BOQs in the project (pre-fetched)
+                project_boqs = _boqs_by_project.get(project.project_id, [])
 
                 total_boqs = len(project_boqs)
                 if total_boqs > 0:
@@ -2802,6 +3153,549 @@ def get_pm_dashboard():
                     "progress": progress
                 })
 
+        # Build base query filters for ChangeRequests
+        cr_filters = [
+            ChangeRequest.project_id.in_(project_ids),
+            ChangeRequest.is_deleted == False
+        ]
+
+        # Get PM's own projects for filtering
+        pm_project_ids = project_ids
+
+        # Filter logic matching get_all_change_requests() controller
+        if user_role == 'admin' and not viewing_as_pm_id:
+            # Admin viewing general dashboard - show all PM-created requests in all projects
+            # Include: Admin/PM created requests OR SE/SS requests that are NOT pending
+            from sqlalchemy import func as sql_func
+            cr_filters.append(
+                or_(
+                    # Admin or PM created (any status)
+                    sql_func.lower(ChangeRequest.requested_by_role).in_(['admin', 'projectmanager', 'project_manager', 'pm']),
+                    # SE/SS created but sent for review (not pending drafts)
+                    and_(
+                        sql_func.lower(ChangeRequest.requested_by_role).in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']),
+                        ChangeRequest.status != 'pending'
+                    )
+                )
+            )
+        else:
+            # Regular PM or admin viewing as specific PM
+            # Match the EXACT logic from get_all_change_requests() controller (lines 1143-1186)
+            from sqlalchemy import func as sql_func
+
+            # Define status filters - use CR_CONFIG to include 'rejected' status
+            approved_status_filter = ChangeRequest.status.in_(CR_CONFIG.APPROVED_WORKFLOW_STATUSES)
+
+            # PM role filter (pending/pm_request requests)
+            pm_role_filter = and_(
+                sql_func.lower(ChangeRequest.requested_by_role).in_(['projectmanager', 'project_manager', 'pm']),
+                ChangeRequest.status.in_(['pending', 'pm_request'])
+            )
+
+            # Admin-created requests
+            admin_created_filter = sql_func.lower(ChangeRequest.requested_by_role) == 'admin'
+
+            # SE requests sent to this PM
+            send_to_pm_filter = and_(
+                ChangeRequest.status == 'send_to_pm',
+                ChangeRequest.assigned_to_pm_user_id == filter_user_id
+            )
+
+            # SE-originated requests assigned to this PM (approved/completed)
+            se_originated_assigned_to_this_pm = and_(
+                ChangeRequest.assigned_to_pm_user_id == filter_user_id,
+                approved_status_filter
+            )
+
+            # PM/Admin originated approved requests (not SE-originated)
+            pm_originated_approved = and_(
+                approved_status_filter,
+                sql_func.lower(ChangeRequest.requested_by_role).in_(['projectmanager', 'project_manager', 'pm', 'admin']),
+                ChangeRequest.assigned_to_pm_user_id.is_(None)
+            )
+
+            # Requests approved by this PM
+            pm_approved_by_this_user = ChangeRequest.pm_approved_by_user_id == filter_user_id
+
+            cr_filters.append(
+                or_(
+                    # 1. PM's pending requests from their projects
+                    and_(
+                        ChangeRequest.project_id.in_(pm_project_ids),
+                        pm_role_filter
+                    ),
+                    # 2. Admin-created requests from PM's projects (any status)
+                    and_(
+                        ChangeRequest.project_id.in_(pm_project_ids),
+                        admin_created_filter
+                    ),
+                    # 3. SE requests sent to this PM
+                    and_(
+                        ChangeRequest.project_id.in_(pm_project_ids),
+                        send_to_pm_filter
+                    ),
+                    # 4. SE-originated approved requests assigned to this PM
+                    and_(
+                        ChangeRequest.project_id.in_(pm_project_ids),
+                        se_originated_assigned_to_this_pm
+                    ),
+                    # 5. PM/Admin originated approved requests from PM's projects
+                    and_(
+                        ChangeRequest.project_id.in_(pm_project_ids),
+                        pm_originated_approved
+                    ),
+                    # 6. Requests approved by this PM
+                    pm_approved_by_this_user,
+                    # 7. Own requests (any status, any project)
+                    ChangeRequest.requested_by_user_id == filter_user_id
+                )
+            )
+
+        # Count unique ChangeRequests by status (matching frontend tabs)
+        po_status_counts = db.session.query(
+            # Sent to Buyer: 'under_review' with approval_required_from='buyer' OR 'assigned_to_buyer'
+            func.count(func.distinct(case(
+                (or_(
+                    and_(ChangeRequest.status == 'under_review', ChangeRequest.approval_required_from == 'buyer'),
+                    ChangeRequest.status == 'assigned_to_buyer'
+                ), ChangeRequest.cr_id),
+                else_=None
+            ))).label('sent_to_buyer'),
+            # SE Requested: send_to_pm, send_to_mep (SE-initiated requests waiting for approval)
+            func.count(func.distinct(case(
+                (ChangeRequest.status.in_(['send_to_pm', 'send_to_mep']), ChangeRequest.cr_id),
+                else_=None
+            ))).label('se_requested'),
+            # Completed: purchase_completed OR routed_to_store
+            func.count(func.distinct(case(
+                (ChangeRequest.status.in_(['purchase_completed', 'routed_to_store']), ChangeRequest.cr_id),
+                else_=None
+            ))).label('completed'),
+            # Rejected: status = 'rejected'
+            func.count(func.distinct(case(
+                (ChangeRequest.status == 'rejected', ChangeRequest.cr_id),
+                else_=None
+            ))).label('rejected')
+        ).filter(
+            *cr_filters
+        ).first()
+
+        purchase_order_status = {
+            "sent_to_buyer": int(po_status_counts.sent_to_buyer) if po_status_counts.sent_to_buyer else 0,
+            "se_requested": int(po_status_counts.se_requested) if po_status_counts.se_requested else 0,
+            "completed": int(po_status_counts.completed) if po_status_counts.completed else 0,
+            "rejected": int(po_status_counts.rejected) if po_status_counts.rejected else 0
+        }
+
+        is_admin_general_view = user_role == 'admin' and not viewing_as_pm_id
+
+        if is_admin_general_view:
+            # Admin viewing general dashboard - show ALL labour data
+            labour_req_counts = db.session.query(
+                func.sum(case((LabourRequisition.status == 'send_to_pm', 1), else_=0)).label('req_pending'),
+                func.sum(case((LabourRequisition.status == 'approved', 1), else_=0)).label('req_approved'),
+                func.sum(case((LabourRequisition.status == 'rejected', 1), else_=0)).label('req_rejected')
+            ).filter(
+                LabourRequisition.is_deleted == False
+            ).first()
+        else:
+            # Regular PM or admin viewing as specific PM - filter by PM's context
+            # Pending: Requisitions awaiting this PM's action (send_to_pm status in their projects)
+            req_pending_count = db.session.query(func.count(LabourRequisition.requisition_id)).filter(
+                LabourRequisition.project_id.in_(project_ids) if project_ids else LabourRequisition.project_id == -1,
+                LabourRequisition.status == 'send_to_pm',
+                LabourRequisition.is_deleted == False
+            ).scalar() or 0
+
+            # Approved/Rejected: Only requisitions actioned BY this PM
+            req_approved_count = db.session.query(func.count(LabourRequisition.requisition_id)).filter(
+                LabourRequisition.approved_by_user_id == filter_user_id,
+                LabourRequisition.status == 'approved',
+                LabourRequisition.is_deleted == False
+            ).scalar() or 0
+
+            req_rejected_count = db.session.query(func.count(LabourRequisition.requisition_id)).filter(
+                LabourRequisition.approved_by_user_id == filter_user_id,
+                LabourRequisition.status == 'rejected',
+                LabourRequisition.is_deleted == False
+            ).scalar() or 0
+
+            # Create a named tuple-like object for consistency
+            class LabourReqCounts:
+                def __init__(self, pending, approved, rejected):
+                    self.req_pending = pending
+                    self.req_approved = approved
+                    self.req_rejected = rejected
+
+            labour_req_counts = LabourReqCounts(req_pending_count, req_approved_count, req_rejected_count)
+
+        # Attendance Lock status counts (Pending = 'pending', Locked = 'locked')
+        # Must match the Attendance Lock page logic: only attendance from requisitions approved BY this PM
+
+        if is_admin_general_view:
+            # Admin viewing general dashboard - show ALL attendance data
+            attendance_lock_counts = db.session.query(
+                func.sum(case((DailyAttendance.approval_status == 'pending', 1), else_=0)).label('pending_lock'),
+                func.sum(case((DailyAttendance.approval_status == 'locked', 1), else_=0)).label('locked')
+            ).first()
+        else:
+            # Regular PM or admin viewing as specific PM
+            # Join with LabourRequisition to filter by requisitions approved BY this PM
+            pending_lock_count = db.session.query(func.count(DailyAttendance.attendance_id)).join(
+                LabourRequisition,
+                DailyAttendance.requisition_id == LabourRequisition.requisition_id
+            ).filter(
+                DailyAttendance.project_id.in_(project_ids) if project_ids else DailyAttendance.project_id == -1,
+                DailyAttendance.is_deleted == False,
+                LabourRequisition.approved_by_user_id == filter_user_id,
+                or_(
+                    DailyAttendance.approval_status == 'pending',
+                    and_(
+                        DailyAttendance.approval_status.is_(None),
+                        DailyAttendance.attendance_status == 'completed',
+                        DailyAttendance.clock_out_time.isnot(None)
+                    )
+                )
+            ).scalar() or 0
+
+            locked_count = db.session.query(func.count(DailyAttendance.attendance_id)).join(
+                LabourRequisition,
+                DailyAttendance.requisition_id == LabourRequisition.requisition_id
+            ).filter(
+                DailyAttendance.project_id.in_(project_ids) if project_ids else DailyAttendance.project_id == -1,
+                DailyAttendance.is_deleted == False,
+                LabourRequisition.approved_by_user_id == filter_user_id,
+                DailyAttendance.approval_status == 'locked'
+            ).scalar() or 0
+
+            # Create a named tuple-like object for consistency
+            class AttendanceLockCounts:
+                def __init__(self, pending, locked):
+                    self.pending_lock = pending
+                    self.locked = locked
+
+            attendance_lock_counts = AttendanceLockCounts(pending_lock_count, locked_count)
+
+        # Combine into labour data array for chart
+        labour_data = [
+            {
+                "labour_type": "Requisition - Pending",
+                "quantity": int(labour_req_counts.req_pending) if labour_req_counts.req_pending else 0
+            },
+            {
+                "labour_type": "Requisition - Approved",
+                "quantity": int(labour_req_counts.req_approved) if labour_req_counts.req_approved else 0
+            },
+            {
+                "labour_type": "Requisition - Rejected",
+                "quantity": int(labour_req_counts.req_rejected) if labour_req_counts.req_rejected else 0
+            },
+            {
+                "labour_type": "Attendance - Pending Lock",
+                "quantity": int(attendance_lock_counts.pending_lock) if attendance_lock_counts.pending_lock else 0
+            },
+            {
+                "labour_type": "Attendance - Locked",
+                "quantity": int(attendance_lock_counts.locked) if attendance_lock_counts.locked else 0
+            }
+        ]
+
+        # Top 5 High Budget Projects - Calculate Grand Total from JSONB
+        # Grand Total = Items Subtotal + Preliminary - Discount (stored in summary)
+        project_budgets = {}
+
+        # Query all BOQ details for PM's projects
+        boq_details_query = db.session.query(
+            BOQ.project_id,
+            BOQDetails.boq_details
+        ).join(
+            BOQDetails, BOQ.boq_id == BOQDetails.boq_id
+        ).filter(
+            BOQ.project_id.in_(project_ids),
+            BOQ.is_deleted == False,
+            BOQDetails.is_deleted == False
+        ).all()
+
+        # Extract grand total from each BOQ's summary
+        for row in boq_details_query:
+            project_id = row.project_id
+            boq_json = row.boq_details or {}
+
+            # Try to get grand total from summary
+            summary = boq_json.get('summary', {}) or boq_json.get('combined_summary', {}) or {}
+            grand_total = summary.get('total_cost') or summary.get('selling_price') or 0
+
+            # If not found in summary, calculate from items + preliminary - discount
+            if not grand_total:
+                items = boq_json.get('items', [])
+                subtotal = sum(
+                    float(item.get('amount', 0) or item.get('total', 0) or item.get('item_total', 0) or 0)
+                    for item in items
+                )
+
+                # Get preliminary amount
+                preliminaries = boq_json.get('preliminaries', {})
+                preliminary_amount = float(
+                    preliminaries.get('cost_details', {}).get('amount', 0) or
+                    preliminaries.get('amount', 0) or
+                    summary.get('preliminary_amount', 0) or 0
+                )
+
+                combined_subtotal = subtotal + preliminary_amount
+
+                # Apply discount
+                discount_percentage = float(summary.get('discount_percentage', 0) or boq_json.get('discount_percentage', 0) or 0)
+                discount_amount = float(summary.get('discount_amount', 0) or boq_json.get('discount_amount', 0) or 0)
+
+                if discount_percentage > 0 and discount_amount == 0:
+                    discount_amount = (combined_subtotal * discount_percentage) / 100
+
+                grand_total = combined_subtotal - discount_amount
+
+            # Accumulate per project
+            if project_id not in project_budgets:
+                project_budgets[project_id] = 0
+            project_budgets[project_id] += float(grand_total or 0)
+
+        # Get project details and sort by budget
+        top_projects_query = db.session.query(
+            Project.project_id,
+            Project.project_name,
+            Project.location,
+            Project.client
+        ).filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).all()
+
+        top_budget_projects = [
+            {
+                "project_id": p.project_id,
+                "project_name": p.project_name,
+                "location": p.location,
+                "client": p.client,
+                "budget": round(project_budgets.get(p.project_id, 0), 2)
+            }
+            for p in top_projects_query
+        ]
+
+        # Sort by budget descending and take top 5
+        top_budget_projects = sorted(top_budget_projects, key=lambda x: x['budget'], reverse=True)[:5]
+
+        # Asset Requisition Stats - Detailed status breakdown for PM's projects
+        asset_stats = db.session.query(
+            func.count(func.distinct(AssetRequisition.requisition_id)).label('total'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'pending_pm', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('pending_pm'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'pm_approved', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('pm_approved'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'pm_rejected', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('pm_rejected'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'pending_prod_mgr', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('pending_prod_mgr'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'prod_mgr_approved', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('prod_mgr_approved'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'dispatched', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('dispatched'),
+            func.count(func.distinct(case(
+                (AssetRequisition.status == 'completed', AssetRequisition.requisition_id),
+                else_=None
+            ))).label('completed')
+        ).filter(
+            AssetRequisition.project_id.in_(project_ids),
+            AssetRequisition.is_deleted == False
+        ).first()
+
+        asset_details = {
+            "total": int(asset_stats.total) if asset_stats.total else 0,
+            "pending_pm": int(asset_stats.pending_pm) if asset_stats.pending_pm else 0,
+            "pm_approved": int(asset_stats.pm_approved) if asset_stats.pm_approved else 0,
+            "pm_rejected": int(asset_stats.pm_rejected) if asset_stats.pm_rejected else 0,
+            "pending_prod_mgr": int(asset_stats.pending_prod_mgr) if asset_stats.pending_prod_mgr else 0,
+            "prod_mgr_approved": int(asset_stats.prod_mgr_approved) if asset_stats.prod_mgr_approved else 0,
+            "dispatched": int(asset_stats.dispatched) if asset_stats.dispatched else 0,
+            "completed": int(asset_stats.completed) if asset_stats.completed else 0,
+            "total_approved": (int(asset_stats.pm_approved or 0) + int(asset_stats.prod_mgr_approved or 0) +
+                             int(asset_stats.dispatched or 0) + int(asset_stats.completed or 0))
+        }
+
+        # Change Request Stats for PM's projects
+        cr_stats = db.session.query(
+            func.count(func.distinct(ChangeRequest.cr_id)).label('total'),
+            func.count(func.distinct(case(
+                (ChangeRequest.status == 'pending_pm_approval', ChangeRequest.cr_id),
+                else_=None
+            ))).label('pending_pm'),
+            func.count(func.distinct(case(
+                (ChangeRequest.status == 'pending_td_approval', ChangeRequest.cr_id),
+                else_=None
+            ))).label('pending_td'),
+            func.count(func.distinct(case(
+                (ChangeRequest.status.in_(['approved', 'vendor_approved', 'purchase_completed']), ChangeRequest.cr_id),
+                else_=None
+            ))).label('approved'),
+            func.count(func.distinct(case(
+                (ChangeRequest.status == 'rejected', ChangeRequest.cr_id),
+                else_=None
+            ))).label('rejected'),
+            func.count(func.distinct(case(
+                (ChangeRequest.status == 'purchase_completed', ChangeRequest.cr_id),
+                else_=None
+            ))).label('completed')
+        ).filter(
+            ChangeRequest.project_id.in_(project_ids),
+            ChangeRequest.is_deleted == False
+        ).first()
+
+        change_request_stats = {
+            "total": int(cr_stats.total) if cr_stats.total else 0,
+            "pending_pm": int(cr_stats.pending_pm) if cr_stats.pending_pm else 0,
+            "pending_td": int(cr_stats.pending_td) if cr_stats.pending_td else 0,
+            "approved": int(cr_stats.approved) if cr_stats.approved else 0,
+            "rejected": int(cr_stats.rejected) if cr_stats.rejected else 0,
+            "completed": int(cr_stats.completed) if cr_stats.completed else 0
+        }
+
+        # Project Progress Stats - count projects by status
+        project_status_counts = db.session.query(
+            func.count(func.distinct(case(
+                (Project.status == 'active', Project.project_id),
+                else_=None
+            ))).label('active'),
+            func.count(func.distinct(case(
+                (Project.status == 'in_progress', Project.project_id),
+                else_=None
+            ))).label('in_progress'),
+            func.count(func.distinct(case(
+                (Project.status == 'completed', Project.project_id),
+                else_=None
+            ))).label('completed'),
+            func.count(func.distinct(case(
+                (Project.status == 'on_hold', Project.project_id),
+                else_=None
+            ))).label('on_hold'),
+            func.count(func.distinct(Project.project_id)).label('total')
+        ).filter(
+            Project.project_id.in_(project_ids),
+            Project.is_deleted == False
+        ).first()
+
+        project_stats = {
+            "total": int(project_status_counts.total) if project_status_counts.total else 0,
+            "active": int(project_status_counts.active) if project_status_counts.active else 0,
+            "in_progress": int(project_status_counts.in_progress) if project_status_counts.in_progress else 0,
+            "completed": int(project_status_counts.completed) if project_status_counts.completed else 0,
+            "on_hold": int(project_status_counts.on_hold) if project_status_counts.on_hold else 0
+        }
+
+        # Recent SE Requests - Latest 5 requests from Site Engineers needing PM attention
+        recent_se_requests = []
+
+        # 1. Recent SE Change Requests (send_to_pm status)
+        se_crs = db.session.query(
+            ChangeRequest.cr_id,
+            ChangeRequest.status,
+            ChangeRequest.created_at,
+            ChangeRequest.requested_by_name,
+            ChangeRequest.requested_by_role,
+            Project.project_name
+        ).join(
+            Project, ChangeRequest.project_id == Project.project_id
+        ).filter(
+            ChangeRequest.project_id.in_(project_ids),
+            ChangeRequest.is_deleted == False,
+            func.lower(ChangeRequest.requested_by_role).in_(['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor'])
+        ).order_by(ChangeRequest.created_at.desc()).limit(5).all()
+
+        for cr in se_crs:
+            recent_se_requests.append({
+                "id": f"cr_{cr.cr_id}",
+                "type": "cr",
+                "code": f"PO-{cr.cr_id}",
+                "project_name": cr.project_name,
+                "status": cr.status,
+                "requested_by": cr.requested_by_name,
+                "date": cr.created_at.isoformat() if cr.created_at else None,
+                "timestamp": cr.created_at
+            })
+
+        # 2. Recent SE Labour Requisitions
+        se_labour = db.session.query(
+            LabourRequisition.requisition_id,
+            LabourRequisition.requisition_code,
+            LabourRequisition.status,
+            LabourRequisition.created_at,
+            LabourRequisition.requested_by_name,
+            Project.project_name
+        ).join(
+            Project, LabourRequisition.project_id == Project.project_id
+        ).filter(
+            LabourRequisition.project_id.in_(project_ids),
+            LabourRequisition.is_deleted == False
+        ).order_by(LabourRequisition.created_at.desc()).limit(5).all()
+
+        for lr in se_labour:
+            recent_se_requests.append({
+                "id": f"labour_{lr.requisition_id}",
+                "type": "labour",
+                "code": lr.requisition_code,
+                "project_name": lr.project_name,
+                "status": lr.status,
+                "requested_by": lr.requested_by_name,
+                "date": lr.created_at.isoformat() if lr.created_at else None,
+                "timestamp": lr.created_at
+            })
+
+        # 3. Recent SE Asset Requisitions
+        se_assets = db.session.query(
+            AssetRequisition.requisition_id,
+            AssetRequisition.requisition_code,
+            AssetRequisition.status,
+            AssetRequisition.created_at,
+            AssetRequisition.requested_by_name,
+            Project.project_name
+        ).join(
+            Project, AssetRequisition.project_id == Project.project_id
+        ).filter(
+            AssetRequisition.project_id.in_(project_ids),
+            AssetRequisition.is_deleted == False
+        ).order_by(AssetRequisition.created_at.desc()).limit(5).all()
+
+        for ar in se_assets:
+            recent_se_requests.append({
+                "id": f"asset_{ar.requisition_id}",
+                "type": "asset",
+                "code": ar.requisition_code,
+                "project_name": ar.project_name,
+                "status": ar.status,
+                "requested_by": ar.requested_by_name,
+                "date": ar.created_at.isoformat() if ar.created_at else None,
+                "timestamp": ar.created_at
+            })
+
+        # Sort by timestamp and take top 5
+        recent_se_requests = sorted(
+            [r for r in recent_se_requests if r.get('timestamp')],
+            key=lambda x: x['timestamp'],
+            reverse=True
+        )[:5]
+
+        # Remove timestamp from response
+        for item in recent_se_requests:
+            item.pop('timestamp', None)
+
         return jsonify({
             "success": True,
             "stats": {
@@ -2815,8 +3709,15 @@ def get_pm_dashboard():
                 "materials": total_materials,
                 "labour": total_labour
             },
+            "purchase_order_status": purchase_order_status,
+            "labour_data": labour_data,
+            "top_budget_projects": top_budget_projects,
             "recent_activities": recent_activities,
-            "projects": projects_data
+            "projects": projects_data,
+            "asset_details": asset_details,
+            "change_request_stats": change_request_stats,
+            "project_stats": project_stats,
+            "recent_se_requests": recent_se_requests
         }), 200
 
     except Exception as e:

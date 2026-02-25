@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useSearchParams } from 'react-router-dom';
 import { Search, TrendingUp, TrendingDown, Send, Mail, Edit, Eye, ArrowRight, CheckCircle, Clock, XCircle, Calculator, Info, Image as ImageIcon, FileCheck } from 'lucide-react';
 import { estimatorService } from '../services/estimatorService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
@@ -21,6 +22,7 @@ interface RevisionComparisonPageProps {
   onRevisionRequest?: (boq: BOQ) => void;
   onCancel?: (boq: BOQ) => void;
   onRefresh?: () => Promise<void>;
+  defaultSubTab?: 'client' | 'internal';
 }
 
 const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
@@ -33,7 +35,8 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
   onClientApproval,
   onRevisionRequest,
   onCancel,
-  onRefresh
+  onRefresh,
+  defaultSubTab
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBoq, setSelectedBoq] = useState<BOQ | null>(null);
@@ -44,6 +47,23 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
   const [expandedRevisionIndex, setExpandedRevisionIndex] = useState<number | null>(null);
   const [isSendingToTD, setIsSendingToTD] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const hasAutoSelectedRef = useRef(false);
+
+  // ✅ Read subtab from URL or use defaultSubTab prop
+  const urlSubtab = searchParams.get('subtab');
+  const initialSubtab = urlSubtab === 'internal' ? 'internal' : (urlSubtab === 'client' ? 'client' : (defaultSubTab || 'client'));
+  const [activeRevisionTab, setActiveRevisionTab] = useState<'client' | 'internal'>(initialSubtab);
+
+  // ✅ Sync active tab with URL parameter or defaultSubTab prop
+  useEffect(() => {
+    const urlSubtab = searchParams.get('subtab');
+    if (urlSubtab === 'internal' || urlSubtab === 'client') {
+      setActiveRevisionTab(urlSubtab);
+    } else if (defaultSubTab) {
+      setActiveRevisionTab(defaultSubTab);
+    }
+  }, [searchParams, defaultSubTab]);
 
   // ✅ LISTEN TO REAL-TIME UPDATES - No more 3-second polling!
   const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
@@ -84,6 +104,38 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
       boqIdString.includes(searchLower) ||
       (boq.boq_id || boq.id)?.toString().includes(searchTerm.trim());
   });
+
+  // ✅ AUTO-SELECT BOQ FROM URL PARAMS (from notification navigation)
+  useEffect(() => {
+    // Only run once on mount
+    if (hasAutoSelectedRef.current) return;
+
+    const boqIdParam = searchParams.get('boq_id');
+    const subtabParam = searchParams.get('subtab');
+
+    if (!boqIdParam || !boqList.length) return;
+
+    const targetBoqId = parseInt(boqIdParam, 10);
+    if (isNaN(targetBoqId)) return;
+
+    // Find the BOQ in the list
+    const matchingBoq = boqList.find(b => (b.boq_id || b.id) === targetBoqId);
+
+    if (matchingBoq) {
+      console.log('[RevisionComparisonPage] Auto-selecting BOQ from notification:', matchingBoq);
+      setSelectedBoq(matchingBoq);
+      hasAutoSelectedRef.current = true;
+
+      // Clean URL params after selection
+      setTimeout(() => {
+        const newParams = new URLSearchParams(searchParams);
+        newParams.delete('boq_id');
+        newParams.delete('tab');
+        newParams.delete('subtab');
+        setSearchParams(newParams, { replace: true });
+      }, 500);
+    }
+  }, [boqList, searchParams]);
 
   useEffect(() => {
     if (selectedBoq) {
@@ -464,7 +516,7 @@ const RevisionComparisonPage: React.FC<RevisionComparisonPageProps> = ({
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="client" className="w-full">
+      <Tabs value={activeRevisionTab} onValueChange={(value) => setActiveRevisionTab(value as 'client' | 'internal')} className="w-full">
         {/* Sub-navigation Tabs */}
         <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
           <TabsTrigger value="client">Client Revisions</TabsTrigger>

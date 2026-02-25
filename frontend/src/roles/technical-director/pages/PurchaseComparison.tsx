@@ -1,14 +1,15 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
-import { DocumentChartBarIcon, ArrowLeftIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import { DocumentChartBarIcon, ArrowLeftIcon, ArrowDownTrayIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { showError, showInfo, showSuccess } from '@/utils/toastHelper';
-import { useProjectsAutoSync } from '@/hooks/useAutoSync';
+import { useAutoSync } from '@/hooks/useAutoSync';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { apiClient } from '@/api/config';
 import { saveAs } from 'file-saver';
+import { PAGINATION } from '@/lib/constants';
 
 // Interface matching backend response structure
 interface ComparisonMaterial {
@@ -80,6 +81,7 @@ interface PurchaseComparisonData {
   };
   comparison: {
     materials: ComparisonMaterial[];
+    items: any[];
     summary: {
       total_compared: number;
       over_budget_count: number;
@@ -90,6 +92,7 @@ interface PurchaseComparisonData {
   };
   unplanned_materials: {
     materials: UnplannedMaterial[];
+    items: any[];
     summary: {
       total_count: number;
       total_amount: number;
@@ -112,10 +115,14 @@ export default function PurchaseComparison() {
   const [comparisonData, setComparisonData] = useState<PurchaseComparisonData | null>(null);
   const [loadingComparison, setLoadingComparison] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Real-time auto-sync for BOQ list - use dedicated purchase comparison projects endpoint
-  const { data: boqData, isLoading: loading, refetch } = useProjectsAutoSync(
-    async () => {
+  // Uses a unique query key to avoid cache conflicts with other pages using ['projects']
+  const { data: boqData, isLoading: loading, refetch } = useAutoSync({
+    queryKey: ['purchase-comparison-projects'],
+    staleTime: 0, // Always fetch fresh on mount so project_status is never stale
+    fetchFn: async () => {
       const token = localStorage.getItem('access_token');
       const response = await apiClient.get('/purchase_comparison_projects', {
         headers: {
@@ -143,7 +150,7 @@ export default function PurchaseComparison() {
 
       return allBOQs;
     }
-  );
+  });
 
   const boqList = useMemo(() => boqData || [], [boqData]);
 
@@ -168,6 +175,19 @@ export default function PurchaseComparison() {
       });
     }
   }, [boqList, activeTab]);
+
+  // Reset page when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
+  // Pagination calculations
+  const totalRecords = filteredBOQList.length;
+  const totalPages = Math.ceil(totalRecords / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedBOQList = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredBOQList.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredBOQList, currentPage]);
 
   // Fetch purchase comparison data when project is selected
   const fetchComparisonData = async (projectId: number) => {
@@ -277,14 +297,14 @@ export default function PurchaseComparison() {
           .filter((material: any) => {
             const purchases = material.purchases || [];
             const hasActivePurchase = purchases.some((p: any) =>
-              ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+              ['approved_by_pm', 'send_to_est', 'approved', 'approved_by_estimator', 'approved_by_td', 'pending_td_approval', 'send_to_buyer', 'assigned_to_buyer', 'vendor_approved', 'purchase_completed', 'routed_to_store'].includes(p.cr_status)
             );
             return (material.actual_amount || 0) > 0 || hasActivePurchase || material.is_new_material === true;
           })
           .forEach((material: any) => {
             const purchases = material.purchases || [];
             purchases.forEach((p: any) => {
-              if (['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)) {
+              if (['approved_by_pm', 'send_to_est', 'approved', 'approved_by_estimator', 'approved_by_td', 'pending_td_approval', 'send_to_buyer', 'assigned_to_buyer', 'vendor_approved', 'purchase_completed', 'routed_to_store'].includes(p.cr_status)) {
                 if (!groupHasData) {
                   // Add item header
                   actualSpendingData.push({
@@ -332,10 +352,10 @@ export default function PurchaseComparison() {
       });
 
       // Prepare Comparison sheet (side by side)
-      const comparisonData: any[] = [];
+      const comparisonSheetData: any[] = [];
       groupedByItem.forEach((group) => {
         const balance = group.totals.planned_amount - group.totals.actual_amount;
-        comparisonData.push({
+        comparisonSheetData.push({
           'Item': group.item_name,
           'Planned Amount (AED)': group.totals.planned_amount,
           'Actual Amount (incl. VAT)': group.totals.actual_amount,
@@ -346,8 +366,8 @@ export default function PurchaseComparison() {
 
       // Add total row
       const totalBalance = totalPlanned - totalActual;
-      comparisonData.push({});
-      comparisonData.push({
+      comparisonSheetData.push({});
+      comparisonSheetData.push({
         'Item': 'GRAND TOTAL',
         'Planned Amount (AED)': totalPlanned,
         'Actual Amount (incl. VAT)': totalActual,
@@ -358,7 +378,7 @@ export default function PurchaseComparison() {
       // Prepare Summary sheet
       const summaryData = [
         { 'Metric': 'Project Name', 'Value': projectName },
-        { 'Metric': 'BOQ ID', 'Value': comparisonData.boq_id || 'N/A' },
+        { 'Metric': 'BOQ ID', 'Value': comparisonData?.boq_id || 'N/A' },
         { 'Metric': '', 'Value': '' },
         { 'Metric': 'Total Planned Amount (AED)', 'Value': totalPlanned.toFixed(2) },
         { 'Metric': 'Total Actual Amount (incl. VAT) (AED)', 'Value': totalActual.toFixed(2) },
@@ -378,7 +398,7 @@ export default function PurchaseComparison() {
       XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
 
       // Add Comparison sheet
-      const ws2 = XLSX.utils.json_to_sheet(comparisonData);
+      const ws2 = XLSX.utils.json_to_sheet(comparisonSheetData);
       ws2['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 25 }, { wch: 18 }, { wch: 15 }];
       XLSX.utils.book_append_sheet(wb, ws2, 'Comparison');
 
@@ -543,14 +563,15 @@ export default function PurchaseComparison() {
       groupedByItem.forEach((group) => {
         // Estimate height needed for this section
         const plannedRowCount = group.plannedMaterials.length;
+        const PDF_ACTIVE_STATUSES = ['approved_by_pm', 'send_to_est', 'approved', 'approved_by_estimator', 'approved_by_td', 'pending_td_approval', 'send_to_buyer', 'assigned_to_buyer', 'vendor_approved', 'purchase_completed', 'routed_to_store'];
         const actualMaterials = group.actualMaterials.filter((m: any) => {
           const purchases = m.purchases || [];
-          return purchases.some((p: any) => ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status));
+          return purchases.some((p: any) => PDF_ACTIVE_STATUSES.includes(p.cr_status));
         });
         let actualRowCount = 0;
         actualMaterials.forEach((m: any) => {
           const purchases = m.purchases || [];
-          actualRowCount += purchases.filter((p: any) => ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)).length;
+          actualRowCount += purchases.filter((p: any) => PDF_ACTIVE_STATUSES.includes(p.cr_status)).length;
         });
         const maxRows = Math.max(plannedRowCount, actualRowCount, 1);
         const estimatedHeight = 35 + (maxRows * 6) + 20;
@@ -645,7 +666,7 @@ export default function PurchaseComparison() {
         actualMaterials.forEach((material: any) => {
           const purchases = material.purchases || [];
           purchases.forEach((p: any) => {
-            if (['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)) {
+            if (PDF_ACTIVE_STATUSES.includes(p.cr_status)) {
               const total = (p.amount || 0) + (p.vat_amount || 0);
               actualRows.push([
                 material.material_name,
@@ -1093,10 +1114,10 @@ export default function PurchaseComparison() {
                   </TabsTrigger>
                   <TabsTrigger
                     value="completed"
-                    className="px-6 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm transition-all"
+                    className="px-6 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-green-600 data-[state=active]:bg-white data-[state=active]:text-green-600 data-[state=active]:shadow-sm transition-all"
                   >
                     <span className="font-semibold">Completed</span>
-                    <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
+                    <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">
                       {boqList.filter((boq: any) => {
                         const projectStatus = (boq.project_status || '').toLowerCase();
                         const boqStatus = (boq.status || boq.boq_status || '').toLowerCase();
@@ -1116,35 +1137,91 @@ export default function PurchaseComparison() {
                     <p className="text-gray-500">No live projects available</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredBOQList.map((boq: any) => (
-                      <motion.div
-                        key={boq.boq_id || boq.project_id}
-                        whileHover={{ scale: 1.02 }}
-                        className="bg-white border border-gray-200 rounded-xl p-5 cursor-pointer hover:shadow-lg transition-all"
-                        onClick={() => handleProjectSelect(boq)}
-                      >
-                        <div className="flex justify-between items-start mb-3">
-                          <DocumentChartBarIcon className="w-8 h-8 text-green-500" />
-                          <Badge className={getStatusColor(boq)}>{getStatusLabel(boq)}</Badge>
-                        </div>
-                        <h3 className="font-semibold text-gray-800 mb-2 line-clamp-2">
-                          {boq.project_name || boq.project?.name || 'Unnamed Project'}
-                        </h3>
-                        <p className="text-sm text-gray-500 mb-3 line-clamp-1">
-                          {boq.boq_description || `BOQ for ${boq.project_name || 'project'}`}
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {paginatedBOQList.map((boq: any) => (
+                        <motion.div
+                          key={boq.boq_id || boq.project_id}
+                          whileHover={{ scale: 1.02 }}
+                          className="bg-white border border-gray-200 rounded-xl p-5 cursor-pointer hover:shadow-lg transition-all"
+                          onClick={() => handleProjectSelect(boq)}
+                        >
+                          <div className="flex justify-between items-start mb-3">
+                            <DocumentChartBarIcon className="w-8 h-8 text-green-500" />
+                            <Badge className={getStatusColor(boq)}>{getStatusLabel(boq)}</Badge>
+                          </div>
+                          <h3 className="font-semibold text-gray-800 mb-2 line-clamp-2">
+                            {boq.project_name || boq.project?.name || 'Unnamed Project'}
+                          </h3>
+                          <p className="text-sm text-gray-500 mb-3 line-clamp-1">
+                            {boq.boq_description || `BOQ for ${boq.project_name || 'project'}`}
+                          </p>
+                          <div className="flex justify-between text-xs text-gray-500">
+                            <span>BOQ ID: #{boq.boq_id}</span>
+                            <span>{boq.created_at ? new Date(boq.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}</span>
+                          </div>
+                          <button className="w-full mt-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2">
+                            <DocumentChartBarIcon className="w-4 h-4" />
+                            View Comparison
+                          </button>
+                        </motion.div>
+                      ))}
+                    </div>
+
+                    {/* Pagination */}
+                    {totalRecords > 0 && (
+                      <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gray-50 px-4 py-3 border border-gray-200 rounded-lg">
+                        <p className="text-sm text-gray-600">
+                          Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} to {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)} of {totalRecords} projects
                         </p>
-                        <div className="flex justify-between text-xs text-gray-500">
-                          <span>BOQ ID: #{boq.boq_id}</span>
-                          <span>{boq.created_at ? new Date(boq.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}</span>
-                        </div>
-                        <button className="w-full mt-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2">
-                          <DocumentChartBarIcon className="w-4 h-4" />
-                          View Comparison
-                        </button>
-                      </motion.div>
-                    ))}
-                  </div>
+                        {totalPages > 1 && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={currentPage === 1}
+                              className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <ChevronLeftIcon className="w-4 h-4" />
+                            </button>
+                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                              if (
+                                page === 1 ||
+                                page === totalPages ||
+                                (page >= currentPage - 1 && page <= currentPage + 1)
+                              ) {
+                                return (
+                                  <button
+                                    key={page}
+                                    onClick={() => setCurrentPage(page)}
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                                      currentPage === page
+                                        ? 'bg-green-600 text-white'
+                                        : 'border border-gray-300 hover:bg-gray-100'
+                                    }`}
+                                  >
+                                    {page}
+                                  </button>
+                                );
+                              } else if (
+                                page === currentPage - 2 ||
+                                page === currentPage + 2
+                              ) {
+                                return <span key={page} className="px-1">...</span>;
+                              }
+                              return null;
+                            })}
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                              disabled={currentPage === totalPages}
+                              className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <ChevronRightIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </TabsContent>
 
@@ -1155,35 +1232,91 @@ export default function PurchaseComparison() {
                     <p className="text-gray-500">No completed projects available</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredBOQList.map((boq: any) => (
-                      <motion.div
-                        key={boq.boq_id || boq.project_id}
-                        whileHover={{ scale: 1.02 }}
-                        className="bg-white border border-gray-200 rounded-xl p-5 cursor-pointer hover:shadow-lg transition-all"
-                        onClick={() => handleProjectSelect(boq)}
-                      >
-                        <div className="flex justify-between items-start mb-3">
-                          <DocumentChartBarIcon className="w-8 h-8 text-blue-500" />
-                          <Badge className={getStatusColor(boq)}>{getStatusLabel(boq)}</Badge>
-                        </div>
-                        <h3 className="font-semibold text-gray-800 mb-2 line-clamp-2">
-                          {boq.project_name || boq.project?.name || 'Unnamed Project'}
-                        </h3>
-                        <p className="text-sm text-gray-500 mb-3 line-clamp-1">
-                          {boq.boq_description || `BOQ for ${boq.project_name || 'project'}`}
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {paginatedBOQList.map((boq: any) => (
+                        <motion.div
+                          key={boq.boq_id || boq.project_id}
+                          whileHover={{ scale: 1.02 }}
+                          className="bg-white border border-gray-200 rounded-xl p-5 cursor-pointer hover:shadow-lg transition-all"
+                          onClick={() => handleProjectSelect(boq)}
+                        >
+                          <div className="flex justify-between items-start mb-3">
+                            <DocumentChartBarIcon className="w-8 h-8 text-blue-500" />
+                            <Badge className={getStatusColor(boq)}>{getStatusLabel(boq)}</Badge>
+                          </div>
+                          <h3 className="font-semibold text-gray-800 mb-2 line-clamp-2">
+                            {boq.project_name || boq.project?.name || 'Unnamed Project'}
+                          </h3>
+                          <p className="text-sm text-gray-500 mb-3 line-clamp-1">
+                            {boq.boq_description || `BOQ for ${boq.project_name || 'project'}`}
+                          </p>
+                          <div className="flex justify-between text-xs text-gray-500">
+                            <span>BOQ ID: #{boq.boq_id}</span>
+                            <span>{boq.created_at ? new Date(boq.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}</span>
+                          </div>
+                          <button className="w-full mt-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2">
+                            <DocumentChartBarIcon className="w-4 h-4" />
+                            View Comparison
+                          </button>
+                        </motion.div>
+                      ))}
+                    </div>
+
+                    {/* Pagination */}
+                    {totalRecords > 0 && (
+                      <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gray-50 px-4 py-3 border border-gray-200 rounded-lg">
+                        <p className="text-sm text-gray-600">
+                          Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} to {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalRecords)} of {totalRecords} projects
                         </p>
-                        <div className="flex justify-between text-xs text-gray-500">
-                          <span>BOQ ID: #{boq.boq_id}</span>
-                          <span>{boq.created_at ? new Date(boq.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}</span>
-                        </div>
-                        <button className="w-full mt-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                          <DocumentChartBarIcon className="w-4 h-4" />
-                          View Comparison
-                        </button>
-                      </motion.div>
-                    ))}
-                  </div>
+                        {totalPages > 1 && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={currentPage === 1}
+                              className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <ChevronLeftIcon className="w-4 h-4" />
+                            </button>
+                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                              if (
+                                page === 1 ||
+                                page === totalPages ||
+                                (page >= currentPage - 1 && page <= currentPage + 1)
+                              ) {
+                                return (
+                                  <button
+                                    key={page}
+                                    onClick={() => setCurrentPage(page)}
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                                      currentPage === page
+                                        ? 'bg-green-600 text-white'
+                                        : 'border border-gray-300 hover:bg-gray-100'
+                                    }`}
+                                  >
+                                    {page}
+                                  </button>
+                                );
+                              } else if (
+                                page === currentPage - 2 ||
+                                page === currentPage + 2
+                              ) {
+                                return <span key={page} className="px-1">...</span>;
+                              }
+                              return null;
+                            })}
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                              disabled={currentPage === totalPages}
+                              className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <ChevronRightIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </TabsContent>
             </Tabs>
@@ -1275,8 +1408,9 @@ export default function PurchaseComparison() {
                                   {group.actualMaterials.filter((m: any) => {
                                     const amount = m.actual_amount || 0;
                                     const purchases = m.purchases || [];
+                                    const ACTIVE_STATUSES = ['approved_by_pm', 'send_to_est', 'approved', 'approved_by_estimator', 'approved_by_td', 'pending_td_approval', 'send_to_buyer', 'assigned_to_buyer', 'vendor_approved', 'purchase_completed', 'routed_to_store'];
                                     const hasActivePurchase = purchases.some((p: any) =>
-                                      ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+                                      ACTIVE_STATUSES.includes(p.cr_status)
                                     );
                                     return amount > 0 || hasActivePurchase || m.is_new_material === true;
                                   }).length === 0 ? (
@@ -1287,20 +1421,21 @@ export default function PurchaseComparison() {
                                     (() => {
                                       // Group all purchases by CR ID to show CR summary with VAT
                                       const purchasesByCR: { [crId: string]: { materials: any[], totalAmount: number, totalVat: number, hasNewMaterial: boolean } } = {};
+                                      const ACTIVE_STATUSES = ['approved_by_pm', 'send_to_est', 'approved', 'approved_by_estimator', 'approved_by_td', 'pending_td_approval', 'send_to_buyer', 'assigned_to_buyer', 'vendor_approved', 'purchase_completed', 'routed_to_store'];
 
                                       group.actualMaterials
                                         .filter((material: any) => {
                                           const amount = material.actual_amount || 0;
                                           const purchases = material.purchases || [];
                                           const hasActivePurchase = purchases.some((p: any) =>
-                                            ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+                                            ACTIVE_STATUSES.includes(p.cr_status)
                                           );
                                           return amount > 0 || hasActivePurchase || material.is_new_material === true;
                                         })
                                         .forEach((material: any) => {
                                           const purchases = material.purchases || [];
                                           const activePurchases = purchases.filter((p: any) =>
-                                            ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+                                            ACTIVE_STATUSES.includes(p.cr_status)
                                           );
 
                                           activePurchases.forEach((purchase: any) => {

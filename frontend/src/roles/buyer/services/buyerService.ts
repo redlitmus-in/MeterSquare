@@ -36,12 +36,13 @@ export interface PurchaseMaterial {
   supplier_notes?: string | null;  // Per-material notes from vendor selection
 }
 
-// POChild type for tracking vendor-specific purchase order splits
+// POChild type for tracking purchase order splits (both store and vendor routing)
 export interface POChild {
   id: number;
   parent_cr_id: number;
   formatted_id: string;  // "PO-100.1", "PO-100.2", etc.
   suffix: string;  // ".1", ".2", etc.
+  routing_type: 'store' | 'vendor';  // 'store' = route via PM, 'vendor' = requires TD approval
   boq_id?: number | null;
   project_id?: number | null;
   item_id?: string | null;
@@ -64,7 +65,7 @@ export interface POChild {
   vendor_country?: string | null;
   vendor_pin_code?: string | null;
   vendor_gst_number?: string | null;
-  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
+  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | 'td_rejected' | 'store_rejected' | 'store_routed' | null;
   vendor_selected_by_buyer_id?: number | null;
   vendor_selected_by_buyer_name?: string | null;
   vendor_selection_date?: string | null;
@@ -75,7 +76,7 @@ export interface POChild {
   vendor_email_sent_date?: string | null;
   vendor_whatsapp_sent?: boolean;
   vendor_whatsapp_sent_at?: string | null;
-  status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'rejected';
+  status: 'pending_td_approval' | 'vendor_approved' | 'purchase_completed' | 'completed' | 'rejected' | 'td_rejected' | 'store_rejected' | 'routed_to_store';
   rejection_reason?: string | null;
   purchase_completed_by_user_id?: number | null;
   purchase_completed_by_name?: string | null;
@@ -134,7 +135,13 @@ export interface Purchase {
   approved_by: number;
   approved_at: string | null;
   created_at: string;
-  status: 'pending' | 'completed';
+  updated_at?: string | null;
+  status: 'pending' | 'completed' | 'rejected';
+  rejection_type?: 'change_request' | 'vendor_selection' | 'store_rejection';
+  rejection_reason?: string;
+  rejected_by_name?: string;
+  rejected_at_stage?: string;
+  vendor_rejection_reason?: string;
   purchase_completed_by_user_id?: number;
   purchase_completed_by_name?: string;
   purchase_completion_date?: string;
@@ -152,7 +159,7 @@ export interface Purchase {
   vendor_country?: string | null;
   vendor_gst_number?: string | null;
   vendor_selection_pending_td_approval?: boolean;
-  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | null;
+  vendor_selection_status?: 'pending_td_approval' | 'approved' | 'rejected' | 'td_rejected' | 'store_rejected' | 'store_routed' | null;
   vendor_selected_by_name?: string | null;
   vendor_selected_by_buyer_name?: string | null;
   vendor_approved_by_td_name?: string | null;
@@ -172,6 +179,8 @@ export interface Purchase {
   all_store_requests_approved?: boolean;
   any_store_request_rejected?: boolean;
   store_requests_pending?: boolean;
+  all_store_requests_rejected?: boolean;
+  store_request_status?: 'pending_vendor_delivery' | 'delivered_to_store' | 'dispatched_to_site' | 'delivered_to_site' | 'store_rejected' | null;
   overhead_analysis?: {
     original_allocated: number;
     overhead_percentage: number;
@@ -185,6 +194,13 @@ export interface Purchase {
   };
   // POChild records for vendor splits
   po_children?: POChild[];
+  // Material routing tracking (prevents duplicates)
+  routed_materials?: Record<string, {
+    routing: 'store' | 'vendor';
+    po_child_id?: number;
+    routed_at: string;
+    routed_by: number;
+  }>;
 }
 
 export interface SelectVendorRequest {
@@ -388,10 +404,13 @@ export interface TDRejectedPOChild {
   materials_count: number;
   total_cost: number;
   created_at: string;
+  updated_at?: string;
   status: string;
-  rejection_type: string;
+  routing_type?: string;
+  rejection_type: string;  // 'td_vendor_rejection' | 'store_rejection'
   rejection_reason: string;
   rejected_by_name: string;
+  vendor_name?: string;
   vendor_selection_status: string;
   can_reselect_vendor: boolean;
 }
@@ -545,18 +564,18 @@ class BuyerService {
     }
   }
 
-  // Mark purchase as complete and merge to BOQ
+  // Mark purchase as complete and route via M2 Store
   async completePurchase(data: CompletePurchaseRequest): Promise<CompletePurchaseResponse> {
     try {
-      // Use the change-request endpoint that properly merges materials to BOQ
+      // Use the buyer endpoint that routes materials via Production Manager (M2 Store)
       // This endpoint:
-      // 1. Changes status to 'purchase_completed'
-      // 2. Merges materials to BOQ with 'planned_quantity: 0' marker
-      // 3. Preserves original BOQ totals
-      // 4. Creates MaterialPurchaseTracking entries
+      // 1. Changes status to 'routed_to_store'
+      // 2. Creates InternalMaterialRequest records for Production Manager
+      // 3. Notifies PM about incoming vendor delivery
+      // 4. Merges materials to BOQ with 'planned_quantity: 0' marker
       const response = await apiClient.post<CompletePurchaseResponse>(
-        `/change-request/${data.cr_id}/complete-purchase`,
-        { purchase_notes: data.notes || '' }
+        `/buyer/complete-purchase`,
+        { cr_id: data.cr_id, notes: data.notes || '' }
       );
 
       if (response.data.success) {
@@ -1207,6 +1226,31 @@ class BuyerService {
     }
   }
 
+  // Route all materials to M2 Store directly (no POChild, updates parent CR)
+  // Used when buyer sends ALL materials to store via vendor selection modal
+  async routeAllToStore(crId: number, materialNames: string[]): Promise<{ success: boolean; message: string; cr_id: number }> {
+    try {
+      const response = await apiClient.post<{ success: boolean; message: string; cr_id: number }>(
+        `/buyer/purchase/${crId}/route-all-to-store`,
+        { material_names: materialNames }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.message || 'Failed to route materials to store');
+    } catch (error: any) {
+      console.error('Error routing all to store:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 404) {
+        throw new Error('Purchase not found');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to route materials to store');
+    }
+  }
+
   // Get optimized vendor selection data (78% smaller payload)
   async getVendorSelectionData(crId: number): Promise<{
     success: boolean;
@@ -1301,12 +1345,13 @@ class BuyerService {
     }
   }
 
-  // Create POChild records for each vendor group
+  // Create POChild records for each vendor group (supports both store and vendor routing)
   async createPOChildren(
     crId: number,
     vendorGroups: Array<{
-      vendor_id: number;
-      vendor_name: string;
+      routing_type: 'store' | 'vendor';  // NEW: Specify routing type
+      vendor_id?: number;  // Optional for store routing
+      vendor_name?: string;  // Optional for store routing
       materials: Array<{
         material_name: string;
         quantity: number;
@@ -1316,7 +1361,8 @@ class BuyerService {
       }>;
       supplier_notes?: string | null;
     }>,
-    submissionGroupId: string
+    submissionGroupId: string,
+    sendNotification: boolean = false
   ): Promise<{
     success: boolean;
     message: string;
@@ -1325,11 +1371,17 @@ class BuyerService {
     po_children: Array<{
       id: number;
       formatted_id: string;
-      vendor_id: number;
+      routing_type: 'store' | 'vendor';
+      vendor_id?: number;
       vendor_name: string;
       materials_count: number;
       total_cost: number;
     }>;
+    routing_summary?: {
+      vendor_routed: number;
+      store_routed: number;
+      total: number;
+    };
   }> {
     try {
 
@@ -1337,7 +1389,8 @@ class BuyerService {
         `/buyer/purchase/${crId}/create-po-children`,
         {
           vendor_groups: vendorGroups,
-          submission_group_id: submissionGroupId
+          submission_group_id: submissionGroupId,
+          send_notification: sendNotification
         }
       );
 
@@ -1354,6 +1407,31 @@ class BuyerService {
         throw new Error('Purchase not found');
       }
       throw new Error(error.response?.data?.error || 'Failed to create separate purchase orders');
+    }
+  }
+
+  // Send vendor-routed PO children for TD approval (manual notification)
+  async sendForTDApproval(
+    crId: number,
+    poChildIds?: number[]
+  ): Promise<{
+    success: boolean;
+    message: string;
+    po_children_sent: number;
+    po_child_ids: number[];
+  }> {
+    try {
+      const response = await apiClient.post(
+        `/buyer/purchase/${crId}/send-for-approval`,
+        { po_child_ids: poChildIds }
+      );
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to send for approval');
+    } catch (error: any) {
+      console.error('Error sending for approval:', error);
+      throw new Error(error.response?.data?.error || 'Failed to send for approval');
     }
   }
 
@@ -1716,6 +1794,30 @@ class BuyerService {
     }
   }
 
+  // Check material availability in M2 Store before purchase completion
+  async checkMaterialAvailability(materials: MaterialAvailabilityRequest[]): Promise<MaterialAvailabilityResponse> {
+    try {
+      const response = await apiClient.post<MaterialAvailabilityResponse>(
+        '/inventory/check-availability',
+        { materials }
+      );
+
+      if (response.data.success) {
+        return response.data;
+      }
+      throw new Error(response.data.error || 'Failed to check availability');
+    } catch (error: any) {
+      console.error('Error checking material availability:', error);
+      if (error.response?.status === 401) {
+        throw new Error('Authentication required. Please login again.');
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response?.data?.error || 'Invalid request');
+      }
+      throw new Error(error.response?.data?.error || 'Failed to check material availability');
+    }
+  }
+
 }
 
 // Response type for POChild price update
@@ -1782,6 +1884,12 @@ export interface StoreAvailabilityResponse {
   can_complete_from_store: boolean;
   available_materials: StoreAvailabilityMaterial[];
   unavailable_materials: StoreAvailabilityMaterial[];
+  already_sent_materials?: Array<{
+    material_name: string;
+    required_quantity: number;
+    status: string;
+    already_sent: boolean;
+  }>;
   error?: string;
 }
 
@@ -1791,6 +1899,200 @@ export interface CompleteFromStoreResponse {
   cr_id?: number;
   requests_created?: number;
   error?: string;
+}
+
+// Material availability check types
+export interface MaterialAvailabilityRequest {
+  material_name: string;
+  brand?: string;
+  size?: string;
+  quantity: number;
+}
+
+export interface MaterialAvailabilityResult {
+  material_name: string;
+  brand: string;
+  size: string;
+  requested_quantity: number;
+  available_quantity: number;
+  is_available: boolean;
+  shortfall: number;
+  status: 'in_stock' | 'insufficient_stock' | 'not_in_inventory' | 'invalid_quantity';
+  inventory_material_id: number | null;
+  material_code: string | null;
+  error?: string;
+}
+
+export interface MaterialAvailabilityResponse {
+  success: boolean;
+  overall_available: boolean;
+  total_materials: number;
+  available_count: number;
+  unavailable_count: number;
+  materials: MaterialAvailabilityResult[];
+  error?: string;
+}
+
+// Dashboard Analytics Types
+export interface BuyerDashboardAnalytics {
+  success: boolean;
+  period_days: number;
+  generated_at: string;
+  purchase_orders: {
+    // Ongoing sub-tabs (matching Purchase Orders > Ongoing tab)
+    pending_vendor_selection: number;  // Ongoing > Pending Purchase
+    store_approved: number;            // Ongoing > Store Approved
+    ready_to_complete: number;         // Ongoing > Vendor Approved (parent CRs)
+
+    // Pending Approval sub-tabs (matching Purchase Orders > Pending Approval tab)
+    pending_td_approval: number;       // Vendor Pending TD (deduplicated)
+    store_requests_pending: number;    // Store Pending
+
+    // Completed & Rejected
+    completed: number;
+    routed_to_store: number;
+    rejected: number;
+
+    // Totals
+    total_ongoing: number;
+    total_pending_approval: number;
+    total_pending: number;
+    total_completed: number;
+    total_pending_cost: number;
+    total_completed_cost: number;
+  };
+  po_children: {
+    pending_td_approval: number;
+    vendor_approved: number;
+    completed: number;
+    rejected: number;
+    total: number;
+  };
+  vendors: {
+    total_approved: number;
+    pending_approval: number;
+  };
+  deliveries: {
+    total: number;
+    draft: number;
+    issued: number;
+    in_transit: number;
+    delivered: number;
+    pending_receipt: number;
+  };
+  store_requests: {
+    pending_vendor_delivery: number;
+    delivered_to_store: number;
+    dispatched_to_site: number;
+    delivered_to_site: number;
+    total_in_pipeline: number;
+  };
+  projects: {
+    total_with_purchases: number;
+    active: number;
+  };
+  performance: {
+    completion_rate: number;
+    avg_processing_days: number;
+  };
+  recent_activity: Array<{
+    cr_id: number;
+    formatted_id: string;
+    project_name: string;
+    item_name: string;
+    total_cost: number;
+    status: string;
+    completed_at: string | null;
+    vendor_name: string | null;
+  }>;
+  workload: {
+    pending_actions: number;
+    awaiting_approval: number;
+    pending_deliveries: number;
+    status: 'normal' | 'moderate' | 'high';
+  };
+  // ========== NEW ANALYTICS TYPES ==========
+  trends: {
+    daily: Array<{
+      date: string;
+      count: number;
+      cost: number;
+    }>;
+    weekly: Array<{
+      week: string;
+      count: number;
+      cost: number;
+    }>;
+  };
+  cost_analysis: {
+    by_project: Array<{
+      project_id: number;
+      project_name: string;
+      po_count: number;
+      total_cost: number;
+      completed_cost: number;
+      pending_cost: number;
+    }>;
+    by_vendor: Array<{
+      vendor_id: number;
+      vendor_name: string;
+      po_count: number;
+      total_cost: number;
+      avg_cost: number;
+    }>;
+  };
+  vendor_performance: Array<{
+    vendor_id: number;
+    vendor_name: string;
+    total_orders: number;
+    completed_orders: number;
+    completion_rate: number;
+    avg_fulfillment_days: number;
+    total_spend: number;
+    performance_score: number;
+  }>;
+  material_categories: Array<{
+    category: string;
+    count: number;
+    cost: number;
+  }>;
+  monthly_comparison: {
+    this_month: {
+      count: number;
+      cost: number;
+    };
+    last_month: {
+      count: number;
+      cost: number;
+    };
+    change: {
+      count_pct: number;
+      cost_pct: number;
+    };
+  };
+}
+
+// Add dashboard method to BuyerService class
+// Note: Adding as standalone function since class is already defined above
+
+export async function getBuyerDashboardAnalytics(days: number = 30): Promise<BuyerDashboardAnalytics> {
+  try {
+    const response = await apiClient.get<BuyerDashboardAnalytics>(
+      `/buyer/dashboard`,
+      { params: { days } }
+    );
+
+    if (response.data.success) {
+      return response.data;
+    }
+    throw new Error('Failed to fetch dashboard analytics');
+  } catch (error: any) {
+    console.error('Error fetching buyer dashboard analytics:', error);
+    if (error.response?.status === 401) {
+      throw new Error('Authentication required. Please login again.');
+    }
+    throw new Error(error.response?.data?.error || 'Failed to fetch dashboard analytics');
+  }
 }
 
 export const buyerService = new BuyerService();

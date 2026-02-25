@@ -145,7 +145,52 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
         result.data.forEach((record: BackendHistoryRecord) => {
           // If action is an array, process each action
           if (Array.isArray(record.action)) {
-            record.action.forEach((actionItem: any, index) => {
+            // Consolidate day extension actions from the same history row into one entry
+            const dayExtActions = record.action.filter((a: any) =>
+              a.type?.toLowerCase().startsWith('day_extension_')
+            );
+            const otherActions = record.action.filter((a: any) =>
+              !a.type?.toLowerCase().startsWith('day_extension_')
+            );
+
+            // Merge day extension actions into a single consolidated entry
+            if (dayExtActions.length > 0) {
+              const requestAction = dayExtActions.find((a: any) => a.type === 'day_extension_requested');
+              const approvalAction = dayExtActions.find((a: any) => a.type === 'day_extension_approved');
+              const rejectionAction = dayExtActions.find((a: any) => a.type === 'day_extension_rejected');
+              const editAction = dayExtActions.find((a: any) => a.type === 'day_extension_edited');
+
+              // Determine the final action type (prioritize resolution over request)
+              const finalAction = approvalAction || rejectionAction || editAction || requestAction;
+              const finalType = approvalAction ? 'DAY_EXTENSION_APPROVED'
+                : rejectionAction ? 'DAY_EXTENSION_REJECTED'
+                : 'DAY_EXTENSION_REQUESTED';
+
+              transformedHistory.push({
+                action_id: record.boq_history_id * 1000,
+                action_type: finalType,
+                action_by: finalAction?.sender || record.action_by,
+                sender_role: record.sender_role,
+                receiver_role: record.receiver_role,
+                action_at: finalAction?.timestamp || record.action_date,
+                comments: requestAction?.reason || record.comments,
+                status: finalAction?.status || record.boq_status,
+                project_name: finalAction?.project_name,
+                rejection_reason: rejectionAction?.rejection_reason,
+                // Day Extension fields - merge from request + resolution
+                original_duration: requestAction?.original_duration_days || finalAction?.original_duration,
+                requested_days: requestAction?.requested_additional_days || requestAction?.requested_days,
+                approved_days: approvalAction?.approved_days,
+                new_duration: finalAction?.new_duration_days || finalAction?.final_duration_days || finalAction?.new_duration,
+                original_end_date: requestAction?.original_end_date || finalAction?.original_end_date,
+                new_end_date: finalAction?.new_end_date || finalAction?.final_end_date,
+                extension_reason: requestAction?.reason,
+                extension_status: finalAction?.status
+              });
+            }
+
+            // Process non-day-extension actions normally
+            otherActions.forEach((actionItem: any, index: number) => {
               // Get the correct action_by name based on action type
               let actionByName = record.action_by;
               if (actionItem.type === 'revision_sent' || actionItem.type === 'email_sent') {
@@ -155,7 +200,7 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
               }
 
               transformedHistory.push({
-                action_id: record.boq_history_id * 1000 + index, // Generate unique ID
+                action_id: record.boq_history_id * 1000 + index + 1,
                 action_type: actionItem.type?.toUpperCase().replace(/_/g, '_') || 'UNKNOWN',
                 action_by: actionByName,
                 sender_role: record.sender_role,
@@ -713,32 +758,36 @@ const BOQHistoryTimeline: React.FC<BOQHistoryTimelineProps> = ({ boqId, onDataCh
                       'bg-red-50 border-red-200'
                     }`}>
                       <div className="space-y-2">
-                        {/* Extension Reason */}
-                        {action.extension_reason && (
+                        {/* Requested Days */}
+                        {action.requested_days !== undefined && (
                           <div className="bg-white/60 rounded p-2">
-                            <p className="text-xs font-semibold text-gray-700 mb-1">Reason:</p>
-                            <p className="text-xs text-gray-600 whitespace-pre-wrap">{action.extension_reason}</p>
+                            <p className="text-gray-600 mb-0.5 text-xs">Requested Days</p>
+                            <p className="font-bold text-orange-700">
+                              +{action.requested_days} days
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Approved Days (only if different from requested) */}
+                        {action.approved_days && action.approved_days !== action.requested_days && (
+                          <div className="bg-white/60 rounded p-2">
+                            <p className="text-gray-600 mb-0.5 text-xs">Approved Days</p>
+                            <p className="font-bold text-green-700">
+                              +{action.approved_days} days
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Rejection Reason */}
+                        {action.rejection_reason && (
+                          <div className="bg-red-100/60 rounded p-2">
+                            <p className="text-xs font-semibold text-red-700 mb-1">Rejection Reason:</p>
+                            <p className="text-xs text-red-600">{action.rejection_reason}</p>
                           </div>
                         )}
 
                         {/* Timeline Details */}
                         <div className="grid grid-cols-2 gap-2 text-xs">
-                          {action.original_duration !== undefined && (
-                            <div className="bg-white/60 rounded p-2">
-                              <p className="text-gray-600 mb-0.5">Original Duration</p>
-                              <p className="font-bold text-gray-900">{action.original_duration} days</p>
-                            </div>
-                          )}
-                          {action.requested_days !== undefined && (
-                            <div className="bg-white/60 rounded p-2">
-                              <p className="text-gray-600 mb-0.5">
-                                {action.action_type === 'DAY_EXTENSION_APPROVED' && action.approved_days ? 'Approved Days' : 'Requested Days'}
-                              </p>
-                              <p className="font-bold text-orange-700">
-                                +{action.action_type === 'DAY_EXTENSION_APPROVED' && action.approved_days ? action.approved_days : action.requested_days} days
-                              </p>
-                            </div>
-                          )}
                           {action.original_end_date && (
                             <div className="bg-white/60 rounded p-2">
                               <p className="text-gray-600 mb-0.5">Original End Date</p>

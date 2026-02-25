@@ -214,22 +214,40 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
     return master_item_id, master_material_ids, master_labour_ids
 
 def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
-    """Add sub-items, their materials, and labour to master tables"""
+    """Add sub-items, their materials, and labour to master tables.
+
+    Duplicate Prevention:
+    - Sub-items: Checked globally by sub_item_name (case-insensitive)
+    - Materials: Checked globally by material_name (case-insensitive)
+    - Labour: Checked globally by labour_role (case-insensitive)
+
+    If duplicate exists, we reuse the existing record and link it to the current sub-item.
+    """
     master_sub_item_ids = []
 
+    # Batch pre-fetch all MasterSubItems by name to avoid N+1
+    _sub_item_names_lower = [
+        s.get("sub_item_name", "").strip().lower()
+        for s in sub_items if s.get("sub_item_name", "").strip()
+    ]
+    _batch_sub_items_by_name = {}
+    if _sub_item_names_lower:
+        for _msi in MasterSubItem.query.filter(
+            db.func.lower(MasterSubItem.sub_item_name).in_(_sub_item_names_lower),
+            MasterSubItem.is_deleted == False
+        ).all():
+            _batch_sub_items_by_name.setdefault(_msi.sub_item_name.lower(), _msi)
+
     for sub_item in sub_items:
-        sub_item_name = sub_item.get("sub_item_name")
+        sub_item_name = sub_item.get("sub_item_name", "").strip()
         if not sub_item_name:
             continue
 
-        # Check if master sub-item already exists for this item and sub-item name
-        master_sub_item = MasterSubItem.query.filter_by(
-            item_id=master_item_id,
-            sub_item_name=sub_item_name
-        ).first()
+        # Check if master sub-item already exists GLOBALLY by name (use pre-fetched batch)
+        master_sub_item = _batch_sub_items_by_name.get(sub_item_name.lower())
 
         if not master_sub_item:
-            # Create new master sub-item
+            # Create new master sub-item (only if name doesn't exist globally)
             master_sub_item = MasterSubItem(
                 item_id=master_item_id,
                 sub_item_name=sub_item_name,
@@ -257,27 +275,8 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             db.session.add(master_sub_item)
             db.session.flush()
         else:
-            # Update existing master sub-item
-            master_sub_item.description = sub_item.get("scope") or sub_item.get("description", "")
-            master_sub_item.size = sub_item.get("size", "")
-            master_sub_item.location = sub_item.get("location", "")
-            master_sub_item.brand = sub_item.get("brand", "")
-            master_sub_item.unit = sub_item.get("unit")
-            master_sub_item.quantity = sub_item.get("quantity")
-            master_sub_item.per_unit_cost = sub_item.get("per_unit_cost")
-            master_sub_item.sub_item_total_cost = sub_item.get("sub_item_total_cost")
-            master_sub_item.misc_percentage = sub_item.get("misc_percentage", 10.0)
-            master_sub_item.misc_amount = sub_item.get("misc_amount", 0.0)
-            master_sub_item.overhead_profit_percentage = sub_item.get("overhead_profit_percentage", 25.0)
-            master_sub_item.overhead_profit_amount = sub_item.get("overhead_profit_amount", 0.0)
-            master_sub_item.transport_percentage = sub_item.get("transport_percentage", 5.0)
-            master_sub_item.transport_amount = sub_item.get("transport_amount", 0.0)
-            master_sub_item.material_cost = sub_item.get("material_cost", 0.0)
-            master_sub_item.labour_cost = sub_item.get("labour_cost", 0.0)
-            master_sub_item.internal_cost = sub_item.get("internal_cost", 0.0)
-            master_sub_item.planned_profit = sub_item.get("planned_profit", 0.0)
-            master_sub_item.negotiable_margin = sub_item.get("negotiable_margin", 0.0)
-            db.session.flush()
+            # Sub-item already exists - just log it, don't update (to preserve existing data)
+            log.info(f"Sub-item '{sub_item_name}' already exists in master table (ID: {master_sub_item.sub_item_id})")
 
         master_sub_item_id = master_sub_item.sub_item_id
         master_sub_item_ids.append(master_sub_item_id)
@@ -285,15 +284,17 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
         # Add materials for this sub-item
         materials = sub_item.get("materials", [])
         if materials:
-            # Filter out materials with empty names before querying
-            material_names = [mat.get("material_name", "").strip() for mat in materials if mat.get("material_name", "").strip()]
+            # Filter out materials with empty names
+            material_names = [mat.get("material_name", "").strip().lower() for mat in materials if mat.get("material_name", "").strip()]
 
+            # Query existing materials GLOBALLY by name (case-insensitive) to prevent duplicates
             existing_materials_map = {}
             if material_names:
                 existing_materials = MasterMaterial.query.filter(
-                    MasterMaterial.material_name.in_(material_names)
+                    db.func.lower(MasterMaterial.material_name).in_(material_names),
+                    MasterMaterial.is_active == True
                 ).all()
-                existing_materials_map = {mat.material_name: mat for mat in existing_materials}
+                existing_materials_map = {mat.material_name.lower(): mat for mat in existing_materials}
 
             for mat in materials:
                 material_name = mat.get("material_name", "").strip()
@@ -304,8 +305,10 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                 unit_price = mat.get("unit_price", 0.0)
                 total_price = mat.get("total_price", quantity * unit_price)
 
-                master_material = existing_materials_map.get(material_name)
+                # Check if material exists GLOBALLY (case-insensitive)
+                master_material = existing_materials_map.get(material_name.lower())
                 if not master_material:
+                    # Create new material only if it doesn't exist globally
                     master_material = MasterMaterial(
                         material_name=material_name,
                         item_id=master_item_id,
@@ -326,34 +329,23 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     db.session.add(master_material)
                     db.session.flush()
                 else:
-                    # Update existing material
-                    master_material.sub_item_id = master_sub_item_id
-                    if master_material.item_id is None:
-                        master_material.item_id = master_item_id
-                    master_material.description = mat.get("description")
-                    master_material.brand = mat.get("brand")
-                    master_material.size = mat.get("size")
-                    master_material.specification = mat.get("specification")
-                    master_material.quantity = quantity
-                    master_material.current_market_price = unit_price
-                    master_material.total_price = total_price
-                    master_material.vat_percentage = mat.get("vat_percentage", 0.0)
-                    master_material.vat_amount = mat.get("vat_amount", 0.0)
-                    master_material.last_modified_by = created_by
-                    db.session.flush()
+                    # Material already exists globally - just log it, don't create duplicate
+                    log.info(f"Material '{material_name}' already exists in master table (ID: {master_material.material_id})")
 
         # Add labour for this sub-item
         labour_list = sub_item.get("labour", [])
         if labour_list:
-            # Filter out labour with empty roles before querying
-            labour_roles = [labour.get("labour_role", "").strip() for labour in labour_list if labour.get("labour_role", "").strip()]
+            # Filter out labour with empty roles
+            labour_roles = [labour.get("labour_role", "").strip().lower() for labour in labour_list if labour.get("labour_role", "").strip()]
 
+            # Query existing labour GLOBALLY by role (case-insensitive) to prevent duplicates
             existing_labour_map = {}
             if labour_roles:
                 existing_labour = MasterLabour.query.filter(
-                    MasterLabour.labour_role.in_(labour_roles)
+                    db.func.lower(MasterLabour.labour_role).in_(labour_roles),
+                    MasterLabour.is_active == True
                 ).all()
-                existing_labour_map = {labour.labour_role: labour for labour in existing_labour}
+                existing_labour_map = {labour.labour_role.lower(): labour for labour in existing_labour}
 
             for labour in labour_list:
                 labour_role = labour.get("labour_role", "").strip()
@@ -364,11 +356,11 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                 hours = labour.get("hours", 0.0)
                 labour_amount = float(rate_per_hour) * float(hours)
 
-                # Check if labour_role already exists in master table
-                master_labour = existing_labour_map.get(labour_role)
+                # Check if labour_role exists GLOBALLY (case-insensitive)
+                master_labour = existing_labour_map.get(labour_role.lower())
 
                 if not master_labour:
-                    # Insert new labour entry
+                    # Create new labour only if it doesn't exist globally
                     master_labour = MasterLabour(
                         labour_role=labour_role,
                         item_id=master_item_id,
@@ -382,15 +374,8 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     db.session.add(master_labour)
                     db.session.flush()
                 else:
-                    # Update existing labour entry with new values
-                    master_labour.item_id = master_item_id
-                    master_labour.sub_item_id = master_sub_item_id
-                    if labour.get("work_type"):
-                        master_labour.work_type = labour.get("work_type")
-                    master_labour.hours = float(hours)
-                    master_labour.rate_per_hour = float(rate_per_hour)
-                    master_labour.amount = labour_amount
-                    db.session.flush()
+                    # Labour already exists globally - just log it, don't create duplicate
+                    log.info(f"Labour '{labour_role}' already exists in master table (ID: {master_labour.labour_id})")
 
     return master_sub_item_ids
 
@@ -702,10 +687,12 @@ def create_boq():
 
             final_selling_price = after_discount + vat_amount
             # Now add to master tables with calculated values (using ALL materials and labour)
+            # Use project's work_type as default instead of hardcoded "contract"
+            default_work_type = project.work_type if project and project.work_type else "contract"
             master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
                 item_data.get("item_name"),
                 item_data.get("description"),
-                item_data.get("work_type", "contract"),
+                item_data.get("work_type", default_work_type),
                 all_materials,
                 all_labour,
                 created_by,
@@ -856,7 +843,7 @@ def create_boq():
                 item_json = {
                     "item_name": item_data.get("item_name"),
                     "description": item_data.get("description", ""),
-                    "work_type": item_data.get("work_type", "contract"),
+                    "work_type": item_data.get("work_type", default_work_type),
                     "has_sub_items": True,
                     "sub_items": sub_items_list,
                     "quantity": item_quantity,
@@ -952,7 +939,7 @@ def create_boq():
                 master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
                     item_data.get("item_name"),
                     item_data.get("description"),
-                    item_data.get("work_type", "contract"),
+                    item_data.get("work_type", default_work_type),
                     materials_data,
                     labour_data,
                     created_by,
@@ -1012,27 +999,31 @@ def create_boq():
         preliminary_selections_to_save = []
         if preliminaries and preliminaries.get('items'):
             preliminary_items = preliminaries.get('items', [])
-            log.info(f"Processing {len(preliminary_items)} preliminary items from request")
+
+            # Batch pre-fetch PreliminaryMaster records for all non-custom prelim_ids
+            from models.preliminary_master import PreliminaryMaster
+            _prelim_ids = [item.get('prelim_id') for item in preliminary_items if item.get('prelim_id') and not item.get('isCustom', False)]
+            _batch_prelim_masters = {
+                pm.prelim_id: pm for pm in PreliminaryMaster.query.filter(
+                    PreliminaryMaster.prelim_id.in_(_prelim_ids)
+                ).all()
+            } if _prelim_ids else {}
 
             for item in preliminary_items:
                 prelim_id = item.get('prelim_id')
                 is_checked = item.get('checked', False) or item.get('selected', False)
                 is_custom = item.get('isCustom', False)
 
-                log.info(f"Preliminary item: prelim_id={prelim_id}, checked={is_checked}, isCustom={is_custom}, item={item}")
-
                 # Handle edited master preliminaries - update the master record
                 if prelim_id and not is_custom:
                     description = item.get('description', '')
                     if description:
-                        # Check if description was changed from master
-                        from models.preliminary_master import PreliminaryMaster
-                        master_prelim = PreliminaryMaster.query.get(prelim_id)
+                        # Check if description was changed from master (use pre-fetched batch)
+                        master_prelim = _batch_prelim_masters.get(prelim_id)
                         if master_prelim and master_prelim.description != description:
                             # Update the master preliminary description
                             master_prelim.description = description
                             master_prelim.updated_by = 'Estimator'
-                            log.info(f"[CREATE_BOQ] Updated master preliminary: prelim_id={prelim_id}, new description={description}")
 
                 # Handle custom preliminaries - create new row in preliminaries_master
                 if is_custom and not prelim_id:
@@ -1049,7 +1040,6 @@ def create_boq():
 
                         if existing_custom:
                             prelim_id = existing_custom.prelim_id
-                            log.info(f"[CREATE_BOQ] Found existing custom preliminary: prelim_id={prelim_id}")
                         else:
                             # Create new custom preliminary in master table
                             new_custom_prelim = PreliminaryMaster(
@@ -1065,15 +1055,12 @@ def create_boq():
                             db.session.add(new_custom_prelim)
                             db.session.flush()  # Get the prelim_id
                             prelim_id = new_custom_prelim.prelim_id
-                            log.info(f"[CREATE_BOQ] Created new custom preliminary: prelim_id={prelim_id}, description={description}")
 
                 if prelim_id:
                     preliminary_selections_to_save.append({
                         'prelim_id': prelim_id,
                         'is_checked': is_checked
                     })
-
-            log.info(f"Prepared {len(preliminary_selections_to_save)} preliminary selections for saving: {preliminary_selections_to_save}")
 
         # Apply BOQ-level discount to total
         boq_discount_percentage = data.get("discount_percentage", 0) or 0
@@ -1093,8 +1080,6 @@ def create_boq():
         # Apply BOQ-level discount to get final total
         final_boq_cost = combined_subtotal - boq_discount_amount if boq_discount_amount > 0 else combined_subtotal
 
-        log.info(f"BOQ {boq.boq_id} create totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
-
         # Calculate total negotiable margin from all sub-items
         total_negotiable_margin = 0.0
         total_planned_profit = 0.0
@@ -1110,8 +1095,6 @@ def create_boq():
                     total_misc_amount += sub_item.get("misc_amount", 0.0)
                     total_overhead_profit_amount += sub_item.get("overhead_profit_amount", 0.0)
                     total_transport_amount += sub_item.get("transport_amount", 0.0)
-
-        log.info(f"BOQ {boq.boq_id} profit breakdown - Negotiable Margin: {total_negotiable_margin}, Planned Profit (O&P): {total_planned_profit}, Misc: {total_misc_amount}, Transport: {total_transport_amount}")
 
         # Create BOQ details JSON (without terms - stored in junction table)
         boq_details_json = {
@@ -1162,12 +1145,8 @@ def create_boq():
                 )
                 db.session.add(boq_prelim)
 
-            log.info(f"Saved {len(preliminary_selections_to_save)} preliminary selections to boq_preliminaries for BOQ {boq.boq_id}")
-
         # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
         terms_conditions = data.get("terms_conditions", [])
-        log.info(f"Received terms_conditions payload: {len(terms_conditions) if terms_conditions else 0} terms")
-
         if terms_conditions and isinstance(terms_conditions, list):
             from sqlalchemy import text
             # Extract only checked term IDs
@@ -1187,13 +1166,10 @@ def create_boq():
                 'term_ids': selected_term_ids
             })
 
-            log.info(f"✅ Saved {len(selected_term_ids)} terms selections to boq_terms_selections for BOQ {boq.boq_id}")
         else:
             log.warning(f"No terms_conditions in payload for BOQ {boq.boq_id}")
 
         db.session.commit()
-
-        log.info(f"BOQ {boq.boq_id} created successfully with {len(boq_items)} items and {len(preliminary_selections_to_save)} preliminary selections")
 
         return jsonify({
             "message": "BOQ created successfully",
@@ -1252,7 +1228,6 @@ def get_boq(boq_id):
             # Use effective role for access control (handles admin viewing as PM)
             user_role = effective_role.lower().replace(' ', '').replace('_', '') if isinstance(effective_role, str) else ''
 
-            log.info(f"BOQ {boq_id} - User access: actual_role='{actual_role}', effective_role='{user_role}', is_admin_viewing={context.get('is_admin_viewing', False)}")
         # Fetch project details
         project = Project.query.filter_by(project_id=boq.project_id).first()
         # Get BOQ history to track which items were added via new_purchase
@@ -1394,7 +1369,6 @@ def get_boq(boq_id):
         # Admin has full access
         if actual_role == 'admin':
             can_view_new_purchase = True
-            log.info(f"BOQ {boq_id} - Admin access GRANTED for status '{boq_status}'")
         elif boq_status in ['new_purchase_create', 'sent_for_review']:
             # Only Project Manager can view when purchase is created or sent for review
             if user_role in ['projectmanager', 'project_manager']:
@@ -1526,36 +1500,64 @@ def get_boq(boq_id):
         from models.boq import MasterSubItem, MasterItem
         ids_were_recovered = False
 
-        for item in existing_purchase_items + new_add_purchase_items:
+        _all_items_for_img = existing_purchase_items + new_add_purchase_items
+
+        # Batch pre-fetch: collect all known sub_item_ids
+        _img_sub_item_ids = [
+            sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")
+            for item in _all_items_for_img
+            for sub_item in item.get("sub_items", [])
+            if sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")
+        ]
+        _batch_img_sub_items = {
+            si.sub_item_id: si for si in MasterSubItem.query.filter(
+                MasterSubItem.sub_item_id.in_(_img_sub_item_ids)
+            ).all()
+        } if _img_sub_item_ids else {}
+
+        # Batch pre-fetch: collect item_names for the fallback path (missing IDs)
+        _img_item_names_fallback = list({
+            item.get("item_name")
+            for item in _all_items_for_img
+            for sub_item in item.get("sub_items", [])
+            if not (sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")) and item.get("item_name")
+        })
+        _batch_img_master_items = {
+            mi.item_name: mi for mi in MasterItem.query.filter(
+                MasterItem.item_name.in_(_img_item_names_fallback)
+            ).all()
+        } if _img_item_names_fallback else {}
+        # Pre-fetch fallback sub-items by (item_id, sub_item_name)
+        _fallback_item_ids = [mi.item_id for mi in _batch_img_master_items.values()]
+        _batch_fallback_sub_items = {}
+        if _fallback_item_ids:
+            for _si in MasterSubItem.query.filter(MasterSubItem.item_id.in_(_fallback_item_ids)).all():
+                _batch_fallback_sub_items[(_si.item_id, _si.sub_item_name)] = _si
+
+        for item in _all_items_for_img:
             sub_items = item.get("sub_items", [])
             for sub_item in sub_items:
                 sub_item_id = sub_item.get("sub_item_id") or sub_item.get("master_sub_item_id")
                 master_sub_item = None
 
                 if sub_item_id:
-                    # Query database for sub_item_image using ID
-                    master_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id).first()
+                    # Use pre-fetched batch (no DB call)
+                    master_sub_item = _batch_img_sub_items.get(sub_item_id)
                 else:
-                    # Fallback: Try to find by item_name and sub_item_name (for BOQs that lost their IDs)
+                    # Fallback: Try to find by item_name and sub_item_name
                     item_name = item.get("item_name")
                     sub_item_name = sub_item.get("sub_item_name")
 
                     if item_name and sub_item_name:
-                        # First find the master item
-                        master_item = MasterItem.query.filter_by(item_name=item_name).first()
+                        master_item = _batch_img_master_items.get(item_name)
                         if master_item:
-                            # Then find the sub-item by item_id and sub_item_name
-                            master_sub_item = MasterSubItem.query.filter_by(
-                                item_id=master_item.item_id,
-                                sub_item_name=sub_item_name
-                            ).first()
+                            master_sub_item = _batch_fallback_sub_items.get((master_item.item_id, sub_item_name))
 
                             # If found, add the ID back to the JSON for future use
                             if master_sub_item:
                                 sub_item["sub_item_id"] = master_sub_item.sub_item_id
                                 sub_item["master_sub_item_id"] = master_sub_item.sub_item_id
                                 ids_were_recovered = True
-                                log.info(f"Recovered sub_item_id {master_sub_item.sub_item_id} for '{sub_item_name}' in item '{item_name}'")
 
                 # Add images if found
                 if master_sub_item and master_sub_item.sub_item_image:
@@ -1564,12 +1566,10 @@ def get_boq(boq_id):
         # If we recovered any IDs, persist them back to the database
         if ids_were_recovered:
             try:
-                log.info(f"Persisting recovered sub_item_ids back to BOQDetails for BOQ {boq_id}")
                 # Update the existing_purchase items in boq_details with recovered IDs
                 boq_details.boq_details["items"] = existing_purchase_items + new_add_purchase_items
                 db.session.add(boq_details)
                 db.session.commit()
-                log.info(f"Successfully persisted recovered sub_item_ids for BOQ {boq_id}")
             except Exception as e:
                 log.error(f"Failed to persist recovered sub_item_ids for BOQ {boq_id}: {str(e)}")
                 db.session.rollback()
@@ -1644,7 +1644,6 @@ def get_boq(boq_id):
 
             custom_count = len([i for i in items if i.get('isCustom')])
             master_count = len(items) - custom_count
-            log.info(f"Retrieved {len(items)} preliminaries ({master_count} master + {custom_count} custom) for BOQ {boq.boq_id}")
         except Exception as e:
             log.error(f"Error fetching preliminaries for BOQ {boq.boq_id}: {str(e)}")
             # Fallback to empty
@@ -1686,7 +1685,6 @@ def get_boq(boq_id):
                 })
 
             terms_conditions = {'items': terms_items}
-            log.info(f"Retrieved {len(terms_items)} terms from boq_terms_selections for BOQ {boq.boq_id}")
         except Exception as e:
             log.error(f"Error fetching terms for BOQ {boq.boq_id}: {str(e)}")
             terms_conditions = {'items': []}
@@ -1856,6 +1854,20 @@ def update_boq(boq_id):
         boq = BOQ.query.filter_by(boq_id=boq_id).first()
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
+
+        # Get project for default work_type
+        project = Project.query.filter_by(project_id=boq.project_id).first()
+        default_work_type = project.work_type if project and project.work_type else "contract"
+
+        # Validate that BOQ can be edited based on status
+        # Cannot edit if PM has approved or items are assigned
+        restricted_statuses = ["PM_Approved", "Items_Assigned", "Approved"]
+        if boq.status in restricted_statuses:
+            return jsonify({
+                "error": f"Cannot edit BOQ with status '{boq.status}'. BOQ has been approved and is no longer editable.",
+                "status": boq.status
+            }), 403
+
         # Update BOQ basic details
         if "boq_name" in data:
             boq.boq_name = data["boq_name"]
@@ -1944,7 +1956,7 @@ def update_boq(boq_id):
                     master_item_id, _, _ = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description", ""),
-                        item_data.get("work_type", "contract"),
+                        item_data.get("work_type", default_work_type),
                         [],  # Don't add materials here, will add per sub-item
                         [],  # Don't add labour here, will add per sub-item
                         created_by,
@@ -2149,7 +2161,7 @@ def update_boq(boq_id):
                     item_json = {
                         "item_name": item_data.get("item_name"),
                         "description": item_data.get("description", ""),
-                        "work_type": item_data.get("work_type", "contract"),
+                        "work_type": item_data.get("work_type", default_work_type),
                         "has_sub_items": True,
                         "sub_items": sub_items_list,
                         "quantity": item_quantity,
@@ -2181,7 +2193,7 @@ def update_boq(boq_id):
                     master_item_id, _, _ = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description", ""),
-                        item_data.get("work_type", "contract"),
+                        item_data.get("work_type", default_work_type),
                         [],  # Don't add materials here, will add per sub-item
                         [],  # Don't add labour here, will add per sub-item
                         created_by,
@@ -2476,6 +2488,14 @@ def update_boq(boq_id):
             preliminary_selections_saved = 0
             custom_preliminaries_created = 0
 
+            # Batch pre-fetch PreliminaryMaster records for all non-custom items
+            _upd_prelim_ids = [item.get('prelim_id') for item in preliminary_items if item.get('prelim_id') and not item.get('isCustom', False)]
+            _batch_upd_prelim_masters = {
+                pm.prelim_id: pm for pm in PreliminaryMaster.query.filter(
+                    PreliminaryMaster.prelim_id.in_(_upd_prelim_ids)
+                ).all()
+            } if _upd_prelim_ids else {}
+
             for item in preliminary_items:
                 prelim_id = item.get('prelim_id')
                 is_checked = item.get('checked', False) or item.get('selected', False)
@@ -2485,8 +2505,8 @@ def update_boq(boq_id):
                 if prelim_id and not is_custom:
                     description = item.get('description', '')
                     if description:
-                        # Check if description was changed from master
-                        master_prelim = PreliminaryMaster.query.get(prelim_id)
+                        # Check if description was changed from master (use pre-fetched batch)
+                        master_prelim = _batch_upd_prelim_masters.get(prelim_id)
                         if master_prelim and master_prelim.description != description:
                             # Update the master preliminary description
                             master_prelim.description = description
@@ -2552,7 +2572,6 @@ def update_boq(boq_id):
                 'boq_id': boq_id,
                 'term_ids': selected_term_ids
             })
-            log.info(f"✅ Updated {len(selected_term_ids)} terms selections in boq_terms_selections for BOQ {boq_id}")
 
         db.session.commit()
 
@@ -2587,6 +2606,10 @@ def revision_boq(boq_id):
 
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
+
+        # Get project for default work_type
+        project = Project.query.filter_by(project_id=boq.project_id).first()
+        default_work_type = project.work_type if project and project.work_type else "contract"
 
         # Get existing BOQ details BEFORE any updates
         boq_details = BOQDetails.query.filter_by(boq_id=boq_id).first()
@@ -2653,8 +2676,6 @@ def revision_boq(boq_id):
 
         if existing_history_count == 0 and old_boq_details_json:
             # This is the first edit - save the ORIGINAL/CURRENT BOQ data to history
-            log.info(f"📝 First edit detected for BOQ {boq_id} - storing original BOQ to history")
-
             # Calculate totals from original BOQ data
             original_items = old_boq_details_json.get("items", [])
             original_total_items = len(original_items)
@@ -2684,7 +2705,6 @@ def revision_boq(boq_id):
                 created_by=f"System (Original by {boq.created_by})"
             )
             db.session.add(original_boq_history)
-            log.info(f"✅ Stored original BOQ data to history for BOQ {boq_id} (version 0)")
 
         # Store the payload directly in BOQDetailsHistory without recalculation
         if data.get("is_revision", False) and "items" in data:
@@ -2723,8 +2743,6 @@ def revision_boq(boq_id):
             else:
                 # This shouldn't happen since we just added version 0, but fallback to next_version
                 edited_version = next_version if next_version > 0 else 1
-
-            log.info(f"📝 Storing edited BOQ to history for BOQ {boq_id} (version {edited_version})")
 
             # Create BOQDetailsHistory entry with the raw payload
             boq_detail_history = BOQDetailsHistory(
@@ -2777,7 +2795,7 @@ def revision_boq(boq_id):
                     master_item_id, _, _ = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description", ""),
-                        item_data.get("work_type", "contract"),
+                        item_data.get("work_type", default_work_type),
                         [],  # Don't add materials here, will add per sub-item
                         [],  # Don't add labour here, will add per sub-item
                         created_by,
@@ -2845,8 +2863,6 @@ def revision_boq(boq_id):
                                 is_checked=is_checked
                             )
                             db.session.add(boq_prelim)
-                    log.info(f"✅ Updated preliminary selections in boq_preliminaries for BOQ {boq_id} during revision")
-
             # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
             terms_conditions = data.get("terms_conditions", [])
             if terms_conditions and isinstance(terms_conditions, list):
@@ -2867,8 +2883,6 @@ def revision_boq(boq_id):
                     'boq_id': boq_id,
                     'term_ids': selected_term_ids
                 })
-                log.info(f"✅ Updated {len(selected_term_ids)} terms selections in boq_terms_selections for BOQ {boq_id} during revision")
-
         # If items are provided, update the JSON structure (for non-revision updates)
         elif "items" in data:
             # Use the same current user logic for BOQ details
@@ -3022,7 +3036,7 @@ def revision_boq(boq_id):
                     item_json = {
                         "item_name": item_data.get("item_name"),
                         "description": item_data.get("description", ""),
-                        "work_type": item_data.get("work_type", "contract"),
+                        "work_type": item_data.get("work_type", default_work_type),
                         "has_sub_items": True,
                         "sub_items": sub_items_list,
                         "quantity": item_quantity,
@@ -3054,7 +3068,7 @@ def revision_boq(boq_id):
                     master_item_id, _, _ = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description", ""),
-                        item_data.get("work_type", "contract"),
+                        item_data.get("work_type", default_work_type),
                         [],  # Don't add materials here, will add per sub-item
                         [],  # Don't add labour here, will add per sub-item
                         created_by,
@@ -3167,7 +3181,7 @@ def revision_boq(boq_id):
                     master_item_id, master_material_ids, master_labour_ids = add_to_master_tables(
                         item_data.get("item_name"),
                         item_data.get("description"),
-                        item_data.get("work_type", "contract"),
+                        item_data.get("work_type", default_work_type),
                         materials_data,
                         labour_data,
                         created_by,
@@ -3271,7 +3285,41 @@ def revision_boq(boq_id):
             # Apply BOQ-level discount to get final total
             final_boq_cost = combined_subtotal - boq_discount_amount if boq_discount_amount > 0 else combined_subtotal
 
-            log.info(f"BOQ {boq.boq_id} revision update totals - Items: {total_boq_cost}, Preliminaries: {preliminary_amount}, Combined: {combined_subtotal}, Discount: {boq_discount_amount} ({boq_discount_percentage}%), Final: {final_boq_cost}")
+            # ── Batch pre-fetch existing MasterItems by name ──────────────────────
+            _boq_item_names = [
+                d.get("item_name") for d in boq_items
+                if d.get("has_sub_items") and d.get("item_name")
+            ]
+            _batch_master_items = {}
+            if _boq_item_names:
+                for _mi in MasterItem.query.filter(MasterItem.item_name.in_(_boq_item_names)).all():
+                    _batch_master_items[_mi.item_name] = _mi
+
+            # ── Batch pre-fetch existing MasterMaterials and MasterLabour by name ─
+            _all_mat_names = [
+                mat.get("material_name")
+                for d in boq_items if d.get("has_sub_items")
+                for si in d.get("sub_items", [])
+                for mat in si.get("materials", [])
+                if mat.get("material_name")
+            ]
+            _batch_master_materials_by_name = {}
+            if _all_mat_names:
+                for _mm in MasterMaterial.query.filter(MasterMaterial.material_name.in_(_all_mat_names)).all():
+                    _batch_master_materials_by_name.setdefault(_mm.material_name, _mm)
+
+            _all_labour_roles = [
+                lab.get("labour_role")
+                for d in boq_items if d.get("has_sub_items")
+                for si in d.get("sub_items", [])
+                for lab in si.get("labour", [])
+                if lab.get("labour_role")
+            ]
+            _batch_master_labour_by_role = {}
+            if _all_labour_roles:
+                for _ml in MasterLabour.query.filter(MasterLabour.labour_role.in_(_all_labour_roles)).all():
+                    _batch_master_labour_by_role.setdefault(_ml.labour_role, _ml)
+            # ─────────────────────────────────────────────────────────────────────
 
             # Store new items, sub-items, and materials to master tables
             for item_data in boq_items:
@@ -3280,7 +3328,7 @@ def revision_boq(boq_id):
                     # NEW FORMAT: Item with sub_items
                     # 1. Store/Update Item in boq_items table
                     item_name = item_data.get("item_name")
-                    existing_item = MasterItem.query.filter_by(item_name=item_name).first()
+                    existing_item = _batch_master_items.get(item_name)  # dict lookup — no DB call
 
                     if not existing_item:
                         new_item = MasterItem(
@@ -3355,10 +3403,8 @@ def revision_boq(boq_id):
                         for material_data in sub_item_data.get("materials", []):
                             material_name = material_data.get("material_name")
 
-                            # Check if material already exists
-                            existing_material = MasterMaterial.query.filter_by(
-                                material_name=material_name
-                            ).first()
+                            # Check if material already exists (use pre-fetched batch)
+                            existing_material = _batch_master_materials_by_name.get(material_name) if material_name else None
 
                             if not existing_material:
                                 new_material = MasterMaterial(
@@ -3392,10 +3438,8 @@ def revision_boq(boq_id):
                         for labour_data_item in sub_item_data.get("labour", []):
                             labour_role = labour_data_item.get("labour_role")
 
-                            # Check if labour already exists
-                            existing_labour = MasterLabour.query.filter_by(
-                                labour_role=labour_role
-                            ).first()
+                            # Check if labour already exists (use pre-fetched batch)
+                            existing_labour = _batch_master_labour_by_role.get(labour_role) if labour_role else None
 
                             if not existing_labour:
                                 new_labour = MasterLabour(
@@ -3839,6 +3883,128 @@ def get_all_item():
         log.error(f"Error fetching item: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+
+def get_all_sub_item_names():
+    """Get all unique sub-item names from the database for autocomplete suggestions"""
+    try:
+        # Query distinct sub_item_names from boq_sub_items table
+        # Only include non-deleted sub-items
+        sub_item_names = db.session.query(
+            MasterSubItem.sub_item_name
+        ).filter(
+            MasterSubItem.is_deleted == False,
+            MasterSubItem.sub_item_name.isnot(None),
+            MasterSubItem.sub_item_name != ''
+        ).distinct().order_by(
+            MasterSubItem.sub_item_name.asc()
+        ).limit(500).all()
+
+        # Extract names from tuples and return as list
+        names_list = [name[0].strip() for name in sub_item_names if name[0] and name[0].strip()]
+
+        return jsonify({
+            "success": True,
+            "sub_item_names": names_list,
+            "count": len(names_list)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error fetching sub-item names: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+def get_sub_item_by_name(sub_item_name):
+    """Get sub-item details including materials and labour by sub-item name"""
+    try:
+        if not sub_item_name:
+            return jsonify({"error": "Sub-item name is required"}), 400
+
+        # Find the sub-item by name (case-insensitive, get most recent one)
+        sub_item = MasterSubItem.query.filter(
+            db.func.lower(MasterSubItem.sub_item_name) == sub_item_name.lower().strip(),
+            MasterSubItem.is_deleted == False
+        ).order_by(MasterSubItem.created_at.desc()).first()
+
+        if not sub_item:
+            return jsonify({
+                "success": False,
+                "message": "Sub-item not found",
+                "sub_item": None
+            }), 404
+
+        # Get materials for this sub-item
+        materials = MasterMaterial.query.filter_by(
+            sub_item_id=sub_item.sub_item_id,
+            is_active=True
+        ).all()
+
+        material_list = []
+        for material in materials:
+            material_list.append({
+                "material_id": material.material_id,
+                "material_name": material.material_name,
+                "description": material.description,
+                "size": material.size,
+                "specification": material.specification,
+                "quantity": material.quantity or 1,
+                "brand": material.brand,
+                "unit": material.default_unit,
+                "unit_price": material.current_market_price,
+                "current_market_price": material.current_market_price,
+                "is_active": material.is_active
+            })
+
+        # Get labour for this sub-item
+        labours = MasterLabour.query.filter_by(
+            sub_item_id=sub_item.sub_item_id,
+            is_active=True
+        ).all()
+
+        labour_list = []
+        for labour in labours:
+            labour_list.append({
+                "labour_id": labour.labour_id,
+                "labour_role": labour.labour_role,
+                "work_type": labour.work_type or "daily_wages",
+                "hours": labour.hours or 8,
+                "rate_per_hour": labour.rate_per_hour or (labour.amount / 8 if labour.amount else 0),
+                "amount": labour.amount,
+                "is_active": labour.is_active
+            })
+
+        # Return sub-item with materials and labour
+        return jsonify({
+            "success": True,
+            "sub_item": {
+                "sub_item_id": sub_item.sub_item_id,
+                "item_id": sub_item.item_id,
+                "sub_item_name": sub_item.sub_item_name,
+                "scope": sub_item.description,
+                "description": sub_item.description,
+                "size": sub_item.size,
+                "location": sub_item.location,
+                "brand": sub_item.brand,
+                "unit": sub_item.unit or "nos",
+                "quantity": sub_item.quantity or 1,
+                "per_unit_cost": sub_item.per_unit_cost or 0,
+                "rate": sub_item.per_unit_cost or 0,
+                "misc_percentage": sub_item.misc_percentage or 10.0,
+                "overhead_profit_percentage": sub_item.overhead_profit_percentage or 25.0,
+                "transport_percentage": sub_item.transport_percentage or 5.0,
+                "materials": material_list,
+                "labour": labour_list
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error fetching sub-item by name: {str(e)}")
+        import traceback
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
 # SEND EMAIL - Send BOQ to Technical Director
 def send_boq_email(boq_id):
     try:
@@ -3891,162 +4057,301 @@ def send_boq_email(boq_id):
         items_summary['items'] = boq_details.boq_details.get('items', [])
 
         # Initialize email service
-        # boq_email_service = BOQEmailService()
+        boq_email_service = BOQEmailService()
 
-        # Get TD email from request or fetch all Technical Directors
-        # Handle GET request with optional JSON body (non-standard but supported)
+        # Get TD email from request - support both JSON body and query params (GET request)
         try:
             data = request.get_json(silent=True) or {}
         except Exception as e:
             log.warning(f"Failed to parse JSON body: {e}")
             data = {}
 
-        td_email = data.get('td_email')
-        td_name = data.get('full_name')
-        comments = data.get('comments')  # Get comments from request
+        # Read from JSON body first, fallback to query params for GET requests
+        td_email = data.get('td_email') or request.args.get('td_email')
+        td_name = data.get('full_name') or request.args.get('full_name')
+        comments = data.get('comments') or request.args.get('comments')
+
+        # If no TD email provided, find TD automatically
+        if not td_email:
+            td_role = Role.query.filter(
+                Role.role.in_(['technicalDirector', 'TechnicalDirector', 'technical_director']),
+                Role.is_deleted == False
+            ).first()
+
+            if td_role:
+                td_user_auto = User.query.filter_by(
+                    role_id=td_role.role_id,
+                    is_active=True,
+                    is_deleted=False
+                ).first()
+
+                if td_user_auto:
+                    td_email = td_user_auto.email
+                    td_name = td_user_auto.full_name
+                else:
+                    return jsonify({
+                        "error": "No Technical Director found",
+                        "message": "No active Technical Director found in system"
+                    }), 404
+            else:
+                return jsonify({
+                    "error": "Technical Director role not found",
+                    "message": "Technical Director role not configured in system"
+                }), 404
 
         if td_email:
-            # Send to specific TD
-            # email_sent = boq_email_service.send_boq_to_technical_director(
-            #     boq_data, project_data, items_summary, td_email
-            # )
+            # Find TD user to check offline/online status
+            td_user = User.query.filter_by(email=td_email, is_deleted=False, is_active=True).first()
 
-            # if email_sent:
-                # Update BOQ status and mark email as sent to TD
-            # This API is ONLY for Internal Revisions - status is always Pending_Revision
-            is_internal_revision = boq.status == "Internal_Revision_Pending" or boq.has_internal_revisions
+            email_sent = False
+            if td_user:
+                # Check TD online/offline status
+                td_status = str(td_user.user_status).lower().strip() if td_user.user_status else "unknown"
 
-            # Internal Revisions sent to TD get status "Pending_Revision"
-            # New BOQ (without internal revisions) get status "Pending"
-            new_status = "Pending_Revision" if is_internal_revision else "Pending"
-            boq.email_sent = True
-            boq.status = new_status
-            boq.last_modified_by = user_name
-            boq.last_modified_at = datetime.utcnow()
+                if td_status == "offline":
+                    # Add project_code to project_data
+                    project_data['project_code'] = project.project_code if hasattr(project, 'project_code') else 'N/A'
 
-            # Check if history entry already exists for this BOQ
-            existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
-
-            # Prepare action data in the new format
-            action_type = "internal_revision_sent" if is_internal_revision else "email_sent"
-            default_comment = "Internal revision sent to TD for review" if is_internal_revision else "BOQ sent for review and approval"
-
-            new_action = {
-                "role": user_role,
-                "type": action_type,
-                "sender": user_role,
-                "receiver": "technicalDirector",
-                "status": new_status.lower(),
-                "comments": comments if comments else default_comment,
-                "timestamp": datetime.utcnow().isoformat(),
-                "decided_by": user_name,
-                "decided_by_user_id": user_id,
-                "recipient_email": td_email,
-                "recipient_name": td_name if td_name else None,
-                "boq_name": boq.boq_name,
-                "project_name": project_data.get("project_name"),
-                "total_cost": items_summary.get("total_cost"),
-                "is_internal_revision": is_internal_revision
-            }
-
-            if existing_history:
-                # Append to existing action array (avoid duplicates)
-                # Handle existing actions - ensure it's always a list
-                if existing_history.action is None:
-                    current_actions = []
-                elif isinstance(existing_history.action, list):
-                    current_actions = existing_history.action
-                elif isinstance(existing_history.action, dict):
-                    current_actions = [existing_history.action]
-                else:
-                    current_actions = []
-
-                # Check if similar action already exists (same type, sender, receiver, timestamp within 1 minute)
-                action_exists = False
-                for existing_action in current_actions:
-                    if (existing_action.get('type') == new_action['type'] and
-                        existing_action.get('sender') == new_action['sender'] and
-                        existing_action.get('receiver') == new_action['receiver']):
-                        # Check if timestamps are within 1 minute (to avoid duplicate on retry)
-                        existing_ts = existing_action.get('timestamp', '')
-                        new_ts = new_action['timestamp']
-                        if existing_ts and new_ts:
-                            try:
-                                existing_dt = datetime.fromisoformat(existing_ts)
-                                new_dt = datetime.fromisoformat(new_ts)
-                                if abs((new_dt - existing_dt).total_seconds()) < 60:
-                                    action_exists = True
-                                    break
-                            except:
-                                pass
-
-                if not action_exists:
-                    current_actions.append(new_action)
-                    existing_history.action = current_actions
-                    # Mark JSONB field as modified for SQLAlchemy
-                    flag_modified(existing_history, "action")
-
-                existing_history.action_by = user_name
-                existing_history.boq_status = "Pending"
-                existing_history.sender = user_name
-                existing_history.receiver = td_name if td_name else td_email
-                existing_history.comments = comments if comments else "BOQ sent for review and approval"
-                existing_history.sender_role = user_role
-                existing_history.receiver_role = 'technicalDirector'
-                existing_history.action_date = datetime.utcnow()
-                existing_history.last_modified_by = user_name
-                existing_history.last_modified_at = datetime.utcnow()
-            else:
-                # Create new history entry with action as array
-                boq_history = BOQHistory(
-                    boq_id=boq_id,
-                    action=[new_action],  # Store as array
-                    action_by=user_name,
-                    boq_status="Pending",
-                    sender=user_name,
-                    receiver=td_name if td_name else td_email,
-                    comments=comments if comments else "BOQ sent for review and approval",
-                    sender_role=user_role,
-                    receiver_role='technicalDirector',
-                    action_date=datetime.utcnow(),
-                    created_by=user_name
-                )
-                db.session.add(boq_history)
-
-            db.session.commit()
-
-            # Send notification to TD
-            try:
-                from utils.comprehensive_notification_service import notification_service
-                from models.user import User as UserModel
-                # Find TD user by email
-                td_user = UserModel.query.filter_by(email=td_email).first()
-                if td_user:
-                    log.info(f"[send_boq_email] Sending notification to TD {td_user.user_id}")
-                    notification_service.notify_boq_sent_to_td(
-                        boq_id=boq_id,
-                        project_name=project.project_name,
-                        estimator_id=user_id,
+                    # Send BOQ to TD (BLUE header, submission email)
+                    email_sent = boq_email_service.send_boq_approval_to_pm(
+                        boq_data=boq_data,
+                        project_data=project_data,
+                        items_summary=items_summary,
+                        pm_email=td_email,
+                        comments=comments,
                         estimator_name=user_name,
-                        td_user_id=td_user.user_id
+                        pm_name=td_name if td_name else td_user.full_name
                     )
-                    log.info(f"[send_boq_email] Notification sent successfully")
-            except Exception as notif_err:
-                log.error(f"[send_boq_email] Failed to send notification: {notif_err}")
 
-            return jsonify({
-                "success": True,
-                "message": "BOQ review email sent successfully to Technical Director",
-                "boq_id": boq_id,
-                "recipient": td_email
-            }), 200
-            # else:
-            #     return jsonify({
-            #         "success": False,
-            #         "message": "Failed to send BOQ review email",
-            #         "boq_id": boq_id,
-            #         "error": "Email service failed"
-            #     }), 500
+                    if email_sent:
+                        log.info(f"📧 ✅ Email sent successfully to TD: {td_email}")
+                    else:
+                        log.error(f"📧 ❌ Failed to send email to TD: {td_email}")
+                else:
+                    email_sent = True  # Proceed without email (in-app notification)
+            else:
+                email_sent = True  # Proceed without email
+
+            if email_sent:
+                is_internal_revision = (
+                    (boq.internal_revision_number and boq.internal_revision_number > 0 and (boq.revision_number == 0 or boq.revision_number is None)) or
+                    (boq.has_internal_revisions and (boq.revision_number == 0 or boq.revision_number is None)) or
+                    boq.status == "Internal_Revision_Pending"
+                )
+
+                # This takes precedence over internal revisions
+                is_client_revision = (
+                    boq.revision_number and
+                    boq.revision_number > 0
+                )
+                # - New BOQ → "Pending"
+                if is_internal_revision:
+                    new_status = "Pending_Revision"
+                elif is_client_revision:
+                    new_status = "client_pending_revision"
+                else:
+                    new_status = "Pending"
+                boq.email_sent = True
+                boq.status = new_status
+                boq.last_modified_by = user_name
+                boq.last_modified_at = datetime.utcnow()
+
+                # Check if history entry already exists for this BOQ
+                existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+
+                # Prepare action data in the new format
+                action_type = "internal_revision_sent" if is_internal_revision else "email_sent"
+                default_comment = "Internal revision sent to TD for review" if is_internal_revision else "BOQ sent for review and approval"
+
+                new_action = {
+                    "role": user_role,
+                    "type": action_type,
+                    "sender": user_role,
+                    "receiver": "technicalDirector",
+                    "status": new_status.lower(),
+                    "comments": comments if comments else default_comment,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "decided_by": user_name,
+                    "decided_by_user_id": user_id,
+                    "recipient_email": td_email,
+                    "recipient_name": td_name if td_name else None,
+                    "boq_name": boq.boq_name,
+                    "project_name": project_data.get("project_name"),
+                    "total_cost": items_summary.get("total_cost"),
+                    "is_internal_revision": is_internal_revision
+                }
+
+                if existing_history:
+                    # Append to existing action array (avoid duplicates)
+                    # Handle existing actions - ensure it's always a list
+                    if existing_history.action is None:
+                        current_actions = []
+                    elif isinstance(existing_history.action, list):
+                        current_actions = existing_history.action
+                    elif isinstance(existing_history.action, dict):
+                        current_actions = [existing_history.action]
+                    else:
+                        current_actions = []
+
+                    # Check if similar action already exists (same type, sender, receiver, timestamp within 1 minute)
+                    action_exists = False
+                    for existing_action in current_actions:
+                        if (existing_action.get('type') == new_action['type'] and
+                            existing_action.get('sender') == new_action['sender'] and
+                            existing_action.get('receiver') == new_action['receiver']):
+                            # Check if timestamps are within 1 minute (to avoid duplicate on retry)
+                            existing_ts = existing_action.get('timestamp', '')
+                            new_ts = new_action['timestamp']
+                            if existing_ts and new_ts:
+                                try:
+                                    existing_dt = datetime.fromisoformat(existing_ts)
+                                    new_dt = datetime.fromisoformat(new_ts)
+                                    if abs((new_dt - existing_dt).total_seconds()) < 60:
+                                        action_exists = True
+                                        break
+                                except:
+                                    pass
+
+                    if not action_exists:
+                        current_actions.append(new_action)
+                        existing_history.action = current_actions
+                        # Mark JSONB field as modified for SQLAlchemy
+                        flag_modified(existing_history, "action")
+
+                    existing_history.action_by = user_name
+                    existing_history.boq_status = "Pending"
+                    existing_history.sender = user_name
+                    existing_history.receiver = td_name if td_name else td_email
+                    existing_history.comments = comments if comments else "BOQ sent for review and approval"
+                    existing_history.sender_role = user_role
+                    existing_history.receiver_role = 'technicalDirector'
+                    existing_history.action_date = datetime.utcnow()
+                    existing_history.last_modified_by = user_name
+                    existing_history.last_modified_at = datetime.utcnow()
+                else:
+                    # Create new history entry with action as array
+                    boq_history = BOQHistory(
+                        boq_id=boq_id,
+                        action=[new_action],  # Store as array
+                        action_by=user_name,
+                        boq_status="Pending",
+                        sender=user_name,
+                        receiver=td_name if td_name else td_email,
+                        comments=comments if comments else "BOQ sent for review and approval",
+                        sender_role=user_role,
+                        receiver_role='technicalDirector',
+                        action_date=datetime.utcnow(),
+                        created_by=user_name
+                    )
+                    db.session.add(boq_history)
+
+                db.session.commit()
+
+                # Send notification to TD
+                try:
+                    from utils.comprehensive_notification_service import notification_service
+                    from utils.notification_utils import NotificationManager
+                    from socketio_server import send_notification_to_user, send_notification_to_role
+                    from models.user import User as UserModel
+                    # Find TD user by email
+                    td_user = UserModel.query.filter_by(email=td_email).first()
+                    if td_user:
+                        log.info(f"[send_boq_email] Sending notification to TD {td_user.user_id}")
+                        try:
+                            # Send appropriate notification based on revision type
+                            if is_internal_revision:
+                                notification_service.notify_internal_revision_created(
+                                    boq_id=boq_id,
+                                    project_name=project.project_name,
+                                    revision_number=boq.internal_revision_number or 1,
+                                    actor_id=user_id,
+                                    actor_name=user_name,
+                                    actor_role=user_role
+                                )
+                            elif is_client_revision:
+                                # Send client revision notification
+                                notification_service.notify_client_revision_created(
+                                    boq_id=boq_id,
+                                    project_name=project.project_name,
+                                    revision_number=boq.revision_number,
+                                    actor_id=user_id,
+                                    actor_name=user_name,
+                                    actor_role=user_role
+                                )
+                            else:
+                                # Send regular BOQ notification
+                                notification_service.notify_boq_sent_to_td(
+                                    boq_id=boq_id,
+                                    project_name=project.project_name,
+                                    estimator_id=user_id,
+                                    estimator_name=user_name,
+                                    td_user_id=td_user.user_id
+                                )
+                        except Exception as svc_err:
+                            log.error(f"[send_boq_email] Service notification failed: {svc_err}")
+                            log.error(f"[DEBUG] FALLBACK NOTIFICATION BEING USED - Service failed, is_internal_revision={is_internal_revision}")
+                            # Fallback: create notification directly
+                            try:
+                                from utils.role_route_mapper import get_td_approval_url
+
+                                # Use appropriate title and message based on revision type
+                                if is_internal_revision:
+                                    title = 'Internal Revision BOQ for Approval'
+                                    message = f'Internal Revision BOQ for {project.project_name} (Revision #{boq.internal_revision_number or 1}) requires your review. Submitted by {user_name}'
+                                    action_url = get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='internal')
+                                    action_label = 'Review Revision'
+                                    metadata = {'boq_id': boq_id, 'internal_revision_number': boq.internal_revision_number, 'target_role': 'technical_director'}
+                                elif is_client_revision:
+                                    title = 'Client Revision BOQ for Approval'
+                                    message = f'Client Revision BOQ for {project.project_name} (Revision R{boq.revision_number}) requires your review. Submitted by {user_name}'
+                                    action_url = get_td_approval_url(td_user.user_id, boq_id, tab='revisions', subtab='client')
+                                    action_label = 'Review Revision'
+                                    metadata = {'boq_id': boq_id, 'client_revision_number': boq.revision_number, 'target_role': 'technical_director'}
+                                else:
+                                    title = 'New BOQ for Approval'
+                                    message = f'BOQ for {project.project_name} requires your approval. Submitted by {user_name}'
+                                    action_url = get_td_approval_url(td_user.user_id, boq_id, tab='pending')
+                                    action_label = 'Review BOQ'
+                                    metadata = {'boq_id': boq_id}
+
+                                fallback_notif = NotificationManager.create_notification(
+                                    user_id=td_user.user_id,
+                                    type='approval',
+                                    title=title,
+                                    message=message,
+                                    priority='urgent',
+                                    category='boq',
+                                    action_required=True,
+                                    action_url=action_url,
+                                    action_label=action_label,
+                                    metadata=metadata,
+                                    sender_id=user_id,
+                                    sender_name=user_name,
+                                    target_role='technical_director'
+                                )
+                                send_notification_to_user(td_user.user_id, fallback_notif.to_dict())
+                                send_notification_to_role('technicalDirector', fallback_notif.to_dict())
+                                notification_type = 'Internal Revision' if is_internal_revision else ('Client Revision' if is_client_revision else 'New BOQ')
+                            except Exception as fallback_err:
+                                log.error(f"[send_boq_email] Fallback notification also failed: {fallback_err}")
+                    else:
+                        log.warning(f"[send_boq_email] TD user not found by email: {td_email}")
+                except Exception as notif_err:
+                    log.error(f"[send_boq_email] Failed to send notification: {notif_err}")
+
+                return jsonify({
+                    "success": True,
+                    "message": "BOQ review email sent successfully to Technical Director",
+                    "boq_id": boq_id,
+                    "recipient": td_email
+                }), 200
+                # else:
+                #     return jsonify({
+                #         "success": False,
+                #         "message": "Failed to send BOQ review email",
+                #         "boq_id": boq_id,
+                #         "error": "Email service failed"
+                #     }), 500
         else:
             # Send to ALL Technical Directors (support multiple TDs)
             td_role = Role.query.filter_by(role='technicalDirector').first()
@@ -4079,19 +4384,26 @@ def send_boq_email(boq_id):
                     "message": f"Technical Director {technical_director.full_name} does not have an email address"
                 }), 400
 
-            # Send email to the Technical Director
-            # email_sent = boq_email_service.send_boq_to_technical_director(
-            #     boq_data, project_data, items_summary, technical_director.email
-            # )
+           
+            is_internal_revision = (
+                (boq.internal_revision_number and boq.internal_revision_number > 0 and (boq.revision_number == 0 or boq.revision_number is None)) or
+                (boq.has_internal_revisions and (boq.revision_number == 0 or boq.revision_number is None)) or
+                boq.status == "Internal_Revision_Pending"
+            )
 
-            # if email_sent:
-                # Update BOQ status and mark email as sent to TD
-            # This API is ONLY for Internal Revisions - status is always Pending_Revision
-            is_internal_revision = boq.status == "Internal_Revision_Pending" or boq.has_internal_revisions
-
-            # Internal Revisions sent to TD get status "Pending_Revision"
-            # New BOQ (without internal revisions) get status "Pending"
-            new_status = "Pending_Revision" if is_internal_revision else "Pending"
+            # Client revision: has revision_number > 0 (has been sent to client at least once)
+            # This takes precedence over internal revisions
+            is_client_revision = (
+                boq.revision_number and
+                boq.revision_number > 0
+            )
+            # - New BOQ → "Pending"
+            if is_internal_revision:
+                new_status = "Pending_Revision"
+            elif is_client_revision:
+                new_status = "client_pending_revision"
+            else:
+                new_status = "Pending"
 
             boq.email_sent = True
             boq.status = new_status
@@ -4192,19 +4504,85 @@ def send_boq_email(boq_id):
             # Send notification to ALL TDs
             try:
                 from utils.comprehensive_notification_service import notification_service
-                log.info(f"[send_boq_email] Sending notification to {len(technical_directors)} Technical Director(s)")
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user, send_notification_to_role
                 for td in technical_directors:
                     try:
-                        notification_service.notify_boq_sent_to_td(
-                            boq_id=boq_id,
-                            project_name=project.project_name,
-                            estimator_id=user_id,
-                            estimator_name=user_name,
-                            td_user_id=td.user_id
-                        )
-                        log.info(f"[send_boq_email] Notification sent successfully to TD {td.user_id} ({td.full_name})")
+                        # Send appropriate notification based on revision type
+                        if is_internal_revision:
+                            notification_service.notify_internal_revision_created(
+                                boq_id=boq_id,
+                                project_name=project.project_name,
+                                revision_number=boq.internal_revision_number or 1,
+                                actor_id=user_id,
+                                actor_name=user_name,
+                                actor_role=user_role
+                            )
+                        elif is_client_revision:
+                            # Send client revision notification
+                            notification_service.notify_client_revision_created(
+                                boq_id=boq_id,
+                                project_name=project.project_name,
+                                revision_number=boq.revision_number,
+                                actor_id=user_id,
+                                actor_name=user_name,
+                                actor_role=user_role
+                            )
+                        else:
+                            notification_service.notify_boq_sent_to_td(
+                                boq_id=boq_id,
+                                project_name=project.project_name,
+                                estimator_id=user_id,
+                                estimator_name=user_name,
+                                td_user_id=td.user_id
+                            )
                     except Exception as td_notif_err:
                         log.error(f"[send_boq_email] Failed to send notification to TD {td.user_id}: {td_notif_err}")
+                        log.error(f"[DEBUG] FALLBACK NOTIFICATION BEING USED (multiple TDs) - Service failed, is_internal_revision={is_internal_revision}, is_client_revision={is_client_revision}")
+                        # Fallback: create notification directly in DB
+                        try:
+                            from utils.role_route_mapper import get_td_approval_url
+
+                            # Use appropriate title and message based on revision type
+                            if is_internal_revision:
+                                title = 'Internal Revision BOQ for Approval'
+                                message = f'Internal Revision BOQ for {project.project_name} (Revision #{boq.internal_revision_number or 1}) requires your review. Submitted by {user_name}'
+                                action_url = get_td_approval_url(td.user_id, boq_id, tab='revisions', subtab='internal')
+                                action_label = 'Review Revision'
+                                metadata = {'boq_id': boq_id, 'internal_revision_number': boq.internal_revision_number, 'target_role': 'technical_director'}
+                            elif is_client_revision:
+                                title = 'Client Revision BOQ for Approval'
+                                message = f'Client Revision BOQ for {project.project_name} (Revision R{boq.revision_number}) requires your review. Submitted by {user_name}'
+                                action_url = get_td_approval_url(td.user_id, boq_id, tab='revisions', subtab='client')
+                                action_label = 'Review Revision'
+                                metadata = {'boq_id': boq_id, 'client_revision_number': boq.revision_number, 'target_role': 'technical_director'}
+                            else:
+                                title = 'New BOQ for Approval'
+                                message = f'BOQ for {project.project_name} requires your approval. Submitted by {user_name}'
+                                action_url = get_td_approval_url(td.user_id, boq_id, tab='pending')
+                                action_label = 'Review BOQ'
+                                metadata = {'boq_id': boq_id}
+
+                            fallback_notif = NotificationManager.create_notification(
+                                user_id=td.user_id,
+                                type='approval',
+                                title=title,
+                                message=message,
+                                priority='urgent',
+                                category='boq',
+                                action_required=True,
+                                action_url=action_url,
+                                action_label=action_label,
+                                metadata=metadata,
+                                sender_id=user_id,
+                                sender_name=user_name,
+                                target_role='technical_director'
+                            )
+                            send_notification_to_user(td.user_id, fallback_notif.to_dict())
+                            send_notification_to_role('technicalDirector', fallback_notif.to_dict())
+                            notification_type = 'Internal Revision' if is_internal_revision else ('Client Revision' if is_client_revision else 'New BOQ')
+                        except Exception as fallback_err:
+                            log.error(f"[send_boq_email] Fallback notification also failed for TD {td.user_id}: {fallback_err}")
             except Exception as notif_err:
                 log.error(f"[send_boq_email] Failed to send notifications to TDs: {notif_err}")
 
@@ -4350,10 +4728,6 @@ def get_estimator_dashboard():
         )
 
         total_boqs = sum(status_counts.values())
-
-        # Debug: Log all status counts for troubleshooting
-        log.info(f"[EstimatorDashboard] Status counts: {status_counts}")
-        log.info(f"[EstimatorDashboard] Calculated: pending={pending_boqs}, approved={approved_boqs_count}, rejected={rejected_boqs}, sent={sent_for_confirmation_boqs}, draft={draft_boqs}")
 
         # OPTIMIZATION 2: Calculate average approval time using SQL
         if is_admin:
@@ -4614,19 +4988,20 @@ def get_estimator_tab_counts():
 
         pending_count = pending_query.scalar() or 0
 
-        # Send BOQ tab: Pending, Pending_PM_Approval (BOQs sent for review, waiting for approval)
+        # Send BOQ tab: Pending, Pending_PM_Approval, Pending_TD_Approval (BOQs sent for review, waiting for approval)
         # All keys are now lowercase after normalization
         sent_count = (
             counts_dict.get('pending', 0) +
-            counts_dict.get('pending_pm_approval', 0)
+            counts_dict.get('pending_pm_approval', 0) +
+            counts_dict.get('pending_td_approval', 0)
         )
 
-        # Approved tab: PM approved, Pending TD approval, TD approved, and subsequent statuses
+        # Approved tab: PM approved, TD approved, and subsequent statuses (excluding pending_td_approval which is in Send BOQ tab)
         approved_count = (
             counts_dict.get('pm_approved', 0) +
-            counts_dict.get('pending_td_approval', 0) +
             counts_dict.get('approved', 0) +
             counts_dict.get('revision_approved', 0) +
+            counts_dict.get('internal_revision_approved', 0) +
             counts_dict.get('sent_for_confirmation', 0) +
             counts_dict.get('client_confirmed', 0) +
             counts_dict.get('items_assigned', 0)
@@ -4634,8 +5009,13 @@ def get_estimator_tab_counts():
 
         # Rejected tab: TD rejected, PM rejected, client rejected, internal revision pending
         # Note: 'rejected' status = TD rejected in the workflow
+        # Must match frontend filtering logic in EstimatorHub.tsx line 1252
         rejected_count = (
-            counts_dict.get('rejected', 0)
+            counts_dict.get('rejected', 0) +
+            counts_dict.get('td_rejected', 0) +
+            counts_dict.get('client_rejected', 0) +
+            counts_dict.get('pm_rejected', 0) +
+            counts_dict.get('internal_revision_pending', 0)
         )
 
         completed_count = counts_dict.get('completed', 0)
@@ -4683,13 +5063,26 @@ def get_sub_item(item_id):
             is_deleted=False
         ).all()
 
+        # Batch pre-fetch all materials and labour for all sub-items in one query each
+        _sub_ids = [s.sub_item_id for s in boq_sub_items]
+        _batch_materials_by_sub = {}
+        _batch_labour_by_sub = {}
+        if _sub_ids:
+            for _m in MasterMaterial.query.filter(
+                MasterMaterial.sub_item_id.in_(_sub_ids),
+                MasterMaterial.is_active == True
+            ).all():
+                _batch_materials_by_sub.setdefault(_m.sub_item_id, []).append(_m)
+            for _l in MasterLabour.query.filter(
+                MasterLabour.sub_item_id.in_(_sub_ids),
+                MasterLabour.is_active == True
+            ).all():
+                _batch_labour_by_sub.setdefault(_l.sub_item_id, []).append(_l)
+
         sub_item_details = []
         for sub_item in boq_sub_items:
-            # Get materials for this sub-item
-            materials = MasterMaterial.query.filter_by(
-                sub_item_id=sub_item.sub_item_id,
-                is_active=True
-            ).all()
+            # Use pre-fetched materials (no DB call)
+            materials = _batch_materials_by_sub.get(sub_item.sub_item_id, [])
 
             material_list = []
             for material in materials:
@@ -4707,11 +5100,8 @@ def get_sub_item(item_id):
                     "is_active": material.is_active
                 })
 
-            # Get labour for this sub-item
-            labours = MasterLabour.query.filter_by(
-                sub_item_id=sub_item.sub_item_id,
-                is_active=True
-            ).all()
+            # Get labour for this sub-item (use pre-fetched batch)
+            labours = _batch_labour_by_sub.get(sub_item.sub_item_id, [])
 
             labour_list = []
             for labour in labours:
@@ -4784,14 +5174,23 @@ def get_sub_item(item_id):
             MaterialPurchaseTracking.is_from_change_request == True
         ).all()
 
+        # Batch pre-fetch CR materials (only those not already in all_materials_dict)
+        _cr_mat_ids = [
+            cm.master_material_id for cm in cr_materials
+            if cm.master_material_id and cm.master_material_id not in all_materials_dict
+        ]
+        _batch_cr_materials = {}
+        if _cr_mat_ids:
+            for _mm in MasterMaterial.query.filter(
+                MasterMaterial.material_id.in_(_cr_mat_ids),
+                MasterMaterial.is_active == True
+            ).all():
+                _batch_cr_materials[_mm.material_id] = _mm
+
         for cr_mat in cr_materials:
             mat_id = cr_mat.master_material_id
             if mat_id and mat_id not in all_materials_dict:
-                # Fetch the full material details from boq_material
-                master_material = MasterMaterial.query.filter_by(
-                    material_id=mat_id,
-                    is_active=True
-                ).first()
+                master_material = _batch_cr_materials.get(mat_id)  # dict lookup — no DB call
 
                 if master_material:
                     all_materials_dict[mat_id] = {
@@ -4850,7 +5249,6 @@ def get_custom_units():
                 "created_by": unit.created_by
             })
 
-        log.info(f"Retrieved {len(units_data)} custom units")
         return jsonify({
             "message": "Custom units retrieved successfully",
             "custom_units": units_data
@@ -4901,8 +5299,6 @@ def create_custom_unit():
 
         db.session.add(new_unit)
         db.session.commit()
-
-        log.info(f"Created custom unit: {unit_label} ({unit_value}) by {current_user.get('email')}")
 
         return jsonify({
             "message": "Custom unit created successfully",
@@ -4966,10 +5362,17 @@ def get_pending_boq():
                 Project.project_id.label('proj_id'),
                 Project.project_name,
                 Project.project_code,
+                Project.work_type,
                 Project.client,
                 Project.location,
                 Project.floor_name,
                 Project.working_hours,
+                Project.area,
+                Project.description,
+                Project.start_date,
+                Project.duration_days,
+                Project.end_date,
+                Project.status.label('project_status'),
                 Project.user_id,
                 User.full_name.label('last_pm_name')
             )
@@ -5022,10 +5425,19 @@ def get_pending_boq():
                 "project_id": row.project_id if row.project_id else row.proj_id,
                 "project_name": row.project_name,
                 "project_code": row.project_code,
+                "work_type": row.work_type,
                 "client": row.client,
                 "location": row.location,
                 "floor": row.floor_name,
+                "floor_name": row.floor_name,
                 "hours": row.working_hours,
+                "working_hours": row.working_hours,
+                "area": row.area,
+                "description": row.description,
+                "start_date": row.start_date.isoformat() if row.start_date else None,
+                "duration_days": row.duration_days,
+                "end_date": row.end_date.isoformat() if row.end_date else None,
+                "project_status": row.project_status,
                 "status": row.status if row.status else "No BOQ",
                 "client_status": row.client_status,
                 "revision_number": row.revision_number or 0,
@@ -5110,7 +5522,7 @@ def get_approved_boq():
             .filter(
                 BOQ.is_deleted == False,
                 Project.is_deleted == False,
-                BOQ.status.in_(['approved', 'Approved', 'items_assigned', 'Sent_for_Confirmation', 'Client_Confirmed','PM_Approved','Revision_Approved'])
+                BOQ.status.in_(['approved', 'Approved', 'items_assigned', 'Sent_for_Confirmation', 'Client_Confirmed','PM_Approved','Revision_Approved','Internal_Revision_Approved'])
             )
         )
 
@@ -5243,7 +5655,7 @@ def get_rejected_boq():
             .outerjoin(User, BOQ.last_pm_user_id == User.user_id)
             .filter(BOQ.is_deleted == False)
             .filter(Project.is_deleted == False)
-            .filter(BOQ.status.in_(['rejected', 'Rejected', 'PM_Rejected']))
+            .filter(BOQ.status.in_(['rejected', 'Rejected', 'PM_Rejected', 'TD_Rejected', 'Client_Rejected', 'Internal_Revision_Pending']))
             .order_by(BOQ.created_at.desc())
         )
 
@@ -5872,3 +6284,192 @@ def get_revisions_boq():
             'error': 'Failed to retrieve revision BOQs',
             'details': str(e)
         }), 500
+
+
+def search_all_materials():
+    """Search all materials across all BOQs for autocomplete suggestions.
+    Returns distinct material names with their latest details (brand, size, unit, price).
+    Query params: q (search term), limit (max results, default 20)
+    """
+    try:
+        search_term = request.args.get('q', '').strip()
+        try:
+            limit = min(int(request.args.get('limit', 20)), 50)
+        except (ValueError, TypeError):
+            limit = 20
+
+        if len(search_term) < 1:
+            return jsonify({"success": True, "materials": []}), 200
+
+        # Subquery to get the latest material_id for each unique material_name
+        latest_material = db.session.query(
+            func.max(MasterMaterial.material_id).label('max_id')
+        ).filter(
+            MasterMaterial.is_active == True,
+            MasterMaterial.material_name.ilike(f'%{search_term}%')
+        ).group_by(
+            func.lower(func.trim(MasterMaterial.material_name))
+        ).subquery()
+
+        materials = db.session.query(MasterMaterial).filter(
+            MasterMaterial.material_id.in_(
+                db.session.query(latest_material.c.max_id)
+            )
+        ).order_by(
+            # Prioritize exact prefix matches
+            db.case(
+                (MasterMaterial.material_name.ilike(f'{search_term}%'), 0),
+                else_=1
+            ),
+            MasterMaterial.material_name
+        ).limit(limit).all()
+
+        results = []
+        for mat in materials:
+            results.append({
+                "material_id": mat.material_id,
+                "material_name": mat.material_name,
+                "brand": mat.brand or '',
+                "size": mat.size or '',
+                "specification": mat.specification or '',
+                "description": mat.description or '',
+                "default_unit": mat.default_unit,
+                "current_market_price": mat.current_market_price or 0
+            })
+
+        return jsonify({"success": True, "materials": results}), 200
+
+    except Exception as e:
+        log.error(f"[search_all_materials] Error: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to search materials"}), 500
+
+
+def get_all_master_materials():
+    """Get all distinct master materials for dropdown/autocomplete (no search required).
+    Returns up to 500 distinct materials with their latest details.
+    """
+    try:
+        latest_material = db.session.query(
+            func.max(MasterMaterial.material_id).label('max_id')
+        ).filter(
+            MasterMaterial.is_active == True
+        ).group_by(
+            func.lower(func.trim(MasterMaterial.material_name))
+        ).subquery()
+
+        materials = db.session.query(MasterMaterial).filter(
+            MasterMaterial.material_id.in_(
+                db.session.query(latest_material.c.max_id)
+            )
+        ).order_by(MasterMaterial.material_name).limit(500).all()
+
+        results = []
+        for mat in materials:
+            results.append({
+                "material_id": mat.material_id,
+                "material_name": mat.material_name,
+                "brand": mat.brand or '',
+                "size": mat.size or '',
+                "specification": mat.specification or '',
+                "description": mat.description or '',
+                "default_unit": mat.default_unit,
+                "current_market_price": mat.current_market_price or 0
+            })
+
+        return jsonify({"success": True, "materials": results}), 200
+
+    except Exception as e:
+        log.error(f"[get_all_master_materials] Error: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to fetch materials"}), 500
+
+
+def get_all_master_sub_items():
+    """Get all distinct master sub-items for dropdown/autocomplete (no search required).
+    Returns up to 500 distinct sub-items with their latest details.
+    """
+    try:
+        latest_sub_item = db.session.query(
+            func.max(MasterSubItem.sub_item_id).label('max_id')
+        ).filter(
+            MasterSubItem.is_deleted == False,
+            MasterSubItem.sub_item_name.isnot(None),
+            MasterSubItem.sub_item_name != ''
+        ).group_by(
+            func.lower(func.trim(MasterSubItem.sub_item_name))
+        ).subquery()
+
+        sub_items = db.session.query(MasterSubItem).filter(
+            MasterSubItem.sub_item_id.in_(
+                db.session.query(latest_sub_item.c.max_id)
+            )
+        ).order_by(MasterSubItem.sub_item_name).limit(500).all()
+
+        results = []
+        for si in sub_items:
+            results.append({
+                "sub_item_id": si.sub_item_id,
+                "sub_item_name": si.sub_item_name,
+                "description": si.description or '',
+                "size": si.size or '',
+                "brand": si.brand or '',
+                "unit": si.unit or '',
+            })
+
+        return jsonify({"success": True, "sub_items": results}), 200
+
+    except Exception as e:
+        log.error(f"[get_all_master_sub_items] Error: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to fetch sub-items"}), 500
+
+
+def search_all_labours():
+    """Search all labours across all BOQs for autocomplete suggestions.
+    Returns distinct labour roles with their latest details (work_type, hours, rate).
+    Query params: q (search term), limit (max results, default 20)
+    """
+    try:
+        search_term = request.args.get('q', '').strip()
+        try:
+            limit = min(int(request.args.get('limit', 20)), 50)
+        except (ValueError, TypeError):
+            limit = 20
+
+        if len(search_term) < 1:
+            return jsonify({"success": True, "labours": []}), 200
+
+        # Subquery to get the latest labour_id for each unique labour_role
+        latest_labour = db.session.query(
+            func.max(MasterLabour.labour_id).label('max_id')
+        ).filter(
+            MasterLabour.is_active == True,
+            MasterLabour.labour_role.ilike(f'%{search_term}%')
+        ).group_by(
+            func.lower(func.trim(MasterLabour.labour_role))
+        ).subquery()
+
+        labours = db.session.query(MasterLabour).filter(
+            MasterLabour.labour_id.in_(
+                db.session.query(latest_labour.c.max_id)
+            )
+        ).order_by(
+            db.case(
+                (MasterLabour.labour_role.ilike(f'{search_term}%'), 0),
+                else_=1
+            ),
+            MasterLabour.labour_role
+        ).limit(limit).all()
+
+        results = [{
+            "labour_id": lab.labour_id,
+            "labour_role": lab.labour_role,
+            "work_type": lab.work_type or 'daily_wages',
+            "hours": lab.hours or 0,
+            "rate_per_hour": lab.rate_per_hour or 0,
+            "amount": lab.amount or 0
+        } for lab in labours]
+
+        return jsonify({"success": True, "labours": results}), 200
+
+    except Exception as e:
+        log.error(f"[search_all_labours] Error: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to search labours"}), 500

@@ -33,9 +33,14 @@ const PayrollProcessing: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
 
-  // Collapse state for projects and workers
+  // Collapse state for projects, requisitions, and workers
   const [expandedProjects, setExpandedProjects] = useState<Set<number>>(new Set());
+  const [expandedRequisitions, setExpandedRequisitions] = useState<Set<string>>(new Set()); // "projectId-requisitionId"
   const [expandedWorkers, setExpandedWorkers] = useState<Set<string>>(new Set()); // "projectId-workerId"
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   // Date range - default to current month
   const today = new Date();
@@ -52,6 +57,20 @@ const PayrollProcessing: React.FC = () => {
         newSet.delete(projectId);
       } else {
         newSet.add(projectId);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle requisition expansion within a project
+  const toggleRequisition = (projectId: number, requisitionId: number | string) => {
+    const key = `${projectId}-${requisitionId}`;
+    setExpandedRequisitions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(key)) {
+        newSet.delete(key);
+      } else {
+        newSet.add(key);
       }
       return newSet;
     });
@@ -85,23 +104,25 @@ const PayrollProcessing: React.FC = () => {
     setLoadingProjects(false);
   };
 
-  // Date validation handlers
+  // Date validation handlers - Allow setting dates freely
   const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newStart = e.target.value;
-    if (newStart > endDate) {
-      showError('Start date cannot be after end date');
-      return;
-    }
     setStartDate(newStart);
+
+    // If new start date is after current end date, also update end date
+    if (newStart > endDate) {
+      setEndDate(newStart);
+    }
   };
 
   const handleEndDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newEnd = e.target.value;
-    if (newEnd < startDate) {
-      showError('End date cannot be before start date');
-      return;
-    }
     setEndDate(newEnd);
+
+    // If new end date is before current start date, also update start date
+    if (newEnd < startDate) {
+      setStartDate(newEnd);
+    }
   };
 
   const fetchData = async () => {
@@ -117,6 +138,17 @@ const PayrollProcessing: React.FC = () => {
       // Auto-expand all projects on load
       if (result.grouped_by_project && result.grouped_by_project.length > 0) {
         setExpandedProjects(new Set(result.grouped_by_project.map(p => p.project_id)));
+
+        // Auto-expand all requisitions on load
+        const allRequisitionKeys: string[] = [];
+        result.grouped_by_project.forEach(project => {
+          if (project.requisitions) {
+            project.requisitions.forEach(req => {
+              allRequisitionKeys.push(`${project.project_id}-${req.requisition_id || 'no_req'}`);
+            });
+          }
+        });
+        setExpandedRequisitions(new Set(allRequisitionKeys));
       }
     } else {
       showError(result.message || 'Failed to fetch payroll summary');
@@ -145,12 +177,54 @@ const PayrollProcessing: React.FC = () => {
   };
 
   // Memoize calculations to prevent recalculation on every render
-  const { totalPayroll, totalWorkers, totalHours, totalDays } = useMemo(() => ({
+  const { totalPayroll, totalWorkers, totalHours } = useMemo(() => ({
     totalPayroll: summary.reduce((sum, s) => sum + s.total_cost, 0),
     totalWorkers: summary.length,
-    totalHours: summary.reduce((sum, s) => sum + s.total_hours, 0),
-    totalDays: summary.reduce((sum, s) => sum + s.total_days, 0)
+    totalHours: summary.reduce((sum, s) => sum + s.total_hours, 0)
   }), [summary]);
+
+  // Pagination calculations
+  const totalProjects = groupedByProject.length;
+  const totalPages = Math.ceil(totalProjects / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedProjects = groupedByProject.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [startDate, endDate, projectId]);
+
+  // Generate page numbers for pagination
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    const maxVisiblePages = 5;
+
+    if (totalPages <= maxVisiblePages) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        for (let i = 1; i <= 4; i++) pages.push(i);
+        pages.push('...');
+        pages.push(totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        pages.push(1);
+        pages.push('...');
+        for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i);
+      } else {
+        pages.push(1);
+        pages.push('...');
+        pages.push(currentPage - 1);
+        pages.push(currentPage);
+        pages.push(currentPage + 1);
+        pages.push('...');
+        pages.push(totalPages);
+      }
+    }
+    return pages;
+  };
 
   // Export to PDF
   const handleExportPDF = async () => {
@@ -230,7 +304,6 @@ const PayrollProcessing: React.FC = () => {
               type="date"
               value={startDate}
               onChange={handleStartDateChange}
-              max={endDate}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
             />
           </div>
@@ -245,7 +318,6 @@ const PayrollProcessing: React.FC = () => {
               type="date"
               value={endDate}
               onChange={handleEndDateChange}
-              min={startDate}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
             />
           </div>
@@ -307,7 +379,7 @@ const PayrollProcessing: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-4">
-            {groupedByProject.map((project) => (
+            {paginatedProjects.map((project) => (
               <div key={project.project_id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
                 {/* Project Header - Collapsible */}
                 <button
@@ -357,35 +429,58 @@ const PayrollProcessing: React.FC = () => {
                       className="overflow-hidden"
                     >
                       {/* Iterate over requisitions */}
-                      {project.requisitions && project.requisitions.map((requisition) => (
-                        <div key={requisition.requisition_id || 'no_req'} className="border-t border-gray-200">
-                          {/* Requisition Header */}
-                          <div className="bg-gradient-to-r from-purple-50 to-blue-50 px-5 py-3 border-b border-purple-200">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="font-semibold text-gray-900">
-                                  <span className="text-purple-600">{requisition.requisition_code}</span>
-                                  <span className="mx-2 text-gray-400">•</span>
-                                  <span>{requisition.work_description}</span>
-                                </p>
-                                <p className="text-sm text-gray-600 mt-1">
-                                  <span className="font-medium">{requisition.skill_required}</span>
-                                  {requisition.site_name && (
-                                    <>
-                                      <span className="mx-2">•</span>
-                                      <span>{requisition.site_name}</span>
-                                    </>
-                                  )}
-                                </p>
-                              </div>
-                              <div className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full border border-purple-200">
-                                <strong>{requisition.workers.length}</strong> / {requisition.workers_count || requisition.workers.length} Workers
-                              </div>
-                            </div>
-                          </div>
+                      {project.requisitions && project.requisitions.map((requisition) => {
+                        const requisitionKey = `${project.project_id}-${requisition.requisition_id || 'no_req'}`;
+                        const isRequisitionExpanded = expandedRequisitions.has(requisitionKey);
 
-                          {/* Workers Table for this Requisition */}
-                          <table className="min-w-full divide-y divide-gray-200">
+                        return (
+                          <div key={requisition.requisition_id || 'no_req'} className="border-t border-gray-200">
+                            {/* Requisition Header - Clickable */}
+                            <button
+                              onClick={() => toggleRequisition(project.project_id, requisition.requisition_id || 'no_req')}
+                              className="w-full bg-gradient-to-r from-purple-50 to-blue-50 px-5 py-3 border-b border-purple-200 hover:from-purple-100 hover:to-blue-100 transition-colors"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  {isRequisitionExpanded ? (
+                                    <ChevronDownIcon className="w-5 h-5 text-purple-600" />
+                                  ) : (
+                                    <ChevronRightIcon className="w-5 h-5 text-purple-600" />
+                                  )}
+                                  <div className="text-left">
+                                    <p className="font-semibold text-gray-900">
+                                      <span className="text-purple-600">{requisition.requisition_code}</span>
+                                      <span className="mx-2 text-gray-400">•</span>
+                                      <span>{requisition.work_description}</span>
+                                    </p>
+                                    <p className="text-sm text-gray-600 mt-1">
+                                      <span className="font-medium">{requisition.skill_required}</span>
+                                      {requisition.site_name && (
+                                        <>
+                                          <span className="mx-2">•</span>
+                                          <span>{requisition.site_name}</span>
+                                        </>
+                                      )}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="text-sm text-gray-600 bg-white px-3 py-1 rounded-full border border-purple-200">
+                                  <strong>{requisition.workers.length}</strong> / {requisition.workers_count || requisition.workers.length} Workers
+                                </div>
+                              </div>
+                            </button>
+
+                            {/* Workers Table - Collapsible */}
+                            <AnimatePresence>
+                              {isRequisitionExpanded && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: 'auto', opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="overflow-hidden"
+                                >
+                                  <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
                               <tr>
                                 <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase w-10"></th>
@@ -476,9 +571,41 @@ const PayrollProcessing: React.FC = () => {
                                 );
                               })}
                             </tbody>
+                            <tfoot className="bg-gradient-to-r from-purple-50 to-blue-50">
+                              <tr>
+                                <td colSpan={7} className="px-5 py-3 text-right text-sm font-medium text-gray-700">
+                                  Labour Cost:
+                                </td>
+                                <td className="px-5 py-3 text-right text-sm font-semibold text-gray-900">
+                                  AED {(requisition.total_cost - requisition.transport_fee).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                              {requisition.transport_fee > 0 && (
+                                <tr>
+                                  <td colSpan={7} className="px-5 py-2 text-right text-sm font-medium text-gray-700">
+                                    Transport Fee:
+                                  </td>
+                                  <td className="px-5 py-2 text-right text-sm font-semibold text-blue-600">
+                                    AED {requisition.transport_fee.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              )}
+                              <tr className="border-t-2 border-purple-300">
+                                <td colSpan={7} className="px-5 py-3 text-right text-sm font-bold text-gray-900">
+                                  Requisition Total:
+                                </td>
+                                <td className="px-5 py-3 text-right text-sm font-bold text-purple-700">
+                                  AED {requisition.total_cost.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            </tfoot>
                           </table>
-                        </div>
-                      ))}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -492,7 +619,7 @@ const PayrollProcessing: React.FC = () => {
                   <BanknotesIcon className="w-8 h-8 text-green-600" />
                   <div>
                     <p className="font-semibold text-gray-900">Grand Total</p>
-                    <p className="text-sm text-gray-600">{totalWorkers} workers • {groupedByProject.length} projects</p>
+                    <p className="text-sm text-gray-600">{totalWorkers} workers • {totalProjects} projects</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-8">
@@ -507,6 +634,46 @@ const PayrollProcessing: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Pagination Controls */}
+            {groupedByProject.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <div className="flex items-center justify-between">
+                  {/* Left side: Showing info */}
+                  <span className="text-sm text-gray-600">
+                    Showing {startIndex + 1} - {Math.min(endIndex, totalProjects)} of {totalProjects} projects
+                  </span>
+
+                  {/* Right side: Page navigation - only show if more than 1 page */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-1">
+                      {/* Previous Button */}
+                      <button
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                      >
+                        Previous
+                      </button>
+
+                      {/* Page info */}
+                      <span className="text-sm text-gray-600 px-2">
+                        Page {currentPage} of {totalPages}
+                      </span>
+
+                      {/* Next Button */}
+                      <button
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )
       }

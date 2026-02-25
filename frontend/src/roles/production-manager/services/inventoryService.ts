@@ -35,6 +35,13 @@ export interface InventoryTransaction {
   project_id?: number;
   notes?: string;
   delivery_note_url?: string;  // URL to delivery note/invoice file
+  // Transport/Delivery fields (for vendor deliveries - Production Manager role)
+  driver_name?: string;
+  vehicle_number?: string;
+  transport_fee?: number;
+  per_unit_transport_fee?: number;
+  transport_notes?: string;
+  delivery_batch_ref?: string;  // e.g., "DB-2026-001"
   created_at?: string;
   created_by?: string;
 }
@@ -52,7 +59,7 @@ export interface InternalMaterialRequest {
   request_number?: number;
   project_id: number;
   request_buyer_id: number;
-  material_name: string;
+  item_name: string;
   quantity: number;
   brand?: string;
   size?: string;
@@ -227,6 +234,7 @@ export interface MaterialDeliveryNote {
   vehicle_number?: string;
   driver_name?: string;
   driver_contact?: string;
+  delivery_note_url?: string;
   prepared_by?: string;
   checked_by?: string;
   status?: DeliveryNoteStatus;
@@ -244,6 +252,9 @@ export interface MaterialDeliveryNote {
   dispatched_by?: string;
   items?: DeliveryNoteItem[];
   total_items?: number;
+  // Transport fields
+  transport_fee?: number;
+  delivery_batch_ref?: string;
   project_details?: {
     project_id: number;
     project_name: string;
@@ -269,6 +280,9 @@ export interface CreateDeliveryNoteData {
   driver_contact?: string;
   checked_by?: string;
   notes?: string;
+  // Transport fields
+  transport_fee?: number;
+  delivery_batch_ref?: string;
 }
 
 export interface AddDeliveryNoteItemData {
@@ -598,7 +612,7 @@ class InventoryService {
    * Uploads delivery note to Supabase Storage and creates transaction with file URL
    */
   async createTransactionWithFile(
-    transaction: Omit<InventoryTransaction, 'inventory_transaction_id' | 'delivery_note_url'>,
+    transaction: Omit<InventoryTransaction, 'inventory_transaction_id'>,
     deliveryNoteFile: File | null
   ): Promise<InventoryTransaction> {
     try {
@@ -619,9 +633,32 @@ class InventoryService {
         formData.append('notes', transaction.notes);
       }
 
-      // Add file if provided
+      // Add transport/delivery fields if provided
+      if (transaction.driver_name) {
+        formData.append('driver_name', transaction.driver_name);
+      }
+      if (transaction.vehicle_number) {
+        formData.append('vehicle_number', transaction.vehicle_number);
+      }
+      if (transaction.transport_fee !== undefined && transaction.transport_fee !== null) {
+        formData.append('transport_fee', transaction.transport_fee.toString());
+      }
+      if (transaction.per_unit_transport_fee !== undefined && transaction.per_unit_transport_fee !== null) {
+        formData.append('per_unit_transport_fee', transaction.per_unit_transport_fee.toString());
+      }
+      if (transaction.transport_notes) {
+        formData.append('transport_notes', transaction.transport_notes);
+      }
+      if (transaction.delivery_batch_ref) {
+        formData.append('delivery_batch_ref', transaction.delivery_batch_ref);
+      }
+
+      // Add file if provided, OR use existing URL
       if (deliveryNoteFile) {
         formData.append('delivery_note_file', deliveryNoteFile);
+      } else if (transaction.delivery_note_url) {
+        // Use existing delivery note URL from batch
+        formData.append('delivery_note_url', transaction.delivery_note_url);
       }
 
       // Send to backend - backend will handle Supabase upload
@@ -1387,14 +1424,40 @@ class InventoryService {
   /**
    * Create a new delivery note
    */
-  async createDeliveryNote(data: CreateDeliveryNoteData): Promise<MaterialDeliveryNote> {
+  async createDeliveryNote(data: CreateDeliveryNoteData, file?: File | null): Promise<MaterialDeliveryNote> {
     try {
-      const response = await apiClient.post(
-        `/delivery_notes`,
-        data,
-        { headers: this.getAuthHeader() }
-      );
-      return response.data.delivery_note;
+      // If file is provided, use FormData
+      if (file) {
+        const formData = new FormData();
+        formData.append('delivery_note_file', file);
+
+        // Append all data fields
+        Object.entries(data).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            formData.append(key, String(value));
+          }
+        });
+
+        const response = await apiClient.post(
+          `/delivery_notes`,
+          formData,
+          {
+            headers: {
+              ...this.getAuthHeader(),
+              'Content-Type': 'multipart/form-data'
+            }
+          }
+        );
+        return response.data.delivery_note;
+      } else {
+        // Regular JSON request
+        const response = await apiClient.post(
+          `/delivery_notes`,
+          data,
+          { headers: this.getAuthHeader() }
+        );
+        return response.data.delivery_note;
+      }
     } catch (error) {
       const axiosError = error as AxiosError;
       console.error('Error creating delivery note:', axiosError);

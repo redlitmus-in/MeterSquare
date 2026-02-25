@@ -201,7 +201,7 @@ def get_boq_view_url(user_id: int, boq_id: int, tab: Optional[str] = None) -> st
     )
 
 
-def get_td_approval_url(user_id: int, boq_id: int, tab: Optional[str] = 'pending', subtab: Optional[str] = None) -> str:
+def get_td_approval_url(user_id: int, boq_id: int, tab: Optional[str] = 'pending', subtab: Optional[str] = None, view_extension: bool = False) -> str:
     """Get TD approval URL for a specific user
 
     Args:
@@ -209,12 +209,15 @@ def get_td_approval_url(user_id: int, boq_id: int, tab: Optional[str] = 'pending
         boq_id: BOQ ID to navigate to
         tab: Main tab (pending, revisions, approved, etc.)
         subtab: Sub-tab within revisions (internal, client)
+        view_extension: If True, adds view_extension=true to auto-open day extension modal
     """
     params = {'boq_id': boq_id}
     if tab:
         params['tab'] = tab
     if subtab:
         params['subtab'] = subtab
+    if view_extension:
+        params['view_extension'] = 'true'
 
     return build_notification_action_url(
         user_id=user_id,

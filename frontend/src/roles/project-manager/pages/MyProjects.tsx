@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useSearchParams, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   BuildingOfficeIcon,
@@ -93,7 +94,6 @@ interface Project {
   boq_status?: string;
   boq_details?: BOQDetails;
   created_at?: string;
-  priority?: 'high' | 'medium' | 'low';
   boqItems?: BOQItem[];
   existingPurchaseItems?: BOQItem[];
   newPurchaseItems?: BOQItem[];
@@ -143,11 +143,19 @@ interface Buyer {
 
 const MyProjects: React.FC = () => {
   const { user } = useAuthStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
 
-  // ROLE-AWARE: Determine page title based on user role
+  // ROLE-AWARE: Determine page title based on URL path (for admin viewing different roles) or user role
+  const currentPath = window.location.pathname;
+  const isMEPRoute = currentPath.includes('/mep/');
+
   const userRole = (user as any)?.role || '';
   const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
-  const isMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+  const isUserMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+
+  // Use route to determine page type (allows admin to view MEP projects page)
+  const isMEP = isMEPRoute || isUserMEP;
   const pageTitle = isMEP ? 'My Projects (MEP Manager)' : 'My Projects';
 
   // Modal states - declared first to use in auto-refresh condition
@@ -164,8 +172,12 @@ const MyProjects: React.FC = () => {
   const [selectedItemsInfo, setSelectedItemsInfo] = useState<Array<{ item_code: string; description: string }>>([]);
   const [itemAssignmentRefreshTrigger, setItemAssignmentRefreshTrigger] = useState(0);
 
-  // Tab filter state - must be declared before useProjectsAutoSync
-  const [filterStatus, setFilterStatus] = useState<'for_approval' | 'pending' | 'assigned' | 'completed' | 'approved' | 'rejected'>('for_approval');
+  // Tab filter state - initialize from URL ?tab= param so notification redirects work
+  const validTabs = ['for_approval', 'pending', 'assigned', 'completed', 'approved', 'rejected'] as const;
+  type TabType = typeof validTabs[number];
+  const urlTab = searchParams.get('tab') as TabType | null;
+  const initialTab: TabType = urlTab && validTabs.includes(urlTab) ? urlTab : 'for_approval';
+  const [filterStatus, setFilterStatus] = useState<TabType>(initialTab);
   const [tabCounts, setTabCounts] = useState({
     for_approval: 0,
     pending: 0,
@@ -174,6 +186,30 @@ const MyProjects: React.FC = () => {
     rejected: 0,
     completed: 0
   });
+
+  // Sync tab from URL when navigating via notification clicks.
+  // Uses location.key (changes on every navigation) instead of searchParams
+  // to reliably detect same-page navigations from notifications.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tabParam = params.get('tab') as TabType | null;
+    if (tabParam && validTabs.includes(tabParam)) {
+      setFilterStatus(prev => prev === tabParam ? prev : tabParam);
+    }
+
+    // For notification clicks with project_id/boq_id but no tab,
+    // reset guards so auto-open and auto-tab-detection can re-run
+    if (location.state?.notification) {
+      const hasProjectId = params.has('project_id') || params.has('boq_id');
+      if (hasProjectId) {
+        lastProcessedProjectIdRef.current = null;
+        setAutoTabDetected(false);
+      }
+    }
+  }, [location.key]);
+
+  // Auto-detect correct tab when project_id is in URL (from notification click)
+  const [autoTabDetected, setAutoTabDetected] = useState(false);
 
   // Pause auto-refresh when any modal is open to prevent flickering during editing
   const isAnyModalOpen = showEditBOQModal || showAssignModal || showCreateBOQModal || showItemAssignmentModal;
@@ -185,8 +221,11 @@ const MyProjects: React.FC = () => {
       let response: any;
       let dataList: any[] = [];
 
-      // ROLE-AWARE: Use MEP service for MEP role, PM service for PM role
-      const isMEP = userRole.toLowerCase() === 'mep';
+      // ROLE-AWARE: Use MEP service for MEP route or MEP role, PM service for PM route/role
+      // Check URL path to handle admin viewing MEP routes
+      const currentPath = window.location.pathname;
+      const isMEPRoute = currentPath.includes('/mep/');
+      const isMEP = isMEPRoute || userRole.toLowerCase() === 'mep';
 
       // Call specific API based on active tab
       switch (filterStatus) {
@@ -228,25 +267,13 @@ const MyProjects: React.FC = () => {
 
       dataList = response.data || [];
 
-      // Fetch counts from all tabs in parallel
-      const [forApprovalRes, pendingRes, assignedRes, approvedRes, rejectedRes, completedRes] = await Promise.all([
-        isMEP ? mepService.getMEPApprovalBOQs() : projectManagerService.getPMApprovalBOQs(),
-        isMEP ? mepService.getMEPPendingBOQs() : projectManagerService.getPMPendingBOQs(),
-        isMEP ? mepService.getMEPAssignedProjects() : projectManagerService.getPMAssignedProjects(),
-        isMEP ? mepService.getMEPApprovedBOQs() : projectManagerService.getPMApprovedBOQs(),
-        isMEP ? mepService.getMEPRejectedBOQs() : projectManagerService.getPMRejectedBOQs(),
-        isMEP ? mepService.getMEPCompletedProjects() : projectManagerService.getPMCompletedProjects(),
-      ]);
-
-      // Update tab counts from API responses
-      setTabCounts({
-        for_approval: (forApprovalRes.data || []).length,
-        pending: (pendingRes.data || []).length,
-        assigned: (assignedRes.data || []).length,
-        approved: (approvedRes.data || []).length,
-        rejected: (rejectedRes.data || []).length,
-        completed: (completedRes.data || []).length,
-      });
+      // Update tab count for the current tab only (not all tabs)
+      // The response should contain count information
+      const currentCount = (response.data || []).length;
+      setTabCounts(prevCounts => ({
+        ...prevCounts,
+        [filterStatus]: currentCount
+      }));
 
       // Map ALL projects with unified data structure
       const enrichedProjects = dataList.map((item: any) => {
@@ -275,7 +302,6 @@ const MyProjects: React.FC = () => {
           boq_status: item.boq_status,
           boq_details: undefined,
           created_at: item.created_at,
-          priority: item.priority || 'medium',
           total_boq_items: item.total_boq_items || 0,
           total_items_assigned: item.total_items_assigned || 0,
           items_assigned: item.items_assigned || '0/0',
@@ -348,6 +374,52 @@ const MyProjects: React.FC = () => {
   const [completionDetails, setCompletionDetails] = useState<any>(null);
   const [loadingCompletionDetails, setLoadingCompletionDetails] = useState(false);
 
+  // Track last processed project_id to prevent duplicate opens but allow new notification clicks
+  const lastProcessedProjectIdRef = useRef<string | null>(null);
+
+  // Auto-open project details when navigating from notification (project_id in URL)
+  useEffect(() => {
+    const projectIdParam = searchParams.get('project_id');
+    if (!projectIdParam) return;
+    if (lastProcessedProjectIdRef.current === projectIdParam) return;
+    if (!projects || projects.length === 0 || loading) return;
+
+    const targetProjectId = parseInt(projectIdParam, 10);
+    if (isNaN(targetProjectId)) {
+      lastProcessedProjectIdRef.current = projectIdParam;
+      return;
+    }
+
+    lastProcessedProjectIdRef.current = projectIdParam;
+
+    // Find the matching project in loaded data
+    const matchingProject = projects.find((p: any) =>
+      p.project_id === targetProjectId || p.id === targetProjectId
+    );
+
+    if (matchingProject) {
+      setSelectedProject(matchingProject);
+
+      // If the project has a BOQ, open it in fullscreen view
+      if (matchingProject.boq_id) {
+        loadBOQDetails(matchingProject.boq_id).then(() => {
+          setFullScreenBoqMode('view');
+          setShowFullScreenBOQ(true);
+        }).catch((err: any) => {
+          console.error('[MyProjects] Error loading BOQ from notification:', err);
+          lastProcessedProjectIdRef.current = null;
+        });
+      }
+
+      // Clean notification params from URL
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete('project_id');
+      setSearchParams(newParams, { replace: true });
+    } else {
+      lastProcessedProjectIdRef.current = null; // Allow retry when data loads
+    }
+  }, [projects, searchParams, loading]);
+
   useEffect(() => {
     if (showAssignModal) {
       loadAvailableSEs();
@@ -374,6 +446,79 @@ const MyProjects: React.FC = () => {
     // Silent reload without loading spinner when timestamp changes
     refetch().catch(err => console.error('Refetch error (non-critical):', err));
   }, [boqUpdateTimestamp, refetch]);
+
+  // ✅ TRIGGER API CALL when tab (filterStatus) changes
+  useEffect(() => {
+    // Refetch data whenever the tab changes
+    refetch().catch(err => console.error('Tab change refetch error:', err));
+  }, [filterStatus, refetch]);
+
+  // Fetch all tab counts once on component mount (not on every tab change)
+  // Also auto-detect correct tab when project_id is in URL (from notification click)
+  useEffect(() => {
+    const fetchTabCounts = async () => {
+      try {
+        const currentPath = window.location.pathname;
+        const isMEPRoute = currentPath.includes('/mep/');
+        const isMEP = isMEPRoute || userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+
+        // Fetch counts from all tabs in parallel (only once on mount)
+        const [forApprovalRes, pendingRes, assignedRes, approvedRes, rejectedRes, completedRes] = await Promise.all([
+          isMEP ? mepService.getMEPApprovalBOQs() : projectManagerService.getPMApprovalBOQs(),
+          isMEP ? mepService.getMEPPendingBOQs() : projectManagerService.getPMPendingBOQs(),
+          isMEP ? mepService.getMEPAssignedProjects() : projectManagerService.getPMAssignedProjects(),
+          isMEP ? mepService.getMEPApprovedBOQs() : projectManagerService.getPMApprovedBOQs(),
+          isMEP ? mepService.getMEPRejectedBOQs() : projectManagerService.getPMRejectedBOQs(),
+          isMEP ? mepService.getMEPCompletedProjects() : projectManagerService.getPMCompletedProjects(),
+        ]);
+
+        // Update all tab counts at once
+        setTabCounts({
+          for_approval: (forApprovalRes.data || []).length,
+          pending: (pendingRes.data || []).length,
+          assigned: (assignedRes.data || []).length,
+          approved: (approvedRes.data || []).length,
+          rejected: (rejectedRes.data || []).length,
+          completed: (completedRes.data || []).length,
+        });
+
+        // Auto-detect correct tab when project_id or boq_id is in URL (from notification click)
+        // Only auto-detect if no explicit tab was provided
+        const targetProjectId = searchParams.get('project_id');
+        const targetBoqId = searchParams.get('boq_id');
+        if ((targetProjectId || targetBoqId) && !autoTabDetected && !searchParams.get('tab')) {
+          const tabDataMap: Record<TabType, any[]> = {
+            for_approval: forApprovalRes.data || [],
+            pending: pendingRes.data || [],
+            assigned: assignedRes.data || [],
+            approved: approvedRes.data || [],
+            rejected: rejectedRes.data || [],
+            completed: completedRes.data || [],
+          };
+
+          // Search all tabs to find which one contains the project/BOQ
+          for (const tab of validTabs) {
+            const found = tabDataMap[tab].some((p: any) => {
+              if (targetProjectId && p.project_id === Number(targetProjectId)) return true;
+              if (targetBoqId && p.boq_id === Number(targetBoqId)) return true;
+              return false;
+            });
+            if (found) {
+              setAutoTabDetected(true);
+              if (tab !== filterStatus) {
+                setFilterStatus(tab);
+              }
+              break;
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching tab counts:', error);
+      }
+    };
+
+    fetchTabCounts();
+  }, []); // Empty dependency array - run only once on mount
 
   const loadAvailableSEs = async () => {
     try {
@@ -753,15 +898,6 @@ const MyProjects: React.FC = () => {
     return new Date(dateString).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const getPriorityColor = (priority?: string) => {
-    switch (priority) {
-      case 'high': return 'bg-red-100 text-red-700';
-      case 'medium': return 'bg-yellow-100 text-yellow-700';
-      case 'low': return 'bg-green-100 text-green-700';
-      default: return 'bg-gray-100 text-gray-700';
-    }
-  };
-
   const getStatusBadge = (project: Project) => {
     // Check if items have been assigned to site engineers
     if (project.total_items_assigned && project.total_items_assigned > 0) {
@@ -1015,9 +1151,6 @@ const MyProjects: React.FC = () => {
                             {project.project_code}
                           </span>
                         )}
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPriorityColor(project.priority)}`}>
-                          {project.priority} priority
-                        </span>
                         <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadge(project).color} flex items-center gap-1`}>
                           <ClockIcon className="w-3 h-3" />
                           {getStatusBadge(project).text}
@@ -1036,51 +1169,54 @@ const MyProjects: React.FC = () => {
                           <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md">
                             <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-600 flex-shrink-0" />
                             <span className="text-[10px] sm:text-xs font-medium text-purple-900 truncate">{project.site_supervisor_name}</span>
-                            <div className="flex items-center gap-0.5 sm:gap-1 ml-auto">
-                              <button
-                                onClick={async () => {
-                                  const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                                  if (se) {
-                                    setEditingSE(se);
-                                    setEditSEData({
-                                      full_name: se.sitesupervisor_name,
-                                      email: se.email || '',
-                                      phone: se.phone || ''
-                                    });
-                                    setShowEditModal(true);
-                                  } else {
-                                    await loadAvailableSEs();
-                                    const refreshedSE = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                                    if (refreshedSE) {
-                                      setEditingSE(refreshedSE);
+                            {/* Hide edit/delete buttons in Approved tab - view only */}
+                            {filterStatus !== 'approved' && (
+                              <div className="flex items-center gap-0.5 sm:gap-1 ml-auto">
+                                <button
+                                  onClick={async () => {
+                                    const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
+                                    if (se) {
+                                      setEditingSE(se);
                                       setEditSEData({
-                                        full_name: refreshedSE.sitesupervisor_name,
-                                        email: refreshedSE.email || '',
-                                        phone: refreshedSE.phone || ''
+                                        full_name: se.sitesupervisor_name,
+                                        email: se.email || '',
+                                        phone: se.phone || ''
                                       });
                                       setShowEditModal(true);
+                                    } else {
+                                      await loadAvailableSEs();
+                                      const refreshedSE = availableSEs.find(s => s.user_id === project.site_supervisor_id);
+                                      if (refreshedSE) {
+                                        setEditingSE(refreshedSE);
+                                        setEditSEData({
+                                          full_name: refreshedSE.sitesupervisor_name,
+                                          email: refreshedSE.email || '',
+                                          phone: refreshedSE.phone || ''
+                                        });
+                                        setShowEditModal(true);
+                                      }
                                     }
-                                  }
-                                }}
-                                className="p-0.5 sm:p-1 text-purple-600 hover:text-blue-600 hover:bg-blue-100 rounded transition-all flex-shrink-0"
-                                title="Edit Site Engineer Details"
-                              >
-                                <PencilIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setSeToDelete({
-                                    id: project.site_supervisor_id,
-                                    name: project.site_supervisor_name
-                                  });
-                                  setShowDeleteConfirm(true);
-                                }}
-                                className="p-0.5 sm:p-1 text-purple-600 hover:text-red-600 hover:bg-red-100 rounded transition-all flex-shrink-0"
-                                title="Delete Site Engineer"
-                              >
-                                <XMarkIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                              </button>
-                            </div>
+                                  }}
+                                  className="p-0.5 sm:p-1 text-purple-600 hover:text-blue-600 hover:bg-blue-100 rounded transition-all flex-shrink-0"
+                                  title="Edit Site Engineer Details"
+                                >
+                                  <PencilIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSeToDelete({
+                                      id: project.site_supervisor_id,
+                                      name: project.site_supervisor_name
+                                    });
+                                    setShowDeleteConfirm(true);
+                                  }}
+                                  className="p-0.5 sm:p-1 text-purple-600 hover:text-red-600 hover:bg-red-100 rounded transition-all flex-shrink-0"
+                                  title="Delete Site Engineer"
+                                >
+                                  <XMarkIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1101,28 +1237,42 @@ const MyProjects: React.FC = () => {
                         <EyeIcon className="w-5 h-5" />
                       </button>
 
-                      {/* Show assign button for projects with approved BOQ (works in both Pending and Assigned tabs) */}
+                      {/* Show assign button for projects with approved BOQ (works in Pending and Assigned tabs, NOT in Approved tab) */}
                       {project.boq_id &&
                        project.user_id !== null &&
+                       filterStatus !== 'approved' &&
                        (project.boq_status?.toLowerCase() === 'approved' ||
                         project.boq_status?.toLowerCase() === 'pm_approved' ||
                         project.boq_status?.toLowerCase() === 'client_confirmed' ||
-                        project.boq_status?.toLowerCase() === 'items_assigned') && (
-                        <button
-                          onClick={() => {
-                            setSelectedProject(project);
-                            // Open modal with empty items array - modal will fetch items itself
-                            setSelectedItemIndices([]);
-                            setShowItemAssignmentModal(true);
-                          }}
-                          className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-all"
-                          title="Assign Items to Site Engineer"
-                        >
-                          <UserPlusIcon className="w-5 h-5" />
-                        </button>
-                      )}
-                      {/* Show completion confirmation tracking */}
-                      {(project.site_supervisor_id ||
+                        project.boq_status?.toLowerCase() === 'items_assigned') && (() => {
+                        // Check if all items are already assigned
+                        const allItemsAssigned = project.total_boq_items &&
+                                                project.total_items_assigned === project.total_boq_items;
+
+                        return (
+                          <button
+                            onClick={() => {
+                              if (allItemsAssigned) return; // Prevent click when all items assigned
+                              setSelectedProject(project);
+                              // Open modal with empty items array - modal will fetch items itself
+                              setSelectedItemIndices([]);
+                              setShowItemAssignmentModal(true);
+                            }}
+                            disabled={allItemsAssigned}
+                            className={`p-2 rounded transition-all ${
+                              allItemsAssigned
+                                ? 'text-gray-300 bg-gray-100 cursor-not-allowed'
+                                : 'text-gray-400 hover:text-green-600 hover:bg-green-50'
+                            }`}
+                            title={allItemsAssigned ? "All items already assigned" : "Assign Items to Site Engineer"}
+                          >
+                            <UserPlusIcon className="w-5 h-5" />
+                          </button>
+                        );
+                      })()}
+                      {/* Show completion confirmation tracking - hide in Approved tab */}
+                      {filterStatus !== 'approved' &&
+                       (project.site_supervisor_id ||
                         (project.total_items_assigned && project.total_items_assigned > 0)) &&
                        project.status?.toLowerCase() !== 'completed' && (
                         <div className="flex items-center gap-2">
@@ -1227,12 +1377,11 @@ const MyProjects: React.FC = () => {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Priority
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Site Engineer
-                    </th>
+                    {filterStatus !== 'approved' && filterStatus !== 'completed' && filterStatus !== 'rejected' && (
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Site Engineer
+                      </th>
+                    )}
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Date
                     </th>
@@ -1262,66 +1411,24 @@ const MyProjects: React.FC = () => {
                           {project.boq_status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPriorityColor(project.priority)}`}>
-                          {project.priority}
-                        </span>
-                      </td>
-                      <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                        {project.site_supervisor_name ? (
-                          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md w-fit max-w-full">
-                            <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-600 flex-shrink-0" />
-                            <span className="text-[10px] sm:text-xs font-medium text-purple-900 truncate">{project.site_supervisor_name}</span>
-                            <div className="flex items-center gap-0.5 sm:gap-1 ml-auto flex-shrink-0">
-                              <button
-                                onClick={async () => {
-                                  const se = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                                  if (se) {
-                                    setEditingSE(se);
-                                    setEditSEData({
-                                      full_name: se.sitesupervisor_name,
-                                      email: se.email || '',
-                                      phone: se.phone || ''
-                                    });
-                                    setShowEditModal(true);
-                                  } else {
-                                    await loadAvailableSEs();
-                                    const refreshedSE = availableSEs.find(s => s.user_id === project.site_supervisor_id);
-                                    if (refreshedSE) {
-                                      setEditingSE(refreshedSE);
-                                      setEditSEData({
-                                        full_name: refreshedSE.sitesupervisor_name,
-                                        email: refreshedSE.email || '',
-                                        phone: refreshedSE.phone || ''
-                                      });
-                                      setShowEditModal(true);
-                                    }
-                                  }
-                                }}
-                                className="p-0.5 sm:p-1 text-purple-600 hover:text-blue-600 hover:bg-blue-100 rounded transition-all"
-                                title="Edit Site Engineer Details"
-                              >
-                                <PencilIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setSeToDelete({
-                                    id: project.site_supervisor_id,
-                                    name: project.site_supervisor_name
-                                  });
-                                  setShowDeleteConfirm(true);
-                                }}
-                                className="p-0.5 sm:p-1 text-purple-600 hover:text-red-600 hover:bg-red-100 rounded transition-all"
-                                title="Delete Site Engineer"
-                              >
-                                <XMarkIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-xs sm:text-sm text-gray-400">Not assigned</span>
-                        )}
-                      </td>
+                      {filterStatus !== 'approved' && filterStatus !== 'completed' && filterStatus !== 'rejected' && (
+                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                          {project.total_se_assignments && project.total_se_assignments > 0 ? (
+                            <button
+                              onClick={() => loadCompletionDetails(project.project_id)}
+                              className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-md w-fit max-w-full hover:bg-purple-100 hover:border-purple-300 transition-all cursor-pointer"
+                              title="Click to view site engineers"
+                            >
+                              <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-600 flex-shrink-0" />
+                              <span className="text-[10px] sm:text-xs font-medium text-purple-900 truncate">
+                                {project.total_se_assignments} {project.total_se_assignments === 1 ? 'Site Engineer' : 'Site Engineers'}
+                              </span>
+                            </button>
+                          ) : (
+                            <span className="text-xs sm:text-sm text-gray-400">Not assigned</span>
+                          )}
+                        </td>
+                      )}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{formatDate(project.created_at)}</div>
                       </td>
@@ -1341,8 +1448,10 @@ const MyProjects: React.FC = () => {
                           >
                             <EyeIcon className="w-5 h-5" />
                           </button>
+                          {/* Hide assign button in Approved tab - view only */}
                           {!project.site_supervisor_id &&
                            project.user_id !== null &&
+                           filterStatus !== 'approved' &&
                            (project.boq_status?.toLowerCase() === 'client_confirmed' ||
                             project.boq_status?.toLowerCase() === 'approved') && (
                             <button
@@ -1356,7 +1465,8 @@ const MyProjects: React.FC = () => {
                               <UserPlusIcon className="w-5 h-5" />
                             </button>
                           )}
-                          {project.site_supervisor_id && project.status?.toLowerCase() !== 'completed' && (
+                          {/* Hide completion confirmation in Approved tab - view only */}
+                          {filterStatus !== 'approved' && project.site_supervisor_id && project.status?.toLowerCase() !== 'completed' && (
                             <>
                               {project.completion_requested ? (
                                 <button

@@ -10,11 +10,14 @@ import {
   Clock,
   ArrowRight,
   Trash2,
-  Eye
+  Eye,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { inventoryService, MaterialReturn } from '../services/inventoryService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { PAGINATION } from '@/lib/inventoryConstants';
 
 type TabType = 'pending' | 'completed';
 
@@ -29,6 +32,7 @@ const RepairManagement: React.FC = () => {
   const [confirmAction, setConfirmAction] = useState<'repair' | 'disposal' | null>(null);
   const [processing, setProcessing] = useState(false);
   const [repairNotes, setRepairNotes] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     fetchRepairItems();
@@ -87,6 +91,25 @@ const RepairManagement: React.FC = () => {
 
     return filtered;
   }, [repairItems, activeTab, searchTerm]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredItems.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedItems = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredItems.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredItems, currentPage]);
+
+  // Reset page when tab or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchTerm]);
+
+  // Clamp page when total pages decreases
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   // Counts based on disposal_status
   const pendingCount = repairItems.filter(item => item.disposal_status === 'sent_for_repair').length;
@@ -239,7 +262,7 @@ const RepairManagement: React.FC = () => {
               <ModernLoadingSpinners size="sm" className="mx-auto mb-4" />
               <p className="text-gray-500">Loading repair items...</p>
             </div>
-          ) : filteredItems.length > 0 ? (
+          ) : paginatedItems.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -271,7 +294,7 @@ const RepairManagement: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {filteredItems.map((item) => (
+                  {paginatedItems.map((item) => (
                     <tr key={item.return_id} className="hover:bg-gray-50">
                       <td className="px-6 py-4">
                         <p className="font-medium text-gray-900">
@@ -341,14 +364,37 @@ const RepairManagement: React.FC = () => {
               </p>
             </div>
           )}
-        </div>
 
-        {/* Results count */}
-        {filteredItems.length > 0 && (
-          <p className="mt-4 text-sm text-gray-600 text-center">
-            Showing {filteredItems.length} of {repairItems.length} items
-          </p>
-        )}
+          {/* Pagination */}
+          {filteredItems.length > 0 && (
+            <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
+              <p className="text-sm text-gray-600">
+                Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredItems.length)} of {filteredItems.length} items
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </button>
+                <span className="text-sm text-gray-600">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Detail Modal */}

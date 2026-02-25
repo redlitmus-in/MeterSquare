@@ -11,6 +11,7 @@
  * 8. Admin (HR): Payroll Processing
  */
 import { apiClient } from '@/api/config';
+import { useAdminViewStore } from '@/store/adminViewStore';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -71,6 +72,11 @@ export interface LabourRequisition {
   project_name?: string;
   site_name: string;
   required_date: string;
+  start_time?: string;
+  end_time?: string;
+  preferred_worker_ids?: number[];
+  preferred_workers?: Array<{ worker_id: number; full_name: string; worker_code: string }>;
+  preferred_workers_notes?: string;
   labour_items: LabourItem[];
   total_workers_count: number;
   // Backward compatibility fields (deprecated)
@@ -83,6 +89,7 @@ export interface LabourRequisition {
   work_status?: 'pending_assignment' | 'assigned' | 'in_progress' | 'completed';
   requested_by_user_id: number;
   requested_by_name: string;
+  requester_role?: 'SE' | 'PM';  // Who created the requisition
   request_date: string;
   status: 'pending' | 'approved' | 'rejected';
   approved_by_user_id?: number;
@@ -100,6 +107,11 @@ export interface LabourRequisition {
   assigned_by_name?: string;
   assignment_date?: string;
   whatsapp_notified: boolean;
+  transport_fee?: number;
+  transport_master_requisition_id?: number;
+  driver_name?: string;
+  vehicle_number?: string;
+  driver_contact?: string;
   is_deleted: boolean;
   created_at: string;
   created_by: string;
@@ -109,6 +121,10 @@ export interface CreateRequisitionData {
   project_id: number;
   site_name: string;
   required_date: string;
+  start_time?: string;
+  end_time?: string;
+  preferred_worker_ids?: number[];
+  preferred_workers_notes?: string;
   labour_items: LabourItem[];
   // Backward compatibility (deprecated, use labour_items array)
   work_description?: string;
@@ -117,6 +133,7 @@ export interface CreateRequisitionData {
   boq_id?: number;
   item_id?: string;
   labour_id?: string;
+  transport_fee?: number;
 }
 
 export interface LabourArrival {
@@ -163,6 +180,7 @@ export interface DailyAttendance {
   project_name?: string;
   assignment_id?: number;
   attendance_date: string;
+  labour_role?: string;  // Links to BOQ labour item for cost tracking
   clock_in_time?: string;
   clock_out_time?: string;
   total_hours?: number;
@@ -196,6 +214,7 @@ export interface ClockInData {
   attendance_date: string;
   clock_in_time: string;
   hourly_rate: number;
+  labour_role?: string;  // Links to BOQ labour item for cost tracking
 }
 
 export interface PayrollSummary {
@@ -230,6 +249,7 @@ export interface PayrollRequisitionGroup {
   skill_required: string;
   site_name: string | null;
   workers_count: number | null;
+  transport_fee: number;
   total_hours: number;
   total_regular_hours: number;
   total_overtime_hours: number;
@@ -435,10 +455,11 @@ class LabourService {
    * @param page - Page number (default: 1)
    * @param perPage - Items per page (default: 15)
    */
-  async getMyRequisitions(status?: string, page: number = 1, perPage: number = 15): Promise<{ success: boolean; data: LabourRequisition[]; pagination?: any; message?: string }> {
+  async getMyRequisitions(status?: string, page: number = 1, perPage: number = 15, assignmentStatus?: string): Promise<{ success: boolean; data: LabourRequisition[]; pagination?: any; message?: string }> {
     try {
       const params: Record<string, string | number> = { page, per_page: perPage };
       if (status) params.status = status;
+      if (assignmentStatus) params.assignment_status = assignmentStatus;
       const response = await apiClient.get('/labour/requisitions/my-requests', { params });
       return {
         success: true,
@@ -568,6 +589,13 @@ class LabourService {
       const params: Record<string, string | number> = { page, per_page: perPage };
       if (status) params.status = status;
       if (projectId) params.project_id = projectId;
+
+      // If admin is viewing as another role, pass that info to backend
+      const { viewingAsRole } = useAdminViewStore.getState();
+      if (viewingAsRole && viewingAsRole !== 'admin') {
+        params.view_as_role = viewingAsRole;
+      }
+
       const response = await apiClient.get('/labour/requisitions/pending', { params });
       return {
         success: true,
@@ -622,6 +650,26 @@ class LabourService {
     }
   }
 
+  /**
+   * Send PM's pending requisition to production (PM only)
+   */
+  async sendToProduction(requisitionId: number): Promise<{ success: boolean; data?: LabourRequisition; message?: string }> {
+    try {
+      const response = await apiClient.post(`/labour/requisitions/${requisitionId}/send-to-production`);
+      return {
+        success: true,
+        data: response.data.requisition,
+        message: response.data.message || 'Requisition sent to production successfully'
+      };
+    } catch (error: any) {
+      console.error('Error sending requisition to production:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to send requisition to production'
+      };
+    }
+  }
+
   // ==========================================================================
   // STEP 4: Assign Personnel (Production Manager)
   // ==========================================================================
@@ -652,10 +700,15 @@ class LabourService {
   /**
    * Get available workers for skill and date
    */
-  async getAvailableWorkers(skill: string, date: string): Promise<{ success: boolean; data: Worker[]; message?: string }> {
+  async getAvailableWorkers(skill: string, date: string, requisition_id?: number): Promise<{ success: boolean; data: Worker[]; message?: string }> {
     try {
+      const params: any = { skill, date };
+      if (requisition_id) {
+        params.requisition_id = requisition_id;
+      }
+
       const response = await apiClient.get('/labour/workers/available', {
-        params: { skill, date }
+        params
       });
       return {
         success: true,
@@ -674,10 +727,21 @@ class LabourService {
   /**
    * Assign workers to requisition
    */
-  async assignWorkersToRequisition(requisitionId: number, workerIds: number[]): Promise<{ success: boolean; message?: string }> {
+  async assignWorkersToRequisition(
+    requisitionId: number,
+    workerIds: number[],
+    transportFee?: number,
+    driverName?: string,
+    vehicleNumber?: string,
+    driverContact?: string
+  ): Promise<{ success: boolean; message?: string }> {
     try {
       const response = await apiClient.post(`/labour/requisitions/${requisitionId}/assign`, {
-        worker_ids: workerIds
+        worker_ids: workerIds,
+        transport_fee: transportFee || 0,
+        driver_name: driverName || '',
+        vehicle_number: vehicleNumber || '',
+        driver_contact: driverContact || ''
       });
       return {
         success: true,
@@ -689,6 +753,109 @@ class LabourService {
         success: false,
         message: error.response?.data?.error || 'Failed to assign workers'
       };
+    }
+  }
+
+  /**
+   * Reassign workers from a requisition for a new date (duplicate with conflict checking)
+   * Creates new requisition with status 'send_to_pm' for PM approval
+   */
+  async reassignWorkers(requisitionId: number, data: {
+    required_date: string;
+    start_time?: string;
+    end_time?: string;
+    check_only?: boolean;
+  }): Promise<{
+    success: boolean;
+    message?: string;
+    data?: any;
+    available_workers?: number[];
+    unavailable_workers?: any[];
+    new_requisition?: LabourRequisition;
+  }> {
+    try {
+      const response = await apiClient.post(`/labour/requisitions/${requisitionId}/retain`, data);
+      return {
+        success: true,
+        message: response.data.message,
+        data: response.data,
+        available_workers: response.data.available_workers,
+        unavailable_workers: response.data.unavailable_workers,
+        new_requisition: response.data.new_requisition
+      };
+    } catch (error: any) {
+      console.error('Error reassigning workers:', error);
+      return {
+        success: false,
+        message: error.response?.data?.error || 'Failed to reassign workers'
+      };
+    }
+  }
+
+  /**
+   * Download assignment PDF report
+   */
+  async downloadAssignmentPDF(requisitionId: number): Promise<void> {
+    try {
+      const response = await apiClient.get(`/labour/requisitions/${requisitionId}/download_pdf`, {
+        responseType: 'blob'
+      });
+
+      // Create a blob from the response
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+
+      // Create a temporary URL for the blob
+      const url = window.URL.createObjectURL(blob);
+
+      // Create a temporary link element and trigger download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Assignment_Report_${requisitionId}_${new Date().toISOString().split('T')[0]}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+
+      // Clean up
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('Error downloading PDF:', error);
+      throw new Error('Failed to download PDF report');
+    }
+  }
+
+  /**
+   * Download daily worker assignment schedule PDF (poster format)
+   * Shows all assigned workers for a specific date, grouped by project
+   */
+  async downloadDailySchedulePDF(date: string): Promise<void> {
+    try {
+      const response = await apiClient.get(`/labour/daily-schedule/download_pdf`, {
+        params: { date },
+        responseType: 'blob'
+      });
+
+      // Create a blob from the response
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+
+      // Create a temporary URL for the blob
+      const url = window.URL.createObjectURL(blob);
+
+      // Format date for filename
+      const formattedDate = new Date(date).toLocaleDateString('en-GB').replace(/\//g, '-');
+
+      // Create a temporary link element and trigger download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Worker_Assignment_Schedule_${formattedDate}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+
+      // Clean up
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('Error downloading daily schedule PDF:', error);
+      throw new Error('Failed to download daily schedule PDF');
     }
   }
 
@@ -891,6 +1058,12 @@ class LabourService {
       if (projectId) params.project_id = projectId;
       if (date) params.date = date;
       if (status) params.approval_status = status;
+
+      // If admin is viewing as another role, pass that info to backend
+      const { viewingAsRole } = useAdminViewStore.getState();
+      if (viewingAsRole && viewingAsRole !== 'admin') {
+        params.view_as_role = viewingAsRole;
+      }
 
       const response = await apiClient.get('/labour/attendance/to-lock', { params });
       return {

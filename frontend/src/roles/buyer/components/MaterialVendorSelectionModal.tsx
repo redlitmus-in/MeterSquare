@@ -74,6 +74,7 @@ interface MaterialVendorState {
   selected_vendors: SelectedVendorInfo[]; // Changed to array for multi-select
   expanded: boolean;
   selection_mode: 'single' | 'multi'; // Single vendor or multiple vendors
+  routing_type?: 'store' | 'vendor'; // NEW: Track if material goes to store or vendor
 }
 
 const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> = ({
@@ -363,7 +364,32 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       const fetchFreshData = async () => {
         try {
           const freshData = await buyerService.getPurchaseById(purchase.cr_id);
-          setFreshPurchaseData(freshData);
+
+          // When opening for a specific POChild (e.g. store-rejected reselection),
+          // the purchase prop has only the POChild's materials (e.g. 5 out of 7).
+          // Filter fresh parent CR data to only include those POChild materials.
+          if (purchase.po_child_id && purchase.materials && purchase.materials.length > 0 && freshData.materials) {
+            const poChildMaterialNames = new Set(
+              purchase.materials
+                .map((m: any) => normalizeForComparison(m.material_name || ''))
+                .filter((name: string) => name.length > 0)
+            );
+
+            const filteredMaterials = freshData.materials.filter((m: any) => {
+              const materialName = normalizeForComparison(m.material_name || '');
+              return materialName.length > 0 && poChildMaterialNames.has(materialName);
+            });
+
+            // Safety fallback: if filtering removed ALL materials, use prop materials
+            if (filteredMaterials.length === 0 && purchase.materials.length > 0) {
+              console.error('[Material Filter] Filtering removed all materials - using purchase.materials as fallback');
+              setFreshPurchaseData({ ...freshData, materials: purchase.materials });
+            } else {
+              setFreshPurchaseData({ ...freshData, materials: filteredMaterials });
+            }
+          } else {
+            setFreshPurchaseData(freshData);
+          }
         } catch (error) {
           console.error('Failed to fetch fresh purchase data:', error);
           // Fall back to prop data if fetch fails
@@ -403,7 +429,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       }
 
       setIsLoadingLpo(true);
-      const response = await buyerService.previewLPOPdf(purchase.cr_id, purchase.po_child_id, vendorId);
+      // When loading for a specific vendor (individual send), don't pass po_child_id
+      // so the backend uses vendor_id filtering instead of returning all POChild materials
+      const poChildIdToUse = vendorId ? undefined : purchase.po_child_id;
+      const response = await buyerService.previewLPOPdf(purchase.cr_id, poChildIdToUse, vendorId);
       let enrichedLpoData = response.lpo_data;
 
       // Try to load default template if no custom terms exist
@@ -899,6 +928,32 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     }));
   };
 
+  // NEW: Handle routing material to store (bypasses vendor selection)
+  const handleRouteToStore = (materialName: string) => {
+    setMaterialVendors(prev => prev.map(m => {
+      if (m.material_name !== materialName) return m;
+
+      // Toggle store routing
+      const isCurrentlyStore = m.routing_type === 'store';
+
+      if (isCurrentlyStore) {
+        // Switch back to vendor routing - clear routing type
+        return {
+          ...m,
+          routing_type: undefined,
+          selected_vendors: [] // Clear any selections when switching back
+        };
+      } else {
+        // Switch to store routing
+        return {
+          ...m,
+          routing_type: 'store',
+          selected_vendors: [] // Clear vendor selections when routing to store
+        };
+      }
+    }));
+  };
+
   const handleToggleSendIndividually = (materialName: string, vendorId: number) => {
     setMaterialVendors(prev => prev.map(m => {
       if (m.material_name !== materialName) return m;
@@ -1107,8 +1162,10 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       return !isApproved;
     });
 
-    // Check if at least one material has a vendor selected (from non-approved materials only)
-    const selectedMaterials = materialsNotApproved.filter(m => m.selected_vendors.length > 0);
+    // ✅ NEW: Check if at least one material has either vendor selected OR is routed to store
+    const selectedMaterials = materialsNotApproved.filter(m =>
+      m.selected_vendors.length > 0 || m.routing_type === 'store'
+    );
 
     if (selectedMaterials.length === 0) {
       // Check if all materials were already approved
@@ -1116,15 +1173,17 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       if (allApproved) {
         toast.error('All materials have already been approved. No new vendor selection needed.');
       } else {
-        toast.error('Please select at least one vendor for any material');
+        toast.error('Please select at least one vendor or route materials to store');
       }
       return;
     }
 
-    // Show warning if some materials don't have vendors
-    const unselectedMaterials = materialsNotApproved.filter(m => m.selected_vendors.length === 0);
+    // Show warning if some materials don't have vendors or store routing
+    const unselectedMaterials = materialsNotApproved.filter(m =>
+      m.selected_vendors.length === 0 && m.routing_type !== 'store'
+    );
     if (unselectedMaterials.length > 0) {
-      toast.warning(`${unselectedMaterials.length} material(s) without vendors will be skipped: ${unselectedMaterials.map(m => m.material_name).join(', ')}`);
+      toast.warning(`${unselectedMaterials.length} material(s) without routing will be skipped: ${unselectedMaterials.map(m => m.material_name).join(', ')}`);
     }
 
     // Save LPO customization before sending to TD (for buyer mode only)
@@ -1180,10 +1239,34 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     // For buyer mode: Check if full purchase to single vendor (no sub-PO needed)
     // or partial/multiple vendors (create sub-CRs)
     if (viewMode === 'buyer') {
-      // Group materials by vendor
+      // Separate store-routed from vendor-routed materials
+      const storeRoutedMaterials = selectedMaterials.filter(m => m.routing_type === 'store');
+      const vendorRoutedMaterials = selectedMaterials.filter(m => m.routing_type !== 'store' && m.selected_vendors.length > 0);
+      const allMaterialsSelected = selectedMaterials.length === materialsNotApproved.length;
+
+      // ALL MATERIALS TO STORE: Update parent CR directly (no POChild needed)
+      if (storeRoutedMaterials.length > 0 && vendorRoutedMaterials.length === 0 && allMaterialsSelected) {
+        try {
+          setIsSubmitting(true);
+          const materialNames = storeRoutedMaterials.map(m => m.material_name);
+          const response = await buyerService.routeAllToStore(purchase.cr_id, materialNames);
+          toast.success(response.message || 'All materials sent to M2 Store!');
+          await onVendorSelected?.();
+          onClose();
+          return;
+        } catch (error: any) {
+          console.error('Error routing all to store:', error);
+          toast.error(error.message || 'Failed to route materials to store');
+          return;
+        } finally {
+          setIsSubmitting(false);
+        }
+      }
+
+      // Group vendor-routed materials by vendor (skip store-routed to prevent crash)
       const vendorGroupsMap = new Map<number, Array<typeof selectedMaterials[0]>>();
 
-      selectedMaterials.forEach(material => {
+      vendorRoutedMaterials.forEach(material => {
         const vendorId = material.selected_vendors[0].vendor_id;
         if (!vendorGroupsMap.has(vendorId)) {
           vendorGroupsMap.set(vendorId, []);
@@ -1192,22 +1275,61 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       });
 
       const uniqueVendorCount = vendorGroupsMap.size;
-      // Compare against non-approved materials, not all materialVendors
-      const allMaterialsSelected = selectedMaterials.length === materialsNotApproved.length;
+
+      // ✅ FIX: Check if any materials have been routed to store (mixed routing scenario)
+      // When materials are split between store and vendor, ALWAYS create POChildren
+      // even if all vendor materials go to the same vendor (prevents mixing in parent CR)
+      // CRITICAL: If ALL store requests were REJECTED, ignore store_requested_materials — buyer is switching to vendor
+      // Only use all_store_requests_rejected (not any_) to handle partial rejection correctly
+      const isAllStoreRejected = purchase.all_store_requests_rejected === true;
+      const hasMixedRouting = storeRoutedMaterials.length > 0 || (!isAllStoreRejected && purchase.store_requested_materials && purchase.store_requested_materials.length > 0);
 
       // FULL PURCHASE TO SINGLE VENDOR: Update parent PO directly (no sub-PO)
-      if (uniqueVendorCount === 1 && allMaterialsSelected) {
+      // BUT: If there's mixed routing (some materials went to store), force POChild creation
+      if (uniqueVendorCount === 1 && allMaterialsSelected && !hasMixedRouting) {
         // Show confirmation dialog for full purchase
         setShowConfirmation(true);
         return;
       }
 
-      // PARTIAL OR MULTIPLE VENDORS: Create sub-CRs
+      // PARTIAL OR MULTIPLE VENDORS OR STORE ROUTING: Create sub-CRs (POChildren)
       try {
         setIsSubmitting(true);
 
+        // Use already-separated store/vendor materials from above
         // Prepare vendor groups data for sub-PO creation
-        const vendorGroups = Array.from(vendorGroupsMap.entries()).map(([vendorId, materials]) => ({
+        const vendorGroups: Array<{
+          routing_type: 'store' | 'vendor';
+          vendor_id?: number;
+          vendor_name?: string;
+          supplier_notes?: string;
+          materials: Array<{
+            material_name: string;
+            quantity: number;
+            unit: string;
+            negotiated_price?: number | null;
+            save_price_for_future?: boolean;
+            supplier_notes?: string | null;
+          }>;
+        }> = [];
+
+        // Add store-routed materials as a single group
+        if (storeRoutedMaterials.length > 0) {
+          vendorGroups.push({
+            routing_type: 'store',
+            vendor_name: 'M2 Store',
+            materials: storeRoutedMaterials.map(m => ({
+              material_name: m.material_name,
+              quantity: m.quantity,
+              unit: m.unit,
+              supplier_notes: materialNotes[m.material_name] || null
+            }))
+          });
+        }
+
+        // Add vendor-routed materials grouped by vendor
+        const vendorRoutedGroups = Array.from(vendorGroupsMap.entries()).map(([vendorId, materials]) => ({
+          routing_type: 'vendor' as const,
           vendor_id: vendorId,
           vendor_name: materials[0].selected_vendors[0].vendor_name,
           supplier_notes: undefined, // No purchase-level notes, only per-material notes
@@ -1249,6 +1371,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           })
         }));
 
+        vendorGroups.push(...vendorRoutedGroups);
+
         // Generate submission group ID
         const submissionGroupId = `${Date.now()}-${Math.random().toString(36).slice(2, 2 + SUBMISSION_ID_LENGTH)}`;
 
@@ -1259,14 +1383,22 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
           submissionGroupId
         );
 
-        toast.success(response.message || `Sent to TD for approval!`);
+        toast.success(response.message || 'Purchase orders created! Use "Send for Approval" to notify TD.');
 
         // Show individual PO child IDs created
         if (response.po_children && response.po_children.length > 0) {
-          const poChildrenList = response.po_children.map((po: any) =>
-            `${po.formatted_id} (${po.vendor_name})`
-          ).join(', ');
-          toast.info(`Purchase Orders Created: ${poChildrenList}`, { duration: 5000 });
+          const vendorPOs = response.po_children.filter((po: any) => po.routing_type === 'vendor');
+          const storePOs = response.po_children.filter((po: any) => po.routing_type === 'store');
+          if (vendorPOs.length > 0) {
+            const vendorList = vendorPOs.map((po: any) =>
+              `${po.formatted_id} (${po.vendor_name})`
+            ).join(', ');
+            toast.info(`Vendor POs: ${vendorList} - Click "Send for Approval" to notify TD`, { duration: 6000 });
+          }
+          if (storePOs.length > 0) {
+            const storeList = storePOs.map((po: any) => po.formatted_id).join(', ');
+            toast.info(`Store POs: ${storeList} - Routed to M2 Store`, { duration: 5000 });
+          }
         }
 
         // Wait for parent to refetch data before closing modal
@@ -1440,7 +1572,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       </h2>
                     </div>
                     <div className="text-sm text-gray-600">
-                      <span className="font-medium">Purchase Order:</span> PO #{purchase.cr_id} - {purchase.item_name}
+                      <span className="font-medium">Purchase Order:</span> {purchase.formatted_cr_id || `PO #${purchase.cr_id}`} - {purchase.item_name}
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
                       {viewMode === 'td'
@@ -1805,9 +1937,31 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                   </Badge>
                                 </div>
 
-                                {/* Selected Vendors Display */}
+                                {/* Selected Vendors Display OR Store Routing */}
                                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                                  {material.selected_vendors.length > 0 ? (
+                                  {/* ✅ NEW: Store Routing Badge */}
+                                  {material.routing_type === 'store' ? (
+                                    <>
+                                      <Badge className="bg-blue-500 text-white">
+                                        <Store className="w-3 h-3 mr-1" />
+                                        Routed to M2 Store
+                                      </Badge>
+                                      {!isMaterialLocked && (
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleRouteToStore(material.material_name);
+                                          }}
+                                          className="h-6 text-xs text-gray-600 hover:text-red-600"
+                                        >
+                                          <X className="w-3 h-3 mr-1" />
+                                          Switch to Vendor
+                                        </Button>
+                                      )}
+                                    </>
+                                  ) : material.selected_vendors.length > 0 ? (
                                     <>
                                       {material.selected_vendors.map((selectedVendor, idx) => (
                                         <div key={idx} className="flex items-center gap-1">
@@ -1839,10 +1993,27 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                         )}
                                     </>
                                   ) : (
-                                    <Badge className="bg-red-100 text-red-800">
-                                      <AlertCircle className="w-3 h-3 mr-1" />
-                                      No vendor selected
-                                    </Badge>
+                                    <>
+                                      <Badge className="bg-red-100 text-red-800">
+                                        <AlertCircle className="w-3 h-3 mr-1" />
+                                        No routing selected
+                                      </Badge>
+                                      {/* ✅ NEW: Quick "Send to Store" button */}
+                                      {!isMaterialLocked && viewMode === 'buyer' && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleRouteToStore(material.material_name);
+                                          }}
+                                          className="h-6 text-xs border-blue-500 text-blue-600 hover:bg-blue-50"
+                                        >
+                                          <Store className="w-3 h-3 mr-1" />
+                                          Send to Store
+                                        </Button>
+                                      )}
+                                    </>
                                   )}
                                 </div>
                               </div>
@@ -2649,11 +2820,34 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                             return;
                                           }
 
-                                          // IMPORTANT: If lpoData exists (edited in main view), cache it for this vendor
-                                          // This preserves user's edits (like VAT %) when showing confirmation dialog
+                                          // IMPORTANT: If lpoData exists (edited in main view), cache a vendor-filtered copy
+                                          // This preserves user's edits (like VAT %) while only including this vendor's materials
                                           if (lpoData) {
+                                            // Filter items to only include materials assigned to this vendor
+                                            const vendorMaterialNames = new Set(
+                                              vendorMaterials.map((m: any) => m.material_name)
+                                            );
+                                            const filteredItems = lpoData.items.filter(
+                                              (item: any) => vendorMaterialNames.has(item.material_name || item.description)
+                                            );
+                                            // Recalculate totals for filtered items
+                                            const filteredSubtotal = filteredItems.reduce(
+                                              (sum: number, item: any) => sum + (item.amount || 0), 0
+                                            );
+                                            const vatPercent = lpoData.totals?.vat_percent || 0;
+                                            const vatAmount = (filteredSubtotal * vatPercent) / 100;
+                                            const filteredLpoData = {
+                                              ...lpoData,
+                                              items: filteredItems,
+                                              totals: {
+                                                ...lpoData.totals,
+                                                subtotal: filteredSubtotal,
+                                                vat_amount: vatAmount,
+                                                total: filteredSubtotal + vatAmount
+                                              }
+                                            };
                                             const newMap = new Map(lpoDataByVendor);
-                                            newMap.set(vendorGroup.vendor_id, lpoData);
+                                            newMap.set(vendorGroup.vendor_id, filteredLpoData);
                                             setLpoDataByVendor(newMap);
                                           }
 
@@ -3113,7 +3307,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                     min="0"
                                     max="100"
                                     step="0.5"
-                                    value={lpoData.totals.vat_percent}
+                                    value={lpoData.totals.vat_percent || ''}
                                     onChange={(e) => {
                                       const newVatPercent = parseFloat(e.target.value) || 0;
                                       const newVatAmount = (lpoData.totals.subtotal * newVatPercent) / 100;
@@ -3819,7 +4013,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                       min="0"
                                       max="100"
                                       step="0.5"
-                                      value={lpoData.totals.vat_percent}
+                                      value={lpoData.totals.vat_percent || ''}
                                       onChange={(e) => {
                                         const newVatPercent = parseFloat(e.target.value) || 0;
                                         const newVatAmount = (lpoData.totals.subtotal * newVatPercent) / 100;
@@ -4153,7 +4347,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                 supplier_notes: undefined,  // No purchase-level notes, only per-material notes
                                 materials: materials
                               }],
-                              submissionGroupId
+                              submissionGroupId,
+                              true  // Auto-send TD notification since buyer already confirmed
                             );
 
                             // After POChild is created, save supplier notes for each material that has notes
@@ -4241,6 +4436,31 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                             const newMap = new Map(lpoDataByVendor);
                             newMap.delete(sentVendorId);
                             setLpoDataByVendor(newMap);
+
+                            // Check if ALL materials are now in POChildren (all locked)
+                            // If so, auto-close the modal since there's nothing left for buyer to do
+                            const allMaterialNames = materialVendors.map(m => m.material_name.toLowerCase().trim());
+                            const materialsInPOChildren = new Set<string>();
+                            if (purchase.po_children) {
+                              for (const pc of purchase.po_children) {
+                                if (pc.materials && Array.isArray(pc.materials)) {
+                                  for (const m of pc.materials) {
+                                    if (m.material_name) {
+                                      materialsInPOChildren.add(m.material_name.toLowerCase().trim());
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                            const allMaterialsLocked = allMaterialNames.length > 0 &&
+                              allMaterialNames.every(name => materialsInPOChildren.has(name));
+
+                            if (allMaterialsLocked) {
+                              // All materials sent to TD — close modal and refresh
+                              onVendorSelected?.();
+                              onClose();
+                              return;
+                            }
 
                             // Lazy refresh data in background (doesn't block UI)
                             setTimeout(() => {

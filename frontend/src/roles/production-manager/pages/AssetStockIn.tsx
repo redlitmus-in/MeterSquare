@@ -3,16 +3,17 @@
  * Add new assets to inventory - First step in the DN/RDN flow
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Plus, Package, Save, RefreshCw, Hash, X, Check, Building2, Upload, FileText, ExternalLink, Trash2
+  ArrowLeft, Plus, Package, Save, RefreshCw, Hash, X, Check, Building2, Upload, FileText, ExternalLink, Trash2, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { apiClient } from '@/api/config';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { assetService, AssetCategory } from '../services/assetService';
 import { createStockIn, getStockInList, StockIn, uploadStockInDocument } from '../services/assetDnService';
 import { showSuccess, showError } from '@/utils/toastHelper';
+import { PAGINATION } from '@/lib/inventoryConstants';
 
 interface StockInItemInput {
   serial_number: string;
@@ -37,6 +38,7 @@ const AssetStockIn: React.FC = () => {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [stockInHistory, setStockInHistory] = useState<StockIn[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Category input state
   const [categoryInput, setCategoryInput] = useState('');
@@ -86,6 +88,20 @@ const AssetStockIn: React.FC = () => {
   const exactMatch = categories.find(
     cat => cat.category_name.toLowerCase() === categoryInput.toLowerCase()
   );
+
+  // Pagination calculations for stock in history
+  const totalPages = Math.ceil(stockInHistory.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedStockInHistory = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return stockInHistory.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [stockInHistory, currentPage]);
+
+  // Clamp page when total pages decreases
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   useEffect(() => {
     fetchData();
@@ -504,7 +520,8 @@ const AssetStockIn: React.FC = () => {
                 <input
                   type="number"
                   min="1"
-                  value={quantity}
+                  value={quantity || ''}
+                  placeholder="1"
                   onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                   required
@@ -663,7 +680,8 @@ const AssetStockIn: React.FC = () => {
                   type="number"
                   min="0"
                   step="0.01"
-                  value={unitCost}
+                  value={unitCost || ''}
+                  placeholder="0.00"
                   onChange={(e) => setUnitCost(parseFloat(e.target.value) || 0)}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                 />
@@ -675,7 +693,7 @@ const AssetStockIn: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={`$${(unitCost * quantity).toFixed(2)}`}
+                  value={`AED ${(unitCost * quantity).toFixed(2)}`}
                   disabled
                   className="w-full px-3 py-2 border rounded-lg bg-gray-50"
                 />
@@ -870,14 +888,14 @@ const AssetStockIn: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {stockInHistory.length === 0 ? (
+              {paginatedStockInHistory.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                     No stock in records yet
                   </td>
                 </tr>
               ) : (
-                stockInHistory.map(si => (
+                paginatedStockInHistory.map(si => (
                   <tr key={si.stock_in_id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <span className="font-medium text-blue-600">{si.stock_in_number}</span>
@@ -890,7 +908,7 @@ const AssetStockIn: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">{si.quantity}</td>
                     <td className="px-4 py-3 text-gray-600">{si.vendor_name || '-'}</td>
-                    <td className="px-4 py-3">${si.total_cost.toFixed(2)}</td>
+                    <td className="px-4 py-3">AED {si.total_cost.toFixed(2)}</td>
                     <td className="px-4 py-3 text-gray-500 text-sm">
                       {new Date(si.created_at).toLocaleDateString()}
                     </td>
@@ -916,6 +934,36 @@ const AssetStockIn: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        {stockInHistory.length > 0 && (
+          <div className="px-4 py-3 bg-gray-50 border-t flex items-center justify-between text-sm">
+            <span className="text-gray-600">
+              Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, stockInHistory.length)} of {stockInHistory.length} records
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Previous
+              </button>
+              <span className="text-sm text-gray-600">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

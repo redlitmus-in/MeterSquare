@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
@@ -27,7 +28,6 @@ import {
   LayoutGrid,
   List,
   Pencil,
-  GitBranch,
   MapPin
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
@@ -43,7 +43,22 @@ import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 
 const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState('pending');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Get tab and cr_id from URL query parameters (for notification redirects)
+  const urlTab = searchParams.get('tab');
+  const urlCrId = searchParams.get('cr_id');
+
+  const [activeTab, setActiveTab] = useState(() => {
+    // Priority: URL tab param > default
+    if (urlTab) {
+      const validTabs = ['pending', 'approved', 'completed', 'rejected'];
+      if (validTabs.includes(urlTab)) {
+        return urlTab;
+      }
+    }
+    return 'pending';
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [changeRequests, setChangeRequests] = useState<ChangeRequestItem[]>([]);
@@ -66,6 +81,9 @@ const ChangeRequestsPage: React.FC = () => {
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [approvingCrId, setApprovingCrId] = useState<number | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+
+  // Track if we've already auto-opened modal from URL (to prevent reopening on close)
+  const hasAutoOpenedRef = useRef<string | null>(null);
 
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
@@ -94,6 +112,25 @@ const ChangeRequestsPage: React.FC = () => {
       loadChangeRequests(false);
     }
   }, [currentPage]);
+
+  // Auto-open change request details when cr_id is in URL (from notification redirect)
+  useEffect(() => {
+    // Only auto-open if we haven't already opened for this specific urlCrId
+    if (urlCrId && changeRequests.length > 0 && !showDetailsModal && hasAutoOpenedRef.current !== urlCrId) {
+      const crIdNum = parseInt(urlCrId, 10);
+      const targetCr = changeRequests.find((cr: ChangeRequestItem) => cr.cr_id === crIdNum);
+      if (targetCr) {
+        setSelectedChangeRequest(targetCr);
+        setShowDetailsModal(true);
+        // Mark this urlCrId as already opened
+        hasAutoOpenedRef.current = urlCrId;
+      }
+    }
+    // Reset the ref when urlCrId is cleared
+    if (!urlCrId) {
+      hasAutoOpenedRef.current = null;
+    }
+  }, [urlCrId, changeRequests, showDetailsModal]);
 
   const loadChangeRequests = async (showToasts = false) => {
     try {
@@ -190,6 +227,8 @@ const ChangeRequestsPage: React.FC = () => {
 
     setShowDetailsModal(false);
     handleApprove(selectedChangeRequest.cr_id);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   const handleRejectFromModal = () => {
@@ -197,6 +236,8 @@ const ChangeRequestsPage: React.FC = () => {
     setRejectingCrId(selectedChangeRequest.cr_id);
     setShowDetailsModal(false);
     setShowRejectionModal(true);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   const handleEdit = async (crId: number) => {
@@ -232,63 +273,15 @@ const ChangeRequestsPage: React.FC = () => {
       assigned_to_buyer: 'bg-purple-100 text-purple-800',
       approved_td: 'bg-blue-100 text-blue-800',
       purchase_completed: 'bg-green-100 text-green-800',
+      routed_to_store: 'bg-teal-100 text-teal-800',
       rejected: 'bg-red-100 text-red-800',
-      split_to_sub_crs: 'bg-indigo-100 text-indigo-800'
+      split_to_sub_crs: 'bg-indigo-100 text-indigo-800',
+      vendor_approved: 'bg-teal-100 text-teal-800'
     };
     return colors[status as keyof typeof colors] || colors.pending;
   };
 
-  // Helper to render POChildren (vendor splits) info
-  const renderPOChildrenInfo = (request: ChangeRequestItem) => {
-    if (!request.has_po_children || !request.po_children || request.po_children.length === 0) {
-      return null;
-    }
 
-    const getChildStatusColor = (status: string) => {
-      switch (status) {
-        case 'purchase_completed': return 'bg-green-100 text-green-700';
-        case 'vendor_approved': return 'bg-blue-100 text-blue-700';
-        case 'pending_td_approval': return 'bg-yellow-100 text-yellow-700';
-        case 'rejected': return 'bg-red-100 text-red-700';
-        default: return 'bg-gray-100 text-gray-700';
-      }
-    };
-
-    const getChildStatusLabel = (status: string) => {
-      switch (status) {
-        case 'purchase_completed': return 'Completed';
-        case 'vendor_approved': return 'Vendor Approved';
-        case 'pending_td_approval': return 'Pending TD';
-        case 'rejected': return 'Rejected';
-        default: return status;
-      }
-    };
-
-    return (
-      <div className="px-4 pb-3">
-        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-3 border border-indigo-200">
-          <div className="flex items-center gap-2 mb-2">
-            <GitBranch className="h-4 w-4 text-indigo-600" />
-            <span className="text-xs font-semibold text-indigo-700">Split into {request.po_children.length} Vendor{request.po_children.length > 1 ? 's' : ''}</span>
-          </div>
-          <div className="space-y-1.5">
-            {request.po_children.map((child) => (
-              <div key={child.id} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-gray-700">{child.formatted_id}</span>
-                  <span className="text-gray-500">→</span>
-                  <span className="text-gray-600 truncate max-w-[100px]">{child.vendor_name || 'No vendor'}</span>
-                </div>
-                <Badge className={`text-[10px] px-1.5 py-0.5 ${getChildStatusColor(child.status)}`}>
-                  {getChildStatusLabel(child.status)}
-                </Badge>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   const filteredRequests = changeRequests.filter(req => {
     const projectName = req.project_name || req.boq_name || '';
@@ -302,18 +295,18 @@ const ChangeRequestsPage: React.FC = () => {
                          idString.includes(searchLower) ||
                          req.cr_id.toString().includes(searchTerm.trim());
     const matchesTab = (
-      (activeTab === 'pending' && (req.status === 'send_to_est' || req.status === 'under_review' || (req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'approved_by_pm' && req.status !== 'rejected' && req.status !== 'purchase_completed' && req.status !== 'pending_td_approval'))) ||
-      (activeTab === 'approved' && (req.status === 'assigned_to_buyer' || req.status === 'approved_by_pm' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs')) ||
-      (activeTab === 'escalated' && req.status === 'purchase_completed') ||
+      (activeTab === 'pending' && (req.status === 'send_to_est' || req.status === 'under_review' || (req.approval_required_from === 'estimator' && req.status !== 'assigned_to_buyer' && req.status !== 'approved_by_pm' && req.status !== 'rejected' && req.status !== 'purchase_completed' && req.status !== 'routed_to_store' && req.status !== 'sent_to_store' && req.status !== 'pending_td_approval'))) ||
+      (activeTab === 'approved' && (req.status === 'assigned_to_buyer' || req.status === 'approved_by_pm' || req.status === 'send_to_buyer' || req.status === 'pending_td_approval' || req.status === 'split_to_sub_crs' || req.status === 'sent_to_store' || req.status === 'vendor_approved')) ||
+      (activeTab === 'escalated' && (req.status === 'purchase_completed' || req.status === 'routed_to_store')) ||
       (activeTab === 'rejected' && req.status === 'rejected')
     );
     return matchesSearch && matchesTab;
   });
 
   const stats = {
-    pending: changeRequests.filter(r => r.status === 'send_to_est' || r.status === 'under_review' || (r.approval_required_from === 'estimator' && r.status !== 'assigned_to_buyer' && r.status !== 'approved_by_pm' && r.status !== 'rejected' && r.status !== 'purchase_completed' && r.status !== 'pending_td_approval')).length,
-    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer' || r.status === 'approved_by_pm' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs').length,
-    escalated: changeRequests.filter(r => r.status === 'purchase_completed').length,
+    pending: changeRequests.filter(r => r.status === 'send_to_est' || r.status === 'under_review' || (r.approval_required_from === 'estimator' && r.status !== 'assigned_to_buyer' && r.status !== 'approved_by_pm' && r.status !== 'rejected' && r.status !== 'purchase_completed' && r.status !== 'routed_to_store' && r.status !== 'sent_to_store' && r.status !== 'pending_td_approval')).length,
+    approved: changeRequests.filter(r => r.status === 'assigned_to_buyer' || r.status === 'approved_by_pm' || r.status === 'send_to_buyer' || r.status === 'pending_td_approval' || r.status === 'split_to_sub_crs' || r.status === 'sent_to_store' || r.status === 'vendor_approved').length,
+    escalated: changeRequests.filter(r => r.status === 'purchase_completed' || r.status === 'routed_to_store').length,
     rejected: changeRequests.filter(r => r.status === 'rejected').length
   };
 
@@ -567,11 +560,6 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* POChildren (Vendor Splits) Info */}
-                        {renderPOChildrenInfo(request)}
-
-                        {/* Budget Comparison - Hidden */}
-
                         {/* Actions */}
                         <div className="border-t border-gray-200 p-2 sm:p-3 flex flex-col gap-2">
                           <button
@@ -681,9 +669,6 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* POChildren (Vendor Splits) Info */}
-                        {renderPOChildrenInfo(request)}
-
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button
                             onClick={() => handleReview(request.cr_id)}
@@ -759,8 +744,7 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* POChildren (Vendor Splits) Info */}
-                        {renderPOChildrenInfo(request)}
+                        {/* POChildren hidden - Estimator doesn't need vendor split details */}
 
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button
@@ -837,8 +821,7 @@ const ChangeRequestsPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* POChildren (Vendor Splits) Info */}
-                        {renderPOChildrenInfo(request)}
+                        {/* POChildren hidden - Estimator doesn't need vendor split details */}
 
                         <div className="border-t border-gray-200 p-2 sm:p-3">
                           <button
@@ -912,6 +895,8 @@ const ChangeRequestsPage: React.FC = () => {
         onClose={() => {
           setShowDetailsModal(false);
           setSelectedChangeRequest(null);
+          // Clear URL parameters to prevent auto-reopen
+          setSearchParams({});
         }}
         changeRequest={selectedChangeRequest}
         onApprove={handleApproveFromModal}
@@ -951,6 +936,8 @@ const ChangeRequestsPage: React.FC = () => {
           onClose={() => {
             setShowEditModal(false);
             setSelectedChangeRequest(null);
+            // Clear URL parameters to prevent auto-reopen
+            setSearchParams({});
           }}
           changeRequest={selectedChangeRequest}
           onSuccess={() => {
@@ -958,6 +945,8 @@ const ChangeRequestsPage: React.FC = () => {
             setSelectedChangeRequest(null);
             loadChangeRequests(true);
             showSuccess('Purchase request updated successfully');
+            // Clear URL parameters to prevent auto-reopen
+            setSearchParams({});
           }}
         />
       )}

@@ -106,6 +106,8 @@ class AssetRequisition(db.Model):
 
     def to_dict(self):
         """Convert model to dictionary for JSON response"""
+        from models.returnable_assets import ReturnableAssetCategory
+
         # Build items list - use items JSONB if available, otherwise build from legacy fields
         items_list = self.items if self.items else []
         if not items_list and self.category_id:
@@ -114,11 +116,23 @@ class AssetRequisition(db.Model):
                 'category_id': self.category_id,
                 'category_code': self.category.category_code if self.category else None,
                 'category_name': self.category.category_name if self.category else None,
+                'tracking_mode': self.category.tracking_mode if self.category else None,
                 'quantity': self.quantity or 1,
                 'asset_item_id': self.asset_item_id,
                 'item_code': self.asset_item.item_code if self.asset_item else None,
                 'serial_number': self.asset_item.serial_number if self.asset_item else None,
             }]
+        elif items_list:
+            # Enrich JSONB items with tracking_mode from category
+            enriched_items = []
+            for item in items_list:
+                enriched_item = dict(item)  # Copy to avoid modifying original
+                if 'tracking_mode' not in enriched_item and item.get('category_id'):
+                    category = ReturnableAssetCategory.query.get(item['category_id'])
+                    if category:
+                        enriched_item['tracking_mode'] = category.tracking_mode
+                enriched_items.append(enriched_item)
+            items_list = enriched_items
 
         # Calculate total items count
         total_items = len(items_list)

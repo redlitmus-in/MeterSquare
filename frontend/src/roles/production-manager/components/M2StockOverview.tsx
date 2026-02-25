@@ -227,7 +227,7 @@ const M2StockOverview: React.FC = () => {
           <div>
             <h2 className="text-xl font-bold text-gray-900">M2 Store Inventory</h2>
             <p className="text-sm text-gray-500 mt-1">
-              {filteredItems.length} items • Total Value: ₹{(stats.totalValue / 100000).toFixed(2)}L
+              {filteredItems.length} items • Total Value: AED {(stats.totalValue / 100000).toFixed(2)}L
             </p>
           </div>
           <button
@@ -378,11 +378,11 @@ const M2StockOverview: React.FC = () => {
                   </td>
                   <td className="px-6 py-4">
                     <p className="font-medium text-gray-900">
-                      ₹{(item.value / 1000).toFixed(1)}K
+                      AED {(item.value / 1000).toFixed(1)}K
                     </p>
                     {item.value > 0 && (
                       <p className="text-xs text-gray-500 mt-1">
-                        ₹{(item.value / item.currentStock).toFixed(0)}/{item.unit}
+                        AED {(item.value / item.currentStock).toFixed(0)}/{item.unit}
                       </p>
                     )}
                   </td>

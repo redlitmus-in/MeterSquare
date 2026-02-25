@@ -11,53 +11,7 @@ API endpoints for 8-step SOP workflow:
 8. Admin (HR): Payroll Processing
 """
 from flask import Blueprint, request, jsonify, g
-from controllers.labour_controller import (
-    # Step 1: Worker Registry
-    get_workers,
-    get_worker_by_id,
-    create_worker,
-    update_worker,
-    delete_worker,
-    get_workers_by_skill,
-    # Step 2: Requisitions
-    create_requisition,
-    get_my_requisitions,
-    get_requisition_by_id,
-    get_requisitions_by_project,
-    update_requisition,
-    resubmit_requisition,
-    delete_requisition,
-    resend_requisition,
-    # Step 3: Approvals
-    get_pending_requisitions,
-    approve_requisition,
-    reject_requisition,
-    # Step 4: Assignments
-    get_approved_requisitions,
-    get_available_workers,
-    assign_workers_to_requisition,
-    # Step 5: Arrivals
-    get_arrivals_for_date,
-    confirm_arrival,
-    mark_no_show,
-    mark_departure,
-    # Step 6: Attendance
-    clock_in_worker,
-    clock_out_worker,
-    get_daily_attendance,
-    update_attendance,
-    # Step 7: Lock
-    get_attendance_to_lock,
-    lock_attendance,
-    lock_day_attendance,
-    # Step 8: Payroll
-    get_locked_for_payroll,
-    get_payroll_summary,
-    # Dashboard
-    get_labour_dashboard,
-    # Utilities
-    get_user_projects
-)
+from controllers.labour_controller import *
 from utils.authentication import jwt_required
 
 
@@ -168,6 +122,13 @@ def resubmit_req(requisition_id):
     return resubmit_requisition(requisition_id)
 
 
+@labour_routes.route('/requisitions/<int:requisition_id>/send-to-production', methods=['POST'])
+@jwt_required
+def send_req_to_production(requisition_id):
+    """Send PM's pending requisition to production for worker assignment (Project Manager only)"""
+    return send_to_production(requisition_id)
+
+
 @labour_routes.route('/requisitions/<int:requisition_id>', methods=['DELETE'])
 @jwt_required
 def delete_req(requisition_id):
@@ -223,6 +184,28 @@ def available_workers():
 def assign_workers(requisition_id):
     """Assign workers to requisition (Production Manager)"""
     return assign_workers_to_requisition(requisition_id)
+
+
+@labour_routes.route('/requisitions/<int:requisition_id>/retain', methods=['POST'])
+@labour_routes.route('/requisitions/<int:requisition_id>/reassign', methods=['POST'])
+@jwt_required
+def retain_workers(requisition_id):
+    """Reassign/duplicate requisition with same workers for a new date. Sends to PM for approval."""
+    return retain_workers_for_next_day(requisition_id)
+
+
+@labour_routes.route('/requisitions/<int:requisition_id>/download_pdf', methods=['GET'])
+@jwt_required
+def download_pdf(requisition_id):
+    """Download PDF report for requisition assignment (Production Manager)"""
+    return download_assignment_pdf(requisition_id)
+
+
+@labour_routes.route('/daily-schedule/download_pdf', methods=['GET'])
+@jwt_required
+def download_daily_schedule():
+    """Download daily worker assignment schedule poster PDF (Production Manager)"""
+    return download_daily_schedule_pdf()
 
 
 # ============================================================================

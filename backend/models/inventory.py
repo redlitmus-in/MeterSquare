@@ -66,6 +66,14 @@ class InventoryTransaction(db.Model):
     project_id = db.Column(db.Integer, nullable=True)
     notes = db.Column(db.Text, nullable=True)
     delivery_note_url = db.Column(db.Text, nullable=True)  # URL to delivery note/invoice file
+
+    # Transport/Delivery fields (for vendor deliveries - Production Manager role)
+    driver_name = db.Column(db.Text, nullable=True)
+    driver_contact = db.Column(db.String(50), nullable=True)
+    vehicle_number = db.Column(db.Text, nullable=True)
+    transport_fee = db.Column(db.Float, nullable=True, default=0.0)
+    delivery_batch_ref = db.Column(db.Text, nullable=True, index=True)  # e.g., "MSQ-IN-01"
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     created_by = db.Column(db.String(255), nullable=False)
 
@@ -81,6 +89,12 @@ class InventoryTransaction(db.Model):
             'project_id': self.project_id,
             'notes': self.notes,
             'delivery_note_url': self.delivery_note_url,
+            # Transport/Delivery fields
+            'driver_name': self.driver_name,
+            'driver_contact': self.driver_contact,
+            'vehicle_number': self.vehicle_number,
+            'transport_fee': self.transport_fee,
+            'delivery_batch_ref': self.delivery_batch_ref,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'created_by': self.created_by
         }
@@ -95,7 +109,7 @@ class InternalMaterialRequest(db.Model):
     project_id = db.Column(db.Integer, nullable=False)
     cr_id = db.Column(db.Integer, nullable=True)  # Change Request ID
     request_buyer_id = db.Column(db.Integer, nullable=False)
-    material_name = db.Column(db.Text, nullable=False)
+    item_name = db.Column(db.Text, nullable=False)
     quantity = db.Column(db.Float, nullable=False)
     brand = db.Column(db.Text, nullable=True)
     size = db.Column(db.Text, nullable=True)
@@ -141,7 +155,7 @@ class InternalMaterialRequest(db.Model):
             'project_id': self.project_id,
             'cr_id': self.cr_id,
             'request_buyer_id': self.request_buyer_id,
-            'material_name': self.material_name,
+            'item_name': self.item_name,
             'quantity': self.quantity,
             'brand': self.brand,
             'size': self.size,
@@ -244,7 +258,7 @@ class MaterialDeliveryNote(db.Model):
 
     delivery_note_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     delivery_note_number = db.Column(db.String(50), unique=True, nullable=False)  # MDN-2025-001
-    project_id = db.Column(db.Integer, nullable=False)
+    project_id = db.Column(db.Integer, nullable=True)  # Nullable for store transfers (no project)
     delivery_date = db.Column(db.DateTime, nullable=False)
     attention_to = db.Column(db.String(255), nullable=True)  # Site engineer/supervisor name
     delivery_from = db.Column(db.String(255), default='M2 Store')  # Store location
@@ -253,10 +267,15 @@ class MaterialDeliveryNote(db.Model):
     vehicle_number = db.Column(db.String(100), nullable=True)
     driver_name = db.Column(db.String(255), nullable=True)
     driver_contact = db.Column(db.String(50), nullable=True)
+    delivery_note_url = db.Column(db.Text, nullable=True)  # URL to uploaded delivery note file from vendor
     prepared_by = db.Column(db.String(255), nullable=False)
     checked_by = db.Column(db.String(255), nullable=True)
     status = db.Column(db.String(20), default='DRAFT')  # DRAFT, ISSUED, IN_TRANSIT, DELIVERED, PARTIAL, CANCELLED
     notes = db.Column(db.Text, nullable=True)
+
+    # Transport tracking fields
+    transport_fee = db.Column(db.Float, nullable=True, default=0.0)
+    delivery_batch_ref = db.Column(db.Text, nullable=True, index=True)  # e.g., "MSQ-OUT-01"
 
     # Delivery confirmation fields
     received_by = db.Column(db.String(255), nullable=True)
@@ -289,10 +308,13 @@ class MaterialDeliveryNote(db.Model):
             'vehicle_number': self.vehicle_number,
             'driver_name': self.driver_name,
             'driver_contact': self.driver_contact,
+            'delivery_note_url': self.delivery_note_url,
             'prepared_by': self.prepared_by,
             'checked_by': self.checked_by,
             'status': self.status,
             'notes': self.notes,
+            'transport_fee': self.transport_fee,
+            'delivery_batch_ref': self.delivery_batch_ref,
             'received_by': self.received_by,
             'received_at': self.received_at.isoformat() if self.received_at else None,
             'receiver_notes': self.receiver_notes,
@@ -371,6 +393,10 @@ class ReturnDeliveryNote(db.Model):
     status = db.Column(db.String(20), default='DRAFT', nullable=False)  # DRAFT, ISSUED, IN_TRANSIT, RECEIVED, PARTIAL, CANCELLED
     notes = db.Column(db.Text, nullable=True)
 
+    # Transport and delivery fields
+    transport_fee = db.Column(db.Numeric(10, 2), default=0)  # Transport fee in AED
+    delivery_note_url = db.Column(db.Text, nullable=True)  # URL to uploaded delivery note
+
     # Store acceptance fields
     accepted_by = db.Column(db.String(255), nullable=True)
     accepted_at = db.Column(db.DateTime, nullable=True)
@@ -411,6 +437,8 @@ class ReturnDeliveryNote(db.Model):
             'checked_by': self.checked_by,
             'status': self.status,
             'notes': self.notes,
+            'transport_fee': float(self.transport_fee) if self.transport_fee else 0,
+            'delivery_note_url': self.delivery_note_url,
             'accepted_by': self.accepted_by,
             'accepted_at': self._format_datetime(self.accepted_at),
             'acceptance_notes': self.acceptance_notes,

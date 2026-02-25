@@ -10,7 +10,9 @@ from controllers.vendor_controller import (
     get_vendor_products,
     update_vendor_product,
     delete_vendor_product,
-    get_vendor_categories
+    get_vendor_categories,
+    create_vendor_category,
+    get_vendors_matching_materials
 )
 from controllers.auth_controller import jwt_required
 
@@ -142,6 +144,26 @@ def get_vendor_categories_route():
     if access_check:
         return access_check
     return get_vendor_categories()
+
+
+@vendor_routes.route('/categories', methods=['POST'])
+@jwt_required
+def create_vendor_category_route():
+    """Create a new vendor category (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return create_vendor_category()
+
+@vendor_routes.route('/matching-vendors', methods=['POST'])
+@jwt_required
+def get_matching_vendors_route():
+    """Find vendors whose products match given material names (Buyer, TD, or Admin)"""
+    access_check = check_vendor_access()
+    if access_check:
+        return access_check
+    return get_vendors_matching_materials()
+
 
 # DEBUG endpoint - temporary
 @vendor_routes.route('/debug-role', methods=['GET'])

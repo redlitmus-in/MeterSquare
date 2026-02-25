@@ -86,12 +86,8 @@ def calculate_boq_financial_data(boq, boq_details):
     overhead_percentage = 0
     profit_margin = 0
 
-    log.info(f"🔍 [Financial Calc] BOQ {boq.boq_id if boq else 'Unknown'}: Starting calculation")
-    log.info(f"🔍 [Financial Calc] Has boq_details: {boq_details is not None}, Has boq_details.boq_details: {boq_details.boq_details is not None if boq_details else False}")
-
     if boq_details and boq_details.boq_details and "items" in boq_details.boq_details:
         items = boq_details.boq_details["items"]
-        log.info(f"🔍 [Financial Calc] BOQ {boq.boq_id if boq else 'Unknown'}: Processing {len(items)} items")
         for item in items:
             item_materials_cost = 0
             item_labour_cost = 0
@@ -205,8 +201,6 @@ def calculate_boq_financial_data(boq, boq_details):
     # Calculate GRAND TOTAL (Excluding VAT) = Subtotal - Discount
     final_total_cost = subtotal_before_discount - discount_amount
 
-    log.info(f"💰 [Financial Calc] BOQ {boq.boq_id if boq else 'Unknown'}: Materials={total_material_cost}, Labour={total_labour_cost}, Total={final_total_cost}")
-
     return {
         "items_count": boq_details.total_items if boq_details else 0,
         "material_count": boq_details.total_materials if boq_details else 0,
@@ -302,34 +296,58 @@ def td_mail_send():
         # Initialize email service
         # boq_email_service = BOQEmailService()
 
-        # Find Estimator (sender of original BOQ)
-        estimator_role = Role.query.filter(
-            Role.role.in_(['estimator', 'Estimator']),
-            Role.is_deleted == False
-        ).first()
-
+        # Find Estimator assigned to this project (from project.estimator_id)
         estimator = None
-        if estimator_role:
+        estimator_email = None
+        estimator_name = None
+
+        # Method 1: Get estimator from project assignment (PREFERRED)
+        if project.estimator_id:
             estimator = User.query.filter_by(
-                role_id=estimator_role.role_id,
+                user_id=project.estimator_id,
                 is_active=True,
                 is_deleted=False
-            ).filter(
-                db.or_(
-                    User.full_name == boq.created_by,
-                    User.email == boq.created_by
-                )
             ).first()
 
-            if not estimator:
+            if estimator:
+                estimator_email = estimator.email
+                estimator_name = estimator.full_name
+        # Method 2: Fallback to BOQ creator if no project estimator assigned
+        if not estimator:
+            estimator_role = Role.query.filter(
+                Role.role.in_(['estimator', 'Estimator']),
+                Role.is_deleted == False
+            ).first()
+
+            if estimator_role:
                 estimator = User.query.filter_by(
                     role_id=estimator_role.role_id,
                     is_active=True,
                     is_deleted=False
+                ).filter(
+                    db.or_(
+                        User.full_name == boq.created_by,
+                        User.email == boq.created_by
+                    )
                 ).first()
 
-        estimator_email = estimator.email if estimator and estimator.email else boq.created_by
-        estimator_name = estimator.full_name if estimator else boq.created_by
+                if not estimator:
+                    # Last resort: get any active estimator
+                    estimator = User.query.filter_by(
+                        role_id=estimator_role.role_id,
+                        is_active=True,
+                        is_deleted=False
+                    ).first()
+
+                if estimator:
+                    estimator_email = estimator.email
+                    estimator_name = estimator.full_name
+
+        # Final fallback
+        if not estimator_email:
+            estimator_email = boq.created_by
+            estimator_name = boq.created_by
+            log.warning(f"📧 Could not find estimator user, using BOQ creator: {boq.created_by}")
  
         # Get existing BOQ history
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -347,9 +365,6 @@ def td_mail_send():
         else:
             current_actions = []
  
-        log.info(f"BOQ {boq_id} - Existing history found: {existing_history is not None}")
-        log.info(f"BOQ {boq_id} - Current actions before append: {current_actions}")
- 
         new_status = None
         email_sent = False
         recipient_email = None
@@ -358,31 +373,56 @@ def td_mail_send():
  
         # ==================== APPROVED STATUS ====================
         if technical_director_status.lower() == 'approved':
-            log.info(f"BOQ {boq_id} approved by TD, sending to Estimator")
- 
             # Check if this is a revision approval (status was Pending_Revision)
             # or a regular approval from Pending_TD_Approval
             is_revision_approval = boq.status.lower() == 'pending_revision'
             new_status = "Revision_Approved" if is_revision_approval else "Approved"
- 
+
             # DO NOT increment revision_number here!
             # Revision number is already incremented when estimator clicks "Make Revision" and saves
             # (see boq_controller.py revision_boq function line 1436-1438)
             # TD approval should only change status, not increment revision number
- 
+
             if not estimator or not estimator_email:
                 return jsonify({
                     "success": False,
                     "message": "Cannot send approval email - Estimator email not found"
                 }), 400
- 
+
             recipient_email = estimator_email
             recipient_name = estimator_name
             recipient_role = "estimator"
- 
-            # Email sending disabled - approval proceeds without emails
-            email_sent = True
-            log.info(f"TD approved BOQ {boq_id} for Estimator {recipient_name} - Email disabled")
+
+            # ==================== CHECK ESTIMATOR ONLINE/OFFLINE STATUS ====================
+            email_sent = False
+
+            # Normalize status to lowercase for comparison
+            estimator_status = str(estimator.user_status).lower().strip() if estimator.user_status else "unknown"
+            if estimator_status == "offline":
+                # Initialize email service
+                boq_email_service = BOQEmailService()
+
+                # Add project_code to project_data
+                project_data['project_code'] = project.project_code or 'N/A'
+
+                # Send professional GREEN-themed approval confirmation email to Estimator
+                email_sent = boq_email_service.send_boq_approval_confirmation_to_estimator(
+                    boq_data=boq_data,
+                    project_data=project_data,
+                    items_summary=items_summary,
+                    estimator_email=estimator_email,
+                    comments=comments,
+                    estimator_name=estimator_name,
+                    pm_name=td_name,  # TD acts as approver
+                    approver_role="Technical Director"  # Show TD role in heading
+                )
+
+                if email_sent:
+                    log.info(f"📧 ✅ TD approval email sent successfully to {estimator_name} ({estimator_email})")
+                else:
+                    log.error(f"📧 ❌ Failed to send TD approval email to {estimator_name}")
+            else:
+                log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped (in-app notification only)")
  
             # Prepare new action for APPROVED
             new_action = {
@@ -405,22 +445,47 @@ def td_mail_send():
  
         # ==================== REJECTED STATUS ====================
         else:  # rejected
-            log.info(f"BOQ {boq_id} rejected by TD, sending back to Estimator")
             new_status = "Rejected"
- 
+
             if not estimator or not estimator_email:
                 return jsonify({
                     "success": False,
                     "message": "Cannot send rejection email - Estimator email not found"
                 }), 400
- 
+
             recipient_email = estimator_email
             recipient_name = estimator_name
             recipient_role = "estimator"
- 
-            # Email sending disabled - rejection proceeds without emails
-            email_sent = True
-            log.info(f"TD rejected BOQ {boq_id} for Estimator {recipient_name} - Email disabled")
+
+            # ==================== CHECK ESTIMATOR ONLINE/OFFLINE STATUS ====================
+            email_sent = False
+            # Normalize status to lowercase for comparison
+            estimator_status = str(estimator.user_status).lower().strip() if estimator.user_status else "unknown"
+            if estimator_status == "offline":
+                # Initialize email service
+                boq_email_service = BOQEmailService()
+
+                # Add project_code to project_data
+                project_data['project_code'] = project.project_code or 'N/A'
+
+                # Send professional RED-themed rejection email to Estimator
+                email_sent = boq_email_service.send_boq_rejection_to_estimator(
+                    boq_data=boq_data,
+                    project_data=project_data,
+                    items_summary=items_summary,
+                    estimator_email=estimator_email,
+                    rejection_reason=rejection_reason or comments or "No reason provided",
+                    estimator_name=estimator_name,
+                    pm_name=td_name,  # TD acts as rejector
+                    approver_role="Technical Director"  # Show TD role in heading
+                )
+
+                if email_sent:
+                    log.info(f"📧 ✅ TD rejection email sent successfully to {estimator_name} ({estimator_email})")
+                else:
+                    log.error(f"📧 ❌ Failed to send TD rejection email to {estimator_name}")
+            else:
+                log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped (in-app notification only)")
  
             # Prepare new action for REJECTED
             new_action = {
@@ -445,28 +510,29 @@ def td_mail_send():
             # TD rejection should ONLY show in Rejected tab, NOT in Internal Revisions tab
             # Internal revisions are for tracking estimator edits during internal approval cycle
             # TD rejection is a final decision that sends BOQ back to estimator for complete rework
-            log.info(f"✅ TD rejection - BOQ {boq_id} will show only in Rejected tab")
  
         # ==================== UPDATE BOQ & HISTORY ====================
+        # Cache BOQ fields BEFORE commit (avoid lazy-loading issues after commit)
+        cached_has_internal_revisions = bool(boq.has_internal_revisions)
+        cached_internal_revision_number = boq.internal_revision_number or 0
+        cached_project_name = project.project_name
+
         # Update BOQ status
         boq.status = new_status
         boq.email_sent = True
         boq.last_modified_by = td_name
         boq.last_modified_at = datetime.utcnow()
- 
+
         # Append new action to existing actions array
         current_actions.append(new_action)
- 
-        log.info(f"BOQ {boq_id} - New action created: {new_action}")
-        log.info(f"BOQ {boq_id} - Current actions after append: {current_actions}")
- 
+
         if existing_history:
             # Update existing history
             existing_history.action = current_actions
             # Mark the JSONB field as modified for SQLAlchemy to detect changes
             from sqlalchemy.orm.attributes import flag_modified
             flag_modified(existing_history, "action")
- 
+
             existing_history.action_by = td_name
             existing_history.boq_status = new_status
             existing_history.sender = td_name
@@ -477,8 +543,6 @@ def td_mail_send():
             existing_history.action_date = datetime.utcnow()
             existing_history.last_modified_by = td_name
             existing_history.last_modified_at = datetime.utcnow()
- 
-            log.info(f"BOQ {boq_id} - Updated existing history with {len(current_actions)} actions")
         else:
             # Create new history entry
             boq_history = BOQHistory(
@@ -495,84 +559,175 @@ def td_mail_send():
                 created_by=td_name
             )
             db.session.add(boq_history)
-            log.info(f"BOQ {boq_id} - Created new history with {len(current_actions)} actions")
- 
-        db.session.commit()
-        log.info(f"BOQ {boq_id} - Database committed successfully")
- 
-        # Send notification about TD's decision
-        try:
-            # Get estimator user_id for notification from BOQHistory actions
-            # This ensures we notify the CORRECT estimator who sent the BOQ to TD
-            estimator_user_id = None
 
-            # Find the latest "sent_to_td" action to get the estimator's user_id
+        db.session.commit()
+
+        # ==================== SEND NOTIFICATION ====================
+        notification_sent = False
+        notification_error_msg = None
+        try:
+            from utils.notification_utils import NotificationManager
+            from socketio_server import send_notification_to_user
+            from utils.role_route_mapper import get_boq_view_url
+
+            # Build recipient list: notify both the estimator (BOQ creator) and
+            # the PM who forwarded the BOQ to TD (if different from estimator)
+            recipient_user_ids = set()
+
+            # 1. Get the real estimator (BOQ creator) user_id
+            if estimator and hasattr(estimator, 'user_id') and estimator.user_id:
+                recipient_user_ids.add(estimator.user_id)
+            # 2. Get PM/user who forwarded BOQ to TD (from sent_to_td action)
             if current_actions:
-                for action in reversed(current_actions):  # Check from most recent
+                for action in reversed(current_actions):
                     if action.get('type') == 'sent_to_td' and action.get('decided_by_user_id'):
-                        estimator_user_id = action.get('decided_by_user_id')
+                        fwd_uid = action.get('decided_by_user_id')
+                        recipient_user_ids.add(fwd_uid)
                         break
 
-            # Fallback: Try to get from estimator object (old logic for backwards compatibility)
-            if not estimator_user_id and estimator and hasattr(estimator, 'user_id'):
-                estimator_user_id = estimator.user_id
+            # 3. Final fallback: use the estimator object directly
+            if not recipient_user_ids and estimator:
+                try:
+                    est_id = getattr(estimator, 'user_id', None)
+                    if est_id:
+                        recipient_user_ids.add(est_id)
+                except Exception:
+                    pass
 
-            if estimator_user_id:
-                log.info(f"Sending notification to estimator user_id {estimator_user_id} ({estimator_name})")
+            if not recipient_user_ids:
+                log.warning(f"BOQ {boq_id} - No recipients found for notification. estimator={estimator}, estimator.user_id={getattr(estimator, 'user_id', None)}")
+                notification_error_msg = "No recipient found for notification"
+            else:
+                decision = 'approved' if technical_director_status.lower() == 'approved' else 'rejected'
+
                 # Check if this BOQ has internal revisions - send specific notification
-                if boq.has_internal_revisions and boq.internal_revision_number and boq.internal_revision_number > 0:
-                    from utils.comprehensive_notification_service import ComprehensiveNotificationService
-                    if technical_director_status.lower() == 'approved':
-                        ComprehensiveNotificationService.notify_internal_revision_approved(
-                            boq_id=boq_id,
-                            project_name=project.project_name,
-                            revision_number=boq.internal_revision_number,
-                            td_id=td_user_id,
-                            td_name=td_name,
-                            actor_user_id=estimator_user_id,
-                            actor_name=estimator_name
-                        )
-                        log.info(f"Sent internal revision approved notification for BOQ {boq_id}")
-                    else:
-                        ComprehensiveNotificationService.notify_internal_revision_rejected(
-                            boq_id=boq_id,
-                            project_name=project.project_name,
-                            revision_number=boq.internal_revision_number,
-                            td_id=td_user_id,
-                            td_name=td_name,
-                            actor_user_id=estimator_user_id,
-                            actor_name=estimator_name,
-                            rejection_reason=rejection_reason or comments or "No reason provided"
-                        )
-                        log.info(f"Sent internal revision rejected notification for BOQ {boq_id}")
+                is_internal_revision = cached_has_internal_revisions and cached_internal_revision_number > 0
+
+                if is_internal_revision:
+                    try:
+                        from utils.comprehensive_notification_service import ComprehensiveNotificationService
+                        for uid in recipient_user_ids:
+                            try:
+                                if decision == 'approved':
+                                    ComprehensiveNotificationService.notify_internal_revision_approved(
+                                        boq_id=boq_id,
+                                        project_name=cached_project_name,
+                                        revision_number=cached_internal_revision_number,
+                                        td_id=td_user_id,
+                                        td_name=td_name,
+                                        actor_user_id=uid,
+                                        actor_name=estimator_name
+                                    )
+                                else:
+                                    ComprehensiveNotificationService.notify_internal_revision_rejected(
+                                        boq_id=boq_id,
+                                        project_name=cached_project_name,
+                                        revision_number=cached_internal_revision_number,
+                                        td_id=td_user_id,
+                                        td_name=td_name,
+                                        actor_user_id=uid,
+                                        actor_name=estimator_name,
+                                        rejection_reason=rejection_reason or comments or "No reason provided"
+                                    )
+                                notification_sent = True
+                            except Exception as per_user_err:
+                                log.error(f"BOQ {boq_id} - Service notification failed for user {uid}: {per_user_err}")
+                                import traceback
+                                log.error(traceback.format_exc())
+                    except Exception as svc_import_err:
+                        log.error(f"BOQ {boq_id} - ComprehensiveNotificationService import/call failed: {svc_import_err}")
+
+                    # If service notification failed, create directly in DB
+                    if not notification_sent:
+                        for uid in recipient_user_ids:
+                            try:
+                                notif_title = f'Internal Revision {"Approved" if decision == "approved" else "Rejected"}'
+                                notif_msg = (
+                                    f'Internal revision #{cached_internal_revision_number} for {cached_project_name} '
+                                    f'was {decision} by {td_name}'
+                                )
+                                if decision == 'rejected':
+                                    notif_msg += f'. Reason: {rejection_reason or comments or "No reason provided"}'
+                                fallback_notif = NotificationManager.create_notification(
+                                    user_id=uid,
+                                    type='success' if decision == 'approved' else 'rejection',
+                                    title=notif_title,
+                                    message=notif_msg,
+                                    priority='high',
+                                    category='boq',
+                                    action_url=get_boq_view_url(uid, boq_id, tab='rejected' if decision == 'rejected' else 'revisions'),
+                                    action_label='View BOQ',
+                                    metadata={'boq_id': boq_id, 'internal_revision_number': cached_internal_revision_number, 'decision': decision},
+                                    sender_id=td_user_id,
+                                    sender_name=td_name,
+                                    target_role='estimator'
+                                )
+                                send_notification_to_user(uid, fallback_notif.to_dict())
+                                notification_sent = True
+                                log.info(f"BOQ {boq_id} - Direct DB notification created for user {uid}, id={fallback_notif.id}")
+                            except Exception as fallback_err:
+                                log.error(f"BOQ {boq_id} - Direct DB notification also failed for user {uid}: {fallback_err}")
                 else:
                     # Regular BOQ approval/rejection notification
-                    notification_service.notify_td_boq_decision(
-                        boq_id=boq_id,
-                        project_name=project.project_name,
-                        td_id=td_user_id,
-                        td_name=td_name,
-                        recipient_user_ids=[estimator_user_id],
-                        approved=(technical_director_status.lower() == 'approved'),
-                        rejection_reason=rejection_reason if technical_director_status.lower() == 'rejected' else None
-                    )
-            else:
-                log.warning(f"Could not find estimator user_id for BOQ {boq_id} notification")
+                    try:
+                        notification_service.notify_td_boq_decision(
+                            boq_id=boq_id,
+                            project_name=cached_project_name,
+                            td_id=td_user_id,
+                            td_name=td_name,
+                            recipient_user_ids=list(recipient_user_ids),
+                            approved=(decision == 'approved'),
+                            rejection_reason=rejection_reason if decision == 'rejected' else None
+                        )
+                        notification_sent = True
+                    except Exception as regular_err:
+                        log.error(f"BOQ {boq_id} - Regular notification service failed: {regular_err}")
+                        import traceback
+                        log.error(traceback.format_exc())
+
+                    # If service notification failed, create directly in DB
+                    if not notification_sent:
+                        for uid in recipient_user_ids:
+                            try:
+                                notif_title = f'BOQ {"Approved" if decision == "approved" else "Rejected"} by Technical Director'
+                                notif_msg = f'BOQ for {cached_project_name} has been {decision} by {td_name}'
+                                if decision == 'rejected':
+                                    notif_msg += f'. Reason: {rejection_reason or "No reason provided"}'
+                                fallback_notif = NotificationManager.create_notification(
+                                    user_id=uid,
+                                    type='success' if decision == 'approved' else 'rejection',
+                                    title=notif_title,
+                                    message=notif_msg,
+                                    priority='high',
+                                    category='boq',
+                                    action_url=get_boq_view_url(uid, boq_id, tab='approved' if decision == 'approved' else 'rejected'),
+                                    action_label='View BOQ',
+                                    metadata={'boq_id': boq_id, 'decision': decision},
+                                    sender_id=td_user_id,
+                                    sender_name=td_name,
+                                    target_role='estimator'
+                                )
+                                send_notification_to_user(uid, fallback_notif.to_dict())
+                                notification_sent = True
+                            except Exception as fallback_err:
+                                log.error(f"BOQ {boq_id} - Direct DB notification also failed for user {uid}: {fallback_err}")
         except Exception as notif_error:
-            log.error(f"Failed to send TD decision notification: {notif_error}")
+            log.error(f"BOQ {boq_id} - Critical: Failed to send TD decision notification: {notif_error}")
             import traceback
             log.error(traceback.format_exc())
- 
-        log.info(f"BOQ {boq_id} {new_status.lower()} by TD, email sent to {recipient_email}")
- 
+            notification_error_msg = str(notif_error)
+
+
         return jsonify({
             "success": True,
-            "message": f"BOQ {new_status.lower()} successfully and email sent to {recipient_role}",
+            "message": f"BOQ {new_status.lower()} successfully",
             "boq_id": boq_id,
             "status": new_status,
             "recipient": recipient_email,
             "recipient_role": recipient_role,
-            "recipient_name": recipient_name
+            "recipient_name": recipient_name,
+            "notification_sent": notification_sent,
+            "notification_error": "Notification delivery failed" if notification_error_msg else None
         }), 200
  
     except Exception as e:
@@ -751,39 +906,54 @@ def get_td_dashboard_stats():
             BOQ.status != 'Pending_PM_Approval'
         ).all()
 
-        # Count BOQs using EXACT same logic as frontend tabs
-        status_counts = {
-            'in_progress': 0,  # Revisions
-            'completed': 0,     # Approved
-            'pending': 0,       # Pending
-            'delayed': 0        # Rejected by TD
-        }
+        # Count BOQs using EXACT same logic as TD tab counts endpoint
+        # Pending tab: Pending_TD_Approval and Pending statuses
+        pending_count = db.session.query(func.count(BOQ.boq_id)).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Pending_TD_Approval', 'Pending'])
+        ).scalar() or 0
 
-        for boq in boqs_query:
-            project = boq.project
-            if not project or project.is_deleted:
-                continue
-
-            # Check PM assignment - matching frontend logic exactly
-            pm_assigned = project.user_id is not None and (
-                (isinstance(project.user_id, list) and len(project.user_id) > 0) or
-                (not isinstance(project.user_id, list) and project.user_id)
+        # Approved tab: Approved, Revision_Approved, Sent_for_Confirmation AND not assigned to PM
+        approved_count = db.session.query(func.count(BOQ.boq_id)).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'Sent_for_Confirmation']),
+            or_(
+                Project.user_id == None,
+                Project.user_id == '[]',
+                Project.user_id == 'null'
             )
+        ).scalar() or 0
 
-            status_lower = boq.status.lower() if boq.status else ''
+        # Revisions tab: revision_number > 0
+        revisions_count = db.session.query(func.count(BOQ.boq_id)).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.revision_number > 0
+        ).scalar() or 0
 
-            # Pending: status='pending' AND no PM assigned
-            if status_lower == 'pending' and not pm_assigned:
-                status_counts['pending'] += 1
-            # Revisions: status='pending_revision'
-            elif status_lower == 'pending_revision':
-                status_counts['in_progress'] += 1
-            # Approved: status in ['approved', 'revision_approved', 'sent_for_confirmation'] AND no PM assigned
-            elif status_lower in ['approved', 'revision_approved', 'sent_for_confirmation'] and not pm_assigned:
-                status_counts['completed'] += 1
-            # Rejected by TD: status='rejected'
-            elif status_lower == 'rejected':
-                status_counts['delayed'] += 1
+        # Rejected by TD tab
+        rejected_count = db.session.query(func.count(BOQ.boq_id)).join(
+            Project, BOQ.project_id == Project.project_id
+        ).filter(
+            BOQ.is_deleted == False,
+            Project.is_deleted == False,
+            BOQ.status.in_(['Rejected', 'rejected'])
+        ).scalar() or 0
+
+        status_counts = {
+            'in_progress': revisions_count,  # Revisions
+            'completed': approved_count,      # Approved
+            'pending': pending_count,         # Pending
+            'delayed': rejected_count         # Rejected by TD
+        }
 
         # ============ Budget Distribution by Work Type (from same BOQs) ============
         budget_distribution = {}
@@ -816,35 +986,28 @@ def get_td_dashboard_stats():
         performance_month_labels = []
         current_date = datetime.now()
 
-        # Get last 12 months of data
+        # Batch approach: fetch all BOQs in last 12 months, aggregate in Python
+        _perf_start = (current_date - timedelta(days=30 * 11)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        _all_perf_boqs = db.session.query(BOQ.created_at, BOQ.status).filter(
+            BOQ.is_deleted == False,
+            BOQ.created_at >= _perf_start
+        ).all()
+        _approved_statuses = {'Approved', 'approved', 'Revision_Approved', 'new_purchase_create', 'sent_for_review'}
+        # Build month → (total, approved) dict
+        _perf_by_month = {}  # key: (year, month)
+        for _b_date, _b_status in _all_perf_boqs:
+            if _b_date:
+                _key = (_b_date.year, _b_date.month)
+                _tot, _appr = _perf_by_month.get(_key, (0, 0))
+                _perf_by_month[_key] = (_tot + 1, _appr + (1 if _b_status in _approved_statuses else 0))
+
         for i in range(11, -1, -1):
-            # Calculate month start and end
             month_date = current_date - timedelta(days=30 * i)
             month_start = month_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-            # Get next month's start
-            if month_start.month == 12:
-                month_end = month_start.replace(year=month_start.year + 1, month=1)
-            else:
-                month_end = month_start.replace(month=month_start.month + 1)
-
-            # Add month label (e.g., "Jan", "Feb", etc.)
             performance_month_labels.append(month_start.strftime('%b'))
-
-            total_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
-                BOQ.is_deleted == False,
-                BOQ.created_at >= month_start,
-                BOQ.created_at < month_end
-            ).scalar() or 0
-
-            approved_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
-                BOQ.is_deleted == False,
-                BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'new_purchase_create', 'sent_for_review']),
-                BOQ.created_at >= month_start,
-                BOQ.created_at < month_end
-            ).scalar() or 0
-
-            success_rate = round((approved_boqs / total_boqs * 100), 0) if total_boqs > 0 else 0
+            _key = (month_start.year, month_start.month)
+            _tot, _appr = _perf_by_month.get(_key, (0, 0))
+            success_rate = round((_appr / _tot * 100), 0) if _tot > 0 else 0
             monthly_performance.append(success_rate)
 
         # ============ Revenue Growth (Quarterly) ============
@@ -854,32 +1017,32 @@ def get_td_dashboard_stats():
             'previous_year': []
         }
 
+        # Batch approach: fetch approved BOQ revenue for 2-year range, aggregate in Python
+        _rev_start = datetime(current_year - 1, 1, 1)
+        _rev_end = datetime(current_year + 1, 1, 1)
+        _all_rev_rows = db.session.query(BOQ.created_at, BOQDetails.total_cost).join(
+            BOQ, BOQ.boq_id == BOQDetails.boq_id
+        ).filter(
+            BOQ.is_deleted == False,
+            BOQDetails.is_deleted == False,
+            BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review']),
+            BOQ.created_at >= _rev_start,
+            BOQ.created_at < _rev_end
+        ).all()
+        # Build (year, quarter) → sum dict
+        _rev_by_quarter = {}
+        for _r_date, _r_cost in _all_rev_rows:
+            if _r_date and _r_cost:
+                _q = (_r_date.month - 1) // 3 + 1
+                _qkey = (_r_date.year, _q)
+                _rev_by_quarter[_qkey] = _rev_by_quarter.get(_qkey, 0) + float(_r_cost)
+
         for year in [current_year - 1, current_year]:
             year_revenue = []
             for quarter in range(1, 5):
-                quarter_start_month = (quarter - 1) * 3 + 1
-                quarter_start = datetime(year, quarter_start_month, 1)
-                if quarter == 4:
-                    quarter_end = datetime(year + 1, 1, 1)
-                else:
-                    quarter_end = datetime(year, quarter_start_month + 3, 1)
-
-                revenue = db.session.query(
-                    func.sum(BOQDetails.total_cost)
-                ).join(
-                    BOQ, BOQ.boq_id == BOQDetails.boq_id
-                ).filter(
-                    BOQ.is_deleted == False,
-                    BOQDetails.is_deleted == False,
-                    BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review']),
-                    BOQ.created_at >= quarter_start,
-                    BOQ.created_at < quarter_end
-                ).scalar() or 0
-
-                # Convert to lakhs
-                revenue_lakhs = round(float(revenue) / 100000, 0) if revenue else 0
+                revenue = _rev_by_quarter.get((year, quarter), 0)
+                revenue_lakhs = round(revenue / 100000, 0) if revenue else 0
                 year_revenue.append(revenue_lakhs)
-
             if year == current_year - 1:
                 quarterly_revenue['previous_year'] = year_revenue
             else:
@@ -918,38 +1081,138 @@ def get_td_dashboard_stats():
         monthly_revenue = []
         month_labels = []
 
+        # Batch approach: fetch all approved BOQ revenue in last 6 months, aggregate in Python
+        _rev6_start = (datetime.now().replace(day=1) - timedelta(days=30 * 5)).replace(hour=0, minute=0, second=0, microsecond=0)
+        _all_rev6_rows = db.session.query(BOQ.created_at, BOQDetails.total_cost).join(
+            BOQ, BOQ.boq_id == BOQDetails.boq_id
+        ).filter(
+            BOQ.is_deleted == False,
+            BOQDetails.is_deleted == False,
+            BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review']),
+            BOQ.created_at >= _rev6_start
+        ).all()
+        _rev6_by_month = {}
+        for _r_date, _r_cost in _all_rev6_rows:
+            if _r_date and _r_cost:
+                _rkey = (_r_date.year, _r_date.month)
+                _rev6_by_month[_rkey] = _rev6_by_month.get(_rkey, 0) + float(_r_cost)
+
         for i in range(5, -1, -1):  # Last 6 months
             month_start = datetime.now().replace(day=1) - timedelta(days=30*i)
-            month_end = (month_start + timedelta(days=32)).replace(day=1)
-
-            revenue = db.session.query(
-                func.sum(BOQDetails.total_cost)
-            ).join(
-                BOQ, BOQ.boq_id == BOQDetails.boq_id
-            ).filter(
-                BOQ.is_deleted == False,
-                BOQDetails.is_deleted == False,
-                BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review']),
-                BOQ.created_at >= month_start,
-                BOQ.created_at < month_end
-            ).scalar() or 0
-
-            # Convert to lakhs
+            month_start = month_start.replace(hour=0, minute=0, second=0, microsecond=0)
+            revenue = _rev6_by_month.get((month_start.year, month_start.month), 0)
             revenue_lakhs = round(float(revenue) / 100000, 0) if revenue else 0
             monthly_revenue.append(revenue_lakhs)
             month_labels.append(month_start.strftime('%b %Y'))
 
-        # ============ Team Performance (Top Estimators by BOQ Count from same BOQs) ============
-        estimator_counts = {}
-        for boq in boqs_query:
-            if boq.created_by:
-                estimator_counts[boq.created_by] = estimator_counts.get(boq.created_by, 0) + 1
+        # ============ Disposal Trend Statistics (Asset + Material) ============
+        from models.returnable_assets import AssetDisposal
+        from models.inventory import MaterialReturn
+        from dateutil.relativedelta import relativedelta
 
-        # Sort and get top 5
-        top_estimators = [
-            {'name': name, 'count': count}
-            for name, count in sorted(estimator_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-        ]
+        # Get last 6 months of disposal trend data
+        disposal_trend = []
+        disposal_month_labels = []
+
+        current_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        _disp_start = current_month - relativedelta(months=5)
+        _disp_end = current_month + relativedelta(months=1)
+
+        # Batch fetch all asset/material disposals in the 6-month window, aggregate in Python
+        _asset_disp_rows = db.session.query(AssetDisposal.created_at).filter(
+            AssetDisposal.created_at >= _disp_start,
+            AssetDisposal.created_at < _disp_end
+        ).all()
+        _mat_disp_rows = db.session.query(MaterialReturn.created_at).filter(
+            MaterialReturn.created_at >= _disp_start,
+            MaterialReturn.created_at < _disp_end,
+            MaterialReturn.condition.in_(['Damaged', 'Defective'])
+        ).all()
+        _asset_disp_by_month = {}
+        for (_dt,) in _asset_disp_rows:
+            if _dt:
+                _k = (_dt.year, _dt.month)
+                _asset_disp_by_month[_k] = _asset_disp_by_month.get(_k, 0) + 1
+        _mat_disp_by_month = {}
+        for (_dt,) in _mat_disp_rows:
+            if _dt:
+                _k = (_dt.year, _dt.month)
+                _mat_disp_by_month[_k] = _mat_disp_by_month.get(_k, 0) + 1
+
+        for i in range(5, -1, -1):  # Last 6 months
+            month_start = current_month - relativedelta(months=i)
+            _k = (month_start.year, month_start.month)
+            disposal_trend.append({
+                'month': month_start.strftime('%b'),
+                'asset_disposals': _asset_disp_by_month.get(_k, 0),
+                'material_disposals': _mat_disp_by_month.get(_k, 0)
+            })
+            disposal_month_labels.append(month_start.strftime('%b'))
+
+        # Count current totals by status
+        # Asset Disposals
+        asset_pending = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
+            AssetDisposal.status == 'pending_review'
+        ).scalar() or 0
+
+        asset_approved = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
+            AssetDisposal.status == 'approved'
+        ).scalar() or 0
+
+        asset_rejected = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
+            AssetDisposal.status == 'rejected'
+        ).scalar() or 0
+
+        # Material Disposals (Damaged/Defective returns)
+        material_pending = db.session.query(func.count(MaterialReturn.return_id)).filter(
+            MaterialReturn.condition.in_(['Damaged', 'Defective']),
+            or_(MaterialReturn.disposal_status == 'pending_review', MaterialReturn.disposal_status == None)
+        ).scalar() or 0
+
+        material_approved = db.session.query(func.count(MaterialReturn.return_id)).filter(
+            MaterialReturn.condition.in_(['Damaged', 'Defective']),
+            MaterialReturn.disposal_status.in_(['approved', 'approved_for_disposal', 'disposed'])
+        ).scalar() or 0
+
+        material_rejected = db.session.query(func.count(MaterialReturn.return_id)).filter(
+            MaterialReturn.condition.in_(['Damaged', 'Defective']),
+            MaterialReturn.disposal_status == 'rejected'
+        ).scalar() or 0
+
+        # Get total estimated value of asset disposals
+        total_disposal_value = db.session.query(
+            func.sum(AssetDisposal.estimated_value)
+        ).filter(
+            AssetDisposal.status.in_(['pending_review', 'approved'])
+        ).scalar() or 0
+
+        # Get total material disposal value
+        total_material_disposal_value = db.session.query(
+            func.sum(MaterialReturn.disposal_value)
+        ).filter(
+            MaterialReturn.condition.in_(['Damaged', 'Defective'])
+        ).scalar() or 0
+
+        disposal_stats = {
+            'asset': {
+                'pending': asset_pending,
+                'approved': asset_approved,
+                'rejected': asset_rejected,
+                'total': asset_pending + asset_approved + asset_rejected
+            },
+            'material': {
+                'pending': material_pending,
+                'approved': material_approved,
+                'rejected': material_rejected,
+                'total': material_pending + material_approved + material_rejected
+            },
+            'trend': disposal_trend,
+            'month_labels': disposal_month_labels,
+            'total_asset_value': round(float(total_disposal_value), 2),
+            'total_material_value': round(float(total_material_disposal_value), 2),
+            'grand_total': (asset_pending + asset_approved + asset_rejected +
+                          material_pending + material_approved + material_rejected)
+        }
 
         # ============ Active Projects Overview ============
         active_projects_query = db.session.query(Project).filter(
@@ -957,46 +1220,67 @@ def get_td_dashboard_stats():
             Project.status.in_(['In Progress', 'in_progress', 'ongoing', 'Ongoing'])
         ).order_by(Project.created_at.desc()).limit(10).all()
 
+        # ── Batch pre-fetch budget, BOQ counts, and PMs for all active projects ─
+        _td_active_proj_ids = [p.project_id for p in active_projects_query]
+
+        # Budget: SUM(total_cost) per project in one GROUP BY query
+        _td_budget_rows = db.session.query(
+            BOQ.project_id,
+            func.sum(BOQDetails.total_cost)
+        ).join(BOQDetails, BOQ.boq_id == BOQDetails.boq_id).filter(
+            BOQ.project_id.in_(_td_active_proj_ids),
+            BOQ.is_deleted == False,
+            BOQDetails.is_deleted == False
+        ).group_by(BOQ.project_id).all() if _td_active_proj_ids else []
+        _td_budget_map = {row[0]: (row[1] or 0) for row in _td_budget_rows}
+
+        # BOQ counts: total and approved per project in one pass
+        _td_boq_rows = db.session.query(
+            BOQ.project_id, BOQ.status
+        ).filter(
+            BOQ.project_id.in_(_td_active_proj_ids),
+            BOQ.is_deleted == False
+        ).all() if _td_active_proj_ids else []
+        _APPROVED_STATUSES = {'Approved', 'approved', 'new_purchase_create', 'sent_for_review'}
+        _td_total_boqs = {}
+        _td_approved_boqs = {}
+        for _row in _td_boq_rows:
+            _td_total_boqs[_row[0]] = _td_total_boqs.get(_row[0], 0) + 1
+            if _row[1] in _APPROVED_STATUSES:
+                _td_approved_boqs[_row[0]] = _td_approved_boqs.get(_row[0], 0) + 1
+
+        # PM users: batch all PM IDs across all projects
+        _all_pm_ids = list({
+            uid for p in active_projects_query
+            if p.user_id and isinstance(p.user_id, list)
+            for uid in p.user_id
+        })
+        _td_pm_map = {
+            u.user_id: u.full_name for u in User.query.filter(
+                User.user_id.in_(_all_pm_ids),
+                User.is_deleted == False
+            ).all()
+        } if _all_pm_ids else {}
+        # ─────────────────────────────────────────────────────────────────────────
+
         active_projects = []
         for project in active_projects_query:
-            # Get total budget from all BOQs
-            total_budget = db.session.query(
-                func.sum(BOQDetails.total_cost)
-            ).join(
-                BOQ, BOQ.boq_id == BOQDetails.boq_id
-            ).filter(
-                BOQ.project_id == project.project_id,
-                BOQ.is_deleted == False,
-                BOQDetails.is_deleted == False
-            ).scalar() or 0
+            total_budget = _td_budget_map.get(project.project_id, 0)
 
-            # Get project manager names from user_id JSONB array
+            # Get project manager names from pre-fetched dict
             pm_names = 'Unassigned'
             if project.user_id:
                 try:
-                    # user_id is a JSONB array of PM IDs
                     pm_ids = project.user_id if isinstance(project.user_id, list) else []
-                    if pm_ids:
-                        pms = User.query.filter(
-                            User.user_id.in_(pm_ids),
-                            User.is_deleted == False
-                        ).all()
-                        if pms:
-                            pm_names = ', '.join([pm.full_name for pm in pms])
+                    names = [_td_pm_map[uid] for uid in pm_ids if uid in _td_pm_map]
+                    if names:
+                        pm_names = ', '.join(names)
                 except Exception as pm_error:
                     log.warning(f"Error fetching PM names for project {project.project_id}: {str(pm_error)}")
 
-            # Calculate progress based on BOQ status (simplified metric)
-            total_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
-                BOQ.project_id == project.project_id,
-                BOQ.is_deleted == False
-            ).scalar() or 0
-
-            approved_boqs = db.session.query(func.count(BOQ.boq_id)).filter(
-                BOQ.project_id == project.project_id,
-                BOQ.is_deleted == False,
-                BOQ.status.in_(['Approved', 'approved', 'new_purchase_create', 'sent_for_review'])
-            ).scalar() or 0
+            # BOQ counts from pre-fetched dicts
+            total_boqs = _td_total_boqs.get(project.project_id, 0)
+            approved_boqs = _td_approved_boqs.get(project.project_id, 0)
 
             # Calculate progress as percentage of approved BOQs
             progress = int((approved_boqs / total_boqs * 100)) if total_boqs > 0 else 0
@@ -1036,14 +1320,9 @@ def get_td_dashboard_stats():
             'topProjects': top_projects,
             'monthlyRevenue': monthly_revenue,
             'monthLabels': month_labels,
-            'topEstimators': top_estimators,
+            'disposalStats': disposal_stats,
             'activeProjects': active_projects
         }
-
-        # Simple logging for verification
-        log.info(f"TD Dashboard - BOQ Counts: Pending={status_counts['pending']}, Approved={status_counts['completed']}, Revisions={status_counts['in_progress']}, Rejected={status_counts['delayed']}")
-        log.info(f"TD Dashboard - Total BOQs processed: {len(boqs_query)}")
-        log.info(f"TD Dashboard - Active Projects: {len(active_projects)}")
 
         return jsonify({
             'success': True,
@@ -1066,6 +1345,7 @@ def get_td_purchase_orders():
         from models.change_request import ChangeRequest
         from models.po_child import POChild
         from sqlalchemy import or_, and_
+        from utils.po_helpers import CR_COMPLETED_STATUSES
 
         current_user = g.user
         td_id = current_user['user_id']
@@ -1077,7 +1357,6 @@ def get_td_purchase_orders():
         status_filter = request.args.get('status', 'all')  # all, pending, approved, completed, rejected
 
         # Build base query - TD sees ALL change requests (read-only)
-        # Include both change requests and PO children
         base_query = db.session.query(ChangeRequest).options(
             selectinload(ChangeRequest.project),
             selectinload(ChangeRequest.boq),
@@ -1089,6 +1368,8 @@ def get_td_purchase_orders():
                 'pending_td_approval',
                 'vendor_approved',
                 'purchase_completed',
+                'routed_to_store',
+                'completed',
                 'rejected'
             ])
         )
@@ -1099,17 +1380,17 @@ def get_td_purchase_orders():
         elif status_filter == 'approved':
             base_query = base_query.filter(ChangeRequest.status == 'vendor_approved')
         elif status_filter == 'completed':
-            base_query = base_query.filter(ChangeRequest.status == 'purchase_completed')
+            base_query = base_query.filter(ChangeRequest.status.in_(CR_COMPLETED_STATUSES))
         elif status_filter == 'rejected':
             base_query = base_query.filter(ChangeRequest.status == 'rejected')
 
         # Order by created_at desc
         base_query = base_query.order_by(ChangeRequest.created_at.desc())
 
-        # Paginate
+        # Paginate CRs
         paginated = base_query.paginate(page=page, per_page=per_page, error_out=False)
 
-        # Build response
+        # Build CR list
         purchases_list = []
         for cr in paginated.items:
             project = cr.project
@@ -1122,6 +1403,7 @@ def get_td_purchase_orders():
             purchase_data = {
                 'cr_id': cr.cr_id,
                 'formatted_cr_id': f"CR-{cr.cr_id}",
+                'is_po_child': False,
                 'project_id': cr.project_id,
                 'project_name': project.project_name if project else None,
                 'project_code': project.project_code if project else None,
@@ -1139,6 +1421,10 @@ def get_td_purchase_orders():
                 'created_at': cr.created_at.isoformat() if cr.created_at else None,
                 'vendor_id': cr.selected_vendor_id,
                 'vendor_name': vendor.company_name if vendor else None,
+                'vendor_email': vendor.email if vendor else None,
+                'vendor_phone': vendor.phone if vendor else None,
+                'vendor_phone_code': vendor.phone_code if vendor else None,
+                'vendor_category': vendor.category if vendor else None,
                 'vendor_selection_status': cr.vendor_selection_status,
                 'vendor_approved_by_td_name': cr.vendor_approved_by_td_name,
                 'vendor_approval_date': cr.vendor_approval_date.isoformat() if cr.vendor_approval_date else None,
@@ -1146,6 +1432,70 @@ def get_td_purchase_orders():
                 'purchase_completion_date': cr.purchase_completion_date.isoformat() if cr.purchase_completion_date else None
             }
             purchases_list.append(purchase_data)
+
+        # For completed tab: also fetch POChild records that are completed
+        # POChildren are vendor-split purchases that have their own status lifecycle
+        po_children_list = []
+        po_children_total = 0
+        if status_filter in ('completed', 'all'):
+            po_child_query = db.session.query(POChild).options(
+                selectinload(POChild.parent_cr),
+                selectinload(POChild.vendor)
+            ).filter(
+                POChild.is_deleted == False,
+                POChild.status.in_(CR_COMPLETED_STATUSES)
+            ).order_by(POChild.updated_at.desc())
+
+            # For non-completed 'all' tab, skip POChildren to avoid mixing statuses in pagination
+            if status_filter == 'completed':
+                po_child_page = db.session.query(POChild).options(
+                    selectinload(POChild.parent_cr),
+                    selectinload(POChild.vendor)
+                ).filter(
+                    POChild.is_deleted == False,
+                    POChild.status.in_(CR_COMPLETED_STATUSES)
+                ).order_by(POChild.updated_at.desc()).all()
+
+                po_children_total = len(po_child_page)
+
+                for child in po_child_page:
+                    parent = child.parent_cr
+                    vendor = child.vendor
+                    materials_list = child.materials_data or []
+
+                    po_children_list.append({
+                        'id': child.id,
+                        'formatted_cr_id': child.get_formatted_id(),
+                        'is_po_child': True,
+                        'parent_cr_id': child.parent_cr_id,
+                        'parent_cr_formatted_id': f"PO-{child.parent_cr_id}",
+                        'suffix': child.suffix,
+                        'project_id': child.project_id,
+                        'project_name': parent.project.project_name if parent and parent.project else None,
+                        'project_code': parent.project.project_code if parent and parent.project else None,
+                        'client': parent.project.client if parent and parent.project else None,
+                        'location': parent.project.location if parent and parent.project else None,
+                        'boq_id': child.boq_id,
+                        'boq_name': parent.boq.boq_name if parent and parent.boq else None,
+                        'item_name': child.item_name,
+                        'status': child.status,
+                        'materials': materials_list if isinstance(materials_list, list) else [],
+                        'materials_count': len(materials_list) if isinstance(materials_list, list) else 0,
+                        'total_cost': float(child.materials_total_cost) if child.materials_total_cost else 0,
+                        'requested_by_name': parent.requested_by_name if parent else None,
+                        'created_at': child.created_at.isoformat() if child.created_at else None,
+                        'vendor_id': child.vendor_id,
+                        'vendor_name': vendor.company_name if vendor else None,
+                        'vendor_email': vendor.email if vendor else None,
+                        'vendor_phone': vendor.phone if vendor else None,
+                        'vendor_phone_code': vendor.phone_code if vendor else None,
+                        'vendor_category': vendor.category if vendor else None,
+                        'vendor_selection_status': child.vendor_selection_status,
+                        'vendor_approved_by_td_name': child.vendor_approved_by_td_name,
+                        'vendor_approval_date': child.vendor_approval_date.isoformat() if child.vendor_approval_date else None,
+                        'purchase_completed_by_name': child.purchase_completed_by_name,
+                        'purchase_completion_date': child.purchase_completion_date.isoformat() if child.purchase_completion_date else None
+                    })
 
         # Get summary counts
         pending_count = db.session.query(ChangeRequest).filter(
@@ -1158,10 +1508,17 @@ def get_td_purchase_orders():
             ChangeRequest.status == 'vendor_approved'
         ).count()
 
-        completed_count = db.session.query(ChangeRequest).filter(
+        cr_completed_count = db.session.query(ChangeRequest).filter(
             ChangeRequest.is_deleted == False,
-            ChangeRequest.status == 'purchase_completed'
+            ChangeRequest.status.in_(CR_COMPLETED_STATUSES)
         ).count()
+
+        po_child_completed_count = db.session.query(POChild).filter(
+            POChild.is_deleted == False,
+            POChild.status.in_(CR_COMPLETED_STATUSES)
+        ).count()
+
+        completed_count = cr_completed_count + po_child_completed_count
 
         rejected_count = db.session.query(ChangeRequest).filter(
             ChangeRequest.is_deleted == False,
@@ -1171,6 +1528,7 @@ def get_td_purchase_orders():
         return jsonify({
             'success': True,
             'purchases': purchases_list,
+            'completed_po_children': po_children_list,
             'pagination': {
                 'page': page,
                 'per_page': per_page,
@@ -1256,7 +1614,25 @@ def get_td_purchase_order_by_id(cr_id):
             'vendor_id': cr.selected_vendor_id,
             'vendor_name': vendor.company_name if vendor else None,
             'vendor_phone': vendor.phone if vendor else None,
+            'vendor_phone_code': vendor.phone_code if vendor else None,
             'vendor_email': vendor.email if vendor else None,
+            'vendor_category': vendor.category if vendor else None,
+            'vendor_contact_person': vendor.contact_person_name if vendor else None,
+            'vendor_gst_number': vendor.gst_number if vendor else None,
+            'vendor_details': {
+                'company_name': vendor.company_name,
+                'contact_person_name': vendor.contact_person_name,
+                'email': vendor.email,
+                'phone_code': vendor.phone_code,
+                'phone': vendor.phone,
+                'category': vendor.category,
+                'street_address': vendor.street_address,
+                'city': vendor.city,
+                'state': vendor.state,
+                'pin_code': vendor.pin_code,
+                'gst_number': vendor.gst_number,
+                'country': vendor.country,
+            } if vendor else None,
             'vendor_selection_status': cr.vendor_selection_status,
             'vendor_selected_by_buyer_name': cr.vendor_selected_by_buyer_name,
             'vendor_selection_date': cr.vendor_selection_date.isoformat() if cr.vendor_selection_date else None,
@@ -1551,6 +1927,7 @@ def get_td_assign_boq():
         user_role = current_user.get('role', '').lower() if current_user else ''
 
         # OPTIMIZED: Join BOQDetails to eliminate N+1 queries
+        # Include Project.extension_status for day extension indicator
         query = (
             db.session.query(
                 BOQ,
@@ -1561,6 +1938,7 @@ def get_td_assign_boq():
                 Project.floor_name,
                 Project.working_hours,
                 Project.user_id,
+                Project.extension_status,
                 User.full_name.label('last_pm_name'),
                 BOQDetails
             )
@@ -1608,6 +1986,10 @@ def get_td_assign_boq():
             # Calculate financial data
             financial_data = calculate_boq_financial_data(boq_obj, boq_details) if boq_details else {}
 
+            # Check if project has a pending day extension request
+            ext_status = row.extension_status
+            has_pending_ext = ext_status in ('day_request_send_td', 'day_edit_td') if ext_status else False
+
             boq_entry = {
                 "boq_id": boq_obj.boq_id,
                 "boq_name": boq_obj.boq_name,
@@ -1628,6 +2010,9 @@ def get_td_assign_boq():
                 "client_rejection_reason": boq_obj.client_rejection_reason,
                 "last_pm_user_id": boq_obj.last_pm_user_id,
                 "last_pm_name": row.last_pm_name,
+                # Day extension status for TD clock indicator
+                "has_pending_day_extension": has_pending_ext,
+                "pending_day_extension_count": 1 if has_pending_ext else 0,
                 # Add financial data
                 **financial_data
             }
@@ -2152,105 +2537,66 @@ def get_td_rejected_boq():
         }), 500
 
 def get_td_tab_counts():
-    """Get counts for all TD tabs"""
+    """Get counts for all TD tabs - OPTIMIZED: single query instead of 7 separate queries"""
     try:
+        from sqlalchemy import case as sa_case
         current_user = getattr(g, 'user', None)
         if not current_user:
             return jsonify({'error': 'Authentication required'}), 401
 
-        # OPTIMIZED: Use func.count() for better performance (2-3x faster)
-
-        # Count for Pending tab (Pending_TD_Approval and Pending statuses)
-        pending_count = db.session.query(BOQ).join(
+        # OPTIMIZED: Single aggregated query replaces 7 separate COUNT queries.
+        # One DB round-trip instead of seven = ~7x faster.
+        row = db.session.query(
+            func.count(sa_case(
+                (BOQ.status.in_(['Pending_TD_Approval', 'Pending']), 1)
+            )).label('pending'),
+            func.count(sa_case(
+                (and_(
+                    BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'Sent_for_Confirmation']),
+                    or_(Project.user_id == None, Project.user_id == '[]', Project.user_id == 'null')
+                ), 1)
+            )).label('approved'),
+            func.count(sa_case(
+                (BOQ.status.in_(['Client_Confirmed', 'client_confirmed', 'Client_Rejected', 'client_rejected']), 1)
+            )).label('sent'),
+            func.count(sa_case(
+                (BOQ.revision_number > 0, 1)
+            )).label('revisions'),
+            func.count(sa_case(
+                (and_(
+                    Project.user_id != None,
+                    Project.user_id != '[]',
+                    Project.user_id != 'null',
+                    ~BOQ.status.in_(['Rejected', 'rejected', 'Completed', 'completed', 'Client_Cancelled', 'Cancelled', 'cancelled'])
+                ), 1)
+            )).label('assigned'),
+            func.count(sa_case(
+                (BOQ.status.in_(['Completed', 'completed']), 1)
+            )).label('completed'),
+            func.count(sa_case(
+                (BOQ.status.in_(['Rejected', 'rejected']), 1)
+            )).label('rejected'),
+            func.count(sa_case(
+                (BOQ.status.in_(['Client_Cancelled', 'Cancelled', 'cancelled']), 1)
+            )).label('cancelled'),
+        ).join(
             Project, BOQ.project_id == Project.project_id
         ).filter(
             BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Pending_TD_Approval', 'Pending'])
-        ).with_entities(func.count()).scalar()
-
-        # Count for Approved tab (Approved, Revision_Approved, Sent_for_Confirmation AND not assigned to PM)
-        approved_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'Sent_for_Confirmation']),
-            or_(
-                Project.user_id == None,
-                Project.user_id == '[]',
-                Project.user_id == 'null'
-            )
-        ).with_entities(func.count()).scalar()
-
-        # Count for Client Response tab (Client_Confirmed or Client_Rejected)
-        client_response_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Client_Confirmed', 'client_confirmed', 'Client_Rejected', 'client_rejected'])
-        ).with_entities(func.count()).scalar()
-
-        # Count for Revisions tab (revision_number > 0)
-        revisions_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.revision_number > 0
-        ).with_entities(func.count()).scalar()
-
-        # Count for Assigned tab (projects where user_id is not null/empty AND NOT rejected/completed/cancelled)
-        assigned_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            Project.user_id != None,
-            Project.user_id != '[]',
-            Project.user_id != 'null',
-            ~BOQ.status.in_(['Rejected', 'rejected', 'Completed', 'completed', 'Client_Cancelled', 'Cancelled', 'cancelled'])
-        ).with_entities(func.count()).scalar()
-
-        # Count for Completed tab
-        completed_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Completed', 'completed'])
-        ).with_entities(func.count()).scalar()
-
-        # Count for Rejected by TD tab
-        rejected_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Rejected', 'rejected'])
-        ).with_entities(func.count()).scalar()
-
-        # Count for Cancelled tab
-        cancelled_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Client_Cancelled', 'Cancelled', 'cancelled'])
-        ).with_entities(func.count()).scalar()
+            Project.is_deleted == False
+        ).one()
 
         return jsonify({
             "success": True,
             "counts": {
-                "pending": pending_count,
-                "approved": approved_count,
-                "sent": client_response_count,
-                "revisions": revisions_count,
-                "assigned": assigned_count,
-                "completed": completed_count,
-                "rejected": rejected_count,
-                "cancelled": cancelled_count
+                "pending": row.pending or 0,
+                "approved": row.approved or 0,
+                "sent": row.sent or 0,
+                "revisions": row.revisions or 0,
+                "assigned": row.assigned or 0,
+                "completed": row.completed or 0,
+                "rejected": row.rejected or 0,
+                "cancelled": row.cancelled or 0
             }
         }), 200
 

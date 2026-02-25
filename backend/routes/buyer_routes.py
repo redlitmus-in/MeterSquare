@@ -1,8 +1,83 @@
 from flask import Blueprint, g, jsonify
-from controllers.buyer_controller import *
 from controllers.auth_controller import jwt_required
 from controllers.upload_image_controller import *
-from utils.response_cache import cached_response, cache_dashboard_data
+from controllers.boq_controller import get_custom_units
+
+# Import from the new buyer package modules
+from controllers.buyer.purchases_controller import (
+    get_buyer_boq_materials,
+    get_buyer_pending_purchases,
+    get_buyer_completed_purchases,
+    get_buyer_rejected_purchases,
+    complete_purchase,
+    get_purchase_by_id
+)
+from controllers.buyer.vendor_selection_controller import (
+    select_vendor_for_purchase,
+    select_vendor_for_material,
+    create_po_children,
+    update_purchase_order,
+    td_approve_vendor,
+    td_reject_vendor,
+    get_vendor_selection_data,
+    update_vendor_price,
+    save_supplier_notes,
+    send_po_children_for_approval
+)
+from controllers.buyer.po_child_controller import (
+    update_po_child_prices,
+    update_purchase_prices,
+    td_approve_po_child,
+    td_reject_po_child,
+    reselect_vendor_for_po_child,
+    get_project_site_engineers,
+    complete_po_child_purchase,
+    get_pending_po_children,
+    get_rejected_po_children,
+    get_buyer_pending_po_children,
+    get_approved_po_children
+)
+from controllers.buyer.email_controller import (
+    preview_vendor_email,
+    preview_po_child_vendor_email,
+    send_vendor_email,
+    send_po_child_vendor_email,
+    send_vendor_whatsapp
+)
+from controllers.buyer.lpo_controller import (
+    get_lpo_settings,
+    preview_lpo_pdf,
+    save_lpo_customization,
+    generate_lpo_pdf,
+    save_lpo_default_template,
+    get_lpo_default_template
+)
+from controllers.buyer.store_controller import (
+    get_store_items,
+    get_store_item_details,
+    get_store_categories,
+    get_projects_by_material,
+    check_store_availability,
+    complete_from_store,
+    get_store_request_status,
+    route_all_to_store
+)
+from controllers.buyer.se_boq_controller import (
+    get_se_boq_assignments,
+    select_vendor_for_se_boq,
+    td_approve_vendor_for_se_boq,
+    td_reject_vendor_for_se_boq,
+    complete_se_boq_purchase,
+    send_se_boq_vendor_email
+)
+from controllers.buyer.material_transfer_controller import (
+    get_crs_for_material_transfer,
+    create_buyer_material_transfer,
+    get_site_engineers_for_transfer,
+    get_projects_for_site_engineer,
+    get_buyer_transfer_history
+)
+from controllers.buyer.dashboard_controller import get_buyer_dashboard_analytics
 
 # Create blueprint with URL prefix
 buyer_routes = Blueprint('buyer_routes', __name__, url_prefix='/api/buyer')
@@ -59,27 +134,8 @@ def check_buyer_td_or_admin_access():
 
 # ============================================================================
 # NOTE: Buyer CRUD (Create/Update/Delete) is managed by Project Manager
-# See projectmanager_routes.py for buyer CRUD operations:
-# - POST /api/create_buyer
-# - GET /api/all_buyers
-# - GET /api/get_buyer/<user_id>
-# - PUT /api/update_buyer/<user_id>
-# - DELETE /api/delete_buyer/<user_id>
-#
-# This file contains buyer-specific operational routes (dashboard, purchases, etc.)
+# See projectmanager_routes.py for buyer CRUD operations
 # ============================================================================
-
-
-# Dashboard route
-@buyer_routes.route('/dashboard', methods=['GET'])
-@jwt_required
-@cache_dashboard_data(timeout=30)  # Cache dashboard for 30 seconds
-def get_buyer_dashboard_route():
-    """Get buyer dashboard statistics (Buyer or Admin)"""
-    access_check = check_buyer_or_admin_access()
-    if access_check:
-        return access_check
-    return get_buyer_dashboard()
 
 
 # Material management routes
@@ -95,7 +151,6 @@ def get_buyer_boq_materials_route():
 
 @buyer_routes.route('/new-purchases', methods=['GET'])
 @jwt_required
-@cached_response(timeout=15, key_prefix='buyer_pending')  # Short cache for frequently updated data
 def get_buyer_pending_purchases_route():
     """Get pending purchases (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()
@@ -106,7 +161,6 @@ def get_buyer_pending_purchases_route():
 
 @buyer_routes.route('/completed-purchases', methods=['GET'])
 @jwt_required
-@cached_response(timeout=30, key_prefix='buyer_completed')  # Longer cache for historical data
 def get_buyer_completed_purchases_route():
     """Get completed purchases (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()
@@ -117,7 +171,6 @@ def get_buyer_completed_purchases_route():
 
 @buyer_routes.route('/rejected-purchases', methods=['GET'])
 @jwt_required
-@cached_response(timeout=30, key_prefix='buyer_rejected')  # Longer cache for historical data
 def get_buyer_rejected_purchases_route():
     """Get rejected purchases (Buyer or Admin)"""
     access_check = check_buyer_or_admin_access()
@@ -166,16 +219,6 @@ def select_vendor_for_material_route(cr_id):
     return select_vendor_for_material(cr_id)
 
 
-@buyer_routes.route('/purchase/<int:cr_id>/create-sub-crs', methods=['POST'])
-@jwt_required
-def create_sub_crs_route(cr_id):
-    """Create separate sub-CRs for each vendor group (Buyer, TD, or Admin) - DEPRECATED, use create-po-children"""
-    access_check = check_buyer_td_or_admin_access()
-    if access_check:
-        return access_check
-    return create_sub_crs_for_vendor_groups(cr_id)
-
-
 @buyer_routes.route('/purchase/<int:cr_id>/create-po-children', methods=['POST'])
 @jwt_required
 def create_po_children_route(cr_id):
@@ -184,6 +227,16 @@ def create_po_children_route(cr_id):
     if access_check:
         return access_check
     return create_po_children(cr_id)
+
+
+@buyer_routes.route('/purchase/<int:cr_id>/send-for-approval', methods=['POST'])
+@jwt_required
+def send_po_children_for_approval_route(cr_id):
+    """Manually send vendor-routed PO children for TD approval (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return send_po_children_for_approval(cr_id)
 
 
 @buyer_routes.route('/purchase/<int:cr_id>/update', methods=['PUT'])
@@ -234,7 +287,6 @@ def get_buyer_pending_po_children_route():
     access_check = check_buyer_or_admin_access()
     if access_check:
         return access_check
-    from controllers.buyer_controller import get_buyer_pending_po_children
     return get_buyer_pending_po_children()
 
 
@@ -242,7 +294,6 @@ def get_buyer_pending_po_children_route():
 @jwt_required
 def get_approved_po_children_route():
     """Get all POChild records with approved vendor (Buyer, TD, or Admin)"""
-    from controllers.buyer_controller import get_approved_po_children
     return get_approved_po_children()
 
 
@@ -253,7 +304,6 @@ def get_rejected_po_children_route():
     access_check = check_td_or_admin_access()
     if access_check:
         return access_check
-    from controllers.buyer_controller import get_rejected_po_children
     return get_rejected_po_children()
 
 
@@ -284,7 +334,6 @@ def reselect_vendor_for_po_child_route(po_child_id):
     access_check = check_buyer_or_admin_access()
     if access_check:
         return access_check
-    from controllers.buyer_controller import reselect_vendor_for_po_child
     return reselect_vendor_for_po_child(po_child_id)
 
 
@@ -305,7 +354,6 @@ def update_po_child_prices_route(po_child_id):
     access_check = check_buyer_or_admin_access()
     if access_check:
         return access_check
-    from controllers.buyer_controller import update_po_child_prices
     return update_po_child_prices(po_child_id)
 
 
@@ -316,7 +364,6 @@ def update_purchase_prices_route(cr_id):
     access_check = check_buyer_or_admin_access()
     if access_check:
         return access_check
-    from controllers.buyer_controller import update_purchase_prices
     return update_purchase_prices(cr_id)
 
 
@@ -577,6 +624,16 @@ def complete_from_store_route(cr_id):
     return complete_from_store(cr_id)
 
 
+@buyer_routes.route('/purchase/<int:cr_id>/route-all-to-store', methods=['POST'])
+@jwt_required
+def route_all_to_store_route(cr_id):
+    """Route all materials to M2 Store directly on parent CR (no POChild)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return route_all_to_store(cr_id)
+
+
 @buyer_routes.route('/purchase/<int:cr_id>/store-request-status', methods=['GET'])
 @jwt_required
 def get_store_request_status_route(cr_id):
@@ -617,22 +674,6 @@ def save_supplier_notes_route(cr_id):
     return save_supplier_notes(cr_id)
 
 
-@buyer_routes.route('/debug/cr/<int:cr_id>/material-selections', methods=['GET'])
-@jwt_required
-def debug_material_selections(cr_id):
-    """Debug endpoint to check material_vendor_selections"""
-    from models.change_request import ChangeRequest
-    cr = ChangeRequest.query.filter_by(cr_id=cr_id, is_deleted=False).first()
-    if cr:
-        return jsonify({
-            "cr_id": cr.cr_id,
-            "material_vendor_selections": cr.material_vendor_selections,
-            "use_per_material_vendors": cr.use_per_material_vendors
-        }), 200
-    else:
-        return jsonify({"error": "CR not found"}), 404
-
-
 # Project Site Engineers route
 @buyer_routes.route('/project/<int:project_id>/site-engineers', methods=['GET'])
 @jwt_required
@@ -644,3 +685,77 @@ def get_project_site_engineers_route(project_id):
     return get_project_site_engineers(project_id)
 
 
+# Buyer Material Transfer - Get Available CRs
+@buyer_routes.route('/crs-for-transfer', methods=['GET'])
+@jwt_required
+def get_crs_for_material_transfer_route():
+    """Get CRs that are ready for material transfer (purchase completed) (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_crs_for_material_transfer()
+
+
+# Buyer Material Transfer - Create DN
+@buyer_routes.route('/material-transfer', methods=['POST'])
+@jwt_required
+def create_buyer_material_transfer_route():
+    """Create delivery note for buyer-initiated material transfer to site or store (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return create_buyer_material_transfer()
+
+
+# Buyer Transfer History
+@buyer_routes.route('/transfer-history', methods=['GET'])
+@jwt_required
+def get_buyer_transfer_history_route():
+    """Get all delivery notes created by buyer for material transfers (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_buyer_transfer_history()
+
+
+# Get Site Engineers for Material Transfer
+@buyer_routes.route('/site-engineers', methods=['GET'])
+@jwt_required
+def get_site_engineers_route():
+    """Get all site engineers for buyer to select delivery recipient (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_site_engineers_for_transfer()
+
+
+# Get Projects for Site Engineer
+@buyer_routes.route('/site-engineers/<int:site_engineer_id>/projects', methods=['GET'])
+@jwt_required
+def get_se_projects_route(site_engineer_id):
+    """Get all projects for a specific site engineer (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_projects_for_site_engineer(site_engineer_id)
+
+# Get Custom Units (for Material Transfer)
+@buyer_routes.route('/custom-units', methods=['GET'])
+@jwt_required
+def get_buyer_custom_units_route():
+    """Get all custom units for material transfers (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_custom_units()
+
+
+# Dashboard Analytics
+@buyer_routes.route('/dashboard', methods=['GET'])
+@jwt_required
+def get_buyer_dashboard_route():
+    """Get comprehensive dashboard analytics for Buyer (Buyer or Admin)"""
+    access_check = check_buyer_or_admin_access()
+    if access_check:
+        return access_check
+    return get_buyer_dashboard_analytics()

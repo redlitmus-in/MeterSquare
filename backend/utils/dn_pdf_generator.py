@@ -107,7 +107,7 @@ class DNPDFGenerator:
 
         Args:
             dn_data: dict - Delivery note details
-            project_data: dict - Project details
+            project_data: dict | None - Project details (None for store-destined DNs)
             items_data: list[dict] - List of items
             company_name: str - Company name for header
 
@@ -116,8 +116,8 @@ class DNPDFGenerator:
         """
         if not isinstance(dn_data, dict):
             raise ValueError("dn_data must be a dictionary")
-        if not isinstance(project_data, dict):
-            raise ValueError("project_data must be a dictionary")
+        if project_data is not None and not isinstance(project_data, dict):
+            raise ValueError("project_data must be a dictionary or None")
         if not isinstance(items_data, list):
             raise ValueError("items_data must be a list")
         if not items_data:
@@ -180,13 +180,45 @@ class DNPDFGenerator:
         # 2-column layout matching the template exactly
 
         # Format values
-        project_location = f"{self._escape_html(project_data.get('project_name', 'N/A'))}, {self._escape_html(project_data.get('location', ''))}"
+        if project_data:
+            # Build project location with all available details
+            project_name = self._escape_html(project_data.get('project_name', 'N/A'))
+            project_code = self._escape_html(project_data.get('project_code', ''))
+            area = self._escape_html(project_data.get('area', ''))
+            location = self._escape_html(project_data.get('location', ''))
+
+            # Combine details into a comprehensive location string
+            location_parts = [project_name]
+            if project_code:
+                location_parts.append(f"({project_code})")
+            if area:
+                location_parts.append(f"Area: {area}")
+            if location:
+                location_parts.append(location)
+
+            project_location = ", ".join(filter(None, location_parts))
+        else:
+            # For store-destined DNs without project
+            project_location = "M2 Store / Warehouse"
         delivery_date = self._format_date(dn_data.get('delivery_date'))
         attention_to = self._escape_html(dn_data.get('attention_to', '-'))
         delivery_from = self._escape_html(dn_data.get('delivery_from', DefaultValues.DEFAULT_STORE_NAME))
         requested_by = self._escape_html(dn_data.get('requested_by')) if dn_data.get('requested_by') else '-'
         request_date = self._format_date(dn_data.get('request_date')) if dn_data.get('request_date') else '-'
-        vehicle_driver = f"{self._escape_html(dn_data.get('vehicle_number', '-'))} / {self._escape_html(dn_data.get('driver_name', '-'))}"
+
+        # Format Vehicle & Driver (without contact - contact gets its own row)
+        vehicle_number = self._escape_html(dn_data.get('vehicle_number', '-'))
+        driver_name = self._escape_html(dn_data.get('driver_name', '-'))
+        driver_contact = self._escape_html(dn_data.get('driver_contact', '-'))
+
+        vehicle_driver = f"{vehicle_number} / {driver_name}"
+
+        # Format transport fee
+        transport_fee = dn_data.get('transport_fee')
+        if transport_fee is not None:
+            transport_fee_str = f"AED {float(transport_fee):.2f}"
+        else:
+            transport_fee_str = '-'
 
         # Create info grid with proper formatting
         info_data = [
@@ -213,6 +245,12 @@ class DNPDFGenerator:
                 Paragraph(request_date, self.styles['DNNormal']),
                 Paragraph('<b>Vehicle & Driver:</b>', self.styles['DNLabel']),
                 Paragraph(vehicle_driver, self.styles['DNNormal']),
+            ],
+            [
+                Paragraph('<b>Transport Fee:</b>', self.styles['DNLabel']),
+                Paragraph(transport_fee_str, self.styles['DNNormal']),
+                Paragraph('<b>Driver Contact:</b>', self.styles['DNLabel']),
+                Paragraph(driver_contact, self.styles['DNNormal']),
             ],
         ]
 

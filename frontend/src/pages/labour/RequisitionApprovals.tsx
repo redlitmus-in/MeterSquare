@@ -4,8 +4,12 @@
  */
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { labourService, LabourRequisition } from '@/services/labourService';
+import { useNavigate } from 'react-router-dom';
+import { labourService, LabourRequisition, CreateRequisitionData } from '@/services/labourService';
 import { showSuccess, showError } from '@/utils/toastHelper';
+import { apiClient } from '@/api/config';
+import { TimePicker } from '@/components/TimePicker';
+import { PAGINATION } from '@/lib/constants';
 import {
   CheckCircleIcon,
   XCircleIcon,
@@ -18,10 +22,22 @@ import {
   UserIcon,
   WrenchScrewdriverIcon,
   UsersIcon,
+  PlusIcon,
+  CubeIcon,
+  InformationCircleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  PencilSquareIcon,
 } from '@heroicons/react/24/outline';
 
 // Tab configuration
-type TabType = 'pending' | 'approved' | 'rejected';
+// Status Flow for Labour Requisitions:
+// 1. SE creates requisition -> status: 'pending' (draft on SE side)
+// 2. SE sends to PM -> status: 'send_to_pm' (shows in PM's "SE Pending" tab)
+// 3. PM approves/rejects -> status: 'approved' or 'rejected'
+// 4. PM creates requisition -> status: 'pending' (draft in PM's "My Pending" tab)
+// 5. PM manually sends to Production Manager (no auto-approval)
+type TabType = 'my_pending' | 'pending' | 'approved' | 'rejected';
 
 interface TabConfig {
   key: TabType;
@@ -33,45 +49,188 @@ interface TabConfig {
 }
 
 const tabs: TabConfig[] = [
-  { key: 'pending', label: 'Pending', color: 'text-yellow-700', bgColor: 'bg-yellow-100', borderColor: 'border-yellow-500', icon: ClockIcon },
+  { key: 'my_pending', label: 'My Pending', color: 'text-blue-700', bgColor: 'bg-blue-100', borderColor: 'border-blue-500', icon: UserIcon },
+  { key: 'pending', label: 'SE Pending', color: 'text-yellow-700', bgColor: 'bg-yellow-100', borderColor: 'border-yellow-500', icon: ClockIcon },
   { key: 'approved', label: 'Approved', color: 'text-green-700', bgColor: 'bg-green-100', borderColor: 'border-green-500', icon: CheckCircleIcon },
   { key: 'rejected', label: 'Rejected', color: 'text-red-700', bgColor: 'bg-red-100', borderColor: 'border-red-500', icon: XCircleIcon },
 ];
 
+// Helper function to convert 24-hour time to 12-hour format with AM/PM
+const formatTimeTo12Hour = (time24: string): string => {
+  if (!time24) return '';
+
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+
+  return `${hour12}:${minutes} ${period}`;
+};
+
 const RequisitionApprovals: React.FC = () => {
+  const navigate = useNavigate();
   const [requisitions, setRequisitions] = useState<LabourRequisition[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<number | null>(null);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectingId, setRejectingId] = useState<number | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
-  const [activeTab, setActiveTab] = useState<TabType>('pending');
+  const [activeTab, setActiveTab] = useState<TabType>('my_pending');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedRequisition, setSelectedRequisition] = useState<LabourRequisition | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pagination, setPagination] = useState<any>(null);
-  const perPage = 15;
+  const perPage = PAGINATION.DEFAULT_PAGE_SIZE;
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingRequisitionId, setEditingRequisitionId] = useState<number | null>(null);
 
   // Tab counts state
   const [tabCounts, setTabCounts] = useState<Record<TabType, number>>({
+    my_pending: 0,
     pending: 0,
     approved: 0,
     rejected: 0
   });
 
-  // Fetch counts for all tabs
+  // Add Modal - Labour Requisition Form State (copied from LabourRequisition.tsx)
+  interface Project {
+    project_id: number;
+    project_code: string;
+    project_name: string;
+    project_status: string;
+    location?: string;
+    floor_name?: string;
+    area?: string;
+    areas: Area[];
+  }
+
+  interface Area {
+    area_id: number;
+    area_name: string;
+    boqs: BOQ[];
+  }
+
+  interface BOQ {
+    boq_id: number;
+    boq_name: string;
+    items: BOQItem[];
+  }
+
+  interface BOQItem {
+    item_id: string;
+    item_name: string;
+    overhead_allocated: number;
+    overhead_available: number;
+    overhead_consumed: number;
+    sub_items: SubItem[];
+  }
+
+  interface SubItem {
+    sub_item_id: string;
+    sub_item_name: string;
+    materials: Material[];
+    labour?: LabourItem[];
+  }
+
+  interface Material {
+    material_id: string;
+    material_name: string;
+    quantity: number;
+    unit: string;
+    unit_price: number;
+  }
+
+  interface LabourItem {
+    labour_id?: number | string;
+    labour_role: string;
+    labour_type?: string;
+    hours?: number;
+    rate_per_hour?: number;
+    amount?: number;
+    sub_item_name?: string;
+    item_name?: string;
+    boq_id?: number;
+    item_id?: string;
+  }
+
+  interface GroupedLabour {
+    item_id: string;
+    item_name: string;
+    boq_id?: number;
+    labours: LabourItem[];
+  }
+
+  interface SelectedLabour extends LabourItem {
+    workers_count?: number;
+    uniqueKey: string;
+  }
+
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [groupedLabours, setGroupedLabours] = useState<GroupedLabour[]>([]);
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [selectedLabours, setSelectedLabours] = useState<SelectedLabour[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [formData, setFormData] = useState<CreateRequisitionData>({
+    project_id: 0,
+    site_name: '',
+    work_description: '',
+    skill_required: '',
+    workers_count: 1,
+    required_date: new Date().toISOString().split('T')[0],
+    start_time: '',
+    end_time: '',
+    preferred_workers_notes: ''
+  });
+
+  const [editFormData, setEditFormData] = useState<CreateRequisitionData>({
+    project_id: 0,
+    site_name: '',
+    work_description: '',
+    skill_required: '',
+    workers_count: 1,
+    required_date: new Date().toISOString().split('T')[0],
+    start_time: '',
+    end_time: '',
+    preferred_workers_notes: ''
+  });
+
+  // Worker selection state
+  const [availableWorkers, setAvailableWorkers] = useState<any[]>([]);
+  const [workersLoading, setWorkersLoading] = useState(false);
+  const [selectedWorkers, setSelectedWorkers] = useState<any[]>([]);
+  const [workerSearchQuery, setWorkerSearchQuery] = useState('');
+
+  // Edit modal worker selection state
+  const [editAvailableWorkers, setEditAvailableWorkers] = useState<any[]>([]);
+  const [editWorkersLoading, setEditWorkersLoading] = useState(false);
+  const [editSelectedWorkers, setEditSelectedWorkers] = useState<any[]>([]);
+  const [editWorkerSearchQuery, setEditWorkerSearchQuery] = useState('');
+
+  // Edit modal labour selection state
+  const [editSelectedProject, setEditSelectedProject] = useState<Project | null>(null);
+  const [editGroupedLabours, setEditGroupedLabours] = useState<GroupedLabour[]>([]);
+  const [editExpandedItems, setEditExpandedItems] = useState<Set<string>>(new Set());
+  const [editSelectedLabours, setEditSelectedLabours] = useState<SelectedLabour[]>([]);
+
+  // Fetch counts for all tabs using pagination totals
   const fetchTabCounts = async () => {
     try {
+      // Fetch just first page with small limit to get pagination.total for each tab
       const results = await Promise.all([
-        labourService.getPendingRequisitions('pending'),
-        labourService.getPendingRequisitions('approved'),
-        labourService.getPendingRequisitions('rejected')
+        labourService.getMyRequisitions('pending', 1, 1), // PM's own pending drafts
+        labourService.getPendingRequisitions('pending', undefined, 1, 1), // SE pending
+        labourService.getPendingRequisitions('approved', undefined, 1, 1),
+        labourService.getPendingRequisitions('rejected', undefined, 1, 1)
       ]);
 
       setTabCounts({
-        pending: results[0].success ? results[0].data.length : 0,
-        approved: results[1].success ? results[1].data.length : 0,
-        rejected: results[2].success ? results[2].data.length : 0
+        my_pending: results[0].success ? (results[0].pagination?.total || results[0].data.length) : 0,
+        pending: results[1].success ? (results[1].pagination?.total || results[1].data.length) : 0,
+        approved: results[2].success ? (results[2].pagination?.total || results[2].data.length) : 0,
+        rejected: results[3].success ? (results[3].pagination?.total || results[3].data.length) : 0
       });
     } catch (error) {
       console.error('Failed to fetch tab counts:', error);
@@ -81,10 +240,25 @@ const RequisitionApprovals: React.FC = () => {
   const fetchRequisitions = async () => {
     setLoading(true);
     try {
-      const result = await labourService.getPendingRequisitions(activeTab, undefined, currentPage, perPage);
+      let result;
+      if (activeTab === 'my_pending') {
+        // Fetch PM's own pending requisitions (drafts that need to be sent to Production Manager)
+        result = await labourService.getMyRequisitions('pending', currentPage, perPage);
+      } else {
+        // Fetch SE requisitions for approval
+        result = await labourService.getPendingRequisitions(activeTab, undefined, currentPage, perPage);
+      }
+
       if (result.success) {
         setRequisitions(result.data);
         setPagination(result.pagination);
+        // Update the current tab's count from pagination total
+        if (result.pagination?.total !== undefined) {
+          setTabCounts(prev => ({
+            ...prev,
+            [activeTab]: result.pagination.total
+          }));
+        }
       } else {
         showError(result.message || 'Failed to fetch requisitions');
       }
@@ -95,14 +269,31 @@ const RequisitionApprovals: React.FC = () => {
     }
   };
 
+  // Fetch tab counts only on initial mount
+  useEffect(() => {
+    fetchTabCounts();
+  }, []);
+
   useEffect(() => {
     setCurrentPage(1); // Reset to page 1 when changing tabs
   }, [activeTab]);
 
   useEffect(() => {
     fetchRequisitions();
-    fetchTabCounts();
   }, [activeTab, currentPage]);
+
+  const handleSendToProduction = async (requisitionId: number) => {
+    setProcessing(requisitionId);
+    const result = await labourService.sendToProduction(requisitionId);
+    if (result.success) {
+      showSuccess('Requisition sent to Production Manager successfully');
+      fetchRequisitions();
+      fetchTabCounts(); // Refresh counts
+    } else {
+      showError(result.message || 'Failed to send requisition to production');
+    }
+    setProcessing(null);
+  };
 
   const handleApprove = async (requisitionId: number) => {
     setProcessing(requisitionId);
@@ -149,44 +340,638 @@ const RequisitionApprovals: React.FC = () => {
     setShowDetailsModal(true);
   };
 
-  const getStatusBadge = (status: string, assignmentStatus?: string) => {
+  const handleEditRequisition = async (req: LabourRequisition) => {
+    setEditingRequisitionId(req.requisition_id);
+
+    // Fetch full requisition details including labour_items
+    try {
+      const reqResponse = await apiClient.get(`/labour/requisitions/${req.requisition_id}`);
+      if (reqResponse.data?.requisition) {
+        req = reqResponse.data.requisition; // Use full data with labour_items
+      }
+    } catch (error) {
+      console.error('Failed to fetch requisition details:', error);
+    }
+
+    // Pre-fill form data
+    setEditFormData({
+      project_id: req.project_id,
+      site_name: req.site_name || '',
+      work_description: req.work_description || '',
+      skill_required: req.skill_required || '',
+      workers_count: req.total_workers_count || req.workers_count || 1,
+      required_date: req.required_date ? new Date(req.required_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      start_time: req.start_time || '',
+      end_time: req.end_time || '',
+      preferred_workers_notes: req.preferred_workers_notes || ''
+    });
+
+    // Load project with full BOQ data
+    try {
+      const response = await apiClient.get('/projects/assigned-to-me');
+      const project = response.data?.projects?.find((p: any) => p.project_id === req.project_id);
+
+      if (project) {
+        setEditSelectedProject(project);
+        // Extract BOQ labour items for this project
+        extractBOQDataForEdit(project);
+
+        // Pre-select labour items from requisition
+        if (req.labour_items && req.labour_items.length > 0) {
+          const preselected = req.labour_items.map((item: any, idx: number) => ({
+            ...item,
+            uniqueKey: `${item.labour_id || item.item_id}-${idx}`,
+            workers_count: item.workers_count || 1
+          }));
+          setEditSelectedLabours(preselected);
+        } else {
+          // If no labour_items, set empty array
+          setEditSelectedLabours([]);
+        }
+      } else {
+        // Fallback: use data from requisition
+        setEditSelectedProject({
+          project_id: req.project_id,
+          project_code: req.project_code || '',
+          project_name: req.project_name || `Project #${req.project_id}`,
+          project_status: '',
+          location: req.site_name || '',
+          floor_name: ''
+        });
+
+        if (req.labour_items && req.labour_items.length > 0) {
+          setEditSelectedLabours(req.labour_items);
+        }
+      }
+    } catch (error) {
+      showError('Failed to load project data');
+      // Use fallback data from requisition
+      setEditSelectedProject({
+        project_id: req.project_id,
+        project_code: req.project_code || '',
+        project_name: req.project_name || `Project #${req.project_id}`,
+        project_status: '',
+        location: req.site_name || '',
+        floor_name: ''
+      });
+
+      if (req.labour_items && req.labour_items.length > 0) {
+        setEditSelectedLabours(req.labour_items);
+      }
+    }
+
+    setShowEditModal(true);
+  };
+
+  // Labour Requisition Form Helper Functions
+  const fetchProjects = async () => {
+    setProjectsLoading(true);
+    try {
+      const response = await apiClient.get('/projects/assigned-to-me');
+      if (response.data?.projects) {
+        setProjects(response.data.projects);
+      }
+    } catch {
+      showError('Failed to load projects. Please refresh the page.');
+    } finally {
+      setProjectsLoading(false);
+    }
+  };
+
+  const toggleItemExpand = (itemId: string) => {
+    setExpandedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  };
+
+  const extractBOQData = (project: Project) => {
+    const labourByItem: Map<string, GroupedLabour> = new Map();
+
+    (project.areas || []).forEach((area) => {
+      (area.boqs || []).forEach((boq) => {
+        (boq.items || []).forEach((item) => {
+          (item.sub_items || []).forEach((subItem) => {
+            if (subItem.labour && subItem.labour.length > 0) {
+              subItem.labour.forEach((lab) => {
+                const labourItem: LabourItem = {
+                  ...lab,
+                  sub_item_name: subItem.sub_item_name,
+                  item_name: item.item_name
+                };
+
+                const key = item.item_id;
+                if (!labourByItem.has(key)) {
+                  labourByItem.set(key, {
+                    item_id: item.item_id,
+                    item_name: item.item_name,
+                    labours: []
+                  });
+                }
+                labourByItem.get(key)!.labours.push(labourItem);
+              });
+            }
+          });
+        });
+      });
+    });
+
+    const grouped = Array.from(labourByItem.values());
+    if (grouped.length > 0) {
+      setExpandedItems(new Set([grouped[0].item_id]));
+    } else {
+      setExpandedItems(new Set());
+    }
+    setGroupedLabours(grouped);
+  };
+
+  const getLabourKey = (labour: LabourItem, idx: number): string => {
+    return `${labour.item_name}-${labour.sub_item_name}-${labour.labour_role}-${idx}`;
+  };
+
+  const isLabourSelected = (labour: LabourItem, idx: number): boolean => {
+    const key = getLabourKey(labour, idx);
+    return selectedLabours.some(s => s.uniqueKey === key);
+  };
+
+  const toggleLabourSelection = (labour: LabourItem, idx: number) => {
+    const key = getLabourKey(labour, idx);
+    const isSelected = selectedLabours.some(s => s.uniqueKey === key);
+
+    if (isSelected) {
+      setSelectedLabours(prev => prev.filter(s => s.uniqueKey !== key));
+    } else {
+      setSelectedLabours(prev => [...prev, {
+        ...labour,
+        workers_count: undefined,
+        uniqueKey: key
+      }]);
+    }
+  };
+
+  const updateWorkersCount = (uniqueKey: string, count: number) => {
+    setSelectedLabours(prev => prev.map(s =>
+      s.uniqueKey === uniqueKey ? { ...s, workers_count: Math.max(1, count) } : s
+    ));
+  };
+
+  const removeFromSelection = (uniqueKey: string) => {
+    setSelectedLabours(prev => prev.filter(s => s.uniqueKey !== uniqueKey));
+  };
+
+  const selectAllInGroup = (group: GroupedLabour) => {
+    const newSelections: SelectedLabour[] = [];
+    group.labours.forEach((labour, idx) => {
+      const key = getLabourKey(labour, idx);
+      if (!selectedLabours.some(s => s.uniqueKey === key)) {
+        newSelections.push({
+          ...labour,
+          workers_count: undefined,
+          uniqueKey: key
+        });
+      }
+    });
+    setSelectedLabours(prev => [...prev, ...newSelections]);
+  };
+
+  const isGroupFullySelected = (group: GroupedLabour): boolean => {
+    return group.labours.every((labour, idx) => isLabourSelected(labour, idx));
+  };
+
+  const handleProjectSelect = async (projectId: number) => {
+    const project = projects.find(p => p.project_id === projectId);
+    setSelectedProject(project || null);
+
+    if (project) {
+      const locationParts: string[] = [];
+      if (project.location && project.location.trim()) {
+        locationParts.push(project.location.trim());
+      }
+      if (project.floor_name && project.floor_name.trim()) {
+        locationParts.push(project.floor_name.trim());
+      }
+      if (project.area && project.area.trim()) {
+        locationParts.push(project.area.trim());
+      }
+
+      let siteName = '';
+      if (locationParts.length > 0) {
+        siteName = locationParts.join(', ');
+      } else {
+        siteName = project.project_name || '';
+      }
+
+      setFormData(prev => ({
+        ...prev,
+        project_id: projectId,
+        site_name: siteName
+      }));
+
+      extractBOQData(project);
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        project_id: 0,
+        site_name: ''
+      }));
+      setGroupedLabours([]);
+      setExpandedItems(new Set());
+      setSelectedLabours([]);
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      project_id: 0,
+      site_name: '',
+      work_description: '',
+      skill_required: '',
+      workers_count: 1,
+      required_date: new Date().toISOString().split('T')[0],
+      start_time: '',
+      end_time: '',
+      preferred_workers_notes: ''
+    });
+    setSelectedProject(null);
+    setGroupedLabours([]);
+    setExpandedItems(new Set());
+    setSelectedLabours([]);
+    setSelectedWorkers([]);
+    setWorkerSearchQuery('');
+    setAvailableWorkers([]);
+  };
+
+  // Fetch available workers based on selected labour skills
+  const fetchWorkers = async () => {
+    setWorkersLoading(true);
+    try {
+      // Get unique skills from selected labours
+      // Use labour_role (from BOQ) or skill_required (from manual entry)
+      const selectedSkills = Array.from(new Set(
+        selectedLabours
+          .map(labour => (labour as any).labour_role || labour.skill_required)
+          .filter(skill => skill != null && skill !== '')
+      ));
+
+      if (selectedSkills.length === 0) {
+        setAvailableWorkers([]);
+        setWorkersLoading(false);
+        return;
+      }
+
+      // Fetch workers for all selected skills
+      const allWorkers: any[] = [];
+      const workerIds = new Set<number>();
+
+      for (const skill of selectedSkills) {
+        const response = await labourService.getWorkers({
+          status: 'active',
+          per_page: 100,
+          skill: skill
+        });
+
+        if (response.success && response.data) {
+          // Add workers, avoiding duplicates
+          response.data.forEach((worker: any) => {
+            if (!workerIds.has(worker.worker_id)) {
+              allWorkers.push(worker);
+              workerIds.add(worker.worker_id);
+            }
+          });
+        }
+      }
+
+      setAvailableWorkers(allWorkers);
+    } catch (error) {
+      console.error('Failed to load workers:', error);
+      showError('Failed to load workers');
+    } finally {
+      setWorkersLoading(false);
+    }
+  };
+
+  // Auto-fetch workers when selected labours change
+  useEffect(() => {
+    if (selectedLabours.length > 0) {
+      fetchWorkers();
+    } else {
+      setAvailableWorkers([]);
+    }
+  }, [selectedLabours]);
+
+  const toggleWorkerSelection = (worker: any) => {
+    setSelectedWorkers(prev => {
+      const isSelected = prev.some(w => w.worker_id === worker.worker_id);
+      if (isSelected) {
+        return prev.filter(w => w.worker_id !== worker.worker_id);
+      } else {
+        return [...prev, worker];
+      }
+    });
+  };
+
+  const removeWorker = (workerId: number) => {
+    setSelectedWorkers(prev => prev.filter(w => w.worker_id !== workerId));
+  };
+
+  const handleBulkSubmit = async () => {
+    if (selectedLabours.length === 0) {
+      showError('Please select at least one labour item');
+      return;
+    }
+
+    if (!formData.project_id) {
+      showError('Please select a project');
+      return;
+    }
+
+    if (!formData.required_date) {
+      showError('Please select a required date');
+      return;
+    }
+
+    // Validate that end_time is after start_time
+    if (formData.start_time && formData.end_time) {
+      const [startHour, startMin] = formData.start_time.split(':').map(Number);
+      const [endHour, endMin] = formData.end_time.split(':').map(Number);
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+      if (endMinutes <= startMinutes) {
+        showError('End Time must be after Start Time');
+        return;
+      }
+    }
+
+    setSubmitting(true);
+
+    try {
+      const labour_items = selectedLabours.map((labour) => ({
+        work_description: `${labour.item_name} - ${labour.sub_item_name || labour.labour_role}`,
+        skill_required: labour.labour_role,
+        workers_count: labour.workers_count || 1,
+        boq_id: labour.boq_id,
+        item_id: labour.item_id,
+        labour_id: labour.labour_id ? String(labour.labour_id) : undefined
+      }));
+
+      const requisitionData: CreateRequisitionData = {
+        project_id: formData.project_id,
+        site_name: formData.site_name,
+        required_date: formData.required_date,
+        start_time: formData.start_time || undefined,
+        end_time: formData.end_time || undefined,
+        preferred_worker_ids: selectedWorkers.map(w => w.worker_id),
+        labour_items: labour_items
+        // Note: requester_role is determined by backend from user session for security
+      };
+
+      const result = await labourService.createRequisition(requisitionData);
+
+      setSubmitting(false);
+
+      if (result.success) {
+        showSuccess(`Requisition created successfully with ${selectedLabours.length} labour item(s)`);
+        fetchRequisitions();
+        fetchTabCounts();
+        setShowAddModal(false);
+        resetForm();
+      } else {
+        showError(result.error || 'Failed to create requisition');
+      }
+    } catch (error: any) {
+      setSubmitting(false);
+      showError(error.message || 'Failed to create requisition');
+    }
+  };
+
+  const handleUpdateRequisition = async () => {
+    if (!editFormData.required_date) {
+      showError('Please select a required date');
+      return;
+    }
+
+    // Validate that end_time is after start_time
+    if (editFormData.start_time && editFormData.end_time) {
+      const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+      const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+      if (endMinutes <= startMinutes) {
+        showError('End Time must be after Start Time');
+        return;
+      }
+    }
+
+    // Calculate total workers from labour items
+    const totalWorkers = editSelectedLabours.reduce((sum: number, labour: any) =>
+      sum + (labour.workers_count || 1), 0
+    );
+
+    setSubmitting(true);
+
+    try {
+      const requisitionData: any = {
+        site_name: editFormData.site_name,
+        work_description: editFormData.work_description,
+        workers_count: totalWorkers, // Use calculated total from labour items
+        required_date: editFormData.required_date,
+        start_time: editFormData.start_time || null,
+        end_time: editFormData.end_time || null,
+        preferred_workers_notes: editFormData.preferred_workers_notes,
+        labour_items: editSelectedLabours.map((labour: any) => ({
+          work_description: labour.work_description,
+          skill_required: labour.skill_required || labour.labour_role,
+          workers_count: parseInt(labour.workers_count) || 1,
+          boq_id: labour.boq_id,
+          item_id: labour.item_id,
+          labour_id: labour.labour_id
+        }))
+      };
+
+      const response = await apiClient.put(`/labour/requisitions/${editingRequisitionId}`, requisitionData);
+
+      setSubmitting(false);
+
+      if (response.data?.success) {
+        showSuccess('Requisition updated successfully');
+        fetchRequisitions();
+        fetchTabCounts();
+        setShowEditModal(false);
+        resetEditForm();
+      } else {
+        showError(response.data?.error || 'Failed to update requisition');
+      }
+    } catch (error: any) {
+      setSubmitting(false);
+      showError(error.response?.data?.error || error.message || 'Failed to update requisition');
+    }
+  };
+
+  const fetchLaboursForProject = async (projectId: number, isEditMode: boolean = false) => {
+    try {
+      const response = await apiClient.get(`/projects/assigned-to-me`);
+      const project = response.data?.projects?.find((p: any) => p.project_id === projectId);
+      if (project) {
+        if (isEditMode) {
+          extractBOQDataForEdit(project);
+        } else {
+          extractBOQData(project);
+        }
+      }
+    } catch (error) {
+      showError('Failed to load labour items for project');
+    }
+  };
+
+  const extractBOQDataForEdit = (project: Project) => {
+    const labourByItem: Map<string, GroupedLabour> = new Map();
+
+    (project.areas || []).forEach((area) => {
+      (area.boqs || []).forEach((boq) => {
+        (boq.items || []).forEach((item) => {
+          (item.sub_items || []).forEach((subItem) => {
+            if (subItem.labour && subItem.labour.length > 0) {
+              subItem.labour.forEach((lab) => {
+                const labourItem: LabourItem = {
+                  ...lab,
+                  sub_item_name: subItem.sub_item_name,
+                  item_name: item.item_name
+                };
+
+                const key = item.item_id;
+                if (!labourByItem.has(key)) {
+                  labourByItem.set(key, {
+                    item_id: item.item_id,
+                    item_name: item.item_name,
+                    labours: []
+                  });
+                }
+                labourByItem.get(key)!.labours.push(labourItem);
+              });
+            }
+          });
+        });
+      });
+    });
+
+    const grouped = Array.from(labourByItem.values());
+    if (grouped.length > 0) {
+      setEditExpandedItems(new Set([grouped[0].item_id]));
+    } else {
+      setEditExpandedItems(new Set());
+    }
+    setEditGroupedLabours(grouped);
+  };
+
+  const fetchWorkersForEdit = async () => {
+    setEditWorkersLoading(true);
+    try {
+      const response = await apiClient.get('/workers?status=available');
+      if (response.data?.workers) {
+        setEditAvailableWorkers(response.data.workers);
+      }
+    } catch (error) {
+      showError('Failed to load workers');
+    } finally {
+      setEditWorkersLoading(false);
+    }
+  };
+
+  const resetEditForm = () => {
+    setEditFormData({
+      project_id: 0,
+      site_name: '',
+      work_description: '',
+      skill_required: '',
+      workers_count: 1,
+      required_date: new Date().toISOString().split('T')[0],
+      start_time: '',
+      end_time: '',
+      preferred_workers_notes: ''
+    });
+    setEditSelectedProject(null);
+    setEditGroupedLabours([]);
+    setEditExpandedItems(new Set());
+    setEditSelectedLabours([]);
+    setEditSelectedWorkers([]);
+    setEditWorkerSearchQuery('');
+    setEditingRequisitionId(null);
+  };
+
+  // Fetch projects and workers when modal opens
+  useEffect(() => {
+    if (showAddModal) {
+      fetchProjects();
+      fetchWorkers();
+    }
+  }, [showAddModal]);
+
+  const getStatusBadge = (status: string, assignmentStatus?: string, showAsPMDraft: boolean = false) => {
+    // Show assignment status badge when approved and workers are assigned
     if (status === 'approved' && assignmentStatus === 'assigned') {
       return (
         <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800 flex items-center gap-1">
-          <UsersIcon className="w-3 h-3" /> Assigned
+          <UsersIcon className="w-3 h-3" /> Workers Assigned
         </span>
       );
     }
+
     switch (status) {
       case 'pending':
+        // Different label depending on context (PM's own vs SE's)
+        return (
+          <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 flex items-center gap-1">
+            <ClockIcon className="w-3 h-3" /> {showAsPMDraft ? 'PM Draft' : 'Draft'}
+          </span>
+        );
+      case 'send_to_pm':
+        // PM side: Requisition sent to PM for approval
         return (
           <span className="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800 flex items-center gap-1">
-            <ClockIcon className="w-3 h-3" /> Pending Review
+            <ClockIcon className="w-3 h-3" /> Pending PM Approval
           </span>
         );
       case 'approved':
         return (
           <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800 flex items-center gap-1">
-            <CheckCircleIcon className="w-3 h-3" /> Approved
+            <CheckCircleIcon className="w-3 h-3" /> Approved by PM
           </span>
         );
       case 'rejected':
         return (
           <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800 flex items-center gap-1">
-            <XCircleIcon className="w-3 h-3" /> Rejected
+            <XCircleIcon className="w-3 h-3" /> Rejected by PM
           </span>
         );
       default:
-        return null;
+        return (
+          <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600 flex items-center gap-1">
+            {status}
+          </span>
+        );
     }
   };
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Requisition Approvals</h1>
-        <p className="text-gray-600">Review and approve labour requisitions from Site Engineers</p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Labour Requisition Approvals</h1>
+          <p className="text-gray-600">Create, review and approve labour requisitions. Send to Production Manager for worker assignment.</p>
+        </div>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors shadow-sm"
+        >
+          <PlusIcon className="w-5 h-5" />
+          <span className="font-medium">New Requisition</span>
+        </button>
       </div>
 
       {/* Tabs */}
@@ -226,11 +1011,17 @@ const RequisitionApprovals: React.FC = () => {
       ) : requisitions.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <ClipboardDocumentListIcon className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No {activeTab} requisitions</h3>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">
+            {activeTab === 'my_pending' && 'No pending requisitions'}
+            {activeTab === 'pending' && 'No SE pending requisitions'}
+            {activeTab === 'approved' && 'No approved requisitions'}
+            {activeTab === 'rejected' && 'No rejected requisitions'}
+          </h3>
           <p className="mt-1 text-sm text-gray-500">
-            {activeTab === 'pending'
-              ? 'All requisitions have been reviewed.'
-              : `No requisitions with ${activeTab} status.`}
+            {activeTab === 'my_pending' && 'You have not created any requisitions yet. Click "New Requisition" to create one.'}
+            {activeTab === 'pending' && 'No requisitions from Site Engineers are waiting for your approval.'}
+            {activeTab === 'approved' && 'No requisitions have been approved yet.'}
+            {activeTab === 'rejected' && 'No requisitions have been rejected yet.'}
           </p>
         </div>
       ) : (
@@ -245,7 +1036,7 @@ const RequisitionApprovals: React.FC = () => {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
                   <span className="font-semibold text-gray-900 text-sm">{req.requisition_code}</span>
-                  {getStatusBadge(req.status, req.assignment_status)}
+                  {getStatusBadge(req.status, req.assignment_status, activeTab === 'my_pending')}
                   <span className="text-xs text-gray-400 hidden sm:inline">|</span>
                   {req.labour_items && req.labour_items.length > 0 ? (
                     <div className="flex items-center gap-1 flex-wrap">
@@ -273,6 +1064,29 @@ const RequisitionApprovals: React.FC = () => {
                     <EyeIcon className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">View</span>
                   </button>
+                  {activeTab === 'my_pending' && req.status === 'pending' && (
+                    <>
+                      <button
+                        onClick={() => handleEditRequisition(req)}
+                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs border border-blue-300 text-blue-600 rounded hover:bg-blue-50 transition-colors"
+                      >
+                        <PencilSquareIcon className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Edit</span>
+                      </button>
+                      <button
+                        onClick={() => handleSendToProduction(req.requisition_id)}
+                        disabled={processing === req.requisition_id}
+                        className="flex items-center justify-center gap-1 px-2 py-1 text-xs bg-teal-600 text-white rounded hover:bg-teal-700 transition-colors disabled:opacity-50"
+                      >
+                        {processing === req.requisition_id ? (
+                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                        ) : (
+                          <CheckCircleIcon className="w-3.5 h-3.5" />
+                        )}
+                        <span className="hidden sm:inline">Send to Production</span>
+                      </button>
+                    </>
+                  )}
                   {activeTab === 'pending' && (
                     <>
                       <button
@@ -305,62 +1119,65 @@ const RequisitionApprovals: React.FC = () => {
       )}
 
       {/* Pagination */}
-      {pagination && pagination.pages > 1 && (
+      {pagination && pagination.total > 0 && (
         <div className="mt-6 flex items-center justify-between bg-white px-4 py-3 border border-gray-200 rounded-lg">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-700">
-              Showing <span className="font-medium">{(currentPage - 1) * perPage + 1}</span> to{' '}
-              <span className="font-medium">{Math.min(currentPage * perPage, pagination.total)}</span> of{' '}
-              <span className="font-medium">{pagination.total}</span> results
-            </span>
+          <div className="text-sm text-gray-700">
+            Showing {(currentPage - 1) * perPage + 1} to{' '}
+            {Math.min(currentPage * perPage, pagination.total)} of{' '}
+            {pagination.total} requisitions
+            {pagination.pages > 1 && (
+              <span className="text-gray-500 ml-2">(Page {currentPage} of {pagination.pages})</span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Previous
-            </button>
-            <div className="flex items-center gap-1">
-              {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => {
-                // Show first page, last page, current page, and pages around current
-                const showPage =
-                  page === 1 ||
-                  page === pagination.pages ||
-                  (page >= currentPage - 1 && page <= currentPage + 1);
+          {pagination.pages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Previous
+              </button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => {
+                  // Show first page, last page, current page, and pages around current
+                  const showPage =
+                    page === 1 ||
+                    page === pagination.pages ||
+                    (page >= currentPage - 1 && page <= currentPage + 1);
 
-                if (!showPage) {
-                  // Show ellipsis
-                  if (page === currentPage - 2 || page === currentPage + 2) {
-                    return <span key={page} className="px-2 text-gray-500">...</span>;
+                  if (!showPage) {
+                    // Show ellipsis
+                    if (page === currentPage - 2 || page === currentPage + 2) {
+                      return <span key={page} className="px-2 text-gray-500">...</span>;
+                    }
+                    return null;
                   }
-                  return null;
-                }
 
-                return (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                      currentPage === page
-                        ? 'bg-teal-600 text-white font-medium'
-                        : 'border border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    {page}
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                        currentPage === page
+                          ? 'bg-teal-600 text-white font-medium'
+                          : 'border border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                onClick={() => setCurrentPage(Math.min(pagination.pages, currentPage + 1))}
+                disabled={currentPage === pagination.pages}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
             </div>
-            <button
-              onClick={() => setCurrentPage(Math.min(pagination.pages, currentPage + 1))}
-              disabled={currentPage === pagination.pages}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Next
-            </button>
-          </div>
+          )}
         </div>
       )}
 
@@ -390,12 +1207,14 @@ const RequisitionApprovals: React.FC = () => {
               <div className="flex items-center gap-2 mb-6 pb-4 border-b border-gray-100">
                 <span className="text-sm text-gray-500">Status:</span>
                 <span className="px-2.5 py-1 text-xs font-medium rounded bg-gray-100 text-gray-700">
-                  {selectedRequisition.status === 'pending' && 'Pending Approval'}
-                  {selectedRequisition.status === 'approved' && 'Approved'}
-                  {selectedRequisition.status === 'rejected' && 'Rejected'}
+                  {selectedRequisition.status === 'pending' && (activeTab === 'my_pending' ? 'PM Draft' : 'Draft')}
+                  {selectedRequisition.status === 'send_to_pm' && 'Pending PM Approval'}
+                  {selectedRequisition.status === 'approved' && 'Approved by PM'}
+                  {selectedRequisition.status === 'rejected' && 'Rejected by PM'}
+                  {!['pending', 'send_to_pm', 'approved', 'rejected'].includes(selectedRequisition.status) && selectedRequisition.status}
                 </span>
                 {selectedRequisition.assignment_status === 'assigned' && (
-                  <span className="px-2.5 py-1 text-xs font-medium rounded bg-gray-100 text-gray-700">
+                  <span className="px-2.5 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700">
                     Workers Assigned
                   </span>
                 )}
@@ -454,8 +1273,50 @@ const RequisitionApprovals: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Required Date</h3>
-                    <p className="text-gray-900">{new Date(selectedRequisition.required_date).toLocaleDateString()}</p>
+                    <p className="text-gray-900">
+                      {new Date(selectedRequisition.required_date).toLocaleDateString()}
+                    </p>
                   </div>
+                  <div>
+                    <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Work Shift</h3>
+                    <p className="text-gray-900">
+                      {selectedRequisition.start_time && selectedRequisition.end_time ? (
+                        <span className="text-teal-600 font-medium">
+                          {formatTimeTo12Hour(selectedRequisition.start_time)} - {formatTimeTo12Hour(selectedRequisition.end_time)}
+                        </span>
+                      ) : selectedRequisition.start_time ? (
+                        <span className="text-teal-600 font-medium">
+                          From {formatTimeTo12Hour(selectedRequisition.start_time)}
+                        </span>
+                      ) : selectedRequisition.end_time ? (
+                        <span className="text-teal-600 font-medium">
+                          Until {formatTimeTo12Hour(selectedRequisition.end_time)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">Not specified</span>
+                      )}
+                    </p>
+                  </div>
+                  {(selectedRequisition.preferred_workers && selectedRequisition.preferred_workers.length > 0) && (
+                    <div className="col-span-2">
+                      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Preferred Workers</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedRequisition.preferred_workers.map((worker: any) => (
+                          <div key={worker.worker_id} className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-full text-sm font-medium border border-purple-200">
+                            {worker.full_name} ({worker.worker_code})
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {selectedRequisition.preferred_workers_notes && (
+                    <div className="col-span-2">
+                      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Preferred Workers (Additional Notes)</h3>
+                      <p className="text-gray-900 text-sm whitespace-pre-wrap bg-gray-50 p-2 rounded border border-gray-200">
+                        {selectedRequisition.preferred_workers_notes}
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Request Date</h3>
                     <p className="text-gray-900">{new Date(selectedRequisition.request_date).toLocaleDateString()}</p>
@@ -495,14 +1356,27 @@ const RequisitionApprovals: React.FC = () => {
               >
                 Close
               </button>
-              {selectedRequisition.status === 'pending' && (
+              {/* Show "Send to Production" for PM's own pending requisitions */}
+              {activeTab === 'my_pending' && selectedRequisition.status === 'pending' && (
+                <button
+                  onClick={() => {
+                    setShowDetailsModal(false);
+                    handleSendToProduction(selectedRequisition.requisition_id);
+                  }}
+                  className="flex-1 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700"
+                >
+                  Send to Production
+                </button>
+              )}
+              {/* Show "Approve/Reject" for SE requisitions sent to PM */}
+              {selectedRequisition.status === 'send_to_pm' && (
                 <>
                   <button
                     onClick={() => {
                       setShowDetailsModal(false);
                       handleApprove(selectedRequisition.requisition_id);
                     }}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
                   >
                     Approve
                   </button>
@@ -511,12 +1385,501 @@ const RequisitionApprovals: React.FC = () => {
                       setShowDetailsModal(false);
                       openRejectModal(selectedRequisition.requisition_id);
                     }}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
                   >
                     Reject
                   </button>
                 </>
               )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Add New Requisition Modal - PM Labour Requisition Form */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div>
+                <h2 className="text-lg font-semibold">Create Labour Requisition</h2>
+                <p className="text-sm text-gray-500">Select project, date and labour requirements. Send to Production Manager for assignment.</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAddModal(false);
+                  resetForm();
+                }}
+                className="p-1 hover:bg-gray-100 rounded-lg"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+              {/* Left Panel - Project & Date Selection */}
+              <div className="p-4 space-y-4 lg:w-[280px] border-r border-gray-200 bg-gray-50">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Select Project *</label>
+                  {projectsLoading ? (
+                    <div className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white">
+                      Loading projects...
+                    </div>
+                  ) : (
+                    <select
+                      value={formData.project_id || ''}
+                      onChange={(e) => handleProjectSelect(parseInt(e.target.value) || 0)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 bg-white"
+                    >
+                      <option value="">Select project...</option>
+                      {projects.map((project) => (
+                        <option key={project.project_id} value={project.project_id}>
+                          {project.project_code ? `${project.project_code} - ` : ''}{project.project_name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Site/Location</label>
+                  <input
+                    type="text"
+                    value={formData.site_name}
+                    onChange={(e) => setFormData({ ...formData, site_name: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 bg-white text-sm"
+                    placeholder="Auto-filled from project"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Required Date *</label>
+                  <input
+                    type="date"
+                    value={formData.required_date}
+                    onChange={(e) => setFormData({ ...formData, required_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 bg-white"
+                  />
+                </div>
+
+                {/* Work Shift Times */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                    <TimePicker
+                      value={formData.start_time || ''}
+                      onChange={(value) => setFormData({ ...formData, start_time: value })}
+                      placeholder="HH:MM"
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                    <TimePicker
+                      value={formData.end_time || ''}
+                      onChange={(value) => setFormData({ ...formData, end_time: value })}
+                      placeholder="HH:MM"
+                      className="w-full"
+                      minTime={formData.start_time || undefined}
+                    />
+                    {formData.start_time && formData.end_time && (() => {
+                      const [startHour, startMin] = formData.start_time.split(':').map(Number);
+                      const [endHour, endMin] = formData.end_time.split(':').map(Number);
+                      const startMinutes = startHour * 60 + startMin;
+                      const endMinutes = endHour * 60 + endMin;
+                      return endMinutes <= startMinutes ? (
+                        <p className="text-red-600 text-xs mt-1">End time must be after start time</p>
+                      ) : null;
+                    })()}
+                  </div>
+                </div>
+
+                {/* Preferred Workers Selection */}
+                <div>
+                  {(() => {
+                    const totalWorkersNeeded = selectedLabours.reduce((sum, labour) => sum + (labour.workers_count || 1), 0);
+                    const remainingSlots = totalWorkersNeeded - selectedWorkers.length;
+
+                    return (
+                      <>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Preferred Workers
+                          {totalWorkersNeeded > 0 && (
+                            <span className="ml-2 text-xs text-gray-500">
+                              ({selectedWorkers.length}/{totalWorkersNeeded} selected)
+                            </span>
+                          )}
+                        </label>
+
+                        {/* Search input with chips inside */}
+                        <div className="relative">
+                          <div className="w-full min-h-[42px] max-h-[200px] overflow-y-auto px-3 py-2 border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-teal-500 bg-white">
+                            {/* Selected workers as chips inside input */}
+                            <div className="flex flex-wrap gap-2 items-center">
+                              {selectedWorkers.map(worker => (
+                                <div
+                                  key={worker.worker_id}
+                                  className="flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs"
+                                >
+                                  <span className="font-medium">{worker.full_name} ({worker.worker_code})</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeWorker(worker.worker_id)}
+                                    className="hover:text-purple-900"
+                                  >
+                                    <XMarkIcon className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                              <input
+                                type="text"
+                                placeholder={
+                                  selectedWorkers.length === 0
+                                    ? totalWorkersNeeded > 0
+                                      ? `Select up to ${totalWorkersNeeded} workers...`
+                                      : "Search workers by name or code..."
+                                    : remainingSlots > 0
+                                      ? `${remainingSlots} more...`
+                                      : ""
+                                }
+                                value={workerSearchQuery}
+                                onChange={(e) => setWorkerSearchQuery(e.target.value)}
+                                className="flex-1 min-w-[200px] outline-none bg-transparent text-sm"
+                                disabled={totalWorkersNeeded > 0 && selectedWorkers.length >= totalWorkersNeeded}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Dropdown - only visible when typing */}
+                          {workerSearchQuery && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {workersLoading ? (
+                          <div className="text-sm text-gray-500 p-3 text-center">Loading workers...</div>
+                        ) : (
+                          <>
+                            {(() => {
+                              // Get unique skills from selected labour items (filter out undefined/null)
+                              // Use labour_role (from BOQ) or skill_required (from manual entry)
+                              const selectedSkills = selectedLabours
+                                .map(labour => (labour as any).labour_role || labour.skill_required)
+                                .filter(skill => skill != null && skill !== '');
+                              const totalWorkersNeeded = selectedLabours.reduce((sum, labour) => sum + (labour.workers_count || 1), 0);
+
+                              // Filter workers by search query AND selected skills
+                              const filteredWorkers = availableWorkers.filter(worker => {
+                                // Match search query (name or code)
+                                const matchesSearch = (worker.full_name || '').toLowerCase().includes(workerSearchQuery.toLowerCase()) ||
+                                  (worker.worker_code || '').toLowerCase().includes(workerSearchQuery.toLowerCase());
+
+                                // ONLY show workers if labour is selected AND worker has matching skill
+                                // Worker skills can be a string (comma-separated) or array
+                                const matchesSkill = selectedSkills.length > 0 && selectedSkills.some(skill => {
+                                  if (!worker.skills || !skill) return false;
+
+                                  // Handle comma-separated skills (e.g., "Carpenter, Mason, Painter")
+                                  const workerSkills = typeof worker.skills === 'string'
+                                    ? worker.skills.split(',').map(s => s.trim().toLowerCase()).filter(s => s)
+                                    : Array.isArray(worker.skills)
+                                      ? worker.skills.map(s => String(s).toLowerCase()).filter(s => s)
+                                      : [];
+
+                                  // Check if any worker skill matches the required skill
+                                  const skillLower = skill.toLowerCase();
+                                  return workerSkills.some(ws =>
+                                    ws.includes(skillLower) || skillLower.includes(ws)
+                                  );
+                                });
+
+                                return matchesSearch && matchesSkill;
+                              });
+
+                              return (
+                                <>
+                                  {filteredWorkers.slice(0, 10).map(worker => {
+                                    const isSelected = selectedWorkers.some(w => w.worker_id === worker.worker_id);
+                                    const limitReached = totalWorkersNeeded > 0 && selectedWorkers.length >= totalWorkersNeeded;
+                                    const canSelect = isSelected || !limitReached;
+
+                                    return (
+                                      <div
+                                        key={worker.worker_id}
+                                        onClick={() => {
+                                          if (isSelected) {
+                                            toggleWorkerSelection(worker);
+                                            setWorkerSearchQuery('');
+                                          } else if (canSelect) {
+                                            toggleWorkerSelection(worker);
+                                            setWorkerSearchQuery('');
+                                          } else {
+                                            showError(`Maximum ${totalWorkersNeeded} workers allowed`);
+                                          }
+                                        }}
+                                        className={`p-3 cursor-pointer hover:bg-purple-50 transition-colors border-b border-gray-100 last:border-b-0 ${
+                                          isSelected ? 'bg-purple-100' : !canSelect ? 'opacity-50 cursor-not-allowed' : ''
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <div>
+                                            <p className="text-sm font-medium text-gray-900">{worker.full_name}</p>
+                                            <p className="text-xs text-gray-500">Code: {worker.worker_code}</p>
+                                          </div>
+                                          {isSelected && (
+                                            <CheckCircleIcon className="w-5 h-5 text-purple-600" />
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                  {filteredWorkers.length === 0 && (
+                                    <div className="text-sm text-gray-500 p-3 text-center">
+                                      No workers found matching "{workerSearchQuery}"
+                                      {selectedLabours.length > 0 && (
+                                        <span> with skills: {selectedSkills.join(', ')}</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </>
+                        )}
+                      </div>
+                    )}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {selectedLabours.length > 0 && (
+                  <div className="p-3 bg-teal-100 rounded-lg">
+                    <div className="flex items-center gap-2 text-teal-800">
+                      <CheckCircleIcon className="w-5 h-5" />
+                      <span className="font-medium">{selectedLabours.length} labour(s) selected</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Middle Panel - BOQ Labour Requirements with Checkboxes */}
+              <div className="p-4 flex-1 overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <UsersIcon className="w-5 h-5 text-teal-600" />
+                    <h3 className="font-semibold text-gray-900">Select Labour Requirements</h3>
+                  </div>
+                  {groupedLabours.length > 0 && selectedLabours.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLabours([])}
+                      className="text-xs text-red-600 hover:text-red-700"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+
+                {!selectedProject ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <InformationCircleIcon className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+                    <p className="font-medium">Select a project first</p>
+                    <p className="text-sm">Labour requirements will appear here</p>
+                  </div>
+                ) : groupedLabours.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <CubeIcon className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+                    <p className="font-medium">No labour defined in assigned items</p>
+                    <p className="text-sm">Contact your PM if you need labour for this project</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {groupedLabours.map((group) => (
+                      <div key={group.item_id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                        {/* Item Header with Select All */}
+                        <div
+                          className="flex items-center justify-between p-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={() => toggleItemExpand(group.item_id)}
+                        >
+                          <div className="flex items-center gap-2">
+                            {expandedItems.has(group.item_id) ? (
+                              <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+                            ) : (
+                              <ChevronRightIcon className="w-4 h-4 text-gray-500" />
+                            )}
+                            <span className="font-medium text-gray-900">{group.item_name}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs px-2 py-1 bg-teal-100 text-teal-700 rounded-full">
+                              {group.labours.length} labour{group.labours.length > 1 ? 's' : ''}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                selectAllInGroup(group);
+                              }}
+                              className={`text-xs px-2 py-1 rounded ${
+                                isGroupFullySelected(group)
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-gray-200 text-gray-600 hover:bg-teal-100 hover:text-teal-700'
+                              }`}
+                            >
+                              {isGroupFullySelected(group) ? '✓ All Selected' : 'Select All'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Labour Items with Checkboxes */}
+                        {expandedItems.has(group.item_id) && (
+                          <div className="border-t border-gray-100 p-2 space-y-2">
+                            {group.labours.map((labour, idx) => {
+                              const isSelected = isLabourSelected(labour, idx);
+                              return (
+                                <div
+                                  key={`${labour.labour_id}-${idx}`}
+                                  className={`p-3 rounded-lg border-2 transition-all ${
+                                    isSelected
+                                      ? 'border-teal-500 bg-teal-50 cursor-pointer'
+                                      : 'border-gray-200 bg-white hover:border-teal-300 cursor-pointer'
+                                  }`}
+                                  onClick={() => toggleLabourSelection(labour, idx)}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    {/* Checkbox */}
+                                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center mt-0.5 ${
+                                      isSelected
+                                        ? 'bg-teal-600 border-teal-600'
+                                        : 'border-gray-300'
+                                    }`}>
+                                      {isSelected && (
+                                        <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                        </svg>
+                                      )}
+                                    </div>
+                                    {/* Labour Info */}
+                                    <div className="flex-1">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="font-medium text-gray-900">
+                                          {labour.labour_role || 'N/A'}
+                                        </span>
+                                        <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-800 rounded">
+                                          {labour.labour_type || 'Daily'}
+                                        </span>
+                                      </div>
+                                      {labour.sub_item_name && (
+                                        <p className="text-sm mt-1 text-gray-500">
+                                          {labour.sub_item_name}
+                                        </p>
+                                      )}
+                                      <p className="text-xs text-gray-400 mt-1">
+                                        Hours: {labour.hours || 8}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Right Panel - Selected Items Summary */}
+              {selectedLabours.length > 0 && (
+                <div className="p-4 lg:w-[320px] border-l border-gray-200 bg-gray-50 overflow-y-auto">
+                  <h3 className="font-semibold text-gray-900 mb-3">Selected Labour ({selectedLabours.length})</h3>
+                  <div className="space-y-2 mb-4">
+                    {selectedLabours.map((labour) => (
+                      <div key={labour.uniqueKey} className="bg-white p-3 rounded-lg border border-gray-200">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-900 text-sm truncate">{labour.labour_role}</p>
+                            <p className="text-xs text-gray-500 truncate">{labour.item_name}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeFromSelection(labour.uniqueKey)}
+                            className="p-1 hover:bg-red-100 rounded text-red-500"
+                          >
+                            <XMarkIcon className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <label className="text-xs text-gray-600">Workers:</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={labour.workers_count || ''}
+                            placeholder="1"
+                            onChange={(e) => updateWorkersCount(labour.uniqueKey, parseInt(e.target.value) || 1)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-teal-500"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer with Submit */}
+            <div className="p-4 border-t border-gray-200 bg-gray-50">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-600">
+                  {selectedLabours.length > 0 ? (
+                    <span>
+                      <span className="font-medium">{selectedLabours.length}</span> requisition(s) will be created
+                      for <span className="font-medium">{selectedLabours.reduce((sum, l) => sum + l.workers_count, 0)}</span> workers
+                    </span>
+                  ) : (
+                    <span>Select labour items from the list above</span>
+                  )}
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddModal(false);
+                      resetForm();
+                    }}
+                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleBulkSubmit}
+                    disabled={selectedLabours.length === 0 || !formData.project_id || submitting}
+                    className={`px-6 py-2 rounded-lg font-medium flex items-center gap-2 ${
+                      selectedLabours.length === 0 || !formData.project_id || submitting
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-teal-600 text-white hover:bg-teal-700'
+                    }`}
+                  >
+                    {submitting ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <PlusIcon className="w-5 h-5" />
+                        Create {selectedLabours.length > 0 ? `${selectedLabours.length} Requisition(s)` : 'Requisition'}
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           </motion.div>
         </div>
@@ -567,6 +1930,222 @@ const RequisitionApprovals: React.FC = () => {
                   Reject Requisition
                 </button>
               </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Edit Requisition Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900">Edit Labour Requisition</h2>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  resetEditForm();
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="space-y-4">
+                {/* Project (Read-only) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Project <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editSelectedProject?.project_name || 'Loading...'}
+                    disabled
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-500"
+                  />
+                </div>
+
+                {/* Site Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Site Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.site_name}
+                    onChange={(e) => setEditFormData({ ...editFormData, site_name: e.target.value })}
+                    placeholder="Enter site name or location"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                {/* Work Description */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Work Description
+                  </label>
+                  <textarea
+                    value={editFormData.work_description}
+                    onChange={(e) => setEditFormData({ ...editFormData, work_description: e.target.value })}
+                    placeholder="Describe the work to be done"
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                {/* Required Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Required Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={editFormData.required_date}
+                    onChange={(e) => setEditFormData({ ...editFormData, required_date: e.target.value })}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                {/* Time Fields */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Start Time
+                    </label>
+                    <TimePicker
+                      value={editFormData.start_time || ''}
+                      onChange={(value) => setEditFormData({ ...editFormData, start_time: value })}
+                      placeholder="HH:MM"
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      End Time
+                    </label>
+                    <TimePicker
+                      value={editFormData.end_time || ''}
+                      onChange={(value) => setEditFormData({ ...editFormData, end_time: value })}
+                      placeholder="HH:MM"
+                      className="w-full"
+                      minTime={editFormData.start_time || undefined}
+                    />
+                  </div>
+                </div>
+
+                {/* Time Validation Error */}
+                {editFormData.start_time && editFormData.end_time && (() => {
+                  const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
+                  const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
+                  const startMinutes = startHour * 60 + startMin;
+                  const endMinutes = endHour * 60 + endMin;
+                  return endMinutes <= startMinutes;
+                })() && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                    <p className="text-sm text-red-700">End Time must be after Start Time</p>
+                  </div>
+                )}
+
+                {/* Labour Items Breakdown */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Labour Requirements <span className="text-red-500">*</span>
+                  </label>
+                  {editSelectedLabours && editSelectedLabours.length > 0 ? (
+                    <div className="space-y-3">
+                      {editSelectedLabours.map((labour: any, idx: number) => (
+                        <div key={idx} className="bg-white border border-gray-200 rounded-lg p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900 mb-1">
+                                {labour.work_description || `${labour.item_name || ''} ${labour.sub_item_name ? '- ' + labour.sub_item_name : ''}`}
+                              </p>
+                              <p className="text-xs text-gray-600">
+                                <span className="font-medium">Skill:</span> {labour.skill_required || labour.labour_role || 'N/A'}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs text-gray-500 font-medium">Workers:</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={labour.workers_count || ''}
+                                placeholder="1"
+                                onChange={(e) => {
+                                  const updated = [...editSelectedLabours];
+                                  updated[idx] = { ...updated[idx], workers_count: parseInt(e.target.value) || 1 };
+                                  setEditSelectedLabours(updated);
+                                }}
+                                className="w-16 px-2 py-1 border border-gray-300 rounded text-center focus:ring-2 focus:ring-purple-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="bg-gray-50 border border-gray-300 rounded-lg p-3 flex items-center justify-between">
+                        <span className="text-sm font-semibold text-gray-900">Total Workers Required:</span>
+                        <span className="text-sm font-bold text-purple-600">
+                          {editSelectedLabours.reduce((sum: number, labour: any) => sum + (parseInt(labour.workers_count) || 1), 0)} workers
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="border border-gray-300 rounded-lg p-4 bg-gray-50 text-gray-500 text-sm text-center">
+                      No labour items found in this requisition
+                    </div>
+                  )}
+                </div>
+
+                {/* Preferred Workers Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Preferred Workers Notes
+                  </label>
+                  <textarea
+                    value={editFormData.preferred_workers_notes}
+                    onChange={(e) => setEditFormData({ ...editFormData, preferred_workers_notes: e.target.value })}
+                    placeholder="Any specific requirements or preferences"
+                    rows={2}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex gap-3 p-6 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  resetEditForm();
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdateRequisition}
+                disabled={submitting || !editFormData.project_id || !editFormData.required_date}
+                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {submitting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Updating...
+                  </>
+                ) : (
+                  'Update Requisition'
+                )}
+              </button>
             </div>
           </motion.div>
         </div>

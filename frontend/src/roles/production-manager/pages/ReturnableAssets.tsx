@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Package, X, RefreshCw, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Search, Package, X, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiClient } from '@/api/config';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { assetService, AssetCategory, AssetDashboard } from '../services/assetService';
 import { showSuccess, showError } from '@/utils/toastHelper';
+import { PAGINATION } from '@/lib/inventoryConstants';
 
 
 const ReturnableAssets: React.FC = () => {
@@ -13,6 +14,9 @@ const ReturnableAssets: React.FC = () => {
   // Data state
   const [dashboard, setDashboard] = useState<AssetDashboard | null>(null);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Disposal modal state
   const [showDisposalModal, setShowDisposalModal] = useState(false);
@@ -86,10 +90,31 @@ const ReturnableAssets: React.FC = () => {
   };
 
   // Filter categories based on search
-  const filteredCategories = categories.filter(c =>
-    c.category_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.category_code.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredCategories = useMemo(() => {
+    return categories.filter(c =>
+      c.category_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.category_code.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [categories, searchTerm]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredCategories.length / PAGINATION.DEFAULT_PAGE_SIZE);
+  const paginatedCategories = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE;
+    return filteredCategories.slice(startIndex, startIndex + PAGINATION.DEFAULT_PAGE_SIZE);
+  }, [filteredCategories, currentPage]);
+
+  // Reset page when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  // Clamp page when total pages decreases
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   // ==================== RENDER DISPOSAL MODAL ====================
   const renderDisposalModal = () => (
@@ -248,7 +273,7 @@ const ReturnableAssets: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filteredCategories.length === 0 ? (
+                {paginatedCategories.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-4 py-12 text-center">
                       <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
@@ -258,7 +283,7 @@ const ReturnableAssets: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  filteredCategories.map(cat => (
+                  paginatedCategories.map(cat => (
                     <tr key={cat.category_id} className="hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
@@ -311,22 +336,32 @@ const ReturnableAssets: React.FC = () => {
             </table>
           </div>
 
-          {/* Summary Footer */}
+          {/* Pagination */}
           {filteredCategories.length > 0 && (
             <div className="px-4 py-3 bg-gray-50 border-t flex items-center justify-between text-sm">
               <span className="text-gray-600">
-                {filteredCategories.length} asset type{filteredCategories.length !== 1 ? 's' : ''}
+                Showing {((currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE) + 1} - {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, filteredCategories.length)} of {filteredCategories.length} asset types
               </span>
-              <div className="flex items-center gap-4">
-                <span className="text-green-600 font-medium">
-                  {dashboard?.summary.total_available || 0} Available
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </button>
+                <span className="text-sm text-gray-600">
+                  Page {currentPage} of {totalPages}
                 </span>
-                <span className="text-orange-600 font-medium">
-                  {dashboard?.summary.total_dispatched || 0} Dispatched
-                </span>
-                <span className="text-gray-700 font-medium">
-                  {categories.reduce((sum, cat) => sum + cat.total_quantity, 0)} Total
-                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
           )}

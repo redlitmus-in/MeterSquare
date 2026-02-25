@@ -14,6 +14,7 @@ from datetime import datetime
 from flask import request, jsonify, g
 from config.db import db
 from sqlalchemy import func, and_
+from sqlalchemy.orm import joinedload
 
 logger = logging.getLogger(__name__)
 from models.returnable_assets import *
@@ -340,12 +341,28 @@ def create_delivery_note():
             vehicle_number=data.get('vehicle_number'),
             driver_name=data.get('driver_name'),
             driver_contact=data.get('driver_contact'),
+            transport_fee=data.get('transport_fee', 0.0),
+            delivery_note_url=data.get('delivery_note_url'),
             status='DRAFT',
             notes=data.get('notes'),
             created_by=user_name
         )
         db.session.add(adn)
         db.session.flush()
+
+        # ── Batch pre-fetch: ReturnableAssetItems for individual-tracking items ──
+        _adn_individual_item_ids = [
+            item_d.get('asset_item_id') for item_d in data['items']
+            if item_d.get('asset_item_id')
+        ]
+        _adn_batch_asset_items = {
+            ai.asset_item_id: ai for ai in ReturnableAssetItem.query.filter(
+                ReturnableAssetItem.asset_item_id.in_(_adn_individual_item_ids)
+            ).all()
+        } if _adn_individual_item_ids else {}
+        # Note: ReturnableAssetCategory uses with_for_update() (pessimistic lock)
+        # and must remain per-item to prevent concurrent stock modification.
+        # ─────────────────────────────────────────────────────────────────────────
 
         # Process items
         for item_data in data['items']:
@@ -384,7 +401,7 @@ def create_delivery_note():
                         'error': f'Asset item ID required for individual tracking ({category.category_name})'
                     }), 400
 
-                asset_item = ReturnableAssetItem.query.get(asset_item_id)
+                asset_item = _adn_batch_asset_items.get(asset_item_id)  # dict lookup — no DB call
                 if not asset_item or asset_item.current_status != 'available':
                     db.session.rollback()
                     return jsonify({
@@ -423,7 +440,13 @@ def get_delivery_notes():
         status = request.args.get('status')
         project_id = request.args.get('project_id', type=int)
 
-        query = AssetDeliveryNote.query
+        # Fix N+1 query: Eager load items and their relationships
+        query = AssetDeliveryNote.query.options(
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.category),
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.asset_item)
+        )
 
         if status:
             query = query.filter_by(status=status)
@@ -463,7 +486,13 @@ def get_delivery_notes():
 def get_delivery_note(adn_id):
     """Get single Asset Delivery Note with details"""
     try:
-        adn = AssetDeliveryNote.query.get(adn_id)
+        # Fix N+1 query: Eager load items and their relationships
+        adn = AssetDeliveryNote.query.options(
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.category),
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.asset_item)
+        ).get(adn_id)
         if not adn:
             return jsonify({'success': False, 'error': 'Delivery note not found'}), 404
 
@@ -496,6 +525,14 @@ def dispatch_delivery_note(adn_id):
         if adn.status not in ['DRAFT', 'ISSUED']:
             return jsonify({'success': False, 'error': f'Cannot dispatch. Current status: {adn.status}'}), 400
 
+        # Batch pre-fetch individual asset items (category uses with_for_update lock, must stay per-item)
+        _dispatch_item_ids = [item.asset_item_id for item in adn.items if item.asset_item_id]
+        _batch_dispatch_items = {
+            ai.asset_item_id: ai for ai in ReturnableAssetItem.query.filter(
+                ReturnableAssetItem.asset_item_id.in_(_dispatch_item_ids)
+            ).all()
+        } if _dispatch_item_ids else {}
+
         # Process each item - deduct from inventory
         for item in adn.items:
             category = ReturnableAssetCategory.query.with_for_update().get(item.category_id)
@@ -511,7 +548,7 @@ def dispatch_delivery_note(adn_id):
                 category.available_quantity = (category.available_quantity or 0) - item.quantity
 
             else:  # individual tracking
-                asset_item = ReturnableAssetItem.query.get(item.asset_item_id)
+                asset_item = _batch_dispatch_items.get(item.asset_item_id)  # dict lookup — no DB call
                 if asset_item:
                     asset_item.current_status = 'dispatched'
                     asset_item.current_project_id = adn.project_id
@@ -613,6 +650,17 @@ def create_return_note():
         db.session.add(ardn)
         db.session.flush()
 
+        # Batch pre-fetch original ADN items — avoid N+1 (one query per item)
+        _orig_adn_item_ids = [
+            d['original_adn_item_id'] for d in data['items']
+            if d.get('original_adn_item_id')
+        ]
+        _orig_adn_items_map = {
+            i.item_id: i for i in AssetDeliveryNoteItem.query.filter(
+                AssetDeliveryNoteItem.item_id.in_(_orig_adn_item_ids)
+            ).all()
+        } if _orig_adn_item_ids else {}
+
         # Process items
         for item_data in data['items']:
             ardn_item = AssetReturnDeliveryNoteItem(
@@ -631,7 +679,7 @@ def create_return_note():
 
             # Update quantity_returned on original ADN item so it disappears from SE view
             if item_data.get('original_adn_item_id'):
-                original_item = AssetDeliveryNoteItem.query.get(item_data['original_adn_item_id'])
+                original_item = _orig_adn_items_map.get(item_data['original_adn_item_id'])
                 if original_item:
                     current_returned = original_item.quantity_returned or 0
                     return_qty = item_data.get('quantity', 1)
@@ -663,7 +711,16 @@ def get_return_notes():
         status = request.args.get('status')
         project_id = request.args.get('project_id', type=int)
 
-        query = AssetReturnDeliveryNote.query
+        # Fix N+1 query: Eager load items, original ADN, and their relationships
+        query = AssetReturnDeliveryNote.query.options(
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.category),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.asset_item),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.original_adn_item),
+            joinedload(AssetReturnDeliveryNote.original_adn)
+        )
 
         if status:
             query = query.filter_by(status=status)
@@ -728,7 +785,16 @@ def get_return_notes():
 def get_return_note(ardn_id):
     """Get single Asset Return Delivery Note with details"""
     try:
-        ardn = AssetReturnDeliveryNote.query.get(ardn_id)
+        # Fix N+1 query: Eager load items, original ADN, and their relationships
+        ardn = AssetReturnDeliveryNote.query.options(
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.category),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.asset_item),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.original_adn_item),
+            joinedload(AssetReturnDeliveryNote.original_adn)
+        ).get(ardn_id)
         if not ardn:
             return jsonify({'success': False, 'error': 'Return note not found'}), 404
 
@@ -850,6 +916,18 @@ def dispatch_return_note(ardn_id):
         if data.get('driver_contact'):
             ardn.driver_contact = data['driver_contact']
 
+        # Update transport fee if provided
+        if 'transport_fee' in data:
+            ardn.transport_fee = float(data['transport_fee']) if data['transport_fee'] else 0.0
+
+        # Update notes if provided
+        if data.get('notes'):
+            ardn.notes = data['notes']
+
+        # Update delivery note URL if provided
+        if data.get('delivery_note_url'):
+            ardn.delivery_note_url = data['delivery_note_url']
+
         ardn.status = 'IN_TRANSIT'
         ardn.dispatched_at = datetime.utcnow()
         ardn.dispatched_by = user_name
@@ -861,6 +939,114 @@ def dispatch_return_note(ardn_id):
             'message': f'Return note {ardn.ardn_number} dispatched',
             'data': ardn.to_dict()
         })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def upload_return_note_delivery_note():
+    """Upload delivery note document for ARDN (from vendor/transporter)"""
+    try:
+        from werkzeug.utils import secure_filename
+        from supabase import create_client
+        import uuid
+        import os
+
+        # Get ARDN ID from request
+        ardn_id = request.form.get('ardn_id')
+        if not ardn_id:
+            return jsonify({'success': False, 'error': 'ARDN ID is required'}), 400
+
+        # Get the ARDN record
+        ardn = AssetReturnDeliveryNote.query.get(ardn_id)
+        if not ardn:
+            return jsonify({'success': False, 'error': 'Return note not found'}), 404
+
+        # Get file from request
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+        # Validate file type
+        filename = secure_filename(file.filename)
+        allowed_extensions = {'pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'}
+        ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+        if ext not in allowed_extensions:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid file type. Allowed: PDF, DOC, DOCX, JPG, PNG (Max 10MB)'
+            }), 400
+
+        # Read file content
+        file_content = file.read()
+        file_size = len(file_content)
+
+        # Check file size (max 10MB)
+        max_size = 10 * 1024 * 1024
+        if file_size > max_size:
+            return jsonify({
+                'success': False,
+                'error': 'File too large. Maximum size is 10MB'
+            }), 400
+
+        if file_size == 0:
+            return jsonify({'success': False, 'error': 'File is empty'}), 400
+
+        # Create unique filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_id = str(uuid.uuid4())[:8]
+        unique_filename = f"asset-return-notes/{ardn.ardn_number}/{timestamp}_{unique_id}_{filename}"
+
+        # Get content type
+        content_type = file.content_type or 'application/octet-stream'
+
+        # Initialize Supabase client based on ENVIRONMENT variable
+        environment = os.environ.get('ENVIRONMENT', 'production')
+        if environment == 'development':
+            supabase_url = os.environ.get('DEV_SUPABASE_URL')
+            supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
+        else:
+            supabase_url = os.environ.get('SUPABASE_URL')
+            supabase_key = os.environ.get('SUPABASE_ANON_KEY')
+
+        if not supabase_url or not supabase_key:
+            return jsonify({'success': False, 'error': 'Storage configuration missing'}), 500
+
+        supabase = create_client(supabase_url, supabase_key)
+
+        # Upload to inventory-files bucket
+        bucket = supabase.storage.from_('inventory-files')
+        try:
+            response = bucket.upload(
+                unique_filename,
+                file_content,
+                {"content-type": content_type, "upsert": "false"}
+            )
+        except Exception as upload_error:
+            return jsonify({'success': False, 'error': f'Upload failed: {str(upload_error)}'}), 500
+
+        # Get public URL
+        public_url = bucket.get_public_url(unique_filename)
+
+        # Update ARDN record with delivery note URL
+        ardn.delivery_note_url = public_url
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Delivery note uploaded successfully',
+            'data': {
+                'ardn_id': ardn_id,
+                'ardn_number': ardn.ardn_number,
+                'delivery_note_url': public_url,
+                'filename': filename,
+                'file_size': file_size
+            }
+        }), 200
 
     except Exception as e:
         db.session.rollback()
@@ -920,9 +1106,40 @@ def process_return_note(ardn_id):
 
         # Process each item
         items_data = data.get('items', [])
+        # Batch pre-fetch all return items for this ARDN
+        _ardn_item_ids = [d['return_item_id'] for d in items_data if 'return_item_id' in d]
+        _batch_ardn_items = {
+            i.return_item_id: i for i in AssetReturnDeliveryNoteItem.query.filter(
+                AssetReturnDeliveryNoteItem.return_item_id.in_(_ardn_item_ids),
+                AssetReturnDeliveryNoteItem.ardn_id == ardn_id
+            ).all()
+        } if _ardn_item_ids else {}
+
+        # Batch pre-fetch ReturnableAssetItems — avoid N+1 per item (return_to_stock / send_to_repair / dispose branches)
+        _asset_item_ids_for_proc = list({
+            d.get('asset_item_id') for d in items_data if d.get('asset_item_id')
+        } | {
+            i.asset_item_id for i in _batch_ardn_items.values() if i.asset_item_id
+        })
+        _proc_asset_items_map = {
+            ai.item_id: ai for ai in ReturnableAssetItem.query.filter(
+                ReturnableAssetItem.item_id.in_(_asset_item_ids_for_proc)
+            ).all()
+        } if _asset_item_ids_for_proc else {}
+
+        # Batch pre-fetch original ADN items for process_return_note update — avoid N+1
+        _proc_orig_adn_item_ids = list({
+            i.original_adn_item_id for i in _batch_ardn_items.values() if i.original_adn_item_id
+        })
+        _proc_orig_adn_items_map = {
+            ai.item_id: ai for ai in AssetDeliveryNoteItem.query.filter(
+                AssetDeliveryNoteItem.item_id.in_(_proc_orig_adn_item_ids)
+            ).all()
+        } if _proc_orig_adn_item_ids else {}
+
         for item_data in items_data:
-            ardn_item = AssetReturnDeliveryNoteItem.query.get(item_data['return_item_id'])
-            if not ardn_item or ardn_item.ardn_id != ardn_id:
+            ardn_item = _batch_ardn_items.get(item_data['return_item_id'])  # dict lookup — no DB call
+            if not ardn_item:
                 continue
 
             # Update PM verification
@@ -941,7 +1158,7 @@ def process_return_note(ardn_id):
                 if category.tracking_mode == 'quantity':
                     category.available_quantity = (category.available_quantity or 0) + ardn_item.quantity
                 else:
-                    asset_item = ReturnableAssetItem.query.get(ardn_item.asset_item_id)
+                    asset_item = _proc_asset_items_map.get(ardn_item.asset_item_id)
                     if asset_item:
                         asset_item.current_status = 'available'
                         asset_item.current_project_id = None
@@ -965,7 +1182,7 @@ def process_return_note(ardn_id):
 
                 # Update item status if individual
                 if category.tracking_mode == 'individual' and ardn_item.asset_item_id:
-                    asset_item = ReturnableAssetItem.query.get(ardn_item.asset_item_id)
+                    asset_item = _proc_asset_items_map.get(ardn_item.asset_item_id)
                     if asset_item:
                         asset_item.current_status = 'maintenance'
                         asset_item.current_project_id = None
@@ -1021,14 +1238,14 @@ def process_return_note(ardn_id):
 
                 # Update individual asset item status if applicable
                 if category.tracking_mode == 'individual' and ardn_item.asset_item_id:
-                    asset_item = ReturnableAssetItem.query.get(ardn_item.asset_item_id)
+                    asset_item = _proc_asset_items_map.get(ardn_item.asset_item_id)
                     if asset_item:
                         asset_item.current_status = 'pending_disposal'
                         asset_item.current_project_id = None
 
-            # Update original ADN item if linked
+            # Update original ADN item if linked (pre-fetched — no DB call)
             if ardn_item.original_adn_item_id:
-                adn_item = AssetDeliveryNoteItem.query.get(ardn_item.original_adn_item_id)
+                adn_item = _proc_orig_adn_items_map.get(ardn_item.original_adn_item_id)
                 if adn_item:
                     adn_item.quantity_returned = (adn_item.quantity_returned or 0) + ardn_item.quantity
                     if adn_item.quantity_returned >= adn_item.quantity:
@@ -1149,8 +1366,13 @@ def get_available_for_dispatch():
 def get_project_dispatched_assets(project_id):
     """Get assets dispatched to a specific project (for creating return notes)"""
     try:
-        # Get delivered ADNs for this project
-        adns = AssetDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items and their relationships
+        adns = AssetDeliveryNote.query.options(
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.category),
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.asset_item)
+        ).filter(
             AssetDeliveryNote.project_id == project_id,
             AssetDeliveryNote.status.in_(['DELIVERED', 'IN_TRANSIT'])
         ).all()
@@ -1362,6 +1584,7 @@ def download_asset_delivery_note(adn_id):
             'delivery_from': adn.delivery_from or 'M2 Store',
             'vehicle_number': adn.vehicle_number,
             'driver_name': adn.driver_name,
+            'transport_fee': adn.transport_fee,
             'notes': adn.notes,
         }
 
@@ -1449,6 +1672,7 @@ def download_asset_return_note(ardn_id):
             'vehicle_number': ardn.vehicle_number,
             'driver_name': ardn.driver_name,
             'driver_contact': ardn.driver_contact,
+            'transport_fee': ardn.transport_fee,
             'notes': ardn.notes,
         }
 
@@ -1566,8 +1790,13 @@ def get_se_dispatched_assets():
         project_ids = [p.project_id for p in my_projects]
         projects_map = {p.project_id: p for p in my_projects}
 
-        # Get all ADNs that are IN_TRANSIT, PARTIAL, or DELIVERED for SE's projects
-        adns = AssetDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items and their relationships
+        adns = AssetDeliveryNote.query.options(
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.category),
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.asset_item)
+        ).filter(
             AssetDeliveryNote.project_id.in_(project_ids),
             AssetDeliveryNote.status.in_(['IN_TRANSIT', 'PARTIAL', 'DELIVERED'])
         ).order_by(AssetDeliveryNote.created_at.desc()).all()
@@ -2036,8 +2265,13 @@ def get_se_movement_history():
 
         movements = []
 
-        # Get ADNs (Dispatches) for SE's projects
-        adns = AssetDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items and their relationships
+        adns = AssetDeliveryNote.query.options(
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.category),
+            joinedload(AssetDeliveryNote.items)
+            .joinedload(AssetDeliveryNoteItem.asset_item)
+        ).filter(
             AssetDeliveryNote.project_id.in_(project_ids),
             AssetDeliveryNote.status.in_(['IN_TRANSIT', 'PARTIAL', 'DELIVERED'])
         ).order_by(AssetDeliveryNote.created_at.desc()).limit(limit).all()
@@ -2087,8 +2321,10 @@ def get_se_movement_history():
                     'created_at': adn.created_at.isoformat()
                 })
 
-        # Get ARDNs (Returns) for SE's projects
-        ardns = AssetReturnDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items (categories and asset_items loaded separately below)
+        ardns = AssetReturnDeliveryNote.query.options(
+            joinedload(AssetReturnDeliveryNote.items)
+        ).filter(
             AssetReturnDeliveryNote.project_id.in_(project_ids),
             AssetReturnDeliveryNote.status.in_(['ISSUED', 'IN_TRANSIT', 'RECEIVED', 'PROCESSED'])
         ).order_by(AssetReturnDeliveryNote.created_at.desc()).limit(limit).all()
@@ -2204,8 +2440,16 @@ def get_ss_return_notes():
                 }
             }), 200
 
-        # Filter return notes by SE's assigned projects
-        query = AssetReturnDeliveryNote.query.filter(
+        # Fix N+1 query: Eager load items and their relationships
+        query = AssetReturnDeliveryNote.query.options(
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.category),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.asset_item),
+            joinedload(AssetReturnDeliveryNote.items)
+            .joinedload(AssetReturnDeliveryNoteItem.original_adn_item),
+            joinedload(AssetReturnDeliveryNote.original_adn)
+        ).filter(
             AssetReturnDeliveryNote.project_id.in_(se_project_ids)
         )
 

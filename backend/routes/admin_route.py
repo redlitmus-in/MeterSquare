@@ -10,7 +10,9 @@ from controllers.admin_controller import (
     get_all_boqs_admin,
     approve_boq_admin,
     get_all_project_managers,
-    get_all_site_engineers
+    get_all_site_engineers,
+    get_user_login_history,
+    get_all_login_history
 )
 
 admin_routes = Blueprint("admin_routes", __name__, url_prefix='/api/admin')
@@ -76,14 +78,8 @@ def assign_pm_route(project_id):
     return assign_project_manager(project_id)
 
 # ============================================
-# SYSTEM STATISTICS & DASHBOARD ROUTES
+# RECENT ACTIVITY ROUTES
 # ============================================
-
-@admin_routes.route('/stats', methods=['GET'])
-@jwt_required
-def get_stats_route():
-    """Get system statistics"""
-    return get_system_stats()
 
 @admin_routes.route('/activity', methods=['GET'])
 @jwt_required
@@ -152,3 +148,47 @@ def get_site_engineers_route():
     return get_all_site_engineers()
 
 
+# ============================================
+# LOGIN HISTORY ROUTES
+# ============================================
+
+@admin_routes.route('/users/<int:user_id>/login-history', methods=['GET'])
+@jwt_required
+def get_user_login_history_route(user_id):
+    """Get login history for a specific user"""
+    return get_user_login_history(user_id)
+
+
+@admin_routes.route('/login-history', methods=['GET'])
+@jwt_required
+def get_all_login_history_route():
+    """Get login history for all users (recent overview)"""
+    return get_all_login_history()
+
+
+# ============================================
+# COMPREHENSIVE DASHBOARD ANALYTICS ROUTES
+# ============================================
+
+@admin_routes.route('/dashboard/analytics', methods=['GET'])
+@jwt_required
+def get_dashboard_analytics_route():
+    """Get comprehensive dashboard analytics"""
+    from controllers.admin_controller import get_dashboard_analytics
+    return get_dashboard_analytics()
+
+
+@admin_routes.route('/dashboard/top-performers', methods=['GET'])
+@jwt_required
+def get_top_performers_route():
+    """Get top performing users"""
+    from controllers.admin_controller import get_top_performers
+    return get_top_performers()
+
+
+@admin_routes.route('/dashboard/financial-summary', methods=['GET'])
+@jwt_required
+def get_financial_summary_route():
+    """Get financial summary for dashboard"""
+    from controllers.admin_controller import get_financial_summary
+    return get_financial_summary()

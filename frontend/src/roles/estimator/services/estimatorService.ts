@@ -3,7 +3,7 @@
  * Handles all API interactions for BOQ management
  */
 
-import { apiClient } from '@/api/config';
+import { apiClient, deduplicatedGet } from '@/api/config';
 import {
   BOQ,
   BOQFilter,
@@ -51,7 +51,7 @@ class EstimatorService {
   // Get BOQs by status - specific API endpoints
   async getPendingBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/pending_boq');
+      const response = await deduplicatedGet('/pending_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -65,7 +65,7 @@ class EstimatorService {
 
   async getApprovedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/approved_boq');
+      const response = await deduplicatedGet('/approved_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -79,7 +79,7 @@ class EstimatorService {
 
   async getRejectedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/rejected_boq');
+      const response = await deduplicatedGet('/rejected_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -93,7 +93,7 @@ class EstimatorService {
 
   async getCompletedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/completed_boq');
+      const response = await deduplicatedGet('/completed_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -107,7 +107,7 @@ class EstimatorService {
 
   async getCancelledBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/cancelled_boq');
+      const response = await deduplicatedGet('/cancelled_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -121,7 +121,7 @@ class EstimatorService {
 
   async getSentBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/all_send_boq');
+      const response = await deduplicatedGet('/all_send_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -133,9 +133,33 @@ class EstimatorService {
     }
   }
 
+  // Get BOQs sent to client (Client Pending) - same as getSentBOQs but with clearer naming
+  async getClientPendingBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+    return this.getSentBOQs();
+  }
+
+  // Get BOQs rejected by client
+  async getClientRejectedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+    try {
+      const response = await deduplicatedGet('/rejected_boq');
+      // Filter only client-rejected BOQs (status: Client_Rejected or client_rejected)
+      const clientRejected = (response.data?.data || response.data || []).filter((boq: any) =>
+        boq.status === 'Client_Rejected' || boq.status === 'client_rejected'
+      );
+      return {
+        success: true,
+        data: clientRejected,
+        count: clientRejected.length
+      };
+    } catch (error: any) {
+      console.error('Error fetching client rejected BOQs:', error.response?.data || error.message);
+      return { success: false, data: [], count: 0 };
+    }
+  }
+
   async getRevisionsBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await apiClient.get('/revisions_boq');
+      const response = await deduplicatedGet('/revisions_boq');
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -161,7 +185,7 @@ class EstimatorService {
     };
   }> {
     try {
-      const response = await apiClient.get('/estimator_tab_counts');
+      const response = await deduplicatedGet('/estimator_tab_counts');
       return {
         success: true,
         counts: response.data?.counts || {
@@ -1076,7 +1100,7 @@ async sendClientRevisionToTD(
     message?: string;
   }> {
     try {
-      const response = await apiClient.get('/boq/revision-tabs');
+      const response = await deduplicatedGet('/boq/revision-tabs');
 
       if (response.data) {
         return {
@@ -1211,6 +1235,78 @@ async sendClientRevisionToTD(
     }
   }
 
+  // Get all unique sub-item names for autocomplete suggestions
+  async getAllSubItemNames(): Promise<string[]> {
+    try {
+      const response = await apiClient.get('/all_sub_item_names');
+
+      if (response.data?.success && response.data?.sub_item_names) {
+        return response.data.sub_item_names;
+      }
+
+      return [];
+    } catch (error) {
+      console.error('Failed to fetch sub-item names:', error);
+      return [];
+    }
+  }
+
+  // Get sub-item details by name (with materials and labour)
+  async getSubItemByName(subItemName: string): Promise<{
+    success: boolean;
+    sub_item: {
+      sub_item_id: number;
+      item_id: number;
+      sub_item_name: string;
+      scope: string;
+      description: string;
+      size: string;
+      location: string;
+      brand: string;
+      unit: string;
+      quantity: number;
+      rate: number;
+      misc_percentage: number;
+      overhead_profit_percentage: number;
+      transport_percentage: number;
+      materials: Array<{
+        material_id: number;
+        material_name: string;
+        description: string;
+        size: string;
+        specification: string;
+        quantity: number;
+        brand: string;
+        unit: string;
+        unit_price: number;
+      }>;
+      labour: Array<{
+        labour_id: number;
+        labour_role: string;
+        work_type: string;
+        hours: number;
+        rate_per_hour: number;
+        amount: number;
+      }>;
+    } | null;
+  }> {
+    try {
+      const response = await apiClient.get(`/sub_item_by_name/${encodeURIComponent(subItemName)}`);
+
+      if (response.data?.success && response.data?.sub_item) {
+        return {
+          success: true,
+          sub_item: response.data.sub_item
+        };
+      }
+
+      return { success: false, sub_item: null };
+    } catch (error) {
+      console.error(`Failed to fetch sub-item by name "${subItemName}":`, error);
+      return { success: false, sub_item: null };
+    }
+  }
+
   // Get materials for a specific item
   async getItemMaterials(itemId: number): Promise<{
     material_id: number;
@@ -1237,6 +1333,54 @@ async sendClientRevisionToTD(
       return [];
     } catch (error) {
       console.error(`Failed to fetch materials for item ${itemId}:`, error);
+      return [];
+    }
+  }
+
+  // Search all materials globally for autocomplete
+  async searchMaterials(query: string, limit: number = 20): Promise<{
+    material_id: number;
+    material_name: string;
+    brand: string;
+    size: string;
+    specification: string;
+    description: string;
+    default_unit: string;
+    current_market_price: number;
+  }[]> {
+    try {
+      const response = await apiClient.get('/materials/search', {
+        params: { q: query, limit }
+      });
+      if (response.data?.success && response.data?.materials) {
+        return response.data.materials;
+      }
+      return [];
+    } catch (error) {
+      console.error(`Failed to search materials for "${query}":`, error);
+      return [];
+    }
+  }
+
+  // Search all labours globally for autocomplete
+  async searchLabours(query: string, limit: number = 20): Promise<{
+    labour_id: number;
+    labour_role: string;
+    work_type: string;
+    hours: number;
+    rate_per_hour: number;
+    amount: number;
+  }[]> {
+    try {
+      const response = await apiClient.get('/labours/search', {
+        params: { q: query, limit }
+      });
+      if (response.data?.success && response.data?.labours) {
+        return response.data.labours;
+      }
+      return [];
+    } catch (error) {
+      console.error(`Failed to search labours for "${query}":`, error);
       return [];
     }
   }

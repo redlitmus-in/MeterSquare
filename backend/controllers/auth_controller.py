@@ -18,6 +18,14 @@ from utils.async_email import send_otp_async
 from utils.sms_service import send_sms_otp
 import os
 
+# Import security logging functions
+try:
+    from utils.advanced_security import on_login_success, on_login_failed
+except ImportError:
+    # Fallback if advanced_security not available
+    def on_login_success(user_id): pass
+    def on_login_failed(email): pass
+
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
 
 log = get_logger()
@@ -229,7 +237,7 @@ def update_user_profile():
             return jsonify({"error": "Not logged in"}), 401
 
         data = request.get_json()
-        allowed_fields = ["full_name", "phone", "department"]
+        allowed_fields = ["full_name", "email", "phone", "department"]
         update_data = {field: data[field] for field in allowed_fields if field in data}
 
         if not update_data:
@@ -293,6 +301,57 @@ def send_email():
 # Users can login with OTP sent to their email
 
 def logout():
+    """
+    Logout user - sets user status to offline before clearing session
+    """
+    try:
+        # Try to get user from token to update their status
+        token = None
+        auth_header = request.headers.get('Authorization')
+        if auth_header:
+            try:
+                token = auth_header.split(' ')[1]
+            except IndexError:
+                pass
+
+        if not token:
+            token = request.cookies.get('access_token')
+
+        if token:
+            try:
+                # Decode token to get user_id
+                SECRET_KEY = os.getenv('SECRET_KEY')
+                payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+                user_id = payload.get('user_id')
+
+                if user_id:
+                    # Set user status to offline
+                    user = User.query.filter_by(user_id=user_id).first()
+                    if user:
+                        user.user_status = 'offline'
+                        db.session.commit()
+                        log.info(f"User {user_id} logged out and set to offline")
+            except jwt.ExpiredSignatureError:
+                # Token expired, still try to set offline from request body
+                pass
+            except jwt.InvalidTokenError:
+                pass
+            except Exception as e:
+                log.error(f"Error setting user offline during logout: {str(e)}")
+
+        # Also check request body for user_id (frontend may send it)
+        data = request.get_json(silent=True)
+        if data and data.get('user_id'):
+            user_id = data.get('user_id')
+            user = User.query.filter_by(user_id=user_id).first()
+            if user:
+                user.user_status = 'offline'
+                db.session.commit()
+                log.info(f"User {user_id} set to offline via request body")
+    except Exception as e:
+        log.error(f"Error during logout status update: {str(e)}")
+        # Don't fail logout if status update fails
+
     response_data = {"message": "Successfully logged out"}
     response = make_response(jsonify(response_data), 200)
     response.delete_cookie('access_token')
@@ -479,6 +538,7 @@ def verify_sms_otp_login():
             storage_key = email
             otp_data = otp_storage.get(storage_key)
         if not otp_data:
+            on_login_failed(email or phone)  # Security audit log
             return jsonify({"error": "OTP not found or expired"}), 400
 
         stored_otp = otp_data.get("otp")
@@ -488,10 +548,12 @@ def verify_sms_otp_login():
         current_time = datetime.utcnow()
         if current_time > expires_at:
             del otp_storage[storage_key]
+            on_login_failed(email or phone)  # Security audit log
             return jsonify({"error": "OTP expired"}), 400
 
         # Check if OTP matches
         if otp_input != stored_otp:
+            on_login_failed(email or phone)  # Security audit log
             return jsonify({"error": "Invalid OTP"}), 400
 
         # Find user - for phone login, get email from storage or query
@@ -519,11 +581,20 @@ def verify_sms_otp_login():
 
         if not user:
             del otp_storage[storage_key]
+            on_login_failed(user_email)  # Security audit log
             return jsonify({"error": "User not found or inactive"}), 404
 
-        # Update last login
+        # Update last login and set user status to online
         user.last_login = current_time
+        user.user_status = 'online'  # Auto-set online on login
         db.session.commit()
+
+        # Record login history for SMS OTP login
+        from utils.authentication import record_login_history
+        record_login_history(user.user_id, login_method='sms_otp')
+
+        # Security audit log - successful login
+        on_login_success(user.user_id)
 
         # Remove OTP from storage
         del otp_storage[storage_key]
@@ -569,7 +640,8 @@ def verify_sms_otp_login():
                 "role": role_name,
                 "role_id": user.role_id,
                 "department": user.department,
-                "permissions": role_permissions
+                "permissions": role_permissions,
+                "user_status": "online"  # Auto-set online on login
             }
         }
 

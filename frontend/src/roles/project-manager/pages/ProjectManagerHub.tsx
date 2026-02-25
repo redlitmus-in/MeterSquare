@@ -1,32 +1,41 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect } from 'react';
 import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
 import { motion } from 'framer-motion';
 import { projectManagerService } from '../services/projectManagerService';
 import { mepService } from '../services/mepService';
-import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
 import { useDashboardMetricsAutoSync } from '@/hooks/useAutoSync';
+import {
+  CheckCircleIcon,
+  ClockIcon,
+  CubeIcon,
+  UserGroupIcon,
+  ArrowPathIcon,
+  ClipboardDocumentListIcon,
+  WrenchScrewdriverIcon,
+} from '@heroicons/react/24/outline';
 
 const ProjectManagerHub: React.FC = () => {
   const { user } = useAuthStore();
 
-  // ROLE-AWARE: Determine dashboard title based on user role
+  // ROLE-AWARE: Determine dashboard type based on URL path or user role
+  const currentPath = window.location.pathname;
+  const isMEPRoute = currentPath.includes('/mep/');
   const userRole = (user as any)?.role || '';
   const userRoleLower = typeof userRole === 'string' ? userRole.toLowerCase() : '';
-  const isMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+  const isUserMEP = userRoleLower === 'mep' || userRoleLower === 'mep supervisor' || userRoleLower === 'mep_supervisor';
+  const isMEP = isMEPRoute || isUserMEP;
   const dashboardTitle = isMEP ? 'MEP Supervisor Dashboard' : 'Project Manager Dashboard';
 
   // Real-time auto-sync for dashboard data
-  const { data: dashboardData, isLoading: loading, refetch} = useDashboardMetricsAutoSync(
+  const { data: dashboardData, isLoading: loading, refetch } = useDashboardMetricsAutoSync(
     'project_manager',
     async () => {
       if (!user?.user_id) {
         throw new Error('User not authenticated');
       }
-
-      // ROLE-AWARE: Fetch dashboard statistics from MEP or PM API based on user role
       const stats = isMEP
         ? await mepService.getDashboardStats()
         : await projectManagerService.getDashboardStats();
@@ -35,368 +44,196 @@ const ProjectManagerHub: React.FC = () => {
         stats: stats.stats,
         boq_status: stats.boq_status,
         items_breakdown: stats.items_breakdown,
-        recent_activities: stats.recent_activities || [],
+        purchase_order_status: stats.purchase_order_status || {},
+        labour_data: stats.labour_data || [],
         projects: stats.projects || [],
-        // Legacy format for backward compatibility
-        materialPurchaseStats: {
-          total_items: stats.stats.total_boq_items,
-          items_assigned: stats.stats.items_assigned,
-          items_pending: stats.stats.pending_assignment,
-          total_cost: stats.stats.total_project_value
-        }
+        asset_details: stats.asset_details || { total: 0, pending_pm: 0, pm_approved: 0, pm_rejected: 0, dispatched: 0, completed: 0, total_approved: 0 },
+        recent_se_requests: stats.recent_se_requests || [],
       };
     }
   );
 
-  // Use dashboard stats directly from the API
-  const stats = dashboardData?.stats || {
-    total_boq_items: 0,
-    items_assigned: 0,
-    pending_assignment: 0,
-    total_project_value: 0
+  const stats = dashboardData?.stats || { total_boq_items: 0, items_assigned: 0, pending_assignment: 0 };
+  const boqStatus = dashboardData?.boq_status || { assigned: 0, pending: 0, rejected: 0, completed: 0 };
+  const purchaseOrderStatus = dashboardData?.purchase_order_status || { sent_to_buyer: 0, se_requested: 0, completed: 0, rejected: 0 };
+  const labourData = dashboardData?.labour_data || [];
+  const assetDetails = dashboardData?.asset_details || { total: 0, pending_pm: 0, pm_approved: 0, pm_rejected: 0, dispatched: 0, completed: 0, total_approved: 0 };
+  const recentSERequests = dashboardData?.recent_se_requests || [];
+
+  // Helper functions for Recent SE Requests display
+  const formatDate = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  const boqStatus = dashboardData?.boq_status || {
-    approved: 0,
-    pending: 0,
-    rejected: 0,
-    completed: 0
+  const formatStatus = (status: string): string => {
+    if (!status) return '';
+    return status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   };
 
-  const itemsBreakdown = dashboardData?.items_breakdown || {
-    materials: 0,
-    labour: 0
+  const getTypeLabel = (type: string): string => {
+    switch (type) {
+      case 'cr': return 'Change Request';
+      case 'labour': return 'Labour Req';
+      case 'asset': return 'Asset Req';
+      default: return 'Request';
+    }
   };
-
-  const recentActivities = dashboardData?.recent_activities || [];
-
-  // Projects data from dashboard API
-  const projects = dashboardData?.projects || [];
 
   useEffect(() => {
-    // Set Highcharts global options for consistent theming
     Highcharts.setOptions({
       colors: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'],
-      chart: {
-        style: {
-          fontFamily: 'Inter, system-ui, sans-serif'
-        }
-      }
+      chart: { style: { fontFamily: 'Inter, system-ui, sans-serif' } }
     });
   }, []);
 
-  // BOQ Status Overview Chart - Use data directly from API
-  const statusCounts = boqStatus;
-
-  const hasStatusData = statusCounts.approved > 0 || statusCounts.pending > 0 || statusCounts.rejected > 0 || statusCounts.completed > 0;
-
-  const projectStatusOptions = {
-    chart: {
-      type: 'column',
-      backgroundColor: 'transparent',
-      height: 300
-    },
-    title: {
-      text: 'BOQ Status Overview',
-      style: {
-        fontSize: '16px',
-        fontWeight: 'bold',
-        color: '#1f2937'
-      }
-    },
-    xAxis: {
-      categories: ['Approved', 'Pending', 'Rejected', 'Completed'],
-      labels: {
-        style: {
-          fontSize: '12px',
-          fontWeight: '600',
-          color: '#4b5563'
-        }
-      }
-    },
-    yAxis: {
-      title: {
-        text: 'Count',
-        style: {
-          fontSize: '12px',
-          color: '#6b7280'
-        }
-      },
-      allowDecimals: false,
-      min: 0,
-      labels: {
-        style: {
-          fontSize: '11px',
-          color: '#6b7280'
-        }
-      }
-    },
-    legend: {
-      enabled: false
-    },
-    plotOptions: {
-      column: {
-        borderRadius: 8,
-        dataLabels: {
-          enabled: true,
-          style: {
-            fontSize: '12px',
-            fontWeight: 'bold',
-            textOutline: 'none'
-          }
-        }
-      }
-    },
-    series: [{
-      name: 'BOQs',
-      data: [
-        { y: statusCounts.approved, color: '#10B981', name: 'Approved' },
-        { y: statusCounts.pending, color: '#F59E0B', name: 'Pending' },
-        { y: statusCounts.rejected, color: '#EF4444', name: 'Rejected' },
-        { y: statusCounts.completed, color: '#3B82F6', name: 'Completed' }
-      ],
-      colorByPoint: true
-    }],
-    tooltip: {
-      pointFormat: '<b>{point.y}</b> BOQs',
-      style: {
-        fontSize: '12px'
-      }
-    },
-    credits: { enabled: false }
-  };
-
-  // Project Activity Chart - Use data from dashboard stats
-  const totalBudget = stats.total_project_value;
-
-  // Calculate activity stats from dashboard status counts
-  const activeBoqs = statusCounts.approved + statusCounts.pending;
-  const completedBoqs = statusCounts.completed;
-  const rejectedBoqs = statusCounts.rejected;
-  const hasActivityData = activeBoqs > 0 || completedBoqs > 0 || rejectedBoqs > 0;
-
-  const budgetUtilizationOptions = {
-    chart: {
-      type: 'pie',
-      backgroundColor: 'transparent',
-      height: 300
-    },
-    title: {
-      text: 'Project Activity',
-      style: {
-        fontSize: '16px',
-        fontWeight: 'bold',
-        color: '#1f2937'
-      }
-    },
+  // ========== CHART 1: BOQ Status Overview (Donut Chart) ==========
+  const totalBOQs = (boqStatus.assigned || 0) + (boqStatus.pending || 0) + (boqStatus.rejected || 0) + (boqStatus.completed || 0);
+  const boqStatusChart: Highcharts.Options = {
+    chart: { type: 'pie', backgroundColor: 'transparent', height: 280, style: { fontFamily: 'inherit' } },
+    title: { text: 'BOQ Status', align: 'left', style: { fontSize: '15px', fontWeight: '600', color: '#111827' } },
+    subtitle: { text: `Total: ${totalBOQs}`, align: 'left', style: { fontSize: '12px', color: '#6b7280' } },
+    legend: { enabled: true, align: 'right', verticalAlign: 'middle', layout: 'vertical', itemStyle: { fontSize: '11px', color: '#6b7280' } },
     plotOptions: {
       pie: {
         innerSize: '60%',
-        borderRadius: 8,
-        dataLabels: {
-          enabled: true,
-          format: '<b>{point.name}</b><br>{point.y} ({point.percentage:.1f}%)',
-          style: {
-            fontSize: '12px',
-            fontWeight: '600',
-            textOutline: 'none',
-            color: '#374151'
-          }
-        },
+        dataLabels: { enabled: false },
         showInLegend: true
       }
     },
-    legend: {
-      align: 'center',
-      verticalAlign: 'bottom',
-      layout: 'horizontal',
-      itemStyle: {
-        fontSize: '11px',
-        fontWeight: '600'
-      }
-    },
     series: [{
+      type: 'pie',
       name: 'BOQs',
-      data: hasActivityData ? [
-        { name: 'Active', y: activeBoqs, color: '#3B82F6' },
-        { name: 'Completed', y: completedBoqs, color: '#10B981' },
-        { name: 'Rejected', y: rejectedBoqs, color: '#EF4444' }
-      ].filter(item => item.y > 0) : [
-        { name: 'No Data', y: 1, color: '#E5E7EB' }
+      data: [
+        { name: 'Assigned', y: boqStatus.assigned || 0, color: '#10b981' },
+        { name: 'Pending', y: boqStatus.pending || 0, color: '#f59e0b' },
+        { name: 'Rejected', y: boqStatus.rejected || 0, color: '#ef4444' },
+        { name: 'Completed', y: boqStatus.completed || 0, color: '#3b82f6' }
       ]
     }],
-    tooltip: {
-      pointFormat: '<b>{point.y}</b> BOQs ({point.percentage:.1f}%)'
-    },
-    credits: { enabled: false }
+    credits: { enabled: false },
+    tooltip: { pointFormat: '<b>{point.y}</b> ({point.percentage:.1f}%)' }
   };
 
-  // BOQ Items Breakdown Chart - Use data from dashboard API
-  const totalMaterials = itemsBreakdown.materials;
-  const totalLabour = itemsBreakdown.labour;
+  // ========== CHART 2: Labour Status ==========
+  // Parse labour data from backend - exact match on labour_type
+  const labourPending = labourData.find((l: any) => l.labour_type === 'Requisition - Pending')?.quantity || 0;
+  const labourApproved = labourData.find((l: any) => l.labour_type === 'Requisition - Approved')?.quantity || 0;
+  const labourRejected = labourData.find((l: any) => l.labour_type === 'Requisition - Rejected')?.quantity || 0;
+  const attnPendingLock = labourData.find((l: any) => l.labour_type === 'Attendance - Pending Lock')?.quantity || 0;
+  const attnLocked = labourData.find((l: any) => l.labour_type === 'Attendance - Locked')?.quantity || 0;
 
-  const boqTrendOptions = {
-    chart: {
-      type: 'column',
-      backgroundColor: 'transparent',
-      height: 300
-    },
-    title: {
-      text: 'BOQ Items Breakdown',
-      style: {
-        fontSize: '16px',
-        fontWeight: 'bold',
-        color: '#1f2937'
-      }
-    },
+  // Calculate totals for KPI cards
+  const totalLabourReqs = labourPending + labourApproved + labourRejected;
+  const totalAttendance = attnPendingLock + attnLocked;
+
+  const labourStatusChart: Highcharts.Options = {
+    chart: { type: 'bar', backgroundColor: 'transparent', height: 280, style: { fontFamily: 'inherit' } },
+    title: { text: 'Labour & Attendance', align: 'left', style: { fontSize: '15px', fontWeight: '600', color: '#111827' } },
     xAxis: {
-      categories: ['Materials', 'Labour'],
-      labels: {
-        style: {
-          fontSize: '12px',
-          fontWeight: '600',
-          color: '#4b5563'
-        }
-      }
+      categories: ['Req Pending', 'Req Approved', 'Req Rejected', 'Attn Pending', 'Attn Locked'],
+      labels: { style: { fontSize: '11px', color: '#6b7280' } }
     },
-    yAxis: {
-      title: {
-        text: 'Total Count',
-        style: {
-          fontSize: '12px',
-          color: '#6b7280'
-        }
-      },
-      allowDecimals: false,
-      min: 0,
-      labels: {
-        style: {
-          fontSize: '11px',
-          color: '#6b7280'
-        }
-      }
-    },
-    legend: {
-      enabled: false
-    },
-    plotOptions: {
-      column: {
-        borderRadius: 8,
-        dataLabels: {
-          enabled: true,
-          style: {
-            fontSize: '12px',
-            fontWeight: 'bold',
-            textOutline: 'none'
-          }
-        }
-      }
-    },
-    series: [{
-      name: 'Items',
-      data: [
-        { y: totalMaterials, color: '#10B981', name: 'Materials' },
-        { y: totalLabour, color: '#F59E0B', name: 'Labour' }
-      ],
-      colorByPoint: true
-    }],
-    tooltip: {
-      pointFormat: '<b>{point.y}</b> items',
-      style: {
-        fontSize: '12px'
-      }
-    },
-    credits: { enabled: false }
-  };
-
-  // Project Progress Chart
-  const topProjects = projects.slice(0, 5);
-  const avgProgress = projects.length > 0
-    ? Math.round(projects.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.length)
-    : 0;
-
-  const projectProgressOptions = {
-    chart: {
-      type: 'bar',
-      backgroundColor: 'transparent',
-      height: 300
-    },
-    title: {
-      text: `Project Progress (Avg: ${avgProgress}%)`,
-      style: {
-        fontSize: '16px',
-        fontWeight: 'bold',
-        color: '#1f2937'
-      }
-    },
-    xAxis: {
-      categories: topProjects.length > 0
-        ? topProjects.map(p => p.project_name?.substring(0, 20) || 'Project')
-        : ['No Projects'],
-      labels: {
-        style: {
-          fontSize: '11px',
-          fontWeight: '600',
-          color: '#4b5563'
-        }
-      }
-    },
-    yAxis: {
-      title: {
-        text: 'Completion (%)',
-        style: {
-          fontSize: '12px',
-          color: '#6b7280'
-        }
-      },
-      min: 0,
-      max: 100,
-      labels: {
-        style: {
-          fontSize: '11px',
-          color: '#6b7280'
-        }
-      }
-    },
-    legend: {
-      enabled: false
-    },
+    yAxis: { title: { text: '' }, labels: { style: { fontSize: '11px', color: '#9ca3af' } }, gridLineColor: '#f3f4f6', allowDecimals: false },
+    legend: { enabled: false },
     plotOptions: {
       bar: {
-        borderRadius: 6,
-        dataLabels: {
-          enabled: true,
-          format: '{y}%',
-          style: {
-            fontSize: '11px',
-            fontWeight: 'bold',
-            textOutline: 'none',
-            color: '#ffffff'
-          }
-        }
+        borderRadius: 4,
+        dataLabels: { enabled: true, style: { fontSize: '11px', fontWeight: '600', textOutline: 'none' } }
       }
     },
     series: [{
-      name: 'Progress',
-      data: topProjects.length > 0
-        ? topProjects.map((p) => ({
-            y: p.progress || 0,
-            color: (p.progress || 0) >= 75 ? '#10B981' : (p.progress || 0) >= 50 ? '#3B82F6' : (p.progress || 0) >= 25 ? '#F59E0B' : '#EF4444'
-          }))
-        : [{ y: 0, color: '#E5E7EB' }]
+      type: 'bar',
+      name: 'Count',
+      data: [
+        { y: labourPending, color: '#f59e0b' },
+        { y: labourApproved, color: '#10b981' },
+        { y: labourRejected, color: '#ef4444' },
+        { y: attnPendingLock, color: '#8b5cf6' },
+        { y: attnLocked, color: '#3b82f6' }
+      ]
     }],
-    tooltip: {
-      pointFormat: '<b>{point.y}%</b> complete',
-      style: {
-        fontSize: '12px'
+    credits: { enabled: false },
+    tooltip: { pointFormat: '<b>{point.y}</b>' }
+  };
+
+  // ========== CHART 3: Purchase Order Status (Area Spline) ==========
+  const totalPOs = (purchaseOrderStatus.sent_to_buyer || 0) + (purchaseOrderStatus.se_requested || 0) +
+                   (purchaseOrderStatus.completed || 0) + (purchaseOrderStatus.rejected || 0);
+  const poStatusChart: Highcharts.Options = {
+    chart: { type: 'areaspline', backgroundColor: 'transparent', height: 280, style: { fontFamily: 'inherit' } },
+    title: { text: 'Purchase Orders', align: 'left', style: { fontSize: '15px', fontWeight: '600', color: '#111827' } },
+    subtitle: { text: `Total: ${totalPOs} POs`, align: 'left', style: { fontSize: '12px', color: '#6b7280' } },
+    xAxis: {
+      categories: ['Sent to Buyer', 'SE Requested', 'Completed', 'Rejected'],
+      labels: { style: { fontSize: '11px', color: '#6b7280' } }
+    },
+    yAxis: { title: { text: '' }, labels: { style: { fontSize: '11px', color: '#9ca3af' } }, gridLineColor: '#f3f4f6', allowDecimals: false },
+    legend: { enabled: false },
+    plotOptions: {
+      areaspline: {
+        fillOpacity: 0.3,
+        marker: { enabled: true, radius: 5 },
+        dataLabels: { enabled: true, style: { fontSize: '11px', fontWeight: '600', textOutline: 'none' } }
       }
     },
-    credits: { enabled: false }
+    series: [{
+      type: 'areaspline',
+      name: 'POs',
+      color: '#3b82f6',
+      data: [
+        purchaseOrderStatus.sent_to_buyer || 0,
+        purchaseOrderStatus.se_requested || 0,
+        purchaseOrderStatus.completed || 0,
+        purchaseOrderStatus.rejected || 0
+      ]
+    }],
+    credits: { enabled: false },
+    tooltip: { pointFormat: '<b>{point.y}</b> POs' }
+  };
+
+  // ========== CHART 4: Asset Requisition Approvals (Semi-circle Donut) ==========
+  const assetRequisitionChart: Highcharts.Options = {
+    chart: { type: 'pie', backgroundColor: 'transparent', height: 280, style: { fontFamily: 'inherit' } },
+    title: { text: 'Asset Requisitions', align: 'left', style: { fontSize: '15px', fontWeight: '600', color: '#111827' } },
+    subtitle: { text: `Total: ${assetDetails.total || 0}`, align: 'left', style: { fontSize: '12px', color: '#6b7280' } },
+    legend: { enabled: true, align: 'right', verticalAlign: 'middle', layout: 'vertical', itemStyle: { fontSize: '11px', color: '#6b7280' } },
+    plotOptions: {
+      pie: {
+        startAngle: -90,
+        endAngle: 90,
+        center: ['50%', '75%'],
+        size: '130%',
+        innerSize: '60%',
+        dataLabels: { enabled: false },
+        showInLegend: true
+      }
+    },
+    series: [{
+      type: 'pie',
+      name: 'Requisitions',
+      data: [
+        { name: 'Pending PM', y: assetDetails.pending_pm || 0, color: '#f59e0b' },
+        { name: 'Approved', y: assetDetails.pm_approved || 0, color: '#10b981' },
+        { name: 'Rejected', y: assetDetails.pm_rejected || 0, color: '#ef4444' },
+        { name: 'Dispatched', y: assetDetails.dispatched || 0, color: '#3b82f6' },
+        { name: 'Completed', y: assetDetails.completed || 0, color: '#8b5cf6' }
+      ]
+    }],
+    credits: { enabled: false },
+    tooltip: { pointFormat: '<b>{point.y}</b> ({point.percentage:.1f}%)' }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <ModernLoadingSpinners size="md" className="mx-auto mb-4" />
           <p className="text-gray-600">Loading dashboard...</p>
@@ -406,186 +243,225 @@ const ProjectManagerHub: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      {/* Header with Blue Gradient - ROLE-AWARE */}
-      <div className={`bg-gradient-to-r shadow-sm ${isMEP ? 'from-cyan-50 to-cyan-100' : 'from-blue-50 to-blue-100'}`}>
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <h1 className={`text-2xl font-bold ${isMEP ? 'text-cyan-900' : 'text-blue-900'}`}>
-            {dashboardTitle}
-          </h1>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className={`${isMEP ? 'bg-cyan-600' : 'bg-blue-600'} text-white`}>
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-bold">{dashboardTitle}</h1>
+            <button
+              onClick={() => refetch()}
+              className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+              title="Refresh"
+            >
+              <ArrowPathIcon className="w-5 h-5" />
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Material Purchase Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-md border border-blue-200 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-blue-600 uppercase tracking-wide mb-1">Total BOQ Items</p>
-                <p className="text-2xl font-bold text-blue-900">{dashboardData?.materialPurchaseStats?.total_items || 0}</p>
-                <p className="text-xs text-blue-700 mt-1">Across all projects</p>
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {/* KPI Cards - Row 1: BOQ Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <ClipboardDocumentListIcon className="w-5 h-5 text-blue-600" />
               </div>
-              <div className="text-blue-500">
-                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{stats.total_boq_items || 0}</p>
+                <p className="text-xs text-gray-500">Total BOQ Items</p>
               </div>
             </div>
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl shadow-md border border-green-200 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-green-600 uppercase tracking-wide mb-1">Items Assigned</p>
-                <p className="text-2xl font-bold text-green-900">{dashboardData?.materialPurchaseStats?.items_assigned || 0}</p>
-                <p className="text-xs text-green-700 mt-1">To Site Engineers</p>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-100 rounded-lg">
+                <CheckCircleIcon className="w-5 h-5 text-green-600" />
               </div>
-              <div className="text-green-500">
-                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{stats.items_assigned || 0}</p>
+                <p className="text-xs text-gray-500">Items Assigned</p>
               </div>
             </div>
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl shadow-md border border-orange-200 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">Pending Assignment</p>
-                <p className="text-2xl font-bold text-orange-900">{dashboardData?.materialPurchaseStats?.items_pending || 0}</p>
-                <p className="text-xs text-orange-700 mt-1">Awaiting action</p>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-orange-100 rounded-lg">
+                <ClockIcon className="w-5 h-5 text-orange-600" />
               </div>
-              <div className="text-orange-500">
-                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{stats.pending_assignment || 0}</p>
+                <p className="text-xs text-gray-500">Pending Assignment</p>
               </div>
             </div>
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl shadow-md border border-purple-200 p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">Total Project Value</p>
-                <p className="text-2xl font-bold text-purple-900">AED {(dashboardData?.materialPurchaseStats?.total_cost || 0).toLocaleString()}</p>
-                <p className="text-xs text-purple-700 mt-1">All BOQs combined</p>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-purple-100 rounded-lg">
+                <CubeIcon className="w-5 h-5 text-purple-600" />
               </div>
-              <div className="text-purple-500">
-                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{assetDetails.total_approved || 0}</p>
+                <p className="text-xs text-gray-500">Assets Approved</p>
               </div>
             </div>
           </motion.div>
         </div>
 
-        {/* Charts Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.2 }}
-            className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
-          >
-            <HighchartsReact highcharts={Highcharts} options={projectStatusOptions} />
+        {/* KPI Cards - Row 2: Labour & PO Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-100 rounded-lg">
+                <UserGroupIcon className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{labourPending}</p>
+                <p className="text-xs text-gray-500">Labour Pending</p>
+              </div>
+            </div>
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.3 }}
-            className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
-          >
-            <HighchartsReact highcharts={Highcharts} options={budgetUtilizationOptions} />
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-emerald-100 rounded-lg">
+                <UserGroupIcon className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{labourApproved}</p>
+                <p className="text-xs text-gray-500">Labour Approved</p>
+              </div>
+            </div>
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.4 }}
-            className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
-          >
-            <HighchartsReact highcharts={Highcharts} options={boqTrendOptions} />
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-cyan-100 rounded-lg">
+                <ClockIcon className="w-5 h-5 text-cyan-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{attnLocked}</p>
+                <p className="text-xs text-gray-500">Attendance Locked</p>
+              </div>
+            </div>
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.5 }}
-            className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6"
-          >
-            <HighchartsReact highcharts={Highcharts} options={projectProgressOptions} />
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-indigo-100 rounded-lg">
+                <WrenchScrewdriverIcon className="w-5 h-5 text-indigo-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{purchaseOrderStatus.completed || 0}</p>
+                <p className="text-xs text-gray-500">POs Completed</p>
+              </div>
+            </div>
           </motion.div>
         </div>
 
-        {/* Recent Activities */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
-          className="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-        >
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Recent BOQ Activities</h2>
-          <div className="space-y-3">
-            {recentActivities.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-gray-500">No recent activities</p>
+        {/* Charts Row 1 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="bg-white rounded-xl border border-gray-200 p-5">
+            <HighchartsReact highcharts={Highcharts} options={boqStatusChart} />
+          </motion.div>
+
+          {!isMEP && (
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="bg-white rounded-xl border border-gray-200 p-5">
+              <HighchartsReact highcharts={Highcharts} options={labourStatusChart} />
+            </motion.div>
+          )}
+
+          {isMEP && (
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="bg-white rounded-xl border border-gray-200 p-5">
+              <HighchartsReact highcharts={Highcharts} options={poStatusChart} />
+            </motion.div>
+          )}
+        </div>
+
+        {/* Charts Row 2 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {!isMEP && (
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="bg-white rounded-xl border border-gray-200 p-5">
+              <HighchartsReact highcharts={Highcharts} options={poStatusChart} />
+            </motion.div>
+          )}
+
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }} className="bg-white rounded-xl border border-gray-200 p-5">
+            <HighchartsReact highcharts={Highcharts} options={assetRequisitionChart} />
+          </motion.div>
+
+          {isMEP && (
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="bg-white rounded-xl border border-gray-200 p-5">
+              {/* Placeholder for MEP-specific chart */}
+              <div className="h-[280px] flex items-center justify-center text-gray-400">
+                <p>MEP specific data chart</p>
               </div>
-            ) : (
-              recentActivities.map((activity, index) => (
-                <div key={activity.boq_id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${
-                      activity.status?.toLowerCase().includes('approved') ? 'bg-green-500' :
-                      activity.status?.toLowerCase().includes('rejected') ? 'bg-red-500' :
-                      activity.status?.toLowerCase().includes('pending') ? 'bg-yellow-500' : 'bg-blue-500'
-                    }`} />
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{activity.boq_name}</p>
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs text-gray-500">{activity.project_name || 'Unknown Project'}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className={`text-xs px-2 py-1 rounded-full ${
-                      activity.status?.toLowerCase().includes('approved') ? 'bg-green-100 text-green-700' :
-                      activity.status?.toLowerCase().includes('rejected') ? 'bg-red-100 text-red-700' :
-                      activity.status?.toLowerCase().includes('pending') ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
-                    }`}>
-                      {activity.status}
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+            </motion.div>
+          )}
+        </div>
+
+        {/* Recent SE Requests */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="font-semibold text-gray-900 mb-4">Recent SE Requests</h3>
+          {recentSERequests.length === 0 ? (
+            <div className="text-center py-6 text-gray-400">
+              <ClipboardDocumentListIcon className="w-8 h-8 mx-auto mb-2" />
+              <p className="text-sm">No recent requests from Site Engineers</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 border-b border-gray-100">
+                    <th className="pb-2 font-medium">Code</th>
+                    <th className="pb-2 font-medium">Type</th>
+                    <th className="pb-2 font-medium">Project</th>
+                    <th className="pb-2 font-medium">Requested By</th>
+                    <th className="pb-2 font-medium">Status</th>
+                    <th className="pb-2 font-medium text-right">Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentSERequests.map((item: any) => (
+                    <tr key={item.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                      <td className="py-2.5 font-medium text-gray-900">{item.code}</td>
+                      <td className="py-2.5">
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          item.type === 'cr' ? 'bg-blue-100 text-blue-700' :
+                          item.type === 'labour' ? 'bg-amber-100 text-amber-700' :
+                          item.type === 'asset' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {getTypeLabel(item.type)}
+                        </span>
+                      </td>
+                      <td className="py-2.5 text-gray-600">{item.project_name}</td>
+                      <td className="py-2.5 text-gray-600">{item.requested_by}</td>
+                      <td className="py-2.5">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          item.status?.toLowerCase().includes('approved') || item.status?.toLowerCase().includes('completed') ? 'bg-green-100 text-green-700' :
+                          item.status?.toLowerCase().includes('rejected') ? 'bg-red-100 text-red-700' :
+                          item.status?.toLowerCase().includes('pending') || item.status?.toLowerCase().includes('send_to') ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
+                        }`}>
+                          {formatStatus(item.status)}
+                        </span>
+                      </td>
+                      <td className="py-2.5 text-gray-400 text-right">{formatDate(item.date)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </motion.div>
+
       </div>
     </div>
   );
 };
 
-// ✅ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
 export default React.memo(ProjectManagerHub);

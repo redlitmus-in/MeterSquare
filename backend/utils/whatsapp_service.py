@@ -262,14 +262,6 @@ class WhatsAppService:
                 'channel_id': self.phone_id
             }
 
-            print(f"\n{'='*50}")
-            print(f"SENDING DOCUMENT via WhatsApp")
-            print(f"{'='*50}")
-            print(f"API URL: {self.api_url}")
-            print(f"Document URL: {document_url}")
-            print(f"Filename: {filename}")
-            print(f"Destination: {clean_phone}")
-
             response = requests.post(
                 self.api_url,
                 json=payload,
@@ -277,13 +269,8 @@ class WhatsAppService:
                 timeout=30
             )
 
-            print(f"Document API response status: {response.status_code}")
-            print(f"Document API response body: {response.text}")
-            print(f"Document API response JSON: {response.json() if response.text else 'No JSON'}")
-
             if response.status_code == 200:
                 response_data = response.json() if response.text else {}
-                print(f"Document send SUCCESS - response: {response_data}")
                 return {'success': True, 'message': 'Document sent successfully', 'response': response_data}
             else:
                 return {'success': False, 'message': f'Failed to send document: {response.text}'}
@@ -333,37 +320,20 @@ _MeterSquare Interiors LLC_"""
         log.info(f"PDF URL: {pdf_url}")
 
         # First send the text message
-        print(f"\n=== STEP A: Sending text message ===")
         result = self.send_message(phone_number, body_text)
-        print(f"Text message result: {result}")
-
-        # Then send PDF document if available
-        print(f"\n=== STEP B: PDF document check ===")
-        print(f"pdf_url received: {pdf_url}")
-        print(f"text result success: {result.get('success')}")
 
         if pdf_url and result.get('success'):
-            print(f"\n=== STEP C: Sending LPO PDF document ===")
-            print(f"PDF URL: {pdf_url}")
             whatsapp_filename = f"LPO-PO-{purchase_data.get('cr_id', 'N/A')}.pdf"
             whatsapp_caption = f"📄 Local Purchase Order - PO-{purchase_data.get('cr_id', 'N/A')}"
-            print(f">>> WhatsApp FILENAME being sent: {whatsapp_filename}")
-            print(f">>> WhatsApp CAPTION being sent: {whatsapp_caption}")
-            print(f">>> purchase_data cr_id: {purchase_data.get('cr_id')}")
             pdf_result = self.send_document(
                 phone_number=phone_number,
                 document_url=pdf_url,
                 filename=whatsapp_filename,
                 caption=whatsapp_caption
             )
-            print(f"PDF send result: {pdf_result}")
             if not pdf_result.get('success'):
                 print(f"WARNING: Failed to send PDF: {pdf_result.get('message')}")
                 # Still return success for text message
         else:
-            print(f"WARNING: PDF NOT SENT!")
-            print(f"pdf_url: {pdf_url}")
-            print(f"text success: {result.get('success')}")
-
-        print(f"\n=== FINAL WhatsApp send result: {result} ===\n")
+            print(f"WARNING: PDF NOT SENT! -- pdf_url: {pdf_url}")
         return result

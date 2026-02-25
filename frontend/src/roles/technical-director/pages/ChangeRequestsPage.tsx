@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -29,7 +30,9 @@ import {
   List,
   Pencil,
   Store,
-  ShoppingCart
+  ShoppingCart,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { buyerService, Purchase, POChild } from '@/roles/buyer/services/buyerService';
@@ -46,6 +49,7 @@ import TDLPOEditorModal from '../components/TDLPOEditorModal';
 import { useAuthStore } from '@/store/authStore';
 import { permissions } from '@/utils/rolePermissions';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
+import { PAGINATION } from '@/lib/constants';
 
 // Helper function to calculate total cost from POChild materials
 const calculatePOChildTotal = (poChild: POChild): number => {
@@ -64,11 +68,27 @@ const calculatePOChildTotal = (poChild: POChild): number => {
 
 const ChangeRequestsPage: React.FC = () => {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState('vendor_approvals');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Get tab and cr_id from URL query parameters (for notification redirects)
+  const urlTab = searchParams.get('tab');
+  const urlCrId = searchParams.get('cr_id');
+
+  const [activeTab, setActiveTab] = useState(() => {
+    // Priority: URL tab param > default
+    if (urlTab) {
+      const validTabs = ['vendor_approvals', 'completed'];
+      if (validTabs.includes(urlTab)) {
+        return urlTab;
+      }
+    }
+    return 'vendor_approvals';
+  });
   const [vendorApprovalsSubTab, setVendorApprovalsSubTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [changeRequests, setChangeRequests] = useState<ChangeRequestItem[]>([]);
+  const [completedRequests, setCompletedRequests] = useState<ChangeRequestItem[]>([]); // Separate state for completed tab
   const [vendorApprovals, setVendorApprovals] = useState<Purchase[]>([]);
   const [pendingPOChildren, setPendingPOChildren] = useState<POChild[]>([]);
   const [approvedPOChildren, setApprovedPOChildren] = useState<POChild[]>([]);
@@ -78,6 +98,7 @@ const ChangeRequestsPage: React.FC = () => {
 
   // ✅ PERFORMANCE: Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const [completedPage, setCompletedPage] = useState(1); // Separate pagination for completed tab
   const [vendorPage, setVendorPage] = useState(1); // Separate pagination for vendor approvals tab
   const [pagination, setPagination] = useState<{
     total_count: number;
@@ -85,7 +106,20 @@ const ChangeRequestsPage: React.FC = () => {
     has_next: boolean;
     has_prev: boolean;
   } | null>(null);
-  const perPage = 20;
+  const [completedPagination, setCompletedPagination] = useState<{
+    total_count: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  } | null>(null);
+  const [statusCounts, setStatusCounts] = useState<{
+    pending: number;
+    approved: number;
+    completed: number;
+    rejected: number;
+    total: number;
+  } | null>(null);
+  const perPage = PAGINATION.DEFAULT_PAGE_SIZE;
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -102,6 +136,9 @@ const ChangeRequestsPage: React.FC = () => {
   const [selectedCrIdForLpo, setSelectedCrIdForLpo] = useState<number | null>(null);
   const [lpoEditorReadOnly, setLpoEditorReadOnly] = useState(false);
 
+  // Track if we've already auto-opened modal from URL (to prevent reopening on close)
+  const hasAutoOpenedRef = useRef<string | null>(null);
+
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
 
@@ -109,6 +146,7 @@ const ChangeRequestsPage: React.FC = () => {
   useEffect(() => {
     // Initial load with loading spinner
     loadChangeRequests(true);
+    loadCompletedRequests(true);
     loadVendorApprovals();
     loadPendingPOChildren();
     loadApprovedPOChildren();
@@ -125,6 +163,7 @@ const ChangeRequestsPage: React.FC = () => {
     if (changeRequestUpdateTimestamp === 0) return;
 
     loadChangeRequests(false); // Silent reload without loading spinner
+    loadCompletedRequests(false); // Also reload completed requests
     loadVendorApprovals(); // Also reload vendor approvals
     loadPendingPOChildren(); // Also reload PO children
     loadApprovedPOChildren(); // Also reload approved PO children
@@ -135,6 +174,30 @@ const ChangeRequestsPage: React.FC = () => {
   useEffect(() => {
     loadChangeRequests(false);
   }, [currentPage]);
+
+  // ✅ PERFORMANCE: Reload completed requests when completed page changes
+  useEffect(() => {
+    loadCompletedRequests(false);
+  }, [completedPage]);
+
+  // Auto-open change request details when cr_id is in URL (from notification redirect)
+  useEffect(() => {
+    // Only auto-open if we haven't already opened for this specific urlCrId
+    if (urlCrId && changeRequests.length > 0 && !showDetailsModal && hasAutoOpenedRef.current !== urlCrId) {
+      const crIdNum = parseInt(urlCrId, 10);
+      const targetCr = changeRequests.find((cr: ChangeRequestItem) => cr.cr_id === crIdNum);
+      if (targetCr) {
+        setSelectedChangeRequest(targetCr);
+        setShowDetailsModal(true);
+        // Mark this urlCrId as already opened
+        hasAutoOpenedRef.current = urlCrId;
+      }
+    }
+    // Reset the ref when urlCrId is cleared
+    if (!urlCrId) {
+      hasAutoOpenedRef.current = null;
+    }
+  }, [urlCrId, changeRequests, showDetailsModal]);
 
   const loadChangeRequests = async (showLoadingSpinner = false) => {
     // Only show loading spinner on initial load, not on auto-refresh
@@ -148,6 +211,9 @@ const ChangeRequestsPage: React.FC = () => {
         setChangeRequests(response.data);
         if (response.pagination) {
           setPagination(response.pagination);
+        }
+        if (response.status_counts) {
+          setStatusCounts(response.status_counts);
         }
       } else {
         // Only show error toast on initial load to avoid spam
@@ -165,6 +231,21 @@ const ChangeRequestsPage: React.FC = () => {
       if (showLoadingSpinner) {
         setLoading(false);
       }
+    }
+  };
+
+  // Load completed requests separately with status filter
+  const loadCompletedRequests = async (showLoadingSpinner = false) => {
+    try {
+      const response = await changeRequestService.getChangeRequests(completedPage, perPage, 'purchase_completed');
+      if (response.success) {
+        setCompletedRequests(response.data);
+        if (response.pagination) {
+          setCompletedPagination(response.pagination);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading completed requests:', error);
     }
   };
 
@@ -288,8 +369,10 @@ const ChangeRequestsPage: React.FC = () => {
       if (response.success) {
         console.log('✅ Approved PO Children loaded:', response.po_children?.length || 0, 'items');
         const children = response.po_children || [];
+        // Exclude store-routed POChildren - TD only manages vendor approvals
+        const vendorOnly = children.filter((pc: any) => pc.routing_type !== 'store');
         // Sort by updated_at (latest first), fallback to created_at
-        const sorted = children.sort((a, b) => {
+        const sorted = vendorOnly.sort((a, b) => {
           const dateA = new Date(a.updated_at || a.created_at).getTime();
           const dateB = new Date(b.updated_at || b.created_at).getTime();
           return dateB - dateA; // Descending (newest first)
@@ -638,6 +721,8 @@ const ChangeRequestsPage: React.FC = () => {
     if (!selectedChangeRequest) return;
     setShowDetailsModal(false);
     handleApprove(selectedChangeRequest.cr_id);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   const handleRejectFromModal = async () => {
@@ -645,6 +730,8 @@ const ChangeRequestsPage: React.FC = () => {
     setShowDetailsModal(false);
     setRejectingCrId(selectedChangeRequest.cr_id);
     setShowRejectionModal(true);
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   // Handle vendor approval from modal (for PO children or legacy CRs with pending_td_approval)
@@ -660,6 +747,8 @@ const ChangeRequestsPage: React.FC = () => {
       // Legacy CR-based vendor approval
       await handleApproveVendor(selectedChangeRequest.cr_id);
     }
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
   };
 
   // Handle vendor rejection from modal (for PO children or legacy CRs with pending_td_approval)
@@ -675,6 +764,8 @@ const ChangeRequestsPage: React.FC = () => {
       // Legacy CR-based vendor rejection
       setRejectingCrId(selectedChangeRequest.cr_id);
     }
+    // Clear URL parameters to prevent auto-reopen
+    setSearchParams({});
     // Set flag so handleRejectionSubmit knows this is a vendor rejection
     setIsVendorRejectionFromModal(true);
     setShowRejectionModal(true);
@@ -717,11 +808,11 @@ const ChangeRequestsPage: React.FC = () => {
       // Pending tab: Items awaiting TD approval
       matchesTab = ['under_review', 'approved_by_pm', 'pending'].includes(status);
     } else if (activeTab === 'approved') {
-      // Approved tab: CRs approved by TD, buyer selecting vendor
-      matchesTab = status === 'assigned_to_buyer' && !req.vendor_selection_status;
+      // Approved tab: CRs approved by TD, buyer selecting vendor or sent to store
+      matchesTab = (status === 'assigned_to_buyer' && !req.vendor_selection_status) || status === 'sent_to_store';
     } else if (activeTab === 'completed') {
-      // Only show truly completed purchases (purchase_completed status)
-      matchesTab = status === 'purchase_completed';
+      // Completed purchases (purchase_completed, routed_to_store, or completed)
+      matchesTab = status === 'purchase_completed' || status === 'routed_to_store' || status === 'completed';
     }
     // vendor_approvals tab uses vendorApprovals data, not changeRequests
 
@@ -930,6 +1021,34 @@ const ChangeRequestsPage: React.FC = () => {
     return { ...request, vendorTotalCost };
   });
 
+  // Enrich completed requests with vendor totals (server-side paginated)
+  const enrichedCompletedRequests = React.useMemo(() => {
+    // Filter by search term
+    const filtered = completedRequests.filter(req => {
+      if (!searchTerm) return true;
+      const searchLower = searchTerm.toLowerCase().trim();
+      const crIdString = `cr-${req.cr_id}`;
+      const poIdString = `po-${req.cr_id}`;
+      return (
+        req.project_name?.toLowerCase().includes(searchLower) ||
+        req.project_code?.toLowerCase().includes(searchLower) ||
+        crIdString.includes(searchLower) ||
+        poIdString.includes(searchLower) ||
+        req.cr_id?.toString().includes(searchTerm.trim())
+      );
+    });
+
+    // Enrich with vendor totals
+    return filtered.map(request => {
+      const vendorTotalCost = (request.materials_data || []).reduce((sum, mat) => {
+        const vendorSelection = request.material_vendor_selections?.[mat.material_name];
+        const vendorPrice = vendorSelection?.negotiated_price ?? mat.unit_price ?? 0;
+        return sum + (vendorPrice * (mat.quantity || 0));
+      }, 0);
+      return { ...request, vendorTotalCost };
+    });
+  }, [completedRequests, searchTerm]);
+
   const handleApproveVendor = async (crId: number) => {
     setApprovingVendorId(crId);
     try {
@@ -1047,12 +1166,13 @@ const ChangeRequestsPage: React.FC = () => {
     }
   };
 
+  // Use server-side counts for accurate tab totals
   const stats = {
-    pending: changeRequests.filter(r => {
+    pending: statusCounts?.pending ?? changeRequests.filter(r => {
       const status = r.status?.trim();
       return ['under_review', 'approved_by_pm', 'pending'].includes(status);
     }).length,
-    approved: changeRequests.filter(r => {
+    approved: statusCounts?.approved ?? changeRequests.filter(r => {
       const status = r.status?.trim();
       return status === 'assigned_to_buyer' && !r.vendor_selection_status;
     }).length,
@@ -1063,7 +1183,10 @@ const ChangeRequestsPage: React.FC = () => {
     poChildrenPending: pendingPOChildren.filter(p => p.vendor_selection_status === 'pending_td_approval').length,
     poChildrenApproved: approvedPOChildren.length,
     poChildrenRejected: rejectedPOChildren.length,
-    completed: changeRequests.filter(r => r.status?.trim() === 'purchase_completed').length
+    completed: completedPagination?.total_count ?? statusCounts?.completed ?? changeRequests.filter(r => {
+      const s = r.status?.trim();
+      return s === 'purchase_completed' || s === 'routed_to_store' || s === 'completed';
+    }).length
   };
 
   if (loading) {
@@ -1147,8 +1270,8 @@ const ChangeRequestsPage: React.FC = () => {
     );
   };
 
-  // Vendor Approvals Table View Component
-  const VendorApprovalsTable = ({ poChildren }: { poChildren: POChild[] }) => {
+  // Vendor Approvals Table View Component - handles both Purchase and POChild types
+  const VendorApprovalsTable = ({ items }: { items: Array<Purchase | POChild> }) => {
     return (
       <div className="border rounded-lg overflow-hidden">
         <Table>
@@ -1165,24 +1288,36 @@ const ChangeRequestsPage: React.FC = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {poChildren.map((poChild) => {
-              const totalCost = calculatePOChildTotal(poChild);
-              const isPending = poChild.vendor_selection_status === 'pending_td_approval';
-              const isApproved = poChild.vendor_selection_status === 'approved';
-              const isRejected = poChild.vendor_selection_status === 'rejected';
+            {items.map((item) => {
+              const isPoChild = isPOChild(item);
+
+              // Extract common fields based on item type
+              const displayId = isPoChild ? item.formatted_id : (item.formatted_cr_id || `CR-${item.cr_id}`);
+              const projectName = item.project_name;
+              const itemName = item.item_name;
+              const vendorName = item.vendor_name;
+              const createdAt = item.created_at;
+              const materialsCount = item.materials?.length || 0;
+              const totalCost = isPoChild ? calculatePOChildTotal(item) : (item.total_cost || 0);
+              const status = item.vendor_selection_status;
+              const itemId = isPoChild ? item.id : item.cr_id;
+
+              const isPending = status === 'pending_td_approval';
+              const isApproved = status === 'approved';
+              const isRejected = status === 'rejected';
 
               return (
-                <TableRow key={poChild.id}>
-                  <TableCell className="font-semibold text-blue-600">{poChild.formatted_id}</TableCell>
+                <TableRow key={`${isPoChild ? 'po' : 'cr'}-${itemId}`}>
+                  <TableCell className="font-semibold text-blue-600">{displayId}</TableCell>
                   <TableCell>
-                    <div className="font-medium">{poChild.project_name || poChild.item_name || 'N/A'}</div>
-                    {poChild.item_name && poChild.project_name && (
-                      <div className="text-xs text-gray-500">{poChild.item_name}</div>
+                    <div className="font-medium">{projectName || itemName || 'N/A'}</div>
+                    {itemName && projectName && (
+                      <div className="text-xs text-gray-500">{itemName}</div>
                     )}
                   </TableCell>
-                  <TableCell className="font-medium text-gray-900">{poChild.vendor_name || 'N/A'}</TableCell>
-                  <TableCell>{poChild.created_at ? new Date(poChild.created_at).toLocaleDateString() : 'N/A'}</TableCell>
-                  <TableCell>{poChild.materials?.length || 0}</TableCell>
+                  <TableCell className="font-medium text-gray-900">{vendorName || 'N/A'}</TableCell>
+                  <TableCell>{createdAt ? new Date(createdAt).toLocaleDateString() : 'N/A'}</TableCell>
+                  <TableCell>{materialsCount}</TableCell>
                   <TableCell className="font-semibold text-blue-700">AED {totalCost.toLocaleString()}</TableCell>
                   <TableCell>
                     <Badge className={
@@ -1195,21 +1330,42 @@ const ChangeRequestsPage: React.FC = () => {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Button size="sm" variant="outline" onClick={() => handleOpenLpoEditor(poChild, true)}>
-                        <Eye className="h-3.5 w-3.5 mr-1" />
-                        Details
-                      </Button>
-                      {isPending && (
+                      {isPoChild ? (
                         <>
-                          <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprovePOChild(poChild.id)}>
-                            <Check className="h-3.5 w-3.5" />
+                          <Button size="sm" variant="outline" onClick={() => handleOpenLpoEditor(item, true)}>
+                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            Details
                           </Button>
-                          <Button size="sm" variant="destructive" onClick={() => {
-                            setRejectingPOChildId(poChild.id);
-                            setShowRejectionModal(true);
-                          }}>
-                            <X className="h-3.5 w-3.5" />
+                          {isPending && (
+                            <>
+                              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprovePOChild(item.id)}>
+                                <Check className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button size="sm" variant="destructive" onClick={() => {
+                                setRejectingPOChildId(item.id);
+                                setShowRejectionModal(true);
+                              }}>
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => handleReviewVendorApproval(item.cr_id)}>
+                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            Details
                           </Button>
+                          {isPending && (
+                            <>
+                              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApproveVendor(item.cr_id)}>
+                                <Check className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button size="sm" variant="destructive" onClick={() => handleRejectVendorSelection(item.cr_id)}>
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
                         </>
                       )}
                     </div>
@@ -1280,7 +1436,17 @@ const ChangeRequestsPage: React.FC = () => {
 
         {/* Content Tabs - Compact */}
         <div className="bg-white rounded-xl shadow border border-blue-100 p-3">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs value={activeTab} onValueChange={(tab) => {
+            setActiveTab(tab);
+            // Reset pagination when changing tabs
+            if (tab === 'completed') {
+              setCompletedPage(1);
+            } else if (tab === 'vendor_approvals') {
+              setVendorPage(1);
+            } else {
+              setCurrentPage(1);
+            }
+          }}>
             <TabsList className="w-full justify-start p-0 h-auto bg-transparent border-b border-gray-200 mb-3">
               {/* Pending tab - COMMENTED OUT
               <TabsTrigger
@@ -1599,10 +1765,10 @@ const ChangeRequestsPage: React.FC = () => {
                     </p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <VendorApprovalsTable poChildren={
-                    vendorApprovalsSubTab === 'pending' ? filteredPOChildren :
-                    vendorApprovalsSubTab === 'approved' ? filteredApprovedPOChildren :
-                    filteredRejectedPOChildren
+                  <VendorApprovalsTable items={
+                    vendorApprovalsSubTab === 'pending' ? paginatedPendingItems :
+                    vendorApprovalsSubTab === 'approved' ? paginatedApprovedItems :
+                    paginatedRejectedItems
                   } />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
@@ -2425,18 +2591,18 @@ const ChangeRequestsPage: React.FC = () => {
                         <TabsContent value="completed" className="mt-0 p-0">
               <div className="space-y-2">
                 <h2 className="text-sm font-bold text-gray-900">Completed Requests (Final Approval)</h2>
-                {filteredRequests.length === 0 ? (
+                {enrichedCompletedRequests.length === 0 ? (
                   <div className="text-center py-8">
                     <CheckCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
                     <p className="text-gray-500 text-sm">No completed requests found</p>
                   </div>
                 ) : viewMode === 'table' ? (
-                  <RequestsTable requests={filteredRequests} />
+                  <RequestsTable requests={enrichedCompletedRequests} />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                    {enrichedChangeRequests.map((request, index) => (
+                    {enrichedCompletedRequests.map((request, index) => (
                       <motion.div
-                        key={request.cr_id}
+                        key={(request as any).is_po_child ? `poc-${(request as any).id}` : `cr-${request.cr_id}`}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.02 * index }}
@@ -2445,9 +2611,12 @@ const ChangeRequestsPage: React.FC = () => {
                         <div className="p-2">
                           <div className="flex items-start justify-between mb-1">
                             <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{request.project_name}</h3>
-                            <Badge className="bg-green-100 text-green-800 text-[9px] px-1 py-0">
-                              COMPLETED
-                            </Badge>
+                            <div className="flex flex-col items-end gap-0.5 ml-1 shrink-0">
+                              <span className="text-[9px] font-mono text-gray-500">{(request as any).formatted_cr_id || `PO-${request.cr_id}`}</span>
+                              <Badge className="bg-green-100 text-green-800 text-[9px] px-1 py-0">
+                                COMPLETED
+                              </Badge>
+                            </div>
                           </div>
 
                           <div className="space-y-0.5 text-[10px] text-gray-600">
@@ -2515,83 +2684,114 @@ const ChangeRequestsPage: React.FC = () => {
               const { totalItems, totalPages, startIndex, hasNext, hasPrev } = vendorPagination;
 
               return (
-                <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                <div className="flex flex-col sm:flex-row items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6 gap-4">
                   <div className="text-sm text-gray-600 font-medium">
                     Showing {totalItems > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + perPage, totalItems)} of {totalItems} results
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setVendorPage(prev => Math.max(1, prev - 1))}
-                      disabled={!hasPrev}
-                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      style={{ color: 'rgb(36, 61, 138)' }}
-                    >
-                      Previous
-                    </button>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-2">
                       <button
-                        key={page}
-                        onClick={() => setVendorPage(page)}
-                        className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                          vendorPage === page
-                            ? 'border-[rgb(36,61,138)] bg-blue-50'
-                            : 'border-gray-300 hover:bg-gray-50'
-                        }`}
-                        style={{ color: vendorPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                        onClick={() => setVendorPage(prev => Math.max(1, prev - 1))}
+                        disabled={!hasPrev}
+                        className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
-                        {page}
+                        <ChevronLeft className="w-4 h-4" />
                       </button>
-                    ))}
-                    <button
-                      onClick={() => setVendorPage(prev => Math.min(totalPages, prev + 1))}
-                      disabled={!hasNext}
-                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      style={{ color: 'rgb(36, 61, 138)' }}
-                    >
-                      Next
-                    </button>
-                  </div>
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                        if (
+                          page === 1 ||
+                          page === totalPages ||
+                          (page >= vendorPage - 1 && page <= vendorPage + 1)
+                        ) {
+                          return (
+                            <button
+                              key={page}
+                              onClick={() => setVendorPage(page)}
+                              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                                vendorPage === page
+                                  ? 'bg-[#243d8a] text-white'
+                                  : 'border border-gray-300 hover:bg-gray-50'
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          );
+                        } else if (
+                          page === vendorPage - 2 ||
+                          page === vendorPage + 2
+                        ) {
+                          return <span key={page} className="px-1">...</span>;
+                        }
+                        return null;
+                      })}
+                      <button
+                        onClick={() => setVendorPage(prev => Math.min(totalPages, prev + 1))}
+                        disabled={!hasNext}
+                        className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
-            } else if (activeTab === 'completed' && pagination) {
-              // Completed tab uses server-side pagination
+            } else if (activeTab === 'completed' && completedPagination) {
+              // Completed tab uses server-side pagination with status filter
+              const totalPagesCount = completedPagination.total_pages || 1;
+              const totalCount = completedPagination.total_count || 0;
+
+              if (totalCount === 0) return null;
+
               return (
-                <div className="flex items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6">
+                <div className="flex flex-col sm:flex-row items-center justify-between bg-white border-t border-gray-200 rounded-b-lg p-4 mt-6 gap-4">
                   <div className="text-sm text-gray-600 font-medium">
-                    Showing {pagination.total_count > 0 ? Math.min((currentPage - 1) * perPage + 1, pagination.total_count) : 0} to {Math.min(currentPage * perPage, pagination.total_count)} of {pagination.total_count} results
+                    Showing {Math.min((completedPage - 1) * perPage + 1, totalCount)} to {Math.min(completedPage * perPage, totalCount)} of {totalCount} results
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                      disabled={!pagination.has_prev}
-                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      style={{ color: 'rgb(36, 61, 138)' }}
-                    >
-                      Previous
-                    </button>
-                    {Array.from({ length: pagination.total_pages || 1 }, (_, i) => i + 1).map(page => (
+                  {totalPagesCount > 1 && (
+                    <div className="flex items-center gap-2">
                       <button
-                        key={page}
-                        onClick={() => setCurrentPage(page)}
-                        className={`h-9 w-9 text-sm font-semibold rounded-lg border transition-colors ${
-                          currentPage === page
-                            ? 'border-[rgb(36,61,138)] bg-blue-50'
-                            : 'border-gray-300 hover:bg-gray-50'
-                        }`}
-                        style={{ color: currentPage === page ? 'rgb(36, 61, 138)' : '#6b7280' }}
+                        onClick={() => setCompletedPage(prev => Math.max(1, prev - 1))}
+                        disabled={!completedPagination.has_prev}
+                        className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
-                        {page}
+                        <ChevronLeft className="w-4 h-4" />
                       </button>
-                    ))}
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.min(pagination.total_pages, prev + 1))}
-                      disabled={!pagination.has_next}
-                      className="h-9 px-4 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      style={{ color: 'rgb(36, 61, 138)' }}
-                    >
-                      Next
-                    </button>
-                  </div>
+                      {Array.from({ length: totalPagesCount }, (_, i) => i + 1).map(page => {
+                        if (
+                          page === 1 ||
+                          page === totalPagesCount ||
+                          (page >= completedPage - 1 && page <= completedPage + 1)
+                        ) {
+                          return (
+                            <button
+                              key={page}
+                              onClick={() => setCompletedPage(page)}
+                              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                                completedPage === page
+                                  ? 'bg-[#243d8a] text-white'
+                                  : 'border border-gray-300 hover:bg-gray-50'
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          );
+                        } else if (
+                          page === completedPage - 2 ||
+                          page === completedPage + 2
+                        ) {
+                          return <span key={page} className="px-1">...</span>;
+                        }
+                        return null;
+                      })}
+                      <button
+                        onClick={() => setCompletedPage(prev => Math.min(totalPagesCount, prev + 1))}
+                        disabled={!completedPagination.has_next}
+                        className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             }
@@ -2606,6 +2806,8 @@ const ChangeRequestsPage: React.FC = () => {
         onClose={() => {
           setShowDetailsModal(false);
           setSelectedChangeRequest(null);
+          // Clear URL parameters to prevent auto-reopen
+          setSearchParams({});
         }}
         changeRequest={selectedChangeRequest}
         onApprove={
@@ -2636,6 +2838,8 @@ const ChangeRequestsPage: React.FC = () => {
           onClose={() => {
             setShowEditModal(false);
             setSelectedChangeRequest(null);
+            // Clear URL parameters to prevent auto-reopen
+            setSearchParams({});
           }}
           changeRequest={selectedChangeRequest}
           onSuccess={handleEditSuccess}

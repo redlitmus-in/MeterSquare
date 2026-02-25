@@ -120,7 +120,7 @@ def send_email_sync(email_data):
                                 <!-- Footer -->
                                 <tr>
                                     <td style="background-color: #f4f6fb; text-align: center; padding: 18px; border-top: 1px solid #e0e6f5;">
-                                        <p style="font-size: 12px; color: #888; margin: 0;">© 2025 Meter Square. All rights reserved.</p>
+                                        <p style="font-size: 12px; color: #888; margin: 0;">© 2026 Meter Square. All rights reserved.</p>
                                     </td>
                                 </tr>
                             </table>

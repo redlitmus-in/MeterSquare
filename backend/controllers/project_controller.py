@@ -217,21 +217,16 @@ def get_all_projects():
         # Paginate
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
 
-        # Helper function to get user details by IDs
+        # Helper function to get user details by IDs — batch query
         def get_user_details(user_ids):
             if not user_ids:
                 return []
             ids_list = user_ids if isinstance(user_ids, list) else [user_ids]
-            users = []
-            for uid in ids_list:
-                user = User.query.get(uid)
-                if user:
-                    users.append({
-                        'user_id': user.user_id,
-                        'full_name': user.full_name,
-                        'email': user.email
-                    })
-            return users
+            user_map = {u.user_id: u for u in User.query.filter(User.user_id.in_(ids_list)).all()}
+            return [
+                {'user_id': uid, 'full_name': user_map[uid].full_name, 'email': user_map[uid].email}
+                for uid in ids_list if uid in user_map
+            ]
 
         # Helper function to get Site Engineers from PM assignments (pm_assign_ss table)
         def get_site_engineers_from_pm_assignments(project_id, existing_se_ids):
@@ -247,9 +242,20 @@ def get_all_projects():
                 site_engineers = []
                 seen_ids = set(existing_se_ids)  # Avoid duplicates with formally assigned SE
 
+                # Batch pre-fetch users — avoid N+1 (one query per assignment)
+                _se_ids_to_fetch = list({
+                    a.assigned_to_se_id for a in assignments
+                    if a.assigned_to_se_id not in seen_ids
+                })
+                _users_map = {
+                    u.user_id: u for u in User.query.filter(
+                        User.user_id.in_(_se_ids_to_fetch)
+                    ).all()
+                } if _se_ids_to_fetch else {}
+
                 for assignment in assignments:
                     if assignment.assigned_to_se_id not in seen_ids:
-                        user = User.query.get(assignment.assigned_to_se_id)
+                        user = _users_map.get(assignment.assigned_to_se_id)
                         if user:
                             site_engineers.append({
                                 'user_id': user.user_id,
@@ -576,13 +582,30 @@ def get_assigned_projects():
                         ).all()
                     log.info(f"Admin viewing as SE user {effective_user_id}: Fetched {len(projects)} projects for that SE")
                 else:
-                    # No specific user, show all SE projects
-                    projects = Project.query.options(*eager_load_options).filter(
-                        Project.site_supervisor_id.isnot(None),
-                        Project.is_deleted == False,
-                        Project.status != 'completed'
-                    ).all()
-                    log.info(f"Admin viewing as SE role: Fetched {len(projects)} total SE projects")
+                    # No specific user, show ALL SE-related projects
+                    # SE assignments come from: site_supervisor_id OR pm_assign_ss table
+                    pm_assign_project_ids_query = db.session.query(PMAssignSS.project_id).filter(
+                        PMAssignSS.is_deleted == False,
+                        PMAssignSS.project_id.isnot(None)
+                    ).distinct()
+                    pm_project_ids = [row[0] for row in pm_assign_project_ids_query.all()]
+
+                    if pm_project_ids:
+                        projects = Project.query.options(*eager_load_options).filter(
+                            or_(
+                                Project.site_supervisor_id.isnot(None),
+                                Project.project_id.in_(pm_project_ids)
+                            ),
+                            Project.is_deleted == False,
+                            Project.status != 'completed'
+                        ).all()
+                    else:
+                        projects = Project.query.options(*eager_load_options).filter(
+                            Project.site_supervisor_id.isnot(None),
+                            Project.is_deleted == False,
+                            Project.status != 'completed'
+                        ).all()
+                    log.info(f"Admin viewing as SE role: Fetched {len(projects)} total SE projects (site_supervisor_id + pm_assign_ss)")
             else:
                 # Regular SE: Show projects assigned via site_supervisor_id OR pm_assign_ss
                 # Get project IDs from pm_assign_ss assignments
@@ -1022,8 +1045,9 @@ def request_day_extension(boq_id):
             "reason": reason,
             "status": "day_request_send_td"
         }
-        # Save day extension request to BOQ (NOT history!)
+        # Save day extension request to project
         project.extension_days = additional_days
+        project.extension_original_days = additional_days
         project.extension_reason = reason
         project.extension_status = 'day_request_send_td'
 
@@ -1123,7 +1147,11 @@ def edit_day_extension(boq_id):
         if project.start_date:
             preview_end_date = project.start_date + timedelta(days=preview_duration)
 
-        # Update BOQ with edited days
+        # Preserve original requested days if not already saved
+        if not project.extension_original_days:
+            project.extension_original_days = project.extension_days
+
+        # Update with TD's edited days
         project.extension_days = edited_days
         project.extension_status = 'day_edit_td'
 
@@ -1203,11 +1231,13 @@ def approve_day_extension(boq_id):
         boq.has_pending_day_extension = False
         boq.pending_extension_status = 'approved'
 
-        # Update Project with approved days
+        # Update Project with approved days and clear extension tracking
         project.duration_days = final_duration
         if final_end_date:
             project.end_date = final_end_date
         project.extension_status = 'approved'
+        project.extension_days = None
+        project.extension_original_days = None
         project.last_modified_by = user_name
         project.last_modified_at = datetime.utcnow()
 
@@ -1348,8 +1378,10 @@ def reject_day_extension(boq_id):
         boq.has_pending_day_extension = False
         boq.pending_extension_status = 'rejected'
 
-        # Update Project extension status
+        # Update Project extension status and clear tracking fields
         project.extension_status = 'rejected'
+        project.extension_days = None
+        project.extension_original_days = None
         project.last_modified_by = user_name
         project.last_modified_at = datetime.utcnow()
 
@@ -1554,16 +1586,61 @@ def get_pending_day_extensions(boq_id):
             Project.extension_status.in_(['day_request_send_td', 'day_edit_td'])
         ).all()
 
+        # ── Batch pre-fetch: BOQs for all pending projects ───────────────────────
+        _ext_proj_ids = [p.project_id for p in pending_projects]
+        _ext_all_boqs = BOQ.query.filter(
+            BOQ.project_id.in_(_ext_proj_ids),
+            BOQ.is_deleted == False
+        ).all() if _ext_proj_ids else []
+        # Group BOQs by project_id
+        _ext_boqs_by_proj = {}
+        for _b in _ext_all_boqs:
+            _ext_boqs_by_proj.setdefault(_b.project_id, []).append(_b)
+
+        # Batch pre-fetch: latest BOQHistory per BOQ for ALL BOQs
+        _ext_all_boq_ids = [_b.boq_id for _b in _ext_all_boqs]
+        # Fetch all relevant history rows sorted so we can pick latest per boq_id
+        _ext_all_hist_rows = BOQHistory.query.filter(
+            BOQHistory.boq_id.in_(_ext_all_boq_ids)
+        ).order_by(BOQHistory.action_date.desc()).all() if _ext_all_boq_ids else []
+        # Keep only the first (latest) history row per boq_id
+        _ext_hist_by_boq = {}
+        for _h in _ext_all_hist_rows:
+            if _h.boq_id not in _ext_hist_by_boq:
+                _ext_hist_by_boq[_h.boq_id] = _h
+        # ─────────────────────────────────────────────────────────────────────────
+
         pending_extensions = []
         for proj in pending_projects:
-            # Get all BOQs under this project
-            project_boqs = BOQ.query.filter_by(project_id=proj.project_id, is_deleted=False).all()
+            # Use pre-fetched BOQs (no DB call)
+            project_boqs = _ext_boqs_by_proj.get(proj.project_id, [])
 
             original_duration = proj.duration_days or 0
-            requested_days = proj.extension_days or 0
-            actual_days = requested_days
+            is_edited = proj.extension_status == 'day_edit_td'
 
-            new_duration = original_duration + actual_days
+            # Separate original requested days from TD's edited days
+            original_requested = proj.extension_original_days or proj.extension_days or 0
+            current_days = proj.extension_days or 0
+
+            # If edited and original_requested equals current_days, the backfill
+            # couldn't recover the true original. Look it up from BOQ history.
+            if is_edited and original_requested == current_days and project_boqs:
+                for pboq in project_boqs:
+                    hist = _ext_hist_by_boq.get(pboq.boq_id)  # dict lookup — no DB call
+                    if hist and hist.action and isinstance(hist.action, list):
+                        for act in hist.action:
+                            if act.get('type') == 'day_extension_requested':
+                                history_days = act.get('requested_additional_days') or act.get('requested_days')
+                                if history_days and history_days != current_days:
+                                    original_requested = history_days
+                                    # Also fix the project record for future lookups
+                                    proj.extension_original_days = history_days
+                                    db.session.commit()
+                                break
+                    if original_requested != current_days:
+                        break
+
+            new_duration = original_duration + current_days
 
             # Calculate new end date
             new_end_date = None
@@ -1574,34 +1651,37 @@ def get_pending_day_extensions(boq_id):
             first_boq_id = project_boqs[0].boq_id if project_boqs else None
 
             extension_data = {
-                "boq_id": first_boq_id,  # Add boq_id for frontend modal
+                "boq_id": first_boq_id,
                 "project_id": proj.project_id,
                 "project_name": proj.project_name,
                 "boqs": [
                     {"boq_id": b.boq_id, "boq_name": b.boq_name} for b in project_boqs
                 ],
                 "original_duration": original_duration,
-                "requested_days": requested_days,
-                "edited_days": actual_days,
-                "actual_days": actual_days,
+                "requested_days": original_requested,
+                "edited_days": current_days if is_edited else None,
+                "actual_days": current_days,
                 "new_duration": new_duration,
-                "request_date": proj.last_modified_at,
+                "request_date": proj.last_modified_at.isoformat() if proj.last_modified_at else None,
                 "requested_by": proj.last_modified_by,
                 "original_end_date": proj.end_date.isoformat() if proj.end_date else None,
                 "new_end_date": new_end_date.isoformat() if new_end_date else None,
                 "reason": proj.extension_reason or 'No reason provided',
                 "status": proj.extension_status,
-                "is_edited": proj.extension_status == 'day_edit_td'
+                "is_edited": is_edited
             }
 
             pending_extensions.append(extension_data)
 
-        return jsonify({
+        response_data = {
             "success": True,
             "count": len(pending_extensions),
             "data": pending_extensions
-        }), 200
+        }
+        return jsonify(response_data), 200
 
     except Exception as e:
+        import traceback
         log.error(f"Error getting pending day extensions for BOQ {boq_id}: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        log.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": f"Failed to load day extension requests: {str(e)}", "success": False}), 500

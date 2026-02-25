@@ -66,11 +66,15 @@ class BOQTrackingService {
     // Determine endpoint based on effective role
     let endpoint = `/pm_production_management`; // Default to PM production endpoint
 
-    // Technical Director uses NEW td_production_management endpoint (shows ALL BOQs)
+    // Technical Director uses td_production_management endpoint (shows ALL BOQs)
     if (effectiveRole === 'technical director' ||
         effectiveRole === 'technical_director' ||
         effectiveRole === 'technicaldirector' ||
-        effectiveRole === 'td') {
+        effectiveRole === 'td' ||
+        userRole === 'technical director' ||
+        userRole === 'technical_director' ||
+        userRole === 'technicaldirector' ||
+        userRole === 'td') {
       endpoint = `/td_production_management`;
     }
     // MEP uses mep_approve_boq endpoint (shows only MEP's assigned BOQs)
@@ -185,6 +189,38 @@ class BOQTrackingService {
     const response = await apiClient.post(
       `/new_purchase/estimator/${boq_id}`,
       {},
+      { headers: this.getHeaders() }
+    );
+    return response.data;
+  }
+
+  /**
+   * Get profit report with transport, material, and item breakdown
+   * Used by the Report tab in Profit Comparison page
+   * API: /api/profit-report/<boq_id>
+   */
+  async getProfitReport(boq_id: number) {
+    const response = await apiClient.get(
+      `/profit-report/${boq_id}`,
+      { headers: this.getHeaders() }
+    );
+    return response.data;
+  }
+
+  /**
+   * Get comprehensive labour workflow details for a BOQ
+   * Includes:
+   * - Labour requisitions (who requested, approval status)
+   * - Worker assignments (which workers, rates, dates)
+   * - Daily attendance records (clock times, hours, costs)
+   * - Attendance locks (approval status, who locked, when)
+   * - Payment status and locks
+   *
+   * Uses API: /api/labour_workflow/<boq_id>
+   */
+  async getLabourWorkflowDetails(boq_id: number) {
+    const response = await apiClient.get(
+      `/labour_workflow/${boq_id}`,
       { headers: this.getHeaders() }
     );
     return response.data;

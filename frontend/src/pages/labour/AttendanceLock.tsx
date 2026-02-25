@@ -2,18 +2,21 @@
  * Attendance Lock Page
  * Project Manager: Review and lock attendance data (Step 7)
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { labourService, DailyAttendance } from '@/services/labourService';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import { apiClient } from '@/api/config';
+import { PAGINATION } from '@/lib/constants';
 import {
   LockClosedIcon,
   ClockIcon,
   CheckCircleIcon,
   EyeIcon,
   XMarkIcon,
-  LockOpenIcon
+  LockOpenIcon,
+  ChevronDownIcon,
+  ChevronRightIcon
 } from '@heroicons/react/24/outline';
 
 // Tab configuration
@@ -44,6 +47,11 @@ const AttendanceLock: React.FC = () => {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedAttendance, setSelectedAttendance] = useState<DailyAttendance | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: number; project_code: string; project_name: string }>>([]);
+  const [selectedAttendanceIds, setSelectedAttendanceIds] = useState<number[]>([]);
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
 
   const fetchAttendance = async () => {
     setLoading(true);
@@ -148,6 +156,124 @@ const AttendanceLock: React.FC = () => {
     );
   };
 
+  // Toggle selection for a single attendance record
+  const toggleSelection = (attendanceId: number | undefined) => {
+    if (!attendanceId || typeof attendanceId !== 'number') {
+      console.error('Invalid attendance ID:', attendanceId);
+      return;
+    }
+    setSelectedAttendanceIds(prev =>
+      prev.includes(attendanceId)
+        ? prev.filter(id => id !== attendanceId)
+        : [...prev, attendanceId]
+    );
+  };
+
+  // Toggle collapse for a date group
+  const toggleCollapse = (date: string | undefined) => {
+    if (!date || typeof date !== 'string') {
+      console.error('Invalid date:', date);
+      return;
+    }
+    setCollapsedDates(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(date)) {
+        newSet.delete(date);
+      } else {
+        newSet.add(date);
+      }
+      return newSet;
+    });
+  };
+
+  // Group attendance by date
+  const groupedByDate = useMemo(() => {
+    const groups = attendance.reduce((acc, record) => {
+      const date = record.attendance_date;
+      if (!acc[date]) {
+        acc[date] = [];
+      }
+      acc[date].push(record);
+      return acc;
+    }, {} as Record<string, DailyAttendance[]>);
+
+    // Sort dates in descending order (most recent first)
+    return Object.keys(groups)
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+      .reduce((acc, date) => {
+        acc[date] = groups[date];
+        return acc;
+      }, {} as Record<string, DailyAttendance[]>);
+  }, [attendance]);
+
+  // Convert to array for pagination
+  const dateGroupsArray = Object.entries(groupedByDate);
+  const totalDateGroups = dateGroupsArray.length;
+  const totalPages = Math.ceil(totalDateGroups / PAGINATION.DEFAULT_PAGE_SIZE);
+
+  // Paginated date groups
+  const paginatedDateGroups = dateGroupsArray.slice(
+    (currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE,
+    currentPage * PAGINATION.DEFAULT_PAGE_SIZE
+  );
+
+  // Reset page when data changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [attendance.length, projectId, selectedDate, activeTab]);
+
+  // Select/deselect all in a date group
+  const toggleDateGroupSelection = (dateRecords: DailyAttendance[]) => {
+    const dateRecordIds = dateRecords.map(r => r.attendance_id);
+    const allSelected = dateRecordIds.every(id => selectedAttendanceIds.includes(id));
+
+    if (allSelected) {
+      // Deselect all in this group
+      setSelectedAttendanceIds(prev => prev.filter(id => !dateRecordIds.includes(id)));
+    } else {
+      // Select all in this group
+      setSelectedAttendanceIds(prev => [...new Set([...prev, ...dateRecordIds])]);
+    }
+  };
+
+  // Handle bulk lock for selected items (parallel execution for performance)
+  const handleBulkLock = async () => {
+    if (selectedAttendanceIds.length === 0) {
+      showError('Please select attendance records to lock');
+      return;
+    }
+
+    setProcessing(-1); // Use -1 to indicate bulk processing
+
+    // Execute all API calls in parallel for better performance
+    const results = await Promise.allSettled(
+      selectedAttendanceIds.map(attendanceId =>
+        labourService.lockAttendance(attendanceId, 'Bulk approved for payroll')
+      )
+    );
+
+    // Count successes and failures
+    const successCount = results.filter(
+      r => r.status === 'fulfilled' && r.value.success
+    ).length;
+    const failCount = results.length - successCount;
+
+    if (successCount > 0) {
+      showSuccess(`Locked ${successCount} attendance record(s)`);
+      setSelectedAttendanceIds([]);
+      fetchAttendance();
+    }
+    if (failCount > 0) {
+      showError(`Failed to lock ${failCount} record(s)`);
+    }
+    setProcessing(null);
+  };
+
+  // Clear selection when tab changes
+  useEffect(() => {
+    setSelectedAttendanceIds([]);
+  }, [activeTab]);
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -235,6 +361,39 @@ const AttendanceLock: React.FC = () => {
         )}
       </div>
 
+      {/* Bulk Action Toolbar */}
+      {selectedAttendanceIds.length > 0 && activeTab === 'pending' && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg flex items-center justify-between"
+        >
+          <div className="flex items-center gap-3">
+            <span className="font-medium text-indigo-900">
+              {selectedAttendanceIds.length} record{selectedAttendanceIds.length > 1 ? 's' : ''} selected
+            </span>
+            <button
+              onClick={() => setSelectedAttendanceIds([])}
+              className="text-sm text-indigo-600 hover:text-indigo-800 underline"
+            >
+              Clear selection
+            </button>
+          </div>
+          <button
+            onClick={handleBulkLock}
+            disabled={processing === -1}
+            className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50"
+          >
+            {processing === -1 ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+            ) : (
+              <LockClosedIcon className="w-5 h-5" />
+            )}
+            Lock Selected
+          </button>
+        </motion.div>
+      )}
+
       {/* Attendance Table */}
       {loading ? (
         <div className="flex items-center justify-center py-12">
@@ -253,89 +412,223 @@ const AttendanceLock: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Worker</th>
-                <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
-                <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Clock In</th>
-                <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Clock Out</th>
-                <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
-                <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Overtime</th>
-                <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Cost</th>
-                <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {attendance.map((record) => (
-                <motion.tr
-                  key={record.attendance_id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="hover:bg-gray-50"
-                >
-                  <td className="px-5 py-4 text-sm text-gray-900">
-                    {formatDate(record.attendance_date)}
-                  </td>
-                  <td className="px-5 py-4">
-                    <div>
-                      <p className="font-medium text-gray-900">{record.worker_name}</p>
-                      <p className="text-sm text-gray-500">{record.worker_code}</p>
-                    </div>
-                  </td>
-                  <td className="px-5 py-4 text-sm text-gray-600">
-                    {record.project_name || `#${record.project_id}`}
-                  </td>
-                  <td className="px-5 py-4 text-sm text-gray-600">
-                    {formatTime(record.clock_in_time)}
-                  </td>
-                  <td className="px-5 py-4 text-sm text-gray-600">
-                    {formatTime(record.clock_out_time)}
-                  </td>
-                  <td className="px-5 py-4 text-sm text-gray-900 font-medium">
-                    {formatDuration(record.regular_hours)}
-                  </td>
-                  <td className="px-5 py-4 text-sm">
-                    {record.overtime_hours && record.overtime_hours > 0 ? (
-                      <span className="text-orange-600 font-medium">{formatDuration(record.overtime_hours)}</span>
-                    ) : (
-                      <span className="text-gray-400">-</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-4 text-sm text-gray-900 font-medium">
-                    AED {record.total_cost?.toFixed(2) || '-'}
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleViewDetails(record)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-50"
-                      >
-                        <EyeIcon className="w-4 h-4" />
-                        View
-                      </button>
-                      {activeTab === 'pending' && (
-                        <button
-                          onClick={() => handleLock(record.attendance_id)}
-                          disabled={processing === record.attendance_id}
-                          className="flex items-center gap-1 px-2.5 py-1.5 bg-teal-600 text-white text-sm rounded-md hover:bg-teal-700 disabled:opacity-50"
-                        >
-                          {processing === record.attendance_id ? (
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                          ) : (
-                            <LockClosedIcon className="w-4 h-4" />
-                          )}
-                          Lock
-                        </button>
+        <div className="space-y-4">
+          {paginatedDateGroups.map(([date, dateRecords]) => {
+            const isCollapsed = collapsedDates.has(date);
+            const allSelected = dateRecords.every(r => selectedAttendanceIds.includes(r.attendance_id));
+            const someSelected = dateRecords.some(r => selectedAttendanceIds.includes(r.attendance_id)) && !allSelected;
+
+            return (
+              <div key={date} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                {/* Date Header */}
+                <div className="bg-gray-50 border-b border-gray-200 px-5 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => toggleCollapse(date)}
+                      className="p-1 hover:bg-gray-200 rounded transition-colors"
+                      aria-label={isCollapsed ? `Expand ${formatDate(date)}` : `Collapse ${formatDate(date)}`}
+                      aria-expanded={!isCollapsed}
+                    >
+                      {isCollapsed ? (
+                        <ChevronRightIcon className="w-5 h-5 text-gray-600" />
+                      ) : (
+                        <ChevronDownIcon className="w-5 h-5 text-gray-600" />
                       )}
-                    </div>
-                  </td>
-                </motion.tr>
-              ))}
-            </tbody>
-          </table>
+                    </button>
+                    {activeTab === 'pending' && (
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        ref={input => {
+                          if (input) input.indeterminate = someSelected;
+                        }}
+                        onChange={() => toggleDateGroupSelection(dateRecords)}
+                        className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Select all records for ${formatDate(date)}`}
+                      />
+                    )}
+                    <h3 className="text-base font-semibold text-gray-900">
+                      {formatDate(date)}
+                      <span className="ml-2 text-sm font-normal text-gray-500">
+                        ({dateRecords.length} record{dateRecords.length > 1 ? 's' : ''})
+                      </span>
+                    </h3>
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    Total Cost: <span className="font-semibold text-gray-900">
+                      AED {dateRecords.reduce((sum, r) => sum + (r.total_cost || 0), 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Records Table */}
+                {!isCollapsed && (
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {activeTab === 'pending' && (
+                          <th className="px-2 py-3.5 text-left text-xs font-medium text-gray-500 uppercase w-10">
+                            Select
+                          </th>
+                        )}
+                        <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Worker</th>
+                        <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
+                        <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Clock In</th>
+                        <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Clock Out</th>
+                        <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
+                        <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Overtime</th>
+                        <th className="px-5 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Cost</th>
+                        <th className="px-4 py-3.5 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {dateRecords.map((record) => {
+                        const isSelected = selectedAttendanceIds.includes(record.attendance_id);
+                        return (
+                          <motion.tr
+                            key={record.attendance_id}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            onClick={() => activeTab === 'pending' && toggleSelection(record.attendance_id)}
+                            className={`cursor-pointer transition-colors ${
+                              isSelected ? 'bg-indigo-50' : 'hover:bg-gray-50'
+                            }`}
+                          >
+                            {activeTab === 'pending' && (
+                              <td className="px-2 py-4" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleSelection(record.attendance_id)}
+                                  className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
+                                  aria-label={`Select ${record.worker_name}`}
+                                />
+                              </td>
+                            )}
+                            <td className="px-5 py-4">
+                              <div>
+                                <p className="font-medium text-gray-900">{record.worker_name}</p>
+                                <p className="text-sm text-gray-500">{record.worker_code}</p>
+                              </div>
+                            </td>
+                            <td className="px-5 py-4 text-sm text-gray-600">
+                              {record.project_name || `#${record.project_id}`}
+                            </td>
+                            <td className="px-5 py-4 text-sm text-gray-600">
+                              {formatTime(record.clock_in_time)}
+                            </td>
+                            <td className="px-5 py-4 text-sm text-gray-600">
+                              {formatTime(record.clock_out_time)}
+                            </td>
+                            <td className="px-5 py-4 text-sm text-gray-900 font-medium">
+                              {formatDuration(record.regular_hours)}
+                            </td>
+                            <td className="px-5 py-4 text-sm">
+                              {record.overtime_hours && record.overtime_hours > 0 ? (
+                                <span className="text-orange-600 font-medium">{formatDuration(record.overtime_hours)}</span>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-4 text-sm text-gray-900 font-medium">
+                              AED {record.total_cost?.toFixed(2) || '-'}
+                            </td>
+                            <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleViewDetails(record)}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-50"
+                                >
+                                  <EyeIcon className="w-4 h-4" />
+                                  View
+                                </button>
+                                {activeTab === 'pending' && (
+                                  <button
+                                    onClick={() => handleLock(record.attendance_id)}
+                                    disabled={processing === record.attendance_id}
+                                    className="flex items-center gap-1 px-2.5 py-1.5 bg-teal-600 text-white text-sm rounded-md hover:bg-teal-700 disabled:opacity-50"
+                                  >
+                                    {processing === record.attendance_id ? (
+                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                    ) : (
+                                      <LockClosedIcon className="w-4 h-4" />
+                                    )}
+                                    Lock
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </motion.tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Pagination */}
+          {totalDateGroups > 0 && (
+            <div className="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 rounded-lg shadow-sm mt-4">
+              <div className="text-sm text-gray-700">
+                Showing {(currentPage - 1) * PAGINATION.DEFAULT_PAGE_SIZE + 1} to{' '}
+                {Math.min(currentPage * PAGINATION.DEFAULT_PAGE_SIZE, totalDateGroups)} of{' '}
+                {totalDateGroups} date groups
+                {totalPages > 1 && (
+                  <span className="text-gray-500 ml-2">(Page {currentPage} of {totalPages})</span>
+                )}
+              </div>
+              {totalPages > 1 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                      const showPage =
+                        page === 1 ||
+                        page === totalPages ||
+                        (page >= currentPage - 1 && page <= currentPage + 1);
+
+                      if (!showPage) {
+                        if (page === currentPage - 2 || page === currentPage + 2) {
+                          return <span key={page} className="px-2 text-gray-500">...</span>;
+                        }
+                        return null;
+                      }
+
+                      return (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                            currentPage === page
+                              ? 'bg-teal-600 text-white font-medium'
+                              : 'border border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

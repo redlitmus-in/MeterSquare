@@ -33,7 +33,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 }) => {
   const { user } = useAuthStore();
   const [showEditModal, setShowEditModal] = useState(false);
-  const [expandedDescriptions, setExpandedDescriptions] = useState<Set<number>>(new Set());
   const [expandedSpecs, setExpandedSpecs] = useState<Set<number>>(new Set());
   const [lpoData, setLpoData] = useState<any>(null);
   const [loadingLPO, setLoadingLPO] = useState(false);
@@ -52,19 +51,6 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
   const [showVendorComparisonModal, setShowVendorComparisonModal] = useState(false);
   const [competitorVendors, setCompetitorVendors] = useState<Vendor[]>([]);
   const [loadingCompetitors, setLoadingCompetitors] = useState(false);
-
-  // Toggle description expansion
-  const toggleDescription = (idx: number) => {
-    setExpandedDescriptions(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(idx)) {
-        newSet.delete(idx);
-      } else {
-        newSet.add(idx);
-      }
-      return newSet;
-    });
-  };
 
   // Toggle specification expansion
   const toggleSpec = (idx: number) => {
@@ -108,8 +94,24 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
           return;
         }
 
+        // PERFORMANCE FIX: Only fetch buyer data for roles that need it
+        // Site Engineers and Project Managers don't need vendor selection data
+        const userRole = (user?.role || user?.role_name || '').toLowerCase().replace(/[_\s]/g, '');
+        const needsVendorData = userRole.includes('buyer') ||
+                                userRole.includes('estimator') ||
+                                userRole.includes('technical') ||
+                                userRole.includes('admin');
+
+        if (!needsVendorData) {
+          // User doesn't need vendor selection data - use prop data directly
+          // Prevents unnecessary 403 errors for Site Engineers/PMs
+          setLatestChangeRequest(changeRequest);
+          return;
+        }
+
         try {
           // This is a parent CR - fetch latest material_vendor_selections with supplier_notes
+          // Only called for Buyer, Estimator, TD, and Admin roles
           const response = await buyerService.getPurchaseById(changeRequest.cr_id);
           // Merge the fresh data with the prop data
           setLatestChangeRequest({
@@ -125,7 +127,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     };
 
     fetchFreshData();
-  }, [isOpen, changeRequest?.cr_id]);
+  }, [isOpen, changeRequest?.cr_id, user]);
 
   // Initialize edited materials when modal opens or changeRequest changes
   // Use isOpen and latestChangeRequest as dependencies to ensure fresh data on every open
@@ -187,6 +189,16 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     const fetchLPOData = async () => {
       if (!isOpen || !latestChangeRequest || lpoData) return;
 
+      // PERFORMANCE FIX: Only fetch LPO data for roles that can view it
+      const userRole = (user?.role || user?.role_name || '').toLowerCase().replace(/[_\s]/g, '');
+      const canViewLPO = userRole.includes('buyer') ||
+                         userRole.includes('estimator') ||
+                         userRole.includes('technical') ||
+                         userRole.includes('admin');
+
+      // Site Engineers and Project Managers don't need LPO data
+      if (!canViewLPO) return;
+
       // Always fetch LPO data when vendor is selected (to get VAT and prices)
       if (latestChangeRequest.selected_vendor_name) {
         try {
@@ -202,7 +214,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     };
 
     fetchLPOData();
-  }, [isOpen, latestChangeRequest, lpoData]);
+  }, [isOpen, latestChangeRequest, lpoData, user]);
 
   // Memoize material data for vendor comparison to avoid recalculation on every render
   // MUST be before early return to avoid "Rendered more hooks than during the previous render" error
@@ -260,6 +272,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
       rejected: 'REJECTED',
       assigned_to_buyer: 'ASSIGNED TO BUYER',
       purchase_completed: 'PURCHASE COMPLETED',
+      routed_to_store: 'ROUTED TO M2 STORE',
       pending_td_approval: 'PENDING TD APPROVAL',
       vendor_approved: 'VENDOR APPROVED',
       split_to_po_children: 'SPLIT TO VENDORS'
@@ -448,8 +461,23 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     };
   });
 
-  // Total cost of ALL materials (for display) - uses editedMaterials
-  const totalMaterialsCost = materialsData.reduce((sum: number, mat: any) =>
+  // ✅ FIX: For TD vendor approval view, filter out materials that were sent to store
+  // TD only needs to see materials that require vendor approval, not store-routed materials
+  const isTDVendorApprovalView = changeRequest?.vendor_selection_status === 'pending_td_approval';
+  const routedMaterialsForFilter = changeRequest?.routed_materials || {};
+
+  const filteredMaterialsData = isTDVendorApprovalView
+    ? materialsData.filter((mat: any) => {
+        const materialName = mat.boq_material_name || mat.material_name || '';
+        const materialRouting = routedMaterialsForFilter[materialName];
+        // Exclude materials routed to store (TD doesn't need to see them)
+        // Include materials with no routing OR materials routed to vendor
+        return !materialRouting || materialRouting.routing !== 'store';
+      })
+    : materialsData;
+
+  // Total cost of ALL materials (for display) - uses filtered materials for TD view
+  const totalMaterialsCost = filteredMaterialsData.reduce((sum: number, mat: any) =>
     sum + (mat.total_price || (mat.quantity * mat.unit_price) || 0), 0
   );
 
@@ -479,7 +507,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
   // Final statuses where no actions should be allowed (except for vendor approval pending TD)
   // Note: vendor_selection_status === 'pending_td_approval' is allowed to show buttons for vendor approval
-  const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'purchase_completed', 'approved', 'rejected', 'vendor_approved'].includes(changeRequest.status);
+  const isFinalStatus = ['approved_by_pm', 'approved_by_td', 'assigned_to_buyer', 'send_to_buyer', 'purchase_completed', 'routed_to_store', 'approved', 'rejected', 'vendor_approved'].includes(changeRequest.status);
 
   // Check if this is a vendor approval pending TD - these should show approve/reject buttons
   const isVendorApprovalPending = changeRequest.vendor_selection_status === 'pending_td_approval';
@@ -763,23 +791,26 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <p className="text-xs text-gray-500 mt-0.5">Compare vendors who can supply these materials</p>
                         </div>
                       </div>
-                      <button
-                        onClick={handleCompareVendors}
-                        disabled={loadingCompetitors}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {loadingCompetitors ? (
-                          <>
-                            <ModernLoadingSpinners size="xs" />
-                            Loading...
-                          </>
-                        ) : (
-                          <>
-                            <GitCompare className="w-4 h-4" />
-                            Compare Vendors
-                          </>
-                        )}
-                      </button>
+                      {/* Show Compare Vendors button ONLY for TD role */}
+                      {(isTechnicalDirector(user) || user?.role_id === 7 || (user?.role || user?.role_name || '').toLowerCase().includes('technical')) && (
+                        <button
+                          onClick={handleCompareVendors}
+                          disabled={loadingCompetitors}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {loadingCompetitors ? (
+                            <>
+                              <ModernLoadingSpinners size="xs" />
+                              Loading...
+                            </>
+                          ) : (
+                            <>
+                              <GitCompare className="w-4 h-4" />
+                              Compare Vendors
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -800,24 +831,27 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             <p className="text-xs text-gray-500">Compare with other vendors who can supply these materials</p>
                           </div>
                         </div>
-                        <button
-                          onClick={handleCompareVendors}
-                          disabled={loadingCompetitors}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                          title="Compare with competitor vendors"
-                        >
-                          {loadingCompetitors ? (
-                            <>
-                              <ModernLoadingSpinners size="xxs" />
-                              Loading...
-                            </>
-                          ) : (
-                            <>
-                              <GitCompare className="w-3.5 h-3.5" />
-                              Compare Vendors
-                            </>
-                          )}
-                        </button>
+                        {/* Show Compare Vendors button ONLY for TD role */}
+                        {(isTechnicalDirector(user) || user?.role_id === 7 || (user?.role || user?.role_name || '').toLowerCase().includes('technical')) && (
+                          <button
+                            onClick={handleCompareVendors}
+                            disabled={loadingCompetitors}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                            title="Compare with competitor vendors"
+                          >
+                            {loadingCompetitors ? (
+                              <>
+                                <ModernLoadingSpinners size="xxs" />
+                                Loading...
+                              </>
+                            ) : (
+                              <>
+                                <GitCompare className="w-3.5 h-3.5" />
+                                Compare Vendors
+                              </>
+                            )}
+                          </button>
+                        )}
                       </div>
                     <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-200">
                       {/* Vendor Company Information */}
@@ -1234,56 +1268,42 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
                   {/* Mobile: Card Layout */}
                   <div className="sm:hidden p-3 space-y-3">
-                    {materialsData?.map((material: any, idx: number) => {
+                    {filteredMaterialsData?.map((material: any, idx: number) => {
                       // Use is_new_material flag from backend (set when material doesn't exist in BOQ)
                       // Fallback to checking master_material_id only if flag is not present
-                      const isNewMaterial = material.is_new_material === true || 
+                      const isNewMaterial = material.is_new_material === true ||
                                             (material.is_new_material === undefined && material.master_material_id === null);
+
+                      // Check if material is routed to store
+                      const routedMaterials = changeRequest?.routed_materials || {};
+                      const materialRouting = routedMaterials[material.material_name];
+                      const isRoutedToStore = materialRouting?.routing === 'store';
+                      const isRoutedToVendor = materialRouting?.routing === 'vendor';
+
                       return (
                         <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                          {/* Material Name + NEW badge */}
-                          <div className="flex items-center gap-2 mb-2">
+                          {/* Material Name + NEW/STORE/VENDOR badges */}
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
                             <span className="font-semibold text-sm text-gray-900 truncate" title={material.material_name}>{material.material_name}</span>
                             {isNewMaterial && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-100 text-green-700 border border-green-300 flex-shrink-0">
                                 NEW
                               </span>
                             )}
+                            {isRoutedToStore && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-700 border border-purple-300 flex-shrink-0">
+                                📦 STORE
+                              </span>
+                            )}
+                            {isRoutedToVendor && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700 border border-blue-300 flex-shrink-0">
+                                🚚 VENDOR
+                              </span>
+                            )}
                           </div>
 
                           {/* Details Grid */}
                           <div className="space-y-2 text-xs">
-                            {/* Description */}
-                            {material.description && material.description.trim() && (
-                              <div>
-                                <span className="text-gray-500">Description:</span>
-                                <div className="ml-1 text-gray-900">
-                                  {material.description.length > 80 && !expandedDescriptions.has(idx) ? (
-                                    <>
-                                      <span>{material.description.substring(0, 80)}...</span>
-                                      <button
-                                        onClick={() => toggleDescription(idx)}
-                                        className="ml-1 text-purple-600 hover:text-purple-800 font-medium"
-                                      >
-                                        See More
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span>{material.description}</span>
-                                      {material.description.length > 80 && (
-                                        <button
-                                          onClick={() => toggleDescription(idx)}
-                                          className="ml-1 text-purple-600 hover:text-purple-800 font-medium"
-                                        >
-                                          See Less
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            )}
                             <div className="grid grid-cols-2 gap-2">
                               <div className="truncate">
                                 <span className="text-gray-500">Brand:</span>
@@ -1396,7 +1416,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         </div>
                         {/* BOQ Total as secondary - always show */}
                         {(() => {
-                          const boqTotal = materialsData.reduce((sum: number, mat: any) => {
+                          const boqTotal = filteredMaterialsData.reduce((sum: number, mat: any) => {
                             const boqPrice = mat.boq_unit_price || mat.original_unit_price || 0;
                             return sum + (boqPrice * (mat.quantity || 0));
                           }, 0);
@@ -1415,7 +1435,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   </div>
 
                   {/* Warning when prices are missing */}
-                  {shouldShowPricing && totalMaterialsCost === 0 && materialsData.length > 0 && (
+                  {shouldShowPricing && totalMaterialsCost === 0 && filteredMaterialsData.length > 0 && (
                     <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
                       <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                       <div>
@@ -1431,153 +1451,100 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                   <div className="hidden sm:block overflow-x-auto">
                   {/* Check if there are any NEW materials to show Notes column */}
                   {(() => {
-                    const hasNewMaterials = materialsData?.some((mat: any) => 
-                      mat.is_new_material === true || 
+                    const hasNewMaterials = filteredMaterialsData?.some((mat: any) =>
+                      mat.is_new_material === true ||
                       (mat.is_new_material === undefined && mat.master_material_id === null)
                     );
                     return (
                   <table className="w-full">
-                    <thead className="bg-gray-100 border-b border-gray-200">
+                    <thead className="bg-gray-100 border-b-2 border-gray-300">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Material</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Description</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Brand</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Size</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Specification</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Sub-Item</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Qty</th>
-                        {hasNewMaterials && (
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Notes</th>
-                        )}
+                        <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-700" style={{ width: '130px' }}>Material Name</th>
+                        <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-700" style={{ width: '180px' }}>Sub-Item</th>
+                        <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-700" style={{ width: '90px' }}>Brand</th>
+                        <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-700" style={{ width: '60px' }}>Size</th>
+                        <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-700" style={{ minWidth: '140px' }}>Specification</th>
+                        <th className="px-2 py-2.5 text-center text-xs font-semibold text-gray-700" style={{ width: '90px' }}>Quantity</th>
                         {shouldShowPricing && (
                           <>
-                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Unit Price</th>
-                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Total</th>
+                            <th className="px-2 py-2.5 text-right text-xs font-semibold text-gray-700" style={{ width: '110px' }}>Unit Price</th>
+                            <th className="px-2 py-2.5 text-right text-xs font-semibold text-gray-700" style={{ width: '110px' }}>Total Price</th>
                           </>
                         )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {materialsData?.map((material: any, idx: number) => {
+                      {filteredMaterialsData?.map((material: any, idx: number) => {
                         // Use is_new_material flag from backend (set when material doesn't exist in BOQ)
                         // Fallback to checking master_material_id only if flag is not present
                         const isNewMaterial = material.is_new_material === true ||
                                               (material.is_new_material === undefined && material.master_material_id === null);
+
+                        // Check if material is routed to store
+                        const routedMaterials = changeRequest?.routed_materials || {};
+                        const materialRouting = routedMaterials[material.material_name];
+                        const isRoutedToStore = materialRouting?.routing === 'store';
+                        const isRoutedToVendor = materialRouting?.routing === 'vendor';
+
                         return (
                           <React.Fragment key={idx}>
                           <tr className="hover:bg-gray-50 transition-colors">
                             {/* Material Name */}
-                            <td className="px-4 py-3 text-sm text-gray-900">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-medium" title={material.material_name}>{material.material_name}</span>
+                            <td className="px-2 py-2.5 text-xs text-gray-900">
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className="font-medium truncate" title={material.material_name}>{material.material_name}</span>
                                 {isNewMaterial && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-300 flex-shrink-0">
+                                  <span className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold bg-green-100 text-green-700 border border-green-300 flex-shrink-0">
                                     NEW
+                                  </span>
+                                )}
+                                {isRoutedToStore && (
+                                  <span className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-700 border border-purple-300 flex-shrink-0">
+                                    📦 STORE
+                                  </span>
+                                )}
+                                {isRoutedToVendor && (
+                                  <span className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700 border border-blue-300 flex-shrink-0">
+                                    🚚 VENDOR
                                   </span>
                                 )}
                               </div>
                             </td>
-                            {/* Description */}
-                            <td className="px-4 py-3 text-sm text-gray-600" style={{ maxWidth: '250px' }}>
-                              {material.description && material.description.trim() ? (
-                                <div>
-                                  {material.description.length > 100 && !expandedDescriptions.has(idx) ? (
-                                    <div>
-                                      <span>{material.description.substring(0, 100)}...</span>
-                                      <button
-                                        onClick={() => toggleDescription(idx)}
-                                        className="ml-1 text-purple-600 hover:text-purple-800 font-medium text-xs whitespace-nowrap"
-                                      >
-                                        See More
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div>
-                                      <span>{material.description}</span>
-                                      {material.description.length > 100 && (
-                                        <button
-                                          onClick={() => toggleDescription(idx)}
-                                          className="ml-1 text-purple-600 hover:text-purple-800 font-medium text-xs whitespace-nowrap"
-                                        >
-                                          See Less
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-gray-400">-</span>
-                              )}
-                            </td>
-                            {/* Brand */}
-                            <td className="px-4 py-3 text-sm text-gray-600" title={material.brand || ''}>
-                              {material.brand || <span className="text-gray-400">-</span>}
-                            </td>
-                            {/* Size */}
-                            <td className="px-4 py-3 text-sm text-gray-600" title={material.size || ''}>
-                              {material.size || <span className="text-gray-400">-</span>}
-                            </td>
-                            {/* Specification */}
-                            <td className="px-4 py-3 text-sm text-gray-600" style={{ maxWidth: '250px' }}>
-                              {material.specification && material.specification.trim() ? (
-                                <div>
-                                  {material.specification.length > 100 && !expandedSpecs.has(idx) ? (
-                                    <div>
-                                      <span>{material.specification.substring(0, 100)}...</span>
-                                      <button
-                                        onClick={() => toggleSpec(idx)}
-                                        className="ml-1 text-purple-600 hover:text-purple-800 font-medium text-xs whitespace-nowrap"
-                                      >
-                                        See More
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div>
-                                      <span>{material.specification}</span>
-                                      {material.specification.length > 100 && (
-                                        <button
-                                          onClick={() => toggleSpec(idx)}
-                                          className="ml-1 text-purple-600 hover:text-purple-800 font-medium text-xs whitespace-nowrap"
-                                        >
-                                          See Less
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-gray-400">-</span>
-                              )}
-                            </td>
                             {/* Sub-Item - Clickable to view in BOQ */}
-                            <td className="px-4 py-3 text-sm">
+                            <td className="px-2 py-2.5 text-xs">
                               {material.sub_item_name ? (
                                 <button
                                   onClick={() => handleViewSubItemInBOQ(material.sub_item_name, material.material_name)}
-                                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 hover:text-purple-900 transition-colors cursor-pointer truncate max-w-full group"
+                                  className="inline-flex items-start gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 hover:text-purple-900 transition-colors cursor-pointer w-full group text-left"
                                   title={`Click to view "${material.sub_item_name}" in BOQ scope`}
                                 >
                                   <span className="truncate">{material.sub_item_name}</span>
-                                  <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                                  <ExternalLink className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5" />
                                 </button>
                               ) : <span className="text-gray-400">-</span>}
                             </td>
-                            {/* Quantity */}
-                            <td className="px-4 py-3 text-sm text-gray-900 text-center whitespace-nowrap font-medium">
-                              {material.quantity} <span className="text-gray-500 font-normal">{material.unit}</span>
+                            {/* Brand */}
+                            <td className="px-2 py-2.5 text-xs text-gray-600 truncate" title={material.brand || ''}>
+                              {material.brand || <span className="text-gray-400">-</span>}
                             </td>
-                            {/* Notes - Only show for NEW materials */}
-                            {hasNewMaterials && (
-                              <td className="px-4 py-3 text-sm">
-                                {isNewMaterial && material.justification && material.justification.trim().length > 0 ? (
-                                  <p className="text-xs text-gray-700 line-clamp-2" title={material.justification}>
-                                    {material.justification}
-                                  </p>
-                                ) : (
-                                  <span className="text-gray-400">-</span>
-                                )}
-                              </td>
-                            )}
+                            {/* Size */}
+                            <td className="px-2 py-2.5 text-xs text-gray-600 truncate" title={material.size || ''}>
+                              {material.size || <span className="text-gray-400">-</span>}
+                            </td>
+                            {/* Specification */}
+                            <td className="px-2 py-2.5 text-xs text-gray-600">
+                              {material.specification && material.specification.trim() ? (
+                                <div className="truncate" title={material.specification}>
+                                  {material.specification}
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </td>
+                            {/* Quantity */}
+                            <td className="px-2 py-2.5 text-xs text-gray-900 text-center whitespace-nowrap font-medium">
+                              {material.quantity} <span className="text-gray-500 font-normal text-[10px]">{material.unit}</span>
+                            </td>
                             {shouldShowPricing && (() => {
                               // Get vendor price and BOQ price
                               const vendorUnitPrice = material.unit_price || 0;
@@ -1589,7 +1556,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                               return (
                               <>
                                 {/* Unit Price */}
-                                <td className="px-4 py-3 text-sm text-right whitespace-nowrap">
+                                <td className="px-2 py-2.5 text-xs text-right">
                                   {canEditPrices && isNewMaterial ? (
                                     <input
                                       type="number"
@@ -1597,21 +1564,21 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                                       min="0"
                                       value={vendorUnitPrice}
                                       onChange={(e) => handlePriceChange(idx, e.target.value)}
-                                      className="w-24 px-2 py-1 text-sm text-right border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50 text-gray-900 font-medium"
+                                      className="w-full max-w-[100px] px-2 py-1 text-xs text-right border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-purple-50 text-gray-900 font-medium"
                                       placeholder="0.00"
                                     />
                                   ) : (
                                     <div className="flex flex-col items-end">
                                       {vendorUnitPrice > 0 ? (
-                                        <span className="font-semibold text-gray-900">{formatCurrency(vendorUnitPrice)}</span>
+                                        <div className="font-semibold text-gray-900 text-xs whitespace-nowrap">{formatCurrency(vendorUnitPrice)}</div>
                                       ) : (
-                                        <span className="text-amber-600 text-xs italic">Price not set</span>
+                                        <div className="text-amber-600 text-[10px] italic whitespace-nowrap">Price not set</div>
                                       )}
                                       {boqUnitPrice > 0 && boqUnitPrice !== vendorUnitPrice && (
-                                        <div className="flex items-center gap-1 mt-0.5">
-                                          <span className="text-[10px] text-gray-400">BOQ: {formatCurrency(boqUnitPrice)}</span>
+                                        <div className="text-[9px] text-gray-400 mt-0.5 whitespace-nowrap">
+                                          BOQ: {formatCurrency(boqUnitPrice)}
                                           {unitPriceDiff !== 0 && (
-                                            <span className={`text-[10px] font-bold ${unitPriceDiff > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                            <span className={`ml-1 font-bold ${unitPriceDiff > 0 ? 'text-red-500' : 'text-green-500'}`}>
                                               ({unitPriceDiff > 0 ? '+' : ''}{formatCurrency(unitPriceDiff)})
                                             </span>
                                           )}
@@ -1620,16 +1587,16 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                                     </div>
                                   )}
                                 </td>
-                                {/* Total */}
-                                <td className="px-4 py-3 text-sm text-right whitespace-nowrap">
+                                {/* Total Price */}
+                                <td className="px-2 py-2.5 text-xs text-right">
                                   <div className="flex flex-col items-end">
                                     {vendorTotal > 0 ? (
-                                      <span className="font-bold text-gray-900">{formatCurrency(vendorTotal)}</span>
+                                      <div className="font-bold text-gray-900 text-xs whitespace-nowrap">{formatCurrency(vendorTotal)}</div>
                                     ) : (
-                                      <span className="text-amber-600 text-xs italic">-</span>
+                                      <div className="text-amber-600 text-[10px] italic">-</div>
                                     )}
                                     {boqTotal > 0 && (
-                                      <span className="text-[10px] text-gray-400 mt-0.5">BOQ: {formatCurrency(boqTotal)}</span>
+                                      <div className="text-[9px] text-gray-400 mt-0.5 whitespace-nowrap">BOQ: {formatCurrency(boqTotal)}</div>
                                     )}
                                   </div>
                                 </td>
@@ -1641,8 +1608,8 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           {/* Supplier Notes Sub-Row */}
                           {material.supplier_notes && material.supplier_notes.trim().length > 0 && (
                             <tr>
-                              <td colSpan={hasNewMaterials ? (shouldShowPricing ? 10 : 7) : (shouldShowPricing ? 9 : 6)} className="px-4 py-2 bg-blue-50 border-t-0">
-                                <div className="flex items-start gap-2 text-xs">
+                              <td colSpan={shouldShowPricing ? 8 : 6} className="px-2 py-2 bg-blue-50 border-t-0">
+                                <div className="flex items-start gap-1.5 text-[10px]">
                                   <span className="font-semibold text-blue-700 whitespace-nowrap">📝 Note:</span>
                                   <span className="text-blue-800">{material.supplier_notes}</span>
                                 </div>
@@ -1659,7 +1626,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         const vatAmount = vatPercent > 0 ? (subtotal * vatPercent / 100) : 0;
                         const grandTotal = subtotal + vatAmount;
 
-                        const boqTotal = materialsData.reduce((sum: number, mat: any) => {
+                        const boqTotal = filteredMaterialsData.reduce((sum: number, mat: any) => {
                           const boqPrice = mat.boq_unit_price || mat.original_unit_price || 0;
                           return sum + (boqPrice * (mat.quantity || 0));
                         }, 0);
@@ -1667,16 +1634,16 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                         return (
                           <>
                             {/* Subtotal Row */}
-                            <tr className="bg-gray-50">
-                              <td colSpan={hasNewMaterials ? 9 : 8} className="px-4 py-2 text-sm font-semibold text-gray-700 text-right">
+                            <tr className="bg-gray-50 border-t-2 border-gray-200">
+                              <td colSpan={7} className="px-2 py-2.5 text-xs font-semibold text-gray-700 text-right">
                                 Subtotal:
                               </td>
-                              <td className="px-4 py-2 text-right whitespace-nowrap">
-                                <div className="text-sm font-semibold text-gray-900">
+                              <td className="px-2 py-2.5 text-right">
+                                <div className="text-xs font-semibold text-gray-900 whitespace-nowrap">
                                   {formatCurrency(subtotal)}
                                 </div>
                                 {boqTotal > 0 && (
-                                  <div className="text-[10px] text-gray-400 mt-0.5">
+                                  <div className="text-[9px] text-gray-400 mt-0.5 whitespace-nowrap">
                                     BOQ: {formatCurrency(boqTotal)}
                                   </div>
                                 )}
@@ -1686,11 +1653,11 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                             {/* VAT Row - Only show if VAT > 0 */}
                             {vatPercent > 0 && (
                               <tr className="bg-gray-50">
-                                <td colSpan={hasNewMaterials ? 9 : 8} className="px-4 py-2 text-sm font-semibold text-gray-700 text-right">
+                                <td colSpan={7} className="px-2 py-2.5 text-xs font-semibold text-gray-700 text-right">
                                   VAT ({vatPercent}%):
                                 </td>
-                                <td className="px-4 py-2 text-right whitespace-nowrap">
-                                  <div className="text-sm font-semibold text-gray-900">
+                                <td className="px-2 py-2.5 text-right">
+                                  <div className="text-xs font-semibold text-gray-900 whitespace-nowrap">
                                     {formatCurrency(vatAmount)}
                                   </div>
                                 </td>
@@ -1699,11 +1666,11 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
 
                             {/* Total Row */}
                             <tr className="bg-gray-100 border-t-2 border-gray-300">
-                              <td colSpan={hasNewMaterials ? 9 : 8} className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
+                              <td colSpan={7} className="px-2 py-2.5 text-xs font-bold text-gray-700 text-right">
                                 Total Cost:
                               </td>
-                              <td className="px-4 py-3 text-right whitespace-nowrap">
-                                <div className="text-base font-bold text-purple-700">
+                              <td className="px-2 py-2.5 text-right">
+                                <div className="text-sm font-bold text-purple-700 whitespace-nowrap">
                                   {formatCurrency(grandTotal)}
                                 </div>
                               </td>
@@ -1719,7 +1686,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                 </div>
 
                 {/* Negotiable Margin Summary - Only show for NEW materials and hide from Site Engineers and PMs */}
-                {shouldShowPricing && changeRequest.negotiable_margin_analysis && materialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined) && (() => {
+                {shouldShowPricing && changeRequest.negotiable_margin_analysis && filteredMaterialsData.some((mat: any) => mat.master_material_id === null || mat.master_material_id === undefined) && (() => {
                   // Check if budget is invalid (zero or negative allocation)
                   const hasInvalidBudget = changeRequest.negotiable_margin_analysis.original_allocated <= 0;
 

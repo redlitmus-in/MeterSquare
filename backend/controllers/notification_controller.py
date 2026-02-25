@@ -3,7 +3,7 @@ Notification Controller
 Handles all notification-related API endpoints
 """
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 from functools import wraps
 import jwt
 from datetime import datetime

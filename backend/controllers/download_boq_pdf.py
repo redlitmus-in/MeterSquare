@@ -17,6 +17,50 @@ from datetime import date
 log = get_logger()
 
 
+def _inject_sub_item_images(items):
+    """
+    Batch-fetch MasterSubItem fields for all sub_items across all items.
+    Replaces the nested N+1 pattern (1 query per sub_item) with a single
+    .in_() query, then injects image, description, brand, and size from the result dict.
+    """
+    # Collect all sub_item_ids in one pass over in-memory data
+    all_sub_item_ids = []
+    for item in items:
+        if item.get('has_sub_items'):
+            for sub_item in item.get('sub_items', []):
+                sid = sub_item.get('sub_item_id')
+                if sid:
+                    all_sub_item_ids.append(sid)
+
+    if not all_sub_item_ids:
+        return  # nothing to do
+
+    # Single batch query instead of one query per sub_item
+    db_sub_items = {
+        row.sub_item_id: row for row in MasterSubItem.query.filter(
+            MasterSubItem.sub_item_id.in_(all_sub_item_ids),
+            MasterSubItem.is_deleted == False
+        ).all()
+    }
+
+    # Inject fields back into the in-memory items list
+    for item in items:
+        if item.get('has_sub_items'):
+            for sub_item in item.get('sub_items', []):
+                sid = sub_item.get('sub_item_id')
+                if sid:
+                    db_row = db_sub_items.get(sid)
+                    if db_row:
+                        if db_row.sub_item_image:
+                            sub_item['sub_item_image'] = db_row.sub_item_image
+                        if not sub_item.get('description') and db_row.description:
+                            sub_item['description'] = db_row.description
+                        if not sub_item.get('brand') and db_row.brand:
+                            sub_item['brand'] = db_row.brand
+                        if not sub_item.get('size') and db_row.size:
+                            sub_item['size'] = db_row.size
+
+
 def download_internal_pdf():
     """
     Download BOQ as Internal PDF with full breakdown
@@ -52,17 +96,8 @@ def download_internal_pdf():
         # Calculate all values (this populates selling_price, overhead_amount, etc.)
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
-        # Fetch sub_item images from database and add to items
-        for item in items:
-            if item.get('has_sub_items'):
-                sub_items = item.get('sub_items', [])
-                for sub_item in sub_items:
-                    sub_item_id = sub_item.get('sub_item_id')
-                    if sub_item_id:
-                        # Fetch from database
-                        db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
-                        if db_sub_item and db_sub_item.sub_item_image:
-                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+        # Batch-fetch sub_item images (single query for all sub_items)
+        _inject_sub_item_images(items)
 
         # Get project
         project = boq.project
@@ -147,17 +182,8 @@ def download_client_pdf():
         # Calculate all values (this populates selling_price, overhead_amount, etc.)
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
-        # Fetch sub_item images from database and add to items
-        for item in items:
-            if item.get('has_sub_items'):
-                sub_items = item.get('sub_items', [])
-                for sub_item in sub_items:
-                    sub_item_id = sub_item.get('sub_item_id')
-                    if sub_item_id:
-                        # Fetch from database
-                        db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
-                        if db_sub_item and db_sub_item.sub_item_image:
-                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+        # Batch-fetch sub_item images, description, brand, size from DB (no N+1)
+        _inject_sub_item_images(items)
 
         # Get project
         project = boq.project
@@ -252,17 +278,8 @@ def download_internal_excel():
         # Calculate all values
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
-        # Fetch sub_item images from database and add to items
-        for item in items:
-            if item.get('has_sub_items'):
-                sub_items = item.get('sub_items', [])
-                for sub_item in sub_items:
-                    sub_item_id = sub_item.get('sub_item_id')
-                    if sub_item_id:
-                        # Fetch from database
-                        db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
-                        if db_sub_item and db_sub_item.sub_item_image:
-                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+        # Batch-fetch sub_item images, description, brand, size from DB (no N+1)
+        _inject_sub_item_images(items)
 
         # Get project
         project = boq.project
@@ -340,16 +357,8 @@ def preview_client_pdf():
         # Calculate all values
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
-        # Fetch sub_item images from database and add to items
-        for item in items:
-            if item.get('has_sub_items'):
-                sub_items = item.get('sub_items', [])
-                for sub_item in sub_items:
-                    sub_item_id = sub_item.get('sub_item_id')
-                    if sub_item_id:
-                        db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
-                        if db_sub_item and db_sub_item.sub_item_image:
-                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+        # Batch-fetch sub_item images, description, brand, size from DB (no N+1)
+        _inject_sub_item_images(items)
 
         # Get project
         project = boq.project
@@ -443,17 +452,8 @@ def download_client_excel():
         # Calculate all values
         total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
 
-        # Fetch sub_item images from database and add to items
-        for item in items:
-            if item.get('has_sub_items'):
-                sub_items = item.get('sub_items', [])
-                for sub_item in sub_items:
-                    sub_item_id = sub_item.get('sub_item_id')
-                    if sub_item_id:
-                        # Fetch from database
-                        db_sub_item = MasterSubItem.query.filter_by(sub_item_id=sub_item_id, is_deleted=False).first()
-                        if db_sub_item and db_sub_item.sub_item_image:
-                            sub_item['sub_item_image'] = db_sub_item.sub_item_image
+        # Batch-fetch sub_item images, description, brand, size from DB (no N+1)
+        _inject_sub_item_images(items)
 
         # Get project
         project = boq.project

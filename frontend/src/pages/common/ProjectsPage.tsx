@@ -557,7 +557,7 @@ const ProjectsPage: React.FC = () => {
                   id="budget"
                   type="number"
                   placeholder="Enter budget"
-                  value={newProject.budget}
+                  value={newProject.budget || ''}
                   onChange={(e) => setNewProject({...newProject, budget: e.target.value})}
                 />
               </div>

@@ -515,7 +515,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
                       </label>
                       <input
                         type="number"
-                        value={subItem.qty}
+                        value={subItem.qty || ''}
                         onChange={(e) => handleSubItemChange(index, 'qty', parseFloat(e.target.value) || 0)}
                         onWheel={(e) => e.currentTarget.blur()}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -547,7 +547,7 @@ const ExtraSubItemsForm: React.FC<ExtraSubItemsFormProps> = ({ onSubmit, onCance
                       </label>
                       <input
                         type="number"
-                        value={subItem.unit_price}
+                        value={subItem.unit_price || ''}
                         onChange={(e) => handleSubItemChange(index, 'unit_price', parseFloat(e.target.value) || 0)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         min="0.01"

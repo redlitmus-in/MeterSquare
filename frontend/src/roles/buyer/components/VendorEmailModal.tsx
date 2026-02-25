@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input';
 import { Purchase, buyerService, LPOData } from '../services/buyerService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { emailCcService } from '@/services/emailCcService';
 import { FileText, Download, ChevronDown } from 'lucide-react';
 
 interface VendorEmailModalProps {
@@ -52,18 +53,100 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
 
-  // CC Email state - default company emails
-  const defaultCcEmails = [
-    { email: 'sajisamuel@metersquare.com', name: 'Saji Samuel', checked: true },
-    { email: 'info@metersquare.com', name: 'Fasil', checked: true },
-    { email: 'admin@metersquare.com', name: 'Admin', checked: true },
-    { email: 'amjath@metersquare.com', name: 'Amjath', checked: true },
-    { email: 'sujith@metersquare.com', name: 'Suijth', checked: true },
-  ];
-  const [ccEmails, setCcEmails] = useState(defaultCcEmails);
-  const [customCcEmails, setCustomCcEmails] = useState<Array<{ email: string; name: string }>>([]);
-  const [newCcEmail, setNewCcEmail] = useState('');
-  const [newCcName, setNewCcName] = useState('');
+  // CC Email state — dynamic from database
+  const [adminCcDefaults, setAdminCcDefaults] = useState<Array<{ id: number; email: string; name: string }>>([]);
+  const [buyerCcRecipients, setBuyerCcRecipients] = useState<Array<{ id: number; email: string; name: string }>>([]);
+  const [ccSearchQuery, setCcSearchQuery] = useState('');
+  const [ccSearchResults, setCcSearchResults] = useState<Array<{ user_id: number; name: string; email: string; role: string }>>([]);
+  const [ccSearchOpen, setCcSearchOpen] = useState(false);
+  const [loadingCc, setLoadingCc] = useState(false);
+  const [deselectedDefaultIds, setDeselectedDefaultIds] = useState<Set<number>>(new Set());
+  const ccSearchRef = useRef<HTMLDivElement>(null);
+
+  // Load CC recipients from database when modal opens
+  // Use allSettled so one API failure doesn't block the other
+  useEffect(() => {
+    if (isOpen) {
+      setLoadingCc(true);
+      Promise.allSettled([
+        emailCcService.getCcDefaults(),
+        emailCcService.getBuyerCcRecipients()
+      ]).then(([defaultsResult, customsResult]) => {
+        if (defaultsResult.status === 'fulfilled') {
+          setAdminCcDefaults(defaultsResult.value.map(d => ({ id: d.id, email: d.email, name: d.name || '' })));
+        } else {
+          console.warn('Failed to load CC defaults:', defaultsResult.reason);
+        }
+        if (customsResult.status === 'fulfilled') {
+          setBuyerCcRecipients(customsResult.value.map(c => ({ id: c.id, email: c.email, name: c.name || '' })));
+        } else {
+          console.warn('Failed to load buyer CC recipients:', customsResult.reason);
+        }
+        if (defaultsResult.status === 'rejected' || customsResult.status === 'rejected') {
+          showWarning('Some CC recipients could not be loaded. Check the CC section before sending.');
+        }
+      }).finally(() => setLoadingCc(false));
+    }
+  }, [isOpen]);
+
+  // Debounced user search for CC typeahead
+  useEffect(() => {
+    if (ccSearchQuery.length < 2) {
+      setCcSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const results = await emailCcService.searchUsers(ccSearchQuery);
+        // Filter out emails already in admin defaults or buyer recipients
+        const existingEmails = new Set([
+          ...adminCcDefaults.map(d => d.email.toLowerCase()),
+          ...buyerCcRecipients.map(r => r.email.toLowerCase())
+        ]);
+        setCcSearchResults(results.filter(u => !existingEmails.has(u.email.toLowerCase())));
+      } catch {
+        setCcSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [ccSearchQuery, adminCcDefaults, buyerCcRecipients]);
+
+  // Click-outside handler to close CC search dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ccSearchRef.current && !ccSearchRef.current.contains(e.target as Node)) {
+        setCcSearchOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleAddCcRecipient = async (email: string, name: string) => {
+    try {
+      const result = await emailCcService.addBuyerCcRecipient(email, name);
+      setBuyerCcRecipients(prev => [...prev, { id: result.id, email: result.email, name: result.name || '' }]);
+      setCcSearchQuery('');
+      setCcSearchOpen(false);
+      setCcSearchResults([]);
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || 'Failed to add CC recipient';
+      if (msg.includes('already')) {
+        showWarning(msg);
+      } else {
+        showError(msg);
+      }
+    }
+  };
+
+  const handleRemoveCcRecipient = async (recipientId: number) => {
+    try {
+      await emailCcService.removeBuyerCcRecipient(recipientId);
+      setBuyerCcRecipients(prev => prev.filter(r => r.id !== recipientId));
+    } catch {
+      showError('Failed to remove CC recipient');
+    }
+  };
 
   // Editable fields
   const [editedGreeting, setEditedGreeting] = useState('');
@@ -110,7 +193,6 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Default template state
   const [isSavingDefault, setIsSavingDefault] = useState(false);
@@ -165,9 +247,6 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
-      }
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
       }
     };
   }, [lpoData, autoSaveLpoCustomization]);
@@ -480,8 +559,17 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
         vendor_phone: editedVendorPhone
       };
 
-      // Include CC emails (default checked only - custom CC temporarily disabled)
-      const allCcEmails = ccEmails.filter(cc => cc.checked).map(cc => ({ email: cc.email, name: cc.name }));
+      // Include CC emails (selected admin defaults + buyer custom)
+      const selectedDefaults = adminCcDefaults.filter(d => !deselectedDefaultIds.has(d.id));
+      const allCcEmails = [
+        ...selectedDefaults.map(d => ({ email: d.email, name: d.name })),
+        ...buyerCcRecipients.map(r => ({ email: r.email, name: r.name })),
+      ];
+      // Warn if any CC recipients are missing emails (backend will try to resolve by name)
+      const ccWithoutEmail = allCcEmails.filter(cc => !cc.email);
+      if (ccWithoutEmail.length > 0) {
+        showWarning(`${ccWithoutEmail.length} CC recipient(s) have no email stored — will attempt to resolve automatically.`);
+      }
       if (allCcEmails.length > 0) {
         emailData.cc_emails = allCcEmails;
       }
@@ -509,17 +597,12 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
           : 'Purchase order email sent to vendor successfully!';
       showSuccess(message);
 
-      // Close modal first, then trigger refresh in background
-      handleClose();
+      // Trigger data refresh BEFORE closing modal (closing unmounts component)
+      // invalidateQueries + refetch are managed by React Query outside the component tree,
+      // so they complete even after unmount
+      onEmailSent?.();
 
-      // Small delay then trigger cache refresh (async, doesn't block)
-      refreshTimeoutRef.current = setTimeout(async () => {
-        try {
-          await onEmailSent?.();
-        } catch (error) {
-          console.error('Failed to refresh data after email send:', error);
-        }
-      }, 500);
+      handleClose();
     } catch (error: any) {
       console.error('Error sending email:', error);
       showError(error.message || 'Failed to send email to vendor');
@@ -545,17 +628,10 @@ const VendorEmailModal: React.FC<VendorEmailModalProps> = ({
 
       showSuccess('Purchase order sent via WhatsApp successfully!');
 
-      // Close modal first, then trigger refresh in background
-      handleClose();
+      // Trigger data refresh BEFORE closing modal (closing unmounts component)
+      onEmailSent?.();
 
-      // Small delay then trigger cache refresh (async, doesn't block)
-      refreshTimeoutRef.current = setTimeout(async () => {
-        try {
-          await onEmailSent?.();
-        } catch (error) {
-          console.error('Failed to refresh data after WhatsApp send:', error);
-        }
-      }, 500);
+      handleClose();
     } catch (error: any) {
       console.error('Error sending WhatsApp:', error);
       showError(error.message || 'Failed to send WhatsApp message');
@@ -735,6 +811,9 @@ _MeterSquare Interiors LLC_`;
     setIsEditMode(false);
     setVendorName('');
     setAttachedFiles([]);
+    setCcSearchQuery('');
+    setCcSearchResults([]);
+    setCcSearchOpen(false);
     onClose();
   };
 
@@ -833,109 +912,152 @@ _MeterSquare Interiors LLC_`;
 
                         {/* CC Email Section */}
                         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                          <label className="block text-sm font-medium text-gray-700 mb-3">
-                            <Mail className="w-4 h-4 inline mr-1" />
+                          <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-3">
+                            <Mail className="w-4 h-4 text-blue-600" />
                             CC (Copy To)
                           </label>
 
-                          {/* Default CC Emails with checkboxes */}
-                          <div className="space-y-2 mb-3">
-                            {ccEmails.map((cc, index) => (
-                              <div key={cc.email} className="flex items-center gap-3 p-2 bg-white rounded border border-gray-200">
-                                <input
-                                  type="checkbox"
-                                  id={`cc-${index}`}
-                                  checked={cc.checked}
-                                  onChange={(e) => {
-                                    const updated = [...ccEmails];
-                                    updated[index].checked = e.target.checked;
-                                    setCcEmails(updated);
-                                  }}
-                                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                                />
-                                <label htmlFor={`cc-${index}`} className="flex-1 text-sm">
-                                  <span className="font-medium text-gray-900">{cc.name}</span>
-                                  <span className="text-gray-500 ml-2">&lt;{cc.email}&gt;</span>
-                                </label>
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* Custom CC Emails - TEMPORARILY HIDDEN
-                          {customCcEmails.length > 0 && (
-                            <div className="space-y-2 mb-3 border-t border-gray-200 pt-3">
-                              <div className="text-xs text-gray-500 font-medium">Custom CC Recipients:</div>
-                              {customCcEmails.map((cc, index) => (
-                                <div key={index} className="flex items-center gap-2 p-2 bg-blue-50 rounded border border-blue-200">
-                                  <div className="flex-1 text-sm">
-                                    <span className="font-medium text-gray-900">{cc.name || 'No name'}</span>
-                                    <span className="text-gray-500 ml-2">&lt;{cc.email}&gt;</span>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setCustomCcEmails(customCcEmails.filter((_, i) => i !== index));
-                                    }}
-                                    className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
+                          {loadingCc ? (
+                            <div className="flex items-center justify-center py-4">
+                              <ModernLoadingSpinners size="sm" />
+                            </div>
+                          ) : (
+                            <>
+                              {/* Admin defaults (toggleable) */}
+                              {adminCcDefaults.length > 0 && (
+                                <div className="space-y-1.5 mb-3">
+                                  {adminCcDefaults.map((cc) => {
+                                    const isSelected = !deselectedDefaultIds.has(cc.id);
+                                    return (
+                                      <button
+                                        key={cc.id}
+                                        type="button"
+                                        onClick={() => {
+                                          setDeselectedDefaultIds(prev => {
+                                            const next = new Set(prev);
+                                            if (next.has(cc.id)) {
+                                              next.delete(cc.id);
+                                            } else {
+                                              next.add(cc.id);
+                                            }
+                                            return next;
+                                          });
+                                        }}
+                                        className={`flex items-center gap-2 px-3 py-2 w-full rounded-lg border transition-colors ${
+                                          isSelected
+                                            ? 'bg-white border-gray-200 hover:bg-gray-50'
+                                            : 'bg-gray-50 border-gray-200 opacity-60 hover:opacity-80'
+                                        }`}
+                                      >
+                                        <CheckCircle className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-blue-600' : 'text-gray-300'}`} />
+                                        <span className="text-sm flex-1 text-left">
+                                          <span className={`font-medium ${isSelected ? 'text-gray-900' : 'text-gray-500 line-through'}`}>{cc.name}</span>
+                                          <span className="text-gray-500 ml-1.5 text-xs">&lt;{cc.email}&gt;</span>
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
                                 </div>
-                              ))}
-                            </div>
-                          )}
-                          */}
+                              )}
 
-                          {/* Add Custom CC - TEMPORARILY HIDDEN
-                          <div className="border-t border-gray-200 pt-3">
-                            <div className="text-xs text-gray-500 font-medium mb-2">Add Custom CC:</div>
-                            <div className="flex gap-2">
-                              <Input
-                                value={newCcName}
-                                onChange={(e) => setNewCcName(e.target.value)}
-                                placeholder="Name"
-                                className="text-sm w-1/3"
-                              />
-                              <Input
-                                value={newCcEmail}
-                                onChange={(e) => setNewCcEmail(e.target.value)}
-                                placeholder="email@example.com"
-                                className="text-sm flex-1"
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    if (newCcEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newCcEmail.trim())) {
-                                      setCustomCcEmails([...customCcEmails, { email: newCcEmail.trim(), name: newCcName.trim() }]);
-                                      setNewCcEmail('');
-                                      setNewCcName('');
-                                    }
-                                  }
-                                }}
-                              />
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  if (newCcEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newCcEmail.trim())) {
-                                    setCustomCcEmails([...customCcEmails, { email: newCcEmail.trim(), name: newCcName.trim() }]);
-                                    setNewCcEmail('');
-                                    setNewCcName('');
-                                  } else {
-                                    showError('Please enter a valid email address');
-                                  }
-                                }}
-                              >
-                                <Plus className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          </div>
-                          */}
+                              {/* Buyer custom CC recipients */}
+                              {buyerCcRecipients.length > 0 && (
+                                <div className="space-y-1.5 mb-3">
+                                  <div className="text-xs text-gray-500 font-medium px-1">Your CC Recipients</div>
+                                  {buyerCcRecipients.map((cc) => (
+                                    <div key={cc.id} className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg border border-blue-200">
+                                      <CheckCircle className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                      <span className="text-sm flex-1">
+                                        <span className="font-medium text-gray-900">{cc.name || cc.email.split('@')[0]}</span>
+                                        <span className="text-gray-500 ml-1.5 text-xs">&lt;{cc.email}&gt;</span>
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveCcRecipient(cc.id)}
+                                        className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                        title="Remove"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Add CC — typeahead search input */}
+                              <div ref={ccSearchRef} className="relative">
+                                <div className="flex items-center gap-2">
+                                  <div className="relative flex-1">
+                                    <input
+                                      type="text"
+                                      value={ccSearchQuery}
+                                      onChange={(e) => {
+                                        setCcSearchQuery(e.target.value);
+                                        setCcSearchOpen(true);
+                                      }}
+                                      onFocus={() => ccSearchQuery.length >= 2 && setCcSearchOpen(true)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && ccSearchQuery.includes('@')) {
+                                          e.preventDefault();
+                                          const email = ccSearchQuery.trim().toLowerCase();
+                                          if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                                            handleAddCcRecipient(email, email.split('@')[0]);
+                                          }
+                                        }
+                                      }}
+                                      placeholder="Type name or email to add CC..."
+                                      className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 pr-8 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                    <Plus className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                  </div>
+                                </div>
+
+                                {/* Dropdown results */}
+                                {ccSearchOpen && (ccSearchResults.length > 0 || (ccSearchQuery.length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ccSearchQuery.trim()))) && (
+                                  <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                                    {ccSearchResults.map((user) => (
+                                      <button
+                                        key={user.user_id}
+                                        type="button"
+                                        onClick={() => handleAddCcRecipient(user.email, user.name)}
+                                        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-blue-50 transition-colors text-left border-b border-gray-50 last:border-0"
+                                      >
+                                        <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-xs font-medium text-blue-700 flex-shrink-0">
+                                          {(user.name || user.email)[0]?.toUpperCase()}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="text-sm font-medium text-gray-900 truncate">{user.name}</div>
+                                          <div className="text-xs text-gray-500 truncate">{user.email}</div>
+                                        </div>
+                                        {user.role && <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded flex-shrink-0">{user.role}</span>}
+                                      </button>
+                                    ))}
+                                    {/* Free-type option if email-like input */}
+                                    {ccSearchQuery.includes('@') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ccSearchQuery.trim()) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAddCcRecipient(ccSearchQuery.trim().toLowerCase(), ccSearchQuery.trim().split('@')[0])}
+                                        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-green-50 transition-colors text-left bg-gray-50"
+                                      >
+                                        <div className="w-7 h-7 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                                          <Plus className="w-3.5 h-3.5 text-green-600" />
+                                        </div>
+                                        <div className="text-sm">
+                                          <span className="text-gray-600">Add </span>
+                                          <span className="font-medium text-green-700">{ccSearchQuery.trim()}</span>
+                                        </div>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          )}
 
                           {/* CC Summary */}
-                          {ccEmails.filter(cc => cc.checked).length > 0 && (
+                          {(adminCcDefaults.length - deselectedDefaultIds.size + buyerCcRecipients.length) > 0 && (
                             <div className="mt-3 text-xs text-green-600">
-                              {ccEmails.filter(cc => cc.checked).length} CC recipient(s) will receive a copy
+                              {adminCcDefaults.length - deselectedDefaultIds.size + buyerCcRecipients.length} CC recipient(s) will receive a copy
                             </div>
                           )}
                         </div>
@@ -1457,11 +1579,11 @@ _MeterSquare Interiors LLC_`;
                           <span>Review the email content below before sending to <span className="font-semibold text-gray-900">{vendorEmail}</span></span>
                         </div>
                         {/* Show CC recipients */}
-                        {ccEmails.filter(cc => cc.checked).length > 0 && (
+                        {(adminCcDefaults.filter(d => !deselectedDefaultIds.has(d.id)).length + buyerCcRecipients.length) > 0 && (
                           <div className="flex items-center gap-2 text-sm text-gray-500 mt-1 ml-6">
                             <span className="text-xs font-medium text-purple-600">CC:</span>
                             <span className="text-xs">
-                              {ccEmails.filter(cc => cc.checked).map(cc => cc.email).join(', ')}
+                              {[...adminCcDefaults.filter(d => !deselectedDefaultIds.has(d.id)), ...buyerCcRecipients].map(cc => cc.email).join(', ')}
                             </span>
                           </div>
                         )}
@@ -1654,6 +1776,7 @@ _MeterSquare Interiors LLC_`;
                           dangerouslySetInnerHTML={{
                             __html: DOMPurify.sanitize(
                               (editedEmailContent || emailPreview)
+                                .replace(/cid:logo/gi, '/assets/logo.png')
                                 .replace(/max-width:\s*800px/gi, 'max-width: 100%')
                                 .replace(/margin:\s*0\s+auto/gi, 'margin: 0')
                             )

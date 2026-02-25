@@ -4,6 +4,19 @@
  */
 
 /**
+ * Parse a date string as UTC when no timezone indicator is present.
+ * Backend uses datetime.utcnow() + .isoformat() which omits the Z suffix.
+ * Without this fix, JS treats bare ISO strings as local time.
+ */
+export const parseAsUTC = (dateString: string | Date): Date => {
+  if (dateString instanceof Date) return dateString;
+  // If the string already has timezone info (Z, +, or - offset), parse as-is
+  if (/Z|[+-]\d{2}:\d{2}$/.test(dateString)) return new Date(dateString);
+  // Otherwise append Z to treat as UTC
+  return new Date(dateString + 'Z');
+};
+
+/**
  * Format number as currency in AED
  * @param value - Number to format
  * @returns Formatted currency string
@@ -26,7 +39,7 @@ export const formatCurrency = (value?: number | null): string => {
 export const formatDate = (dateString?: string | Date): string => {
   if (!dateString) return 'N/A';
 
-  const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+  const date = parseAsUTC(dateString);
 
   return date.toLocaleDateString('en-US', {
     year: 'numeric',
@@ -43,7 +56,7 @@ export const formatDate = (dateString?: string | Date): string => {
 export const formatDateTime = (dateString?: string | Date): string => {
   if (!dateString) return 'N/A';
 
-  const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+  const date = parseAsUTC(dateString);
 
   return date.toLocaleString('en-US', {
     year: 'numeric',
