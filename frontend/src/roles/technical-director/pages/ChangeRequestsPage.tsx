@@ -2602,7 +2602,7 @@ const ChangeRequestsPage: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                     {enrichedCompletedRequests.map((request, index) => (
                       <motion.div
-                        key={request.cr_id}
+                        key={(request as any).is_po_child ? `poc-${(request as any).id}` : `cr-${request.cr_id}`}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.02 * index }}
@@ -2611,9 +2611,12 @@ const ChangeRequestsPage: React.FC = () => {
                         <div className="p-2">
                           <div className="flex items-start justify-between mb-1">
                             <h3 className="font-semibold text-gray-900 text-xs flex-1 line-clamp-1">{request.project_name}</h3>
-                            <Badge className="bg-green-100 text-green-800 text-[9px] px-1 py-0">
-                              COMPLETED
-                            </Badge>
+                            <div className="flex flex-col items-end gap-0.5 ml-1 shrink-0">
+                              <span className="text-[9px] font-mono text-gray-500">{(request as any).formatted_cr_id || `PO-${request.cr_id}`}</span>
+                              <Badge className="bg-green-100 text-green-800 text-[9px] px-1 py-0">
+                                COMPLETED
+                              </Badge>
+                            </div>
                           </div>
 
                           <div className="space-y-0.5 text-[10px] text-gray-600">

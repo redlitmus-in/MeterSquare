@@ -2306,7 +2306,15 @@ def confirm_replacement_received(request_id):
             from models.role import Role
 
             pm_role = Role.query.filter(
-                db.func.lower(db.func.replace(Role.role, ' ', '')).like('%productionmanager%')
+                db.func.lower(
+                    db.func.replace(
+                        db.func.replace(
+                            db.func.replace(Role.role, ' ', ''),
+                            '-', ''
+                        ),
+                        '_', ''
+                    )
+                ) == 'productionmanager'
             ).first()
 
             if pm_role:

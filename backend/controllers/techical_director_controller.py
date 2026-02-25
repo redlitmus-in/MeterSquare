@@ -1345,6 +1345,7 @@ def get_td_purchase_orders():
         from models.change_request import ChangeRequest
         from models.po_child import POChild
         from sqlalchemy import or_, and_
+        from utils.po_helpers import CR_COMPLETED_STATUSES
 
         current_user = g.user
         td_id = current_user['user_id']
@@ -1356,7 +1357,6 @@ def get_td_purchase_orders():
         status_filter = request.args.get('status', 'all')  # all, pending, approved, completed, rejected
 
         # Build base query - TD sees ALL change requests (read-only)
-        # Include both change requests and PO children
         base_query = db.session.query(ChangeRequest).options(
             selectinload(ChangeRequest.project),
             selectinload(ChangeRequest.boq),
@@ -1380,17 +1380,17 @@ def get_td_purchase_orders():
         elif status_filter == 'approved':
             base_query = base_query.filter(ChangeRequest.status == 'vendor_approved')
         elif status_filter == 'completed':
-            base_query = base_query.filter(ChangeRequest.status.in_(['purchase_completed', 'routed_to_store', 'completed']))
+            base_query = base_query.filter(ChangeRequest.status.in_(CR_COMPLETED_STATUSES))
         elif status_filter == 'rejected':
             base_query = base_query.filter(ChangeRequest.status == 'rejected')
 
         # Order by created_at desc
         base_query = base_query.order_by(ChangeRequest.created_at.desc())
 
-        # Paginate
+        # Paginate CRs
         paginated = base_query.paginate(page=page, per_page=per_page, error_out=False)
 
-        # Build response
+        # Build CR list
         purchases_list = []
         for cr in paginated.items:
             project = cr.project
@@ -1403,6 +1403,7 @@ def get_td_purchase_orders():
             purchase_data = {
                 'cr_id': cr.cr_id,
                 'formatted_cr_id': f"CR-{cr.cr_id}",
+                'is_po_child': False,
                 'project_id': cr.project_id,
                 'project_name': project.project_name if project else None,
                 'project_code': project.project_code if project else None,
@@ -1432,6 +1433,70 @@ def get_td_purchase_orders():
             }
             purchases_list.append(purchase_data)
 
+        # For completed tab: also fetch POChild records that are completed
+        # POChildren are vendor-split purchases that have their own status lifecycle
+        po_children_list = []
+        po_children_total = 0
+        if status_filter in ('completed', 'all'):
+            po_child_query = db.session.query(POChild).options(
+                selectinload(POChild.parent_cr),
+                selectinload(POChild.vendor)
+            ).filter(
+                POChild.is_deleted == False,
+                POChild.status.in_(CR_COMPLETED_STATUSES)
+            ).order_by(POChild.updated_at.desc())
+
+            # For non-completed 'all' tab, skip POChildren to avoid mixing statuses in pagination
+            if status_filter == 'completed':
+                po_child_page = db.session.query(POChild).options(
+                    selectinload(POChild.parent_cr),
+                    selectinload(POChild.vendor)
+                ).filter(
+                    POChild.is_deleted == False,
+                    POChild.status.in_(CR_COMPLETED_STATUSES)
+                ).order_by(POChild.updated_at.desc()).all()
+
+                po_children_total = len(po_child_page)
+
+                for child in po_child_page:
+                    parent = child.parent_cr
+                    vendor = child.vendor
+                    materials_list = child.materials_data or []
+
+                    po_children_list.append({
+                        'id': child.id,
+                        'formatted_cr_id': child.get_formatted_id(),
+                        'is_po_child': True,
+                        'parent_cr_id': child.parent_cr_id,
+                        'parent_cr_formatted_id': f"PO-{child.parent_cr_id}",
+                        'suffix': child.suffix,
+                        'project_id': child.project_id,
+                        'project_name': parent.project.project_name if parent and parent.project else None,
+                        'project_code': parent.project.project_code if parent and parent.project else None,
+                        'client': parent.project.client if parent and parent.project else None,
+                        'location': parent.project.location if parent and parent.project else None,
+                        'boq_id': child.boq_id,
+                        'boq_name': parent.boq.boq_name if parent and parent.boq else None,
+                        'item_name': child.item_name,
+                        'status': child.status,
+                        'materials': materials_list if isinstance(materials_list, list) else [],
+                        'materials_count': len(materials_list) if isinstance(materials_list, list) else 0,
+                        'total_cost': float(child.materials_total_cost) if child.materials_total_cost else 0,
+                        'requested_by_name': parent.requested_by_name if parent else None,
+                        'created_at': child.created_at.isoformat() if child.created_at else None,
+                        'vendor_id': child.vendor_id,
+                        'vendor_name': vendor.company_name if vendor else None,
+                        'vendor_email': vendor.email if vendor else None,
+                        'vendor_phone': vendor.phone if vendor else None,
+                        'vendor_phone_code': vendor.phone_code if vendor else None,
+                        'vendor_category': vendor.category if vendor else None,
+                        'vendor_selection_status': child.vendor_selection_status,
+                        'vendor_approved_by_td_name': child.vendor_approved_by_td_name,
+                        'vendor_approval_date': child.vendor_approval_date.isoformat() if child.vendor_approval_date else None,
+                        'purchase_completed_by_name': child.purchase_completed_by_name,
+                        'purchase_completion_date': child.purchase_completion_date.isoformat() if child.purchase_completion_date else None
+                    })
+
         # Get summary counts
         pending_count = db.session.query(ChangeRequest).filter(
             ChangeRequest.is_deleted == False,
@@ -1443,10 +1508,17 @@ def get_td_purchase_orders():
             ChangeRequest.status == 'vendor_approved'
         ).count()
 
-        completed_count = db.session.query(ChangeRequest).filter(
+        cr_completed_count = db.session.query(ChangeRequest).filter(
             ChangeRequest.is_deleted == False,
-            ChangeRequest.status.in_(['purchase_completed', 'routed_to_store', 'completed'])
+            ChangeRequest.status.in_(CR_COMPLETED_STATUSES)
         ).count()
+
+        po_child_completed_count = db.session.query(POChild).filter(
+            POChild.is_deleted == False,
+            POChild.status.in_(CR_COMPLETED_STATUSES)
+        ).count()
+
+        completed_count = cr_completed_count + po_child_completed_count
 
         rejected_count = db.session.query(ChangeRequest).filter(
             ChangeRequest.is_deleted == False,
@@ -1456,6 +1528,7 @@ def get_td_purchase_orders():
         return jsonify({
             'success': True,
             'purchases': purchases_list,
+            'completed_po_children': po_children_list,
             'pagination': {
                 'page': page,
                 'per_page': per_page,

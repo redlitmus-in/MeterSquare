@@ -17,6 +17,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from utils.boq_email_service import BOQEmailService
 from utils.admin_viewing_context import get_effective_user_context
 from utils.comprehensive_notification_service import notification_service
+from utils.po_helpers import CR_COMPLETED_STATUSES
 
 log = get_logger()
 
@@ -1427,7 +1428,7 @@ def get_all_change_requests():
             # 'purchase_completed' filter should also include 'routed_to_store' and 'completed'
             # because buyer sets status to 'routed_to_store' when completing purchase via M2 Store
             if status_filter == 'purchase_completed':
-                query = query.filter(ChangeRequest.status.in_(['purchase_completed', 'routed_to_store', 'completed']))
+                query = query.filter(ChangeRequest.status.in_(CR_COMPLETED_STATUSES))
             else:
                 query = query.filter(ChangeRequest.status == status_filter)
 
@@ -1649,6 +1650,67 @@ def get_all_change_requests():
 
             result.append(cr_dict)
 
+        # For completed filter: also include POChild records that are purchase-completed
+        # POChildren are vendor-split purchases with their own status lifecycle
+        if status_filter == 'purchase_completed':
+            po_children_completed = POChild.query.options(
+                joinedload(POChild.vendor),
+                joinedload(POChild.parent_cr)
+            ).filter(
+                POChild.is_deleted == False,
+                POChild.status.in_(CR_COMPLETED_STATUSES)
+            ).order_by(POChild.updated_at.desc()).all()
+
+            for pc in po_children_completed:
+                parent = pc.parent_cr
+                materials_list = pc.materials_data or []
+                vendor = pc.vendor
+                pc_dict = {
+                    'cr_id': pc.parent_cr_id,  # Use parent CR id so "View Details" opens the parent CR
+                    'formatted_cr_id': pc.get_formatted_id(),
+                    'is_po_child': True,
+                    'id': pc.id,
+                    'parent_cr_id': pc.parent_cr_id,
+                    'parent_cr_formatted_id': f"PO-{pc.parent_cr_id}",
+                    'suffix': pc.suffix,
+                    'project_id': pc.project_id,
+                    'project_name': parent.project.project_name if parent and parent.project else None,
+                    'project_code': parent.project.project_code if parent and parent.project else None,
+                    'project_client': parent.project.client if parent and parent.project else None,
+                    'project_location': parent.project.location if parent and parent.project else None,
+                    'boq_id': pc.boq_id,
+                    'boq_name': parent.boq.boq_name if parent and parent.boq else None,
+                    'item_name': pc.item_name,
+                    'status': pc.status,
+                    'materials_data': materials_list,
+                    'materials_total_cost': float(pc.materials_total_cost) if pc.materials_total_cost else 0,
+                    'requested_by_name': parent.requested_by_name if parent else None,
+                    'requested_by_role': parent.requested_by_role if parent else None,
+                    'created_at': pc.created_at.isoformat() if pc.created_at else None,
+                    'updated_at': pc.updated_at.isoformat() if pc.updated_at else None,
+                    'selected_vendor_id': pc.vendor_id,
+                    'vendor_name': vendor.company_name if vendor else None,
+                    'vendor_email': vendor.email if vendor else None,
+                    'vendor_phone': vendor.phone if vendor else None,
+                    'vendor_phone_code': vendor.phone_code if vendor else None,
+                    'vendor_category': vendor.category if vendor else None,
+                    'vendor_selection_status': pc.vendor_selection_status,
+                    'vendor_approved_by_td_name': pc.vendor_approved_by_td_name,
+                    'vendor_approval_date': pc.vendor_approval_date.isoformat() if pc.vendor_approval_date else None,
+                    'purchase_completed_by_name': pc.purchase_completed_by_name,
+                    'purchase_completion_date': pc.purchase_completion_date.isoformat() if pc.purchase_completion_date else None,
+                    'po_children': [],
+                    'has_po_children': False,
+                    'po_children_count': 0
+                }
+                result.append(pc_dict)
+
+            # Add POChild count to total_count for accurate pagination
+            po_child_count = len(po_children_completed)
+            total_count = total_count + po_child_count
+        else:
+            po_child_count = 0
+
         # PERFORMANCE: Calculate status counts for tab badges (efficient single query)
         # This uses the same base query (with role filters) to count by status
         status_counts_query = query.with_entities(
@@ -1658,12 +1720,18 @@ def get_all_change_requests():
 
         status_counts = {status: count for status, count in status_counts_query}
 
+        # Count completed POChildren to add to the completed badge count
+        po_child_completed_count = db.session.query(POChild).filter(
+            POChild.is_deleted == False,
+            POChild.status.in_(CR_COMPLETED_STATUSES)
+        ).count()
+
         # Aggregate counts for frontend tabs
         pending_statuses = ['under_review', 'approved_by_pm', 'pending']
         status_counts_summary = {
             "pending": sum(status_counts.get(s, 0) for s in pending_statuses),
             "approved": status_counts.get('assigned_to_buyer', 0),
-            "completed": status_counts.get('purchase_completed', 0) + status_counts.get('routed_to_store', 0) + status_counts.get('completed', 0),
+            "completed": sum(status_counts.get(s, 0) for s in CR_COMPLETED_STATUSES) + po_child_completed_count,
             "rejected": status_counts.get('rejected', 0),
             "total": sum(status_counts.values())
         }

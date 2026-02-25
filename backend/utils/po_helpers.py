@@ -11,6 +11,9 @@ from config.logging import get_logger
 
 log = get_logger()
 
+# Statuses that mean a CR or POChild purchase is fully completed by the buyer
+CR_COMPLETED_STATUSES = ['purchase_completed', 'routed_to_store', 'completed']
+
 
 def are_all_cr_materials_covered(cr, po_children):
     """
