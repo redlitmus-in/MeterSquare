@@ -4126,7 +4126,7 @@ def send_boq_email(boq_id):
                     if email_sent:
                         log.info(f"📧 ✅ Email sent successfully to TD: {td_email}")
                     else:
-                        log.error(f"📧 ❌ Failed to send email to TD: {td_email}")
+                        log.error(f" Failed to send email to TD: {td_email}")
                 else:
                     email_sent = True  # Proceed without email (in-app notification)
             else:

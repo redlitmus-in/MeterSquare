@@ -303,9 +303,9 @@ def create_change_request():
                     elif isinstance(raw_sub_item_id, str) and raw_sub_item_id.isdigit():
                         primary_sub_item_id = int(raw_sub_item_id)
                     else:
-                        log.warning(f"⚠️ sub_item_id has unexpected format: {raw_sub_item_id} (type: {type(raw_sub_item_id)})")
+                        log.warning(f" sub_item_id has unexpected format: {raw_sub_item_id} (type: {type(raw_sub_item_id)})")
                 except (ValueError, TypeError) as e:
-                    log.warning(f"❌ Could not parse sub_item_id: {raw_sub_item_id}, error: {e}")
+                    log.warning(f" Could not parse sub_item_id: {raw_sub_item_id}, error: {e}")
             else:
                 log.info("ℹ️ No sub_item_id provided in change request materials")
 

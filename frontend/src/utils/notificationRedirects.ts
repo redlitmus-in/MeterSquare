@@ -233,12 +233,9 @@ const REDIRECT_RULES: RedirectRule[] = [
         };
       }
 
-      // Production Manager stays on store management
+      // Production Manager goes to store stock rejected tab
       if (role === 'production-manager') {
-        return {
-          path: buildPath('/m2-store/materials-catalog'),
-          queryParams: { ...(metadata?.request_id && { request_id: String(metadata.request_id) }) }
-        };
+        return { path: buildPath('/m2-store/stock-out'), queryParams: { tab: 'rejected' } };
       }
 
       return { path: buildPath('/projects') };
@@ -477,32 +474,107 @@ const REDIRECT_RULES: RedirectRule[] = [
   // ═══════════════════════════════════════════════════════════
   {
     id: 'delivery_confirmed',
-    match: ({ titleLower, messageLower }) =>
-      has(titleLower, 'delivery confirmed') || has(messageLower, 'delivery confirmed', 'confirmed receipt'),
-    resolve: ({ buildPath, metadata, role }) => {
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'delivery_confirmed' ||
+      has(titleLower, 'delivery confirmed', 'materials delivered to site', 'delivered to site') ||
+      has(messageLower, 'delivery confirmed', 'confirmed receipt', 'confirmed received'),
+    resolve: ({ buildPath, role }) => {
       if (role === 'site-engineer' || role === 'site-supervisor') {
-        return { path: buildPath('/material-receipts'), queryParams: { ...(metadata?.delivery_note_id && { delivery_note_id: String(metadata.delivery_note_id) }) } };
+        return { path: buildPath('/material-receipts'), queryParams: { tab: 'history', subtab: 'received' } };
       }
       if (role === 'production-manager') {
-        return { path: buildPath('/m2-store/stock-out'), queryParams: { ...(metadata?.delivery_note_id && { delivery_note_id: String(metadata.delivery_note_id) }) } };
+        return { path: buildPath('/m2-store/stock-out'), queryParams: { tab: 'delivered_dn' } };
+      }
+      if (role === 'buyer') {
+        return { path: buildPath('/purchase-orders'), queryParams: { tab: 'completed' } };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+  // ─── IMR Approved (PM approved buyer's material request) ───
+  {
+    id: 'imr_approved',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'imr_approval' ||
+      has(titleLower, 'material request approved') ||
+      has(messageLower, 'approved material request', 'being prepared for dispatch'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'buyer') {
+        return { path: buildPath('/purchase-orders'), queryParams: { tab: 'ongoing', subtab: 'store_approved' } };
+      }
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/stock-out'), queryParams: { tab: 'approved' } };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+  // ─── Return Received at Store (PM confirmed return) ───
+  {
+    id: 'return_received_at_store',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'return_confirmed' ||
+      has(titleLower, 'return received at m2 store', 'return received at store') ||
+      has(messageLower, 'confirmed receipt of return', 'return note', 'received at m2 store'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'site-engineer' || role === 'site-supervisor') {
+        return { path: buildPath('/material-receipts'), queryParams: { tab: 'history' } };
+      }
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/stock-in') };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+  // ─── Incoming Vendor Delivery (buyer routed to store) ───
+  {
+    id: 'vendor_delivery_incoming',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.type === 'vendor_delivery_incoming' ||
+      has(titleLower, 'incoming vendor delivery') ||
+      has(messageLower, 'routed', 'to m2 store', 'vendor', 'warehouse'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/stock-in'), queryParams: { view: 'vendor_deliveries' } };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+  // ─── CR Routed to Store (notifies CR creator / project manager) ───
+  {
+    id: 'cr_routed_to_store',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.type === 'cr_routed_to_store' ||
+      has(titleLower, 'purchase routed to m2 store', 'routed to store') ||
+      has(messageLower, 'routed materials to m2 store', 'completed the purchase and routed'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'project-manager') {
+        return { path: buildPath('/change-requests'), queryParams: { tab: 'completed' } };
+      }
+      if (role === 'site-engineer') {
+        return { path: buildPath('/change-requests'), queryParams: { tab: 'completed' } };
       }
       return { path: buildPath('/projects') };
     }
   },
   {
     id: 'material_dispatched',
-    match: ({ titleLower, messageLower, category }) =>
+    match: ({ titleLower, messageLower, category, metadata }) =>
       category !== 'assets' && category !== 'asset_requisition' && category !== 'labour' && category !== 'support' &&
-      (has(titleLower, 'dispatch', 'dispatched') || has(messageLower, 'dispatched')),
-    resolve: ({ buildPath, metadata, role }) => {
+      (metadata?.workflow === 'delivery_note_dispatched' ||
+       has(titleLower, 'materials dispatched', 'in transit', 'dispatched to site', 'dispatched to your site') ||
+       has(messageLower, 'in transit', 'dispatched to')),
+    resolve: ({ buildPath, role }) => {
       if (role === 'site-engineer' || role === 'site-supervisor') {
         return {
           path: buildPath('/material-receipts'),
-          queryParams: { tab: 'pending', ...(metadata?.dispatch_id && { dispatch_id: String(metadata.dispatch_id) }) }
+          queryParams: { tab: 'pending' }
         };
       }
       if (role === 'production-manager') {
-        return { path: buildPath('/m2-store/dispatch'), queryParams: { ...(metadata?.dispatch_id && { dispatch_id: String(metadata.dispatch_id) }) } };
+        return { path: buildPath('/m2-store/stock-out'), queryParams: { tab: 'issued_dn' } };
+      }
+      if (role === 'buyer') {
+        return { path: buildPath('/purchase-orders'), queryParams: { tab: 'ongoing', subtab: 'store_approved' } };
       }
       return { path: buildPath('/projects') };
     }

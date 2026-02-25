@@ -64,7 +64,7 @@ def create_vendor():
             from socketio_server import send_notification_to_user
 
             # Get Technical Directors
-            td_role = Role.query.filter_by(role='Technical Director', is_deleted=False).first()
+            td_role = Role.query.filter_by(role='technicalDirector').first()
             if td_role:
                 td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
                 for td_user in td_users:

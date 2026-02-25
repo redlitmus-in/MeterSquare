@@ -1333,10 +1333,10 @@ def send_boq_to_estimator():
         # Verify this user is actually an estimator role (extra validation)
         estimator_role = Role.query.filter_by(role='estimator').first()
         if estimator_role and estimator.role_id != estimator_role.role_id:
-            log.warning(f"⚠️  User role_id: {estimator.role_id}, Expected estimator role_id: {estimator_role.role_id}")
+            log.warning(f" User role_id: {estimator.role_id}, Expected estimator role_id: {estimator_role.role_id}")
 
         if not estimator.email:
-            log.error(f"❌ Estimator {estimator.full_name} has no email address")
+            log.error(f" Estimator {estimator.full_name} has no email address")
             return jsonify({"error": f"Estimator {estimator.full_name} has no email address"}), 400
 
         # Prepare email service and data
@@ -1394,7 +1394,7 @@ def send_boq_to_estimator():
             if email_sent:
                 log.info(f"📧 ✅ SUCCESS: {boq_status.upper()} email sent to {estimator.email}")
             else:
-                log.error(f"📧 ❌ FAILED: Could not send {boq_status} email to {estimator.email}")
+                log.error(f" FAILED: Could not send {boq_status} email to {estimator.email}")
         else:
             log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped, in-app notification will be sent")
 

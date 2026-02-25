@@ -2508,6 +2508,33 @@ def approve_internal_request(request_id):
         db.session.add(new_transaction)
         db.session.commit()
 
+        # Notify Buyer that their material request was approved
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+
+            pm_name = g.user.get('full_name', 'Production Manager')
+            buyer_id = internal_req.routed_by_buyer_id or internal_req.request_buyer_id
+
+            if buyer_id:
+                materials_list = internal_req.materials_data or []
+                materials_summary = ', '.join(
+                    m.get('material_name', '') for m in materials_list[:3]
+                ) if isinstance(materials_list, list) else (internal_req.item_name or 'materials')
+
+                project = Project.query.get(internal_req.project_id) if internal_req.project_id else None
+                project_name = project.project_name if project else 'Unknown Project'
+
+                ComprehensiveNotificationService.notify_imr_approved(
+                    request_number=internal_req.request_number or str(request_id),
+                    project_name=project_name,
+                    materials_summary=materials_summary,
+                    approved_by_name=pm_name,
+                    buyer_user_id=buyer_id,
+                    cr_id=internal_req.cr_id
+                )
+        except Exception as notif_err:
+            log.error(f"Failed to send IMR approval notification: {notif_err}")
+
         return jsonify({
             'success': True,
             'message': 'Internal request approved successfully and material deducted from inventory',
@@ -4470,6 +4497,61 @@ def dispatch_delivery_note(delivery_note_id):
 
         db.session.commit()
 
+        # Notify Site Engineers + Buyer that materials are in transit
+        try:
+            import logging as _logging
+            log = _logging.getLogger(__name__)
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            from models.project import Project as _Project
+            from models.user import User
+            from models.role import Role
+
+            pm_name = g.user.get('full_name', 'Production Manager')
+            project = _Project.query.get(note.project_id) if note.project_id else None
+            project_name = project.project_name if project else 'Unknown Project'
+
+            # Get materials summary from note items
+            materials_summary = ', '.join(
+                item.material_name for item in note.items[:3]
+            ) if note.items else 'materials'
+
+            # Get Site Engineer IDs for this project via BOQ assignment
+            se_ids = []
+            if note.project_id:
+                from models.boq import BOQ
+                boq = BOQ.query.filter_by(
+                    project_id=note.project_id, is_deleted=False
+                ).first()
+                if boq and boq.assigned_se_user_id:
+                    se_ids = [boq.assigned_se_user_id]
+
+            # Get buyer_id from linked IMR if available
+            buyer_id = None
+            if note.items:
+                first_item = note.items[0]
+                if first_item.internal_request_id:
+                    from models.inventory import InternalMaterialRequest
+                    imr = InternalMaterialRequest.query.get(first_item.internal_request_id)
+                    if imr:
+                        buyer_id = imr.routed_by_buyer_id or imr.request_buyer_id
+
+            cr_id = note.cr_id if hasattr(note, 'cr_id') else None
+
+            ComprehensiveNotificationService.notify_delivery_note_dispatched(
+                delivery_note_number=note.delivery_note_number,
+                project_name=project_name,
+                materials_summary=materials_summary,
+                dispatched_by_name=pm_name,
+                site_engineer_ids=se_ids,
+                buyer_user_id=buyer_id,
+                vehicle_number=note.vehicle_number,
+                driver_name=note.driver_name,
+                driver_contact=note.driver_contact,
+                cr_id=cr_id
+            )
+        except Exception as notif_err:
+            log.error(f"Failed to send dispatch notification: {notif_err}")
+
         return jsonify({
             'message': 'Delivery note dispatched successfully',
             'delivery_note': note.to_dict()
@@ -4535,6 +4617,54 @@ def confirm_delivery(delivery_note_id):
                     internal_req.last_modified_by = current_user
 
         db.session.commit()
+
+        # Notify Buyer + PM that delivery is confirmed at site
+        try:
+            import logging as _logging
+            log = _logging.getLogger(__name__)
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            from models.project import Project as _Project
+            from models.user import User
+            from models.role import Role
+
+            se_name = g.user.get('full_name', data.get('received_by', 'Site Engineer'))
+            project = _Project.query.get(note.project_id) if note.project_id else None
+            project_name = project.project_name if project else 'Unknown Project'
+
+            # Get buyer_id from linked IMR
+            buyer_id = None
+            cr_id = note.cr_id if hasattr(note, 'cr_id') else None
+            if note.items:
+                first_item = note.items[0]
+                if first_item.internal_request_id:
+                    from models.inventory import InternalMaterialRequest
+                    imr = InternalMaterialRequest.query.get(first_item.internal_request_id)
+                    if imr:
+                        buyer_id = imr.routed_by_buyer_id or imr.request_buyer_id
+                        if not cr_id:
+                            cr_id = imr.cr_id
+
+            # Get all PM IDs
+            pm_role = Role.query.filter(
+                Role.role.ilike('%production%')
+            ).first()
+            pm_ids = []
+            if pm_role:
+                pm_users = User.query.filter_by(
+                    role_id=pm_role.role_id, is_deleted=False, is_active=True
+                ).all()
+                pm_ids = [u.user_id for u in pm_users]
+
+            ComprehensiveNotificationService.notify_delivery_note_confirmed(
+                delivery_note_number=note.delivery_note_number,
+                project_name=project_name,
+                received_by_name=se_name,
+                buyer_user_id=buyer_id,
+                pm_user_ids=pm_ids,
+                cr_id=cr_id
+            )
+        except Exception as notif_err:
+            log.error(f"Failed to send delivery confirmed notification: {notif_err}")
 
         return jsonify({
             'message': 'Delivery confirmed successfully',
@@ -5612,11 +5742,35 @@ def confirm_return_delivery_receipt(return_note_id):
 
         db.session.commit()
 
-        # Send notification to SE
+        # Notify SE that their return was received at M2 Store
         try:
-            project = Project.query.get(rdn.project_id)
+            import logging as _logging
+            log = _logging.getLogger(__name__)
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            from models.project import Project as _Project
+
+            pm_name = g.user.get('full_name', 'Production Manager')
+            project = _Project.query.get(rdn.project_id) if rdn.project_id else None
+            project_name = project.project_name if project else 'Unknown Project'
+
+            # Get materials summary from RDN items
+            materials_summary = ', '.join(
+                item.material_name for item in rdn.items[:3]
+            ) if rdn.items else 'returned materials'
+
+            # Get SE who created the RDN
+            se_user_id = rdn.created_by_user_id if hasattr(rdn, 'created_by_user_id') else None
+
+            if se_user_id:
+                ComprehensiveNotificationService.notify_return_received_at_store(
+                    return_note_number=rdn.return_note_number,
+                    project_name=project_name,
+                    materials_summary=materials_summary,
+                    received_by_name=pm_name,
+                    se_user_id=se_user_id
+                )
         except Exception as notif_err:
-            print(f"Error sending RDN receipt notification: {notif_err}")
+            log.error(f"Error sending RDN receipt notification: {notif_err}")
 
         return jsonify({
             'message': 'Return delivery confirmed successfully. Ready for processing.',

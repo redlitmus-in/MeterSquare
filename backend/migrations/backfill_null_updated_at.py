@@ -71,7 +71,7 @@ def upgrade():
             log.info("=" * 60)
 
         except Exception as e:
-            log.error(f"❌ Error during backfill: {str(e)}")
+            log.error(f" Error during backfill: {str(e)}")
             conn.rollback()
             raise
 
@@ -110,7 +110,7 @@ def verify():
         if cr_null_count == 0 and pc_null_count == 0:
             log.info("✅ Verification passed: No NULL updated_at values found")
         else:
-            log.warning(f"⚠️ Found {cr_null_count + pc_null_count} records with NULL updated_at")
+            log.warning(f" Found {cr_null_count + pc_null_count} records with NULL updated_at")
 
 if __name__ == "__main__":
     import sys

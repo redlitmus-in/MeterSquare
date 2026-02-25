@@ -440,7 +440,7 @@ def client_revision_td_mail_send():
                 if email_sent:
                     log.info(f"📧 ✅ TD approval email sent successfully to {estimator_name} ({estimator_email})")
                 else:
-                    log.error(f"📧 ❌ Failed to send TD approval email to {estimator_name}")
+                    log.error(f" Failed to send TD approval email to {estimator_name}")
             else:
                 log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped (in-app notification only)")
 
@@ -507,7 +507,7 @@ def client_revision_td_mail_send():
                 if email_sent:
                     log.info(f"📧 ✅ TD rejection email sent successfully to {estimator_name} ({estimator_email})")
                 else:
-                    log.error(f"📧 ❌ Failed to send TD rejection email to {estimator_name}")
+                    log.error(f" Failed to send TD rejection email to {estimator_name}")
             else:
                 log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped (in-app notification only)")
 
