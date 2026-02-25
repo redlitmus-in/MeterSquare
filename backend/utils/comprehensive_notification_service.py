@@ -988,7 +988,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     send_notification_to_user(td_user.user_id, notification.to_dict())
 
                 except Exception as e:
-                    log.error(f"[notify_internal_revision_created] ❌ Failed to send notification to TD {td_user.user_id} for BOQ {boq_id}: {e}")
+                    log.error(f"[notify_internal_revision_created] Failed to send notification to TD {td_user.user_id} for BOQ {boq_id}: {e}")
                     import traceback
                     log.error(traceback.format_exc())
                     # Continue to next TD even if this one fails
@@ -1135,7 +1135,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     send_notification_to_user(td_user.user_id, notification.to_dict())
 
                 except Exception as e:
-                    log.error(f"[notify_client_revision_created] ❌ Failed to send notification to TD {td_user.user_id} for BOQ {boq_id}: {e}")
+                    log.error(f"[notify_client_revision_created] Failed to send notification to TD {td_user.user_id} for BOQ {boq_id}: {e}")
                     import traceback
                     log.error(traceback.format_exc())
                     # Continue to next TD even if this one fails
@@ -1636,7 +1636,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         """
         try:
             # Get all Production Managers
-            pm_role = Role.query.filter_by(role='Production Manager').first()
+            pm_role = Role.query.filter_by(role='productionManager').first()
             pm_users = []
             if pm_role:
                 pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True, is_deleted=False).all()
@@ -1699,7 +1699,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         """
         try:
             # Get all Production Managers
-            pm_role = Role.query.filter_by(role='Production Manager').first()
+            pm_role = Role.query.filter_by(role='productionManager').first()
             pm_users = []
             if pm_role:
                 pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True, is_deleted=False).all()
@@ -1762,7 +1762,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         """
         try:
             # Get all Production Managers
-            pm_role = Role.query.filter_by(role='Production Manager').first()
+            pm_role = Role.query.filter_by(role='productionManager').first()
             if not pm_role:
                 log.warning("Production Manager role not found")
                 return
@@ -1872,35 +1872,297 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
     @staticmethod
     def notify_delivery_note_dispatched(
         delivery_note_number, project_name, materials_summary,
-        dispatched_by_name, site_engineer_ids
+        dispatched_by_name, site_engineer_ids, buyer_user_id=None,
+        vehicle_number=None, driver_name=None, driver_contact=None, cr_id=None
     ):
         """
-        Notify Site Engineers when materials are dispatched to their project
-        Trigger: PM dispatches delivery note
-        Recipients: Site Engineers assigned to the project
+        Notify Site Engineers + Buyer when materials are dispatched (IN_TRANSIT)
+        Trigger: PM dispatches delivery note in dispatch_delivery_note()
+        Recipients: Site Engineers assigned to project, Buyer who purchased
         """
         try:
-            for se_id in site_engineer_ids:
+            transport_info = ''
+            if vehicle_number:
+                transport_info += f' Vehicle: {vehicle_number}.'
+            if driver_name:
+                transport_info += f' Driver: {driver_name}'
+            if driver_contact:
+                transport_info += f' ({driver_contact})'
+
+            # Notify all Site Engineers
+            for se_id in (site_engineer_ids or []):
                 notification = NotificationManager.create_notification(
                     user_id=se_id,
-                    type='info',
-                    title='Materials Dispatched to Your Site',
-                    message=f'Delivery Note {delivery_note_number} dispatched to {project_name}. Materials: {materials_summary[:100]}...',
-                    priority='normal',
+                    type='delivery_note_dispatched',
+                    title=f'Materials In Transit to Your Site - {project_name}',
+                    message=f'Delivery Note {delivery_note_number} dispatched to {project_name}.{transport_info} Materials: {str(materials_summary)[:100]}.',
+                    priority='high',
                     category='inventory',
-                    action_required=False,
-                    action_url='/site-engineer/material-receipts',
-                    action_label='View Deliveries',
+                    action_required=True,
+                    action_url=f'/site-engineer/material-receipts?tab=pending',
+                    action_label='View Incoming Deliveries',
                     metadata={
                         'delivery_note_number': delivery_note_number,
                         'project_name': project_name,
-                        'workflow': 'delivery_note'
+                        'vehicle_number': vehicle_number,
+                        'driver_name': driver_name,
+                        'driver_contact': driver_contact,
+                        'cr_id': cr_id,
+                        'workflow': 'delivery_note_dispatched',
+                        'target_role': 'site-engineer'
                     },
                     sender_name=dispatched_by_name
                 )
                 send_notification_to_user(se_id, notification.to_dict())
+
+            # Notify Buyer
+            if buyer_user_id:
+                buyer_notification = NotificationManager.create_notification(
+                    user_id=buyer_user_id,
+                    type='delivery_note_dispatched',
+                    title=f'Materials Dispatched to Site - {project_name}',
+                    message=f'Delivery Note {delivery_note_number} is in transit to {project_name}.{transport_info}',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url=f'/buyer/purchase-orders?tab=ongoing&subtab=store_approved',
+                    action_label='View Purchase Orders',
+                    metadata={
+                        'delivery_note_number': delivery_note_number,
+                        'project_name': project_name,
+                        'cr_id': cr_id,
+                        'workflow': 'delivery_note_dispatched',
+                        'target_role': 'buyer'
+                    },
+                    sender_name=dispatched_by_name
+                )
+                send_notification_to_user(buyer_user_id, buyer_notification.to_dict())
+
+            # Send emails to SE(s) and Buyer
+            try:
+                transport_details = ''
+                if vehicle_number:
+                    transport_details += f'<li><strong>Vehicle:</strong> {vehicle_number}</li>'
+                if driver_name:
+                    transport_details += f'<li><strong>Driver:</strong> {driver_name}</li>'
+                if driver_contact:
+                    transport_details += f'<li><strong>Driver Contact:</strong> {driver_contact}</li>'
+
+                for se_id in (site_engineer_ids or []):
+                    se = User.query.get(se_id)
+                    if se and se.email:
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=se.email,
+                            subject=f'Materials In Transit - {project_name}',
+                            message=f'''
+                            <h2>Materials Dispatched to Your Site</h2>
+                            <p>Delivery Note <strong>{delivery_note_number}</strong> has been dispatched to <strong>{project_name}</strong>.</p>
+                            {'<ul>' + transport_details + '</ul>' if transport_details else ''}
+                            <p><strong>Materials:</strong> {str(materials_summary)[:200]}</p>
+                            <p>Please confirm receipt once the delivery arrives at site.</p>
+                            ''',
+                            notification_type='delivery_note_dispatched'
+                        )
+
+                if buyer_user_id:
+                    buyer = User.query.get(buyer_user_id)
+                    if buyer and buyer.email:
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=buyer.email,
+                            subject=f'Materials Dispatched to Site - {project_name}',
+                            message=f'''
+                            <h2>Materials In Transit</h2>
+                            <p>Delivery Note <strong>{delivery_note_number}</strong> is now in transit to <strong>{project_name}</strong>.</p>
+                            {'<ul>' + transport_details + '</ul>' if transport_details else ''}
+                            <p>You will be notified once delivery is confirmed at site.</p>
+                            ''',
+                            notification_type='delivery_note_dispatched'
+                        )
+            except Exception as email_err:
+                log.error(f"Failed to send dispatch email: {email_err}")
+
         except Exception as e:
             log.error(f"Error sending dispatch notification: {e}")
+
+    @staticmethod
+    def notify_imr_approved(
+        request_number, project_name, materials_summary,
+        approved_by_name, buyer_user_id, cr_id=None
+    ):
+        """
+        Notify Buyer when PM approves their Internal Material Request
+        Trigger: PM approves IMR in approve_internal_request()
+        Recipients: Buyer who routed the materials
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=buyer_user_id,
+                type='imr_approved',
+                title=f'Material Request Approved - {project_name}',
+                message=f'{approved_by_name} approved material request #{request_number} for {project_name}. Materials: {str(materials_summary)[:100]}. Being prepared for dispatch to site.',
+                priority='normal',
+                category='inventory',
+                action_required=False,
+                action_url=f'/buyer/purchase-orders?tab=ongoing&subtab=store_approved',
+                action_label='View Purchase Orders',
+                metadata={
+                    'request_number': request_number,
+                    'project_name': project_name,
+                    'cr_id': cr_id,
+                    'workflow': 'imr_approval',
+                    'target_role': 'buyer'
+                },
+                sender_name=approved_by_name
+            )
+            send_notification_to_user(buyer_user_id, notification.to_dict())
+
+            # Also send email (catches offline users)
+            try:
+                buyer = User.query.get(buyer_user_id)
+                if buyer and buyer.email:
+                    ComprehensiveNotificationService.send_email_notification(
+                        recipient=buyer.email,
+                        subject=f'Material Request Approved - {project_name}',
+                        message=f'''
+                        <h2>Material Request Approved</h2>
+                        <p>{approved_by_name} has approved your material request <strong>#{request_number}</strong> for project <strong>{project_name}</strong>.</p>
+                        <p><strong>Materials:</strong> {str(materials_summary)[:200]}</p>
+                        <p>Materials are being prepared for dispatch to site. You can track progress in your Purchase Orders.</p>
+                        ''',
+                        notification_type='imr_approved'
+                    )
+            except Exception as email_err:
+                log.error(f"Failed to send IMR approved email: {email_err}")
+        except Exception as e:
+            log.error(f"Error sending IMR approved notification: {e}")
+
+    @staticmethod
+    def notify_delivery_note_confirmed(
+        delivery_note_number, project_name, received_by_name,
+        buyer_user_id, pm_user_ids, cr_id=None
+    ):
+        """
+        Notify Buyer + PM when Site Engineer confirms delivery receipt
+        Trigger: SE confirms delivery in confirm_delivery()
+        Recipients: Buyer who purchased materials, all Production Managers
+        """
+        try:
+            # Notify Buyer
+            if buyer_user_id:
+                notification = NotificationManager.create_notification(
+                    user_id=buyer_user_id,
+                    type='delivery_note_confirmed',
+                    title=f'Materials Delivered to Site - {project_name}',
+                    message=f'Delivery Note {delivery_note_number} confirmed received at {project_name} by {received_by_name}. Purchase cycle complete.',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url=f'/buyer/purchase-orders?tab=completed',
+                    action_label='View Completed Orders',
+                    metadata={
+                        'delivery_note_number': delivery_note_number,
+                        'project_name': project_name,
+                        'cr_id': cr_id,
+                        'workflow': 'delivery_confirmed',
+                        'target_role': 'buyer'
+                    },
+                    sender_name=received_by_name
+                )
+                send_notification_to_user(buyer_user_id, notification.to_dict())
+
+            # Notify all PMs
+            for pm_id in (pm_user_ids or []):
+                pm_notification = NotificationManager.create_notification(
+                    user_id=pm_id,
+                    type='delivery_note_confirmed',
+                    title=f'Delivery Confirmed at Site - {project_name}',
+                    message=f'{received_by_name} confirmed receipt of Delivery Note {delivery_note_number} at {project_name}.',
+                    priority='low',
+                    category='inventory',
+                    action_required=False,
+                    action_url=f'/production-manager/m2-store/stock-out?tab=delivered_dn',
+                    action_label='View Delivered Notes',
+                    metadata={
+                        'delivery_note_number': delivery_note_number,
+                        'project_name': project_name,
+                        'workflow': 'delivery_confirmed',
+                        'target_role': 'production-manager'
+                    },
+                    sender_name=received_by_name
+                )
+                send_notification_to_user(pm_id, pm_notification.to_dict())
+
+            # Send emails
+            try:
+                if buyer_user_id:
+                    buyer = User.query.get(buyer_user_id)
+                    if buyer and buyer.email:
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=buyer.email,
+                            subject=f'Materials Delivered to Site - {project_name}',
+                            message=f'''
+                            <h2>Delivery Confirmed</h2>
+                            <p>Delivery Note <strong>{delivery_note_number}</strong> has been confirmed received at <strong>{project_name}</strong> by {received_by_name}.</p>
+                            <p>The purchase cycle for this material request is now complete.</p>
+                            ''',
+                            notification_type='delivery_note_confirmed'
+                        )
+            except Exception as email_err:
+                log.error(f"Failed to send delivery confirmed email: {email_err}")
+
+        except Exception as e:
+            log.error(f"Error sending delivery confirmed notification: {e}")
+
+    @staticmethod
+    def notify_return_received_at_store(
+        return_note_number, project_name, materials_summary,
+        received_by_name, se_user_id
+    ):
+        """
+        Notify Site Engineer when PM confirms return received at M2 Store
+        Trigger: PM confirms return receipt in confirm_return_delivery_receipt()
+        Recipients: Site Engineer who created the return
+        """
+        try:
+            notification = NotificationManager.create_notification(
+                user_id=se_user_id,
+                type='return_received_at_store',
+                title=f'Return Received at M2 Store - {project_name}',
+                message=f'{received_by_name} confirmed receipt of Return Note {return_note_number} at M2 Store. Materials: {str(materials_summary)[:100]}.',
+                priority='normal',
+                category='inventory',
+                action_required=False,
+                action_url=f'/site-engineer/material-receipts?tab=history',
+                action_label='View Return History',
+                metadata={
+                    'return_note_number': return_note_number,
+                    'project_name': project_name,
+                    'workflow': 'return_confirmed',
+                    'target_role': 'site-engineer'
+                },
+                sender_name=received_by_name
+            )
+            send_notification_to_user(se_user_id, notification.to_dict())
+
+            # Also send email
+            try:
+                se = User.query.get(se_user_id)
+                if se and se.email:
+                    ComprehensiveNotificationService.send_email_notification(
+                        recipient=se.email,
+                        subject=f'Return Received at M2 Store - {project_name}',
+                        message=f'''
+                        <h2>Return Received at M2 Store</h2>
+                        <p>{received_by_name} has confirmed receipt of Return Note <strong>{return_note_number}</strong> at M2 Store for project <strong>{project_name}</strong>.</p>
+                        <p><strong>Materials returned:</strong> {str(materials_summary)[:200]}</p>
+                        <p>The returned materials are now being processed at the warehouse.</p>
+                        ''',
+                        notification_type='return_received_at_store'
+                    )
+            except Exception as email_err:
+                log.error(f"Failed to send return received email: {email_err}")
+        except Exception as e:
+            log.error(f"Error sending return received notification: {e}")
 
     @staticmethod
     def notify_delivery_confirmed(
@@ -1912,7 +2174,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
         Recipients: All Production Managers
         """
         try:
-            pm_role = Role.query.filter_by(role='Production Manager').first()
+            pm_role = Role.query.filter_by(role='productionManager').first()
             if not pm_role:
                 return
 
@@ -2343,6 +2605,34 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             log.info(f"Sent simple notification to user {user_id}: {title}")
         except Exception as e:
             log.error(f"Error sending simple notification to user {user_id}: {e}")
+
+
+    @staticmethod
+    def send_email_notification(recipient, subject, message, notification_type=None, action_url=None):
+        """
+        Send an HTML email notification via SMTP (async, non-blocking).
+        Used alongside in-app notifications for users who may be offline.
+
+        Args:
+            recipient: Email address string
+            subject: Email subject line
+            message: HTML content for the email body (can include <p>, <ul>, <table> etc.)
+            notification_type: Optional string label for logging
+            action_url: Optional URL (unused in email body, kept for API compatibility)
+        """
+        try:
+            from utils.boq_email_service import BOQEmailService
+            from utils.email_styles import wrap_email_content
+
+            if not recipient:
+                return
+
+            email_html = wrap_email_content(message)
+            email_service = BOQEmailService()
+            email_service.send_email_async(recipient, subject, email_html)
+            log.info(f"📧 Email queued: {notification_type or subject} → {recipient}")
+        except Exception as e:
+            log.error(f"Failed to send email notification to {recipient}: {e}")
 
 
 # Create singleton instance

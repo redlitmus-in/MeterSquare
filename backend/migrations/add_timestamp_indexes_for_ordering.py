@@ -78,7 +78,7 @@ def upgrade():
             log.info("=" * 60)
 
         except Exception as e:
-            log.error(f"❌ Error creating indexes: {str(e)}")
+            log.error(f" Error creating indexes: {str(e)}")
             conn.rollback()
             raise
 
@@ -108,7 +108,7 @@ def downgrade():
             log.info("✅ Rollback completed successfully")
 
         except Exception as e:
-            log.error(f"❌ Error during rollback: {str(e)}")
+            log.error(f" Error during rollback: {str(e)}")
             conn.rollback()
             raise
 

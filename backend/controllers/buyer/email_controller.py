@@ -571,9 +571,9 @@ def send_vendor_email(cr_id, po_child_id=None):
                     attachments.append((lpo_filename, pdf_bytes, 'application/pdf'))
                     log.info(f"✅ LPO PDF generated on-the-fly (fallback): {lpo_filename}")
                 else:
-                    log.warning(f"⚠️ No pre-saved PDF and no lpo_data for {formatted_id}")
+                    log.warning(f" No pre-saved PDF and no lpo_data for {formatted_id}")
             except Exception as e:
-                log.error(f"❌ Error attaching LPO PDF for {formatted_id}: {str(e)}")
+                log.error(f" Error attaching LPO PDF for {formatted_id}: {str(e)}")
                 # Continue sending email even if LPO PDF attachment fails
 
         # ==================== SEND EMAIL ====================
@@ -686,7 +686,7 @@ def send_vendor_email(cr_id, po_child_id=None):
                 "cc_count": cc_count
             }), 200
         else:
-            log.error(f"❌ Failed to send email for {formatted_id}")
+            log.error(f" Failed to send email for {formatted_id}")
             return jsonify({
                 "success": False,
                 "message": "Failed to send email to vendor"

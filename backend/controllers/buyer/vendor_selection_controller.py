@@ -1586,8 +1586,9 @@ def create_po_children(cr_id):
         if store_routed_po_children:
             try:
                 from models.role import Role
-                from utils.comprehensive_notification_service import notification_service
-                pm_role = Role.query.filter_by(role='production_manager').first()
+                from utils.notification_utils import NotificationManager
+                from socketio_server import send_notification_to_user
+                pm_role = Role.query.filter_by(role='productionManager').first()
                 if pm_role:
                     pms = User.query.filter_by(
                         role_id=pm_role.role_id,
@@ -1599,15 +1600,18 @@ def create_po_children(cr_id):
                     po_child_ids = [pc.get('formatted_id', f"PO-{pc.get('id')}") for pc in store_routed_po_children]
 
                     for pm in pms:
-                        notification_service.create_notification(
+                        notification = NotificationManager.create_notification(
                             user_id=pm.user_id,
                             title=f"Materials Routed to Store - {project_name}",
                             message=f"{user_name} routed {len(store_routed_po_children)} material group(s) to M2 Store: {', '.join(po_child_ids)}. Awaiting vendor delivery.",
-                            type='store_routing',
-                            reference_type='po_child',
-                            reference_id=store_routed_po_children[0].get('id'),  # First POChild ID
-                            action_url='/store/incoming-deliveries'
+                            type='vendor_delivery_incoming',
+                            category='project',
+                            priority='high',
+                            action_required=True,
+                            action_url='/production-manager/m2-store/stock-in',
+                            action_label='View Incoming Materials'
                         )
+                        send_notification_to_user(pm.user_id, notification.to_dict())
             except Exception as pm_notif_error:
                 log.error(f"Failed to send PM notification: {pm_notif_error}")
 

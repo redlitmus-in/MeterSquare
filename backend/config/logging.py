@@ -4,7 +4,7 @@ import sys
 
 def get_logger():
     logger = logging.getLogger("example_logger")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.WARNING)
 
     # Clear existing handlers
     logger.handlers = []
@@ -24,7 +24,9 @@ def get_logger():
 
             logger.addHandler(file_handler)
         else:
-            console_handler = logging.StreamHandler(sys.stdout)
+            # Force UTF-8 encoding to handle emoji in log messages
+            stdout_utf8 = open(sys.stdout.fileno(), mode='w', encoding='utf-8', errors='replace', closefd=False)
+            console_handler = logging.StreamHandler(stdout_utf8)
             formatter = logging.Formatter(
                 "%(asctime)s - %(levelname)s - %(message)s"
             )
