@@ -4479,6 +4479,7 @@ def dispatch_delivery_note(delivery_note_id):
         note.last_modified_by = current_user
 
         # Batch pre-fetch InternalMaterialRequests for dispatch
+        from models.inventory import InternalMaterialRequest
         _dispatch_imr_ids = [item.internal_request_id for item in note.items if item.internal_request_id]
         _batch_dispatch_imrs = {
             r.request_id: r for r in InternalMaterialRequest.query.filter(
@@ -4530,7 +4531,6 @@ def dispatch_delivery_note(delivery_note_id):
             if note.items:
                 first_item = note.items[0]
                 if first_item.internal_request_id:
-                    from models.inventory import InternalMaterialRequest
                     imr = InternalMaterialRequest.query.get(first_item.internal_request_id)
                     if imr:
                         buyer_id = imr.routed_by_buyer_id or imr.request_buyer_id

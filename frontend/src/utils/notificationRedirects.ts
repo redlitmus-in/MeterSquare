@@ -221,12 +221,11 @@ const REDIRECT_RULES: RedirectRule[] = [
       const isBuyer = role === 'buyer' || role === 'procurement';
 
       if (isBuyer) {
-        // Buyer goes to Pending Approval > Store Requests tab to handle rejection
+        // Buyer goes to Rejected tab to see the rejected store request
         return {
           path: buildPath('/purchase-orders'),
           queryParams: {
-            tab: 'pending_approval',
-            subtab: 'store_requests',
+            tab: 'rejected',
             ...(metadata?.request_id && { request_id: String(metadata.request_id) }),
             ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
           }
@@ -531,7 +530,7 @@ const REDIRECT_RULES: RedirectRule[] = [
     match: ({ titleLower, messageLower, metadata }) =>
       metadata?.type === 'vendor_delivery_incoming' ||
       has(titleLower, 'incoming vendor delivery') ||
-      has(messageLower, 'routed', 'to m2 store', 'vendor', 'warehouse'),
+      has(messageLower, 'routed', 'to m2 store'),
     resolve: ({ buildPath, role }) => {
       if (role === 'production-manager') {
         return { path: buildPath('/m2-store/stock-in'), queryParams: { view: 'vendor_deliveries' } };
