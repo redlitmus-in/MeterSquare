@@ -26,6 +26,44 @@ log = get_logger()
 class ComprehensiveNotificationService(LabourNotificationMixin):
     """Unified notification service for all ERP workflows"""
 
+    # ==================== OFFLINE DETECTION ====================
+
+    @staticmethod
+    def is_user_offline(user_id: int, threshold_minutes: int = 30) -> bool:
+        """
+        Determine if a user should receive an email fallback notification.
+
+        Logic (BOTH must be true to consider user offline):
+          1. No active Socket.IO connection right now
+          2. last_login > threshold_minutes ago (or user never logged in)
+
+        Returns True  -> user is offline, send email
+        Returns False -> user is online, skip email (they will see the bell notification)
+        """
+        try:
+            from socketio_server import is_user_connected, active_connections
+            # Check 1: real-time Socket.IO presence
+            if is_user_connected(user_id):
+                return False  # Online right now
+
+            # If no connections are tracked at all, Socket.IO tracking may be
+            # broken (server restart, etc). Fall through to last_login check
+            # but log a warning so the issue is visible.
+            if len(active_connections) == 0:
+                log.debug(f"is_user_offline: no active Socket.IO connections tracked — relying on last_login for user {user_id}")
+
+            # Check 2: recent login fallback
+            user = User.query.get(user_id)
+            if not user or not user.last_login:
+                return True  # No record -> treat as offline
+
+            threshold = datetime.utcnow() - timedelta(minutes=threshold_minutes)
+            return user.last_login < threshold
+
+        except Exception as e:
+            log.warning(f"is_user_offline check failed for user {user_id}: {e}")
+            return False  # Default to NOT sending email if check fails
+
     # ==================== BOQ WORKFLOW NOTIFICATIONS ====================
 
     @staticmethod
@@ -803,6 +841,22 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(requester_user_id, notification.to_dict())
+            # Email fallback for offline users (action_required -> must receive it)
+            if ComprehensiveNotificationService.is_user_offline(requester_user_id):
+                requester = User.query.get(requester_user_id)
+                if requester and requester.email:
+                    ComprehensiveNotificationService.send_email_notification(
+                        recipient=requester.email,
+                        subject=f'Materials Purchase Completed - {project_name}',
+                        message=f'''
+                        <h2>Materials Purchase Completed</h2>
+                        <p>{buyer_name} has completed the purchase for your materials request in
+                        <strong>{project_name}</strong>.</p>
+                        <p>Materials have been routed to the M2 Store. The Production Manager will
+                        receive them from the vendor and dispatch to your site.</p>
+                        ''',
+                        notification_type='cr_purchase_completed'
+                    )
         except Exception as e:
             log.error(f"Error sending CR purchase completed notification: {e}")
 
@@ -1231,6 +1285,53 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
     # ==================== RETURNABLE ASSETS NOTIFICATIONS ====================
 
     @staticmethod
+    def notify_adn_dispatched_to_se(adn_id, adn_number, project_id, project_name,
+                                     item_count, total_quantity, category_summary,
+                                     dispatched_by_name, se_user_ids):
+        """
+        Notify Site Engineer(s) when PM dispatches an Asset Delivery Note (ADN) to their site.
+        Trigger: asset_dn_controller.py — dispatch_delivery_note() when status → IN_TRANSIT
+        Recipients: SE assigned to the project (attention_to_id + site_supervisor_id)
+        """
+        try:
+            for se_user_id in se_user_ids:
+                if check_duplicate_notification(se_user_id, 'Assets Dispatched to Site', 'adn_id', adn_id, minutes=5):
+                    continue
+
+                action_url = build_notification_action_url(
+                    user_id=se_user_id,
+                    base_page='site-assets',
+                    query_params={},
+                    fallback_role_route='site-engineer'
+                )
+
+                notification = NotificationManager.create_notification(
+                    user_id=se_user_id,
+                    type='info',
+                    title=f'Assets Dispatched to Site — {project_name}',
+                    message=f'{dispatched_by_name} dispatched {adn_number} ({total_quantity} item(s): {category_summary}) to {project_name}. Assets are on the way.',
+                    priority='normal',
+                    category='assets',
+                    action_required=True,
+                    action_url=action_url,
+                    action_label='View Deliveries',
+                    metadata={
+                        'adn_id': adn_id,
+                        'adn_number': adn_number,
+                        'project_id': project_id,
+                        'project_name': project_name,
+                        'item_count': item_count,
+                        'total_quantity': total_quantity,
+                        'workflow': 'adn_dispatched'
+                    },
+                    sender_name=dispatched_by_name
+                )
+                send_notification_to_user(se_user_id, notification.to_dict())
+
+        except Exception as e:
+            log.error(f"Error sending ADN dispatched notification to SE: {e}")
+
+    @staticmethod
     def notify_asset_dispatched(project_id, project_name, category_name, category_code, quantity,
                                  dispatched_by_name, se_user_ids, notes=None, item_codes=None):
         """
@@ -1292,7 +1393,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
 
             # Get all Production Managers (join User with Role to query by role name)
             pm_users = User.query.join(Role, User.role_id == Role.role_id).filter(
-                Role.role == 'production-manager',
+                Role.role == 'productionManager',
                 User.is_active == True,
                 User.is_deleted == False
             ).all()
@@ -1366,6 +1467,174 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             log.error(f"Error sending asset return notification: {e}")
 
     @staticmethod
+    def notify_ardn_dispatched(ardn_id, ardn_number, project_id, project_name,
+                               item_count, dispatched_by_name, dispatched_by_user_id=None):
+        """
+        Notify all Production Managers when SE dispatches an Asset Return Delivery Note (ARDN).
+        Trigger: asset_dn_controller.py — dispatch_return_note() when status → IN_TRANSIT
+        Recipients: All active Production Managers
+        Priority: NORMAL
+        """
+        try:
+            from models.role import Role
+            pm_role = Role.query.filter_by(role='productionManager').first()
+            if not pm_role:
+                log.warning("productionManager role not found for ARDN dispatch notification")
+                return
+
+            pm_users = User.query.filter_by(
+                role_id=pm_role.role_id,
+                is_active=True,
+                is_deleted=False
+            ).all()
+
+            for pm in pm_users:
+                if check_duplicate_notification(pm.user_id, 'Asset Return In Transit', 'ardn_id', ardn_id, minutes=5):
+                    continue
+
+                action_url = build_notification_action_url(
+                    user_id=pm.user_id,
+                    base_page='returnable-assets/receive-returns',
+                    query_params={},
+                    fallback_role_route='production-manager'
+                )
+
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='info',
+                    title=f'Asset Return In Transit — {project_name}',
+                    message=f'{dispatched_by_name} dispatched {ardn_number} ({item_count} item(s)) returning from {project_name}. Please receive at store.',
+                    priority='normal',
+                    category='assets',
+                    action_required=True,
+                    action_url=action_url,
+                    action_label='Receive Assets',
+                    metadata={
+                        'ardn_id': ardn_id,
+                        'ardn_number': ardn_number,
+                        'project_id': project_id,
+                        'project_name': project_name,
+                        'item_count': item_count,
+                        'workflow': 'ardn_dispatched'
+                    },
+                    sender_name=dispatched_by_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+
+        except Exception as e:
+            log.error(f"Error sending ARDN dispatched notification: {e}")
+
+    @staticmethod
+    def notify_ardn_created(ardn_id, ardn_number, project_id, project_name,
+                            item_count, created_by_name):
+        """
+        Notify Production Managers when SE creates an Asset Return Delivery Note.
+        Trigger: asset_dn_controller.py — create_return_note()
+        Recipients: All active Production Managers
+        """
+        try:
+            pm_role = Role.query.filter_by(role='productionManager').first()
+            if not pm_role:
+                log.warning("productionManager role not found for ARDN created notification")
+                return
+
+            pm_users = User.query.filter_by(
+                role_id=pm_role.role_id,
+                is_active=True,
+                is_deleted=False
+            ).all()
+
+            for pm in pm_users:
+                if check_duplicate_notification(pm.user_id, 'Asset Return Note Created', 'ardn_id', ardn_id, minutes=5):
+                    continue
+
+                action_url = build_notification_action_url(
+                    user_id=pm.user_id,
+                    base_page='returnable-assets/receive-returns',
+                    query_params={},
+                    fallback_role_route='production-manager'
+                )
+
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='info',
+                    title=f'Asset Return Note Created — {project_name}',
+                    message=f'{created_by_name} created return note {ardn_number} with {item_count} item(s) from {project_name}.',
+                    priority='normal',
+                    category='assets',
+                    action_url=action_url,
+                    action_label='View Returns',
+                    metadata={
+                        'ardn_id': ardn_id,
+                        'ardn_number': ardn_number,
+                        'project_id': project_id,
+                        'project_name': project_name,
+                        'item_count': item_count,
+                        'workflow': 'ardn_created'
+                    },
+                    sender_name=created_by_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+
+        except Exception as e:
+            log.error(f"Error sending ARDN created notification: {e}")
+
+    @staticmethod
+    def notify_ardn_issued(ardn_id, ardn_number, project_id, project_name,
+                           item_count, issued_by_name):
+        """
+        Notify Production Managers when SE issues an Asset Return Delivery Note.
+        Trigger: asset_dn_controller.py — issue_return_note()
+        Recipients: All active Production Managers
+        """
+        try:
+            pm_role = Role.query.filter_by(role='productionManager').first()
+            if not pm_role:
+                log.warning("productionManager role not found for ARDN issued notification")
+                return
+
+            pm_users = User.query.filter_by(
+                role_id=pm_role.role_id,
+                is_active=True,
+                is_deleted=False
+            ).all()
+
+            for pm in pm_users:
+                if check_duplicate_notification(pm.user_id, 'Asset Return Note Issued', 'ardn_id', ardn_id, minutes=5):
+                    continue
+
+                action_url = build_notification_action_url(
+                    user_id=pm.user_id,
+                    base_page='returnable-assets/receive-returns',
+                    query_params={},
+                    fallback_role_route='production-manager'
+                )
+
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='info',
+                    title=f'Asset Return Note Issued — {project_name}',
+                    message=f'{issued_by_name} issued return note {ardn_number} ({item_count} item(s)) from {project_name}. Pending dispatch.',
+                    priority='normal',
+                    category='assets',
+                    action_url=action_url,
+                    action_label='View Returns',
+                    metadata={
+                        'ardn_id': ardn_id,
+                        'ardn_number': ardn_number,
+                        'project_id': project_id,
+                        'project_name': project_name,
+                        'item_count': item_count,
+                        'workflow': 'ardn_issued'
+                    },
+                    sender_name=issued_by_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+
+        except Exception as e:
+            log.error(f"Error sending ARDN issued notification: {e}")
+
+    @staticmethod
     def notify_asset_maintenance_complete(category_name, category_code, item_code, action,
                                            pm_user_ids, completed_by_name):
         """
@@ -1401,6 +1670,148 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
 
         except Exception as e:
             log.error(f"Error sending maintenance complete notification: {e}")
+
+    # ==================== ASSET DISPOSAL NOTIFICATIONS ====================
+
+    @staticmethod
+    def notify_asset_disposal_requested(disposal_id, category_name, quantity, disposal_reason,
+                                         requested_by_name):
+        """
+        Notify Technical Directors when PM requests asset disposal approval.
+        Trigger: asset_disposal_controller.py — create_disposal_request() / request_catalog_disposal()
+        Recipients: All active Technical Directors
+        """
+        try:
+            td_role = Role.query.filter_by(role='technicalDirector').first()
+            if not td_role:
+                log.warning("technicalDirector role not found for disposal request notification")
+                return
+
+            td_users = User.query.filter_by(
+                role_id=td_role.role_id,
+                is_active=True,
+                is_deleted=False
+            ).all()
+
+            for td in td_users:
+                if check_duplicate_notification(td.user_id, 'Asset Disposal Request', 'disposal_id', disposal_id, minutes=5):
+                    continue
+
+                action_url = build_notification_action_url(
+                    user_id=td.user_id,
+                    base_page='asset-disposal-approvals',
+                    query_params={},
+                    fallback_role_route='technical-director'
+                )
+
+                notification = NotificationManager.create_notification(
+                    user_id=td.user_id,
+                    type='approval',
+                    title='Asset Disposal Request — Approval Needed',
+                    message=f'{requested_by_name} requests disposal of {quantity}x {category_name}. Reason: {disposal_reason}',
+                    priority='high',
+                    category='assets',
+                    action_required=True,
+                    action_url=action_url,
+                    action_label='Review Disposal',
+                    metadata={
+                        'disposal_id': disposal_id,
+                        'category_name': category_name,
+                        'quantity': quantity,
+                        'workflow': 'asset_disposal_request'
+                    },
+                    sender_name=requested_by_name
+                )
+                send_notification_to_user(td.user_id, notification.to_dict())
+
+        except Exception as e:
+            log.error(f"Error sending asset disposal request notification: {e}")
+
+    @staticmethod
+    def notify_asset_disposal_approved(disposal_id, category_name, quantity,
+                                        approved_by_name, pm_user_id):
+        """
+        Notify Production Manager when TD approves asset disposal.
+        Trigger: asset_disposal_controller.py — approve_disposal()
+        Recipients: The PM who requested the disposal
+        """
+        try:
+            if check_duplicate_notification(pm_user_id, 'Asset Disposal Approved', 'disposal_id', disposal_id, minutes=5):
+                return
+
+            action_url = build_notification_action_url(
+                user_id=pm_user_id,
+                base_page='returnable-assets',
+                query_params={},
+                fallback_role_route='production-manager'
+            )
+
+            notification = NotificationManager.create_notification(
+                user_id=pm_user_id,
+                type='success',
+                title='Asset Disposal Approved',
+                message=f'{approved_by_name} approved disposal of {quantity}x {category_name}. Inventory has been reduced.',
+                priority='normal',
+                category='assets',
+                action_url=action_url,
+                action_label='View Assets',
+                metadata={
+                    'disposal_id': disposal_id,
+                    'category_name': category_name,
+                    'quantity': quantity,
+                    'workflow': 'asset_disposal_approved'
+                },
+                sender_name=approved_by_name
+            )
+            send_notification_to_user(pm_user_id, notification.to_dict())
+
+        except Exception as e:
+            log.error(f"Error sending asset disposal approved notification: {e}")
+
+    @staticmethod
+    def notify_asset_disposal_rejected(disposal_id, category_name, quantity, action,
+                                        rejected_by_name, review_notes, pm_user_id):
+        """
+        Notify Production Manager when TD rejects asset disposal.
+        Trigger: asset_disposal_controller.py — reject_disposal()
+        Recipients: The PM who requested the disposal
+        """
+        try:
+            if check_duplicate_notification(pm_user_id, 'Asset Disposal Rejected', 'disposal_id', disposal_id, minutes=5):
+                return
+
+            action_text = 'returned to stock' if action == 'return_to_stock' else 'sent back for repair'
+
+            action_url = build_notification_action_url(
+                user_id=pm_user_id,
+                base_page='returnable-assets',
+                query_params={},
+                fallback_role_route='production-manager'
+            )
+
+            notification = NotificationManager.create_notification(
+                user_id=pm_user_id,
+                type='rejection',
+                title='Asset Disposal Rejected',
+                message=f'{rejected_by_name} rejected disposal of {quantity}x {category_name}. Asset {action_text}.' + (f' Notes: {review_notes}' if review_notes else ''),
+                priority='high',
+                category='assets',
+                action_required=True,
+                action_url=action_url,
+                action_label='View Assets',
+                metadata={
+                    'disposal_id': disposal_id,
+                    'category_name': category_name,
+                    'quantity': quantity,
+                    'action': action,
+                    'workflow': 'asset_disposal_rejected'
+                },
+                sender_name=rejected_by_name
+            )
+            send_notification_to_user(pm_user_id, notification.to_dict())
+
+        except Exception as e:
+            log.error(f"Error sending asset disposal rejected notification: {e}")
 
     # ==================== ASSET REQUISITION NOTIFICATIONS ====================
 
@@ -1468,7 +1879,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     priority='high',
                     category='asset_requisition',
                     action_required=True,
-                    action_url=build_notification_action_url(prod_mgr_id, 'returnable-assets', {'tab': 'pending'}, 'production-manager'),
+                    action_url=build_notification_action_url(prod_mgr_id, 'returnable-assets/dispatch', {}, 'production-manager'),
                     action_label='Review Request',
                     metadata={
                         'requisition_id': requisition_id,
@@ -1795,6 +2206,32 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=returned_by_name
                 )
                 send_notification_to_user(pm.user_id, notification.to_dict())
+                # Email fallback -- PM must review damaged material (urgent action required)
+                if ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                    if pm.email:
+                        from utils.email_styles import build_material_email
+                        email_body = build_material_email(
+                            header_title='Damaged Material Return',
+                            status_label='Review Required',
+                            status_variant='urgent',
+                            project_name=project_name,
+                            detail_rows=[
+                                ('Material', f'{material_name} ({material_code})'),
+                                ('Quantity', f'{quantity} {unit}'),
+                                ('Condition', condition),
+                                ('Returned By', returned_by_name),
+                            ],
+                            detail_title='Return Details',
+                            action_message='Please log in and go to <strong>M2 Store &rarr; Stock In &rarr; Returns</strong> '
+                                           'to decide: dispose or add to backup stock.',
+                            action_variant='urgent',
+                        )
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=pm.email,
+                            subject=f'Damaged Material Return - Review Required [{project_name}]',
+                            message=email_body,
+                            notification_type='damaged_return_review'
+                        )
         except Exception as e:
             log.error(f"Error sending damaged return notification: {e}")
 
@@ -1873,12 +2310,17 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
     def notify_delivery_note_dispatched(
         delivery_note_number, project_name, materials_summary,
         dispatched_by_name, site_engineer_ids, buyer_user_id=None,
-        vehicle_number=None, driver_name=None, driver_contact=None, cr_id=None
+        vehicle_number=None, driver_name=None, driver_contact=None,
+        cr_id=None, materials_items=None
     ):
         """
         Notify Site Engineers + Buyer when materials are dispatched (IN_TRANSIT)
         Trigger: PM dispatches delivery note in dispatch_delivery_note()
         Recipients: Site Engineers assigned to project, Buyer who purchased
+
+        Args:
+            materials_items: Optional list of dicts with material_name, quantity, unit, brand, size
+                             for rendering a full materials table in the email.
         """
         try:
             transport_info = ''
@@ -1891,6 +2333,10 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
 
             # Notify all Site Engineers
             for se_id in (site_engineer_ids or []):
+                # Guard: skip if SE was already notified about this delivery note within 10 minutes
+                if check_duplicate_notification(se_id, 'Materials In Transit to Your Site', 'delivery_note_number', delivery_note_number, minutes=10):
+                    log.info(f"Skipping duplicate dispatch notification for SE {se_id}, DN {delivery_note_number}")
+                    continue
                 notification = NotificationManager.create_notification(
                     user_id=se_id,
                     type='delivery_note_dispatched',
@@ -1916,7 +2362,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 send_notification_to_user(se_id, notification.to_dict())
 
             # Notify Buyer
-            if buyer_user_id:
+            if buyer_user_id and not check_duplicate_notification(buyer_user_id, 'Materials Dispatched to Site', 'delivery_note_number', delivery_note_number, minutes=10):
                 buyer_notification = NotificationManager.create_notification(
                     user_id=buyer_user_id,
                     type='delivery_note_dispatched',
@@ -1938,44 +2384,69 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
                 send_notification_to_user(buyer_user_id, buyer_notification.to_dict())
 
-            # Send emails to SE(s) and Buyer
+            # Send professional emails to SE(s) and Buyer
             try:
-                transport_details = ''
+                from utils.email_styles import build_material_email
+                from datetime import datetime
+
+                transport_rows = []
                 if vehicle_number:
-                    transport_details += f'<li><strong>Vehicle:</strong> {vehicle_number}</li>'
+                    transport_rows.append(('Vehicle', vehicle_number))
                 if driver_name:
-                    transport_details += f'<li><strong>Driver:</strong> {driver_name}</li>'
+                    transport_rows.append(('Driver', driver_name))
                 if driver_contact:
-                    transport_details += f'<li><strong>Driver Contact:</strong> {driver_contact}</li>'
+                    transport_rows.append(('Driver Contact', driver_contact))
+                transport_rows.append(('Dispatched By', dispatched_by_name))
+
+                date_str = datetime.utcnow().strftime('%d %b %Y, %I:%M %p')
 
                 for se_id in (site_engineer_ids or []):
                     se = User.query.get(se_id)
                     if se and se.email:
+                        email_body = build_material_email(
+                            header_title='Materials Dispatched to Your Site',
+                            status_label='In Transit',
+                            status_variant='info',
+                            reference_number=delivery_note_number,
+                            reference_label='Delivery Note',
+                            project_name=project_name,
+                            date_str=date_str,
+                            detail_rows=transport_rows,
+                            detail_title='Transport Details',
+                            materials=materials_items,
+                            materials_summary=str(materials_summary)[:300] if not materials_items else None,
+                            action_message='Please confirm receipt once the delivery arrives at your site.',
+                            action_variant='info',
+                        )
                         ComprehensiveNotificationService.send_email_notification(
                             recipient=se.email,
                             subject=f'Materials In Transit - {project_name}',
-                            message=f'''
-                            <h2>Materials Dispatched to Your Site</h2>
-                            <p>Delivery Note <strong>{delivery_note_number}</strong> has been dispatched to <strong>{project_name}</strong>.</p>
-                            {'<ul>' + transport_details + '</ul>' if transport_details else ''}
-                            <p><strong>Materials:</strong> {str(materials_summary)[:200]}</p>
-                            <p>Please confirm receipt once the delivery arrives at site.</p>
-                            ''',
+                            message=email_body,
                             notification_type='delivery_note_dispatched'
                         )
 
                 if buyer_user_id:
                     buyer = User.query.get(buyer_user_id)
                     if buyer and buyer.email:
+                        email_body = build_material_email(
+                            header_title='Materials In Transit',
+                            status_label='Dispatched',
+                            status_variant='info',
+                            reference_number=delivery_note_number,
+                            reference_label='Delivery Note',
+                            project_name=project_name,
+                            date_str=date_str,
+                            detail_rows=transport_rows,
+                            detail_title='Transport Details',
+                            materials=materials_items,
+                            materials_summary=str(materials_summary)[:300] if not materials_items else None,
+                            action_message='You will be notified once the delivery is confirmed at site.',
+                            action_variant='info',
+                        )
                         ComprehensiveNotificationService.send_email_notification(
                             recipient=buyer.email,
                             subject=f'Materials Dispatched to Site - {project_name}',
-                            message=f'''
-                            <h2>Materials In Transit</h2>
-                            <p>Delivery Note <strong>{delivery_note_number}</strong> is now in transit to <strong>{project_name}</strong>.</p>
-                            {'<ul>' + transport_details + '</ul>' if transport_details else ''}
-                            <p>You will be notified once delivery is confirmed at site.</p>
-                            ''',
+                            message=email_body,
                             notification_type='delivery_note_dispatched'
                         )
             except Exception as email_err:
@@ -2016,25 +2487,117 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
             send_notification_to_user(buyer_user_id, notification.to_dict())
 
-            # Also send email (catches offline users)
+            # Send professional email (catches offline users)
             try:
+                from utils.email_styles import build_material_email
+                from datetime import datetime
+
                 buyer = User.query.get(buyer_user_id)
                 if buyer and buyer.email:
+                    email_body = build_material_email(
+                        header_title='Material Request Approved',
+                        status_label='Approved',
+                        status_variant='success',
+                        reference_number=f'#{request_number}',
+                        reference_label='Request',
+                        project_name=project_name,
+                        date_str=datetime.utcnow().strftime('%d %b %Y, %I:%M %p'),
+                        detail_rows=[('Approved By', approved_by_name)],
+                        detail_title='Approval Details',
+                        materials_summary=str(materials_summary)[:300],
+                        action_message='Materials are being prepared for dispatch to site. '
+                                       'You can track progress in your Purchase Orders.',
+                        action_variant='info',
+                    )
                     ComprehensiveNotificationService.send_email_notification(
                         recipient=buyer.email,
                         subject=f'Material Request Approved - {project_name}',
-                        message=f'''
-                        <h2>Material Request Approved</h2>
-                        <p>{approved_by_name} has approved your material request <strong>#{request_number}</strong> for project <strong>{project_name}</strong>.</p>
-                        <p><strong>Materials:</strong> {str(materials_summary)[:200]}</p>
-                        <p>Materials are being prepared for dispatch to site. You can track progress in your Purchase Orders.</p>
-                        ''',
+                        message=email_body,
                         notification_type='imr_approved'
                     )
             except Exception as email_err:
                 log.error(f"Failed to send IMR approved email: {email_err}")
         except Exception as e:
             log.error(f"Error sending IMR approved notification: {e}")
+
+    @staticmethod
+    def notify_imr_dispatched(
+        request_number, project_name, materials_summary,
+        dispatched_by_name, site_engineer_ids, buyer_user_id=None,
+        dispatch_date=None, expected_delivery_date=None, request_id=None
+    ):
+        """
+        Notify Site Engineers (and optionally Buyer) when PM dispatches material to site.
+        Trigger: dispatch_material() in inventory_controller.py
+        Recipients: Site Engineers assigned to the project, Buyer who raised the request
+        """
+        try:
+            dispatch_date_str = dispatch_date.strftime('%d %b %Y') if dispatch_date else 'Today'
+            delivery_str = expected_delivery_date.strftime('%d %b %Y') if expected_delivery_date else 'N/A'
+
+            # Notify each Site Engineer
+            for se_id in (site_engineer_ids or []):
+                try:
+                    notification = NotificationManager.create_notification(
+                        user_id=se_id,
+                        type='imr_dispatched',
+                        title=f'Materials Dispatched - {project_name}',
+                        message=(
+                            f'{dispatched_by_name} has dispatched material request #{request_number} '
+                            f'for {project_name}. Materials: {str(materials_summary)[:100]}. '
+                            f'Dispatched on {dispatch_date_str}. Expected delivery: {delivery_str}.'
+                        ),
+                        priority='high',
+                        category='inventory',
+                        action_required=True,
+                        action_url=f'/site-engineer/stock-in',
+                        action_label='View Incoming Materials',
+                        metadata={
+                            'request_number': request_number,
+                            'project_name': project_name,
+                            'request_id': request_id,
+                            'dispatch_date': dispatch_date_str,
+                            'expected_delivery_date': delivery_str,
+                            'workflow': 'imr_dispatch',
+                            'target_role': 'site_engineer'
+                        },
+                        sender_name=dispatched_by_name
+                    )
+                    send_notification_to_user(se_id, notification.to_dict())
+                except Exception as se_err:
+                    log.error(f"Failed to notify site engineer {se_id}: {se_err}")
+
+            # Notify Buyer (FYI — materials are on their way)
+            if buyer_user_id:
+                try:
+                    notification = NotificationManager.create_notification(
+                        user_id=buyer_user_id,
+                        type='imr_dispatched',
+                        title=f'Materials Dispatched to Site - {project_name}',
+                        message=(
+                            f'Material request #{request_number} for {project_name} has been dispatched to site. '
+                            f'Materials: {str(materials_summary)[:100]}. Dispatched on {dispatch_date_str}.'
+                        ),
+                        priority='normal',
+                        category='inventory',
+                        action_required=False,
+                        action_url=f'/buyer/purchase-orders?tab=ongoing&subtab=store_approved',
+                        action_label='View Purchase Orders',
+                        metadata={
+                            'request_number': request_number,
+                            'project_name': project_name,
+                            'request_id': request_id,
+                            'workflow': 'imr_dispatch',
+                            'target_role': 'buyer'
+                        },
+                        sender_name=dispatched_by_name
+                    )
+                    send_notification_to_user(buyer_user_id, notification.to_dict())
+                except Exception as buyer_err:
+                    log.error(f"Failed to notify buyer {buyer_user_id}: {buyer_err}")
+
+        except Exception as e:
+            log.error(f"Error sending IMR dispatched notification: {e}")
 
     @staticmethod
     def notify_delivery_note_confirmed(
@@ -2092,19 +2655,32 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
                 send_notification_to_user(pm_id, pm_notification.to_dict())
 
-            # Send emails
+            # Send professional emails
             try:
+                from utils.email_styles import build_material_email
+                from datetime import datetime
+
                 if buyer_user_id:
                     buyer = User.query.get(buyer_user_id)
                     if buyer and buyer.email:
+                        email_body = build_material_email(
+                            header_title='Delivery Confirmed',
+                            status_label='Delivered',
+                            status_variant='success',
+                            reference_number=delivery_note_number,
+                            reference_label='Delivery Note',
+                            project_name=project_name,
+                            date_str=datetime.utcnow().strftime('%d %b %Y, %I:%M %p'),
+                            detail_rows=[('Confirmed By', received_by_name)],
+                            detail_title='Confirmation Details',
+                            action_message='The purchase cycle for this material request is now complete. '
+                                           'You can view completed orders in your Purchase Orders section.',
+                            action_variant='success',
+                        )
                         ComprehensiveNotificationService.send_email_notification(
                             recipient=buyer.email,
                             subject=f'Materials Delivered to Site - {project_name}',
-                            message=f'''
-                            <h2>Delivery Confirmed</h2>
-                            <p>Delivery Note <strong>{delivery_note_number}</strong> has been confirmed received at <strong>{project_name}</strong> by {received_by_name}.</p>
-                            <p>The purchase cycle for this material request is now complete.</p>
-                            ''',
+                            message=email_body,
                             notification_type='delivery_note_confirmed'
                         )
             except Exception as email_err:
@@ -2144,19 +2720,31 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
             send_notification_to_user(se_user_id, notification.to_dict())
 
-            # Also send email
+            # Send professional email
             try:
+                from utils.email_styles import build_material_email
+                from datetime import datetime
+
                 se = User.query.get(se_user_id)
                 if se and se.email:
+                    email_body = build_material_email(
+                        header_title='Return Received at M2 Store',
+                        status_label='Received',
+                        status_variant='success',
+                        reference_number=return_note_number,
+                        reference_label='Return Note',
+                        project_name=project_name,
+                        date_str=datetime.utcnow().strftime('%d %b %Y, %I:%M %p'),
+                        detail_rows=[('Received By', received_by_name)],
+                        detail_title='Receipt Confirmation',
+                        materials_summary=str(materials_summary)[:300],
+                        action_message='The returned materials are now being processed at the warehouse.',
+                        action_variant='success',
+                    )
                     ComprehensiveNotificationService.send_email_notification(
                         recipient=se.email,
                         subject=f'Return Received at M2 Store - {project_name}',
-                        message=f'''
-                        <h2>Return Received at M2 Store</h2>
-                        <p>{received_by_name} has confirmed receipt of Return Note <strong>{return_note_number}</strong> at M2 Store for project <strong>{project_name}</strong>.</p>
-                        <p><strong>Materials returned:</strong> {str(materials_summary)[:200]}</p>
-                        <p>The returned materials are now being processed at the warehouse.</p>
-                        ''',
+                        message=email_body,
                         notification_type='return_received_at_store'
                     )
             except Exception as email_err:
@@ -2607,6 +3195,569 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             log.error(f"Error sending simple notification to user {user_id}: {e}")
 
 
+    # ==================== PROCUREMENT ASSIGNMENT NOTIFICATIONS ====================
+
+    @staticmethod
+    def notify_buyer_cr_assigned(
+        cr_id, cr_number, project_name,
+        assigned_by_name,
+        buyer_user_id,
+        notes=None
+    ):
+        """
+        Notify Buyer when PM assigns a CR to procurement for purchasing.
+        Trigger: change_request_controller.py — when PM sets assigned_to_buyer_user_id
+        Recipients: The specific buyer assigned
+        Priority: HIGH (action required — buyer must act)
+        """
+        try:
+            if check_duplicate_notification(buyer_user_id, 'CR Assigned', 'cr_id', cr_id, minutes=5):
+                return
+
+            action_url = build_notification_action_url(
+                user_id=buyer_user_id,
+                base_page='change-requests',
+                query_params={'cr_id': cr_id, 'tab': 'assigned'},
+                fallback_role_route='buyer'
+            )
+
+            notification = NotificationManager.create_notification(
+                user_id=buyer_user_id,
+                type='approval',
+                title=f'CR Assigned to You — {project_name}',
+                message=f'{assigned_by_name} assigned change request {cr_number} to you for procurement. '
+                        f'Project: {project_name}.'
+                        + (f' Notes: {notes}' if notes else ''),
+                priority='high',
+                category='change_request',
+                action_required=True,
+                action_url=action_url,
+                action_label='View CR',
+                metadata={
+                    'cr_id': cr_id,
+                    'cr_number': cr_number,
+                    'project_name': project_name,
+                    'workflow': 'cr_buyer_assignment'
+                },
+                sender_name=assigned_by_name
+            )
+            send_notification_to_user(buyer_user_id, notification.to_dict())
+
+            # Email fallback — buyer must act on this
+            if ComprehensiveNotificationService.is_user_offline(buyer_user_id):
+                buyer = User.query.get(buyer_user_id)
+                if buyer and buyer.email:
+                    ComprehensiveNotificationService.send_email_notification(
+                        recipient=buyer.email,
+                        subject=f'Change Request Assigned to You — {project_name}',
+                        message=f'''
+                        <h2>Change Request Assigned to You</h2>
+                        <p><strong>{assigned_by_name}</strong> has assigned change request
+                        <strong>{cr_number}</strong> to you for procurement in
+                        <strong>{project_name}</strong>.</p>
+                        ''' + ('<p>Notes: ' + str(notes) + '</p>' if notes else '') + '''
+                        <p>Please log in and go to <strong>Change Requests → Assigned</strong>
+                        to review and proceed with purchasing.</p>
+                        ''',
+                        notification_type='cr_buyer_assignment'
+                    )
+        except Exception as e:
+            log.error(f"Error sending buyer CR assignment notification: {e}")
+
+    @staticmethod
+    def notify_td_inventory_escalation(
+        item_name,
+        item_type,
+        condition,
+        project_name,
+        escalated_by_name,
+        return_id=None,
+        disposal_reason=None
+    ):
+        """
+        Notify all Technical Directors when PM escalates a damaged/defective item for disposal approval.
+        Trigger: inventory_controller.py — review_disposal() when action='approve' (full disposal)
+        Recipients: All Technical Directors
+        Priority: HIGH (TD must approve disposal)
+        """
+        try:
+            td_role = Role.query.filter_by(role='technicalDirector').first()
+            if not td_role:
+                log.warning("Technical Director role not found for inventory escalation")
+                return
+
+            td_users = User.query.filter_by(
+                role_id=td_role.role_id,
+                is_active=True,
+                is_deleted=False
+            ).all()
+
+            for td in td_users:
+                if check_duplicate_notification(td.user_id, 'Disposal Escalation', 'return_id', return_id or item_name, minutes=5):
+                    continue
+
+                action_url = build_notification_action_url(
+                    user_id=td.user_id,
+                    base_page='disposal-approvals',
+                    query_params={},
+                    fallback_role_route='technical-director'
+                )
+
+                notification = NotificationManager.create_notification(
+                    user_id=td.user_id,
+                    type='warning',
+                    title=f'Disposal Approval Required — {project_name}',
+                    message=f'{escalated_by_name} has requested disposal approval for {item_type} '
+                            f'"{item_name}" (condition: {condition}) from {project_name}.'
+                            + (f' Reason: {disposal_reason}' if disposal_reason else ''),
+                    priority='high',
+                    category='inventory',
+                    action_required=True,
+                    action_url=action_url,
+                    action_label='Review Disposal',
+                    metadata={
+                        'return_id': return_id,
+                        'item_name': item_name,
+                        'item_type': item_type,
+                        'condition': condition,
+                        'project_name': project_name,
+                        'workflow': 'td_inventory_escalation'
+                    },
+                    sender_name=escalated_by_name
+                )
+                send_notification_to_user(td.user_id, notification.to_dict())
+
+                # Email fallback — TD must approve (action required)
+                if ComprehensiveNotificationService.is_user_offline(td.user_id):
+                    if td.email:
+                        from utils.email_styles import build_material_email
+                        detail_rows = [
+                            ('Item', item_name),
+                            ('Type', item_type),
+                            ('Condition', condition),
+                            ('Escalated By', escalated_by_name),
+                        ]
+                        if disposal_reason:
+                            detail_rows.append(('Reason', disposal_reason))
+
+                        email_body = build_material_email(
+                            header_title='Disposal Approval Required',
+                            status_label='Approval Needed',
+                            status_variant='urgent',
+                            project_name=project_name,
+                            detail_rows=detail_rows,
+                            detail_title='Disposal Details',
+                            action_message='Please log in and go to <strong>Inventory Approvals &rarr; Pending</strong> '
+                                           'to review and approve this disposal request.',
+                            action_variant='urgent',
+                        )
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=td.email,
+                            subject=f'Disposal Approval Required — {project_name}',
+                            message=email_body,
+                            notification_type='td_inventory_escalation'
+                        )
+
+        except Exception as e:
+            log.error(f"Error sending TD inventory escalation notification: {e}")
+
+
+
+    @staticmethod
+    def notify_rdn_created(
+        rdn_number,
+        project_name,
+        materials_count,
+        returned_by_name,
+        returned_by_user_id
+    ):
+        """
+        Notify all Production Managers when SE creates a Return Delivery Note.
+        Trigger: create_return_delivery_note() in inventory_controller.py
+        Recipients: All Production Managers
+        """
+        try:
+            pm_role = Role.query.filter_by(role='productionManager').first()
+            if not pm_role:
+                return
+            pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True, is_deleted=False).all()
+            for pm in pm_users:
+                if check_duplicate_notification(pm.user_id, 'Return Delivery Note Created', 'rdn_number', rdn_number, minutes=5):
+                    continue
+                action_url = build_notification_action_url(
+                    user_id=pm.user_id,
+                    base_page='m2-store/receive-returns',
+                    query_params={'tab': 'pending'},
+                    fallback_role_route='production-manager'
+                )
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='info',
+                    title=f'Return Incoming — {project_name}',
+                    message=f'{returned_by_name} has created return note {rdn_number} with {materials_count} material(s) from {project_name}. Awaiting dispatch.',
+                    priority='normal',
+                    category='inventory',
+                    action_required=True,
+                    action_url=action_url,
+                    action_label='View Returns',
+                    metadata={
+                        'rdn_number': rdn_number,
+                        'project_name': project_name,
+                        'workflow': 'rdn_created'
+                    },
+                    sender_name=returned_by_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+                if ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                    if pm.email:
+                        from utils.email_styles import build_material_email
+                        email_body = build_material_email(
+                            header_title='Material Return Incoming',
+                            status_label='Awaiting Dispatch',
+                            status_variant='neutral',
+                            reference_number=rdn_number,
+                            reference_label='Return Note',
+                            project_name=project_name,
+                            detail_rows=[
+                                ('Created By', returned_by_name),
+                                ('Materials Count', f'{materials_count} material(s)'),
+                            ],
+                            detail_title='Return Details',
+                            action_message='Please log in to review once the return is dispatched from site.',
+                            action_variant='info',
+                        )
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=pm.email,
+                            subject=f'Return Incoming — {project_name}',
+                            message=email_body,
+                            notification_type='rdn_created'
+                        )
+        except Exception as e:
+            log.error(f"Error sending RDN created notification: {e}")
+
+    @staticmethod
+    def notify_rdn_dispatched(
+        rdn_number,
+        project_name,
+        driver_name,
+        returned_by_name,
+        pm_user_ids
+    ):
+        """
+        Notify Production Managers when RDN is dispatched (in transit to store).
+        Trigger: dispatch_return_delivery_note() in inventory_controller.py
+        Recipients: All Production Managers
+        """
+        try:
+            for pm_id in pm_user_ids:
+                if check_duplicate_notification(pm_id, 'Return In Transit', 'rdn_number', rdn_number, minutes=5):
+                    continue
+                action_url = build_notification_action_url(
+                    user_id=pm_id,
+                    base_page='m2-store/receive-returns',
+                    query_params={'tab': 'pending'},
+                    fallback_role_route='production-manager'
+                )
+                notification = NotificationManager.create_notification(
+                    user_id=pm_id,
+                    type='info',
+                    title=f'Return In Transit — {project_name}',
+                    message=f'Return note {rdn_number} from {project_name} is now in transit. Driver: {driver_name}. Prepare to receive.',
+                    priority='normal',
+                    category='inventory',
+                    action_required=True,
+                    action_url=action_url,
+                    action_label='Track Return',
+                    metadata={
+                        'rdn_number': rdn_number,
+                        'project_name': project_name,
+                        'workflow': 'rdn_dispatched'
+                    },
+                    sender_name=returned_by_name
+                )
+                send_notification_to_user(pm_id, notification.to_dict())
+                pm_user = User.query.get(pm_id)
+                if pm_user and ComprehensiveNotificationService.is_user_offline(pm_id):
+                    if pm_user.email:
+                        from utils.email_styles import build_material_email
+                        email_body = build_material_email(
+                            header_title='Material Return In Transit',
+                            status_label='In Transit',
+                            status_variant='warning',
+                            reference_number=rdn_number,
+                            reference_label='Return Note',
+                            project_name=project_name,
+                            detail_rows=[
+                                ('Driver', driver_name),
+                                ('Returned By', returned_by_name),
+                            ],
+                            detail_title='Transport Details',
+                            action_message='Please be ready to receive and inspect at M2 Store warehouse.',
+                            action_variant='warning',
+                        )
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=pm_user.email,
+                            subject=f'Return In Transit — {project_name}',
+                            message=email_body,
+                            notification_type='rdn_dispatched'
+                        )
+        except Exception as e:
+            log.error(f"Error sending RDN dispatched notification: {e}")
+
+    @staticmethod
+    def notify_material_repaired(
+        material_name,
+        quantity,
+        project_name,
+        repaired_by_name,
+        se_user_id=None,
+        pm_user_ids=None
+    ):
+        """
+        Notify SE + PMs when repaired material is moved back to main stock.
+        Trigger: add_repaired_to_stock() in inventory_controller.py
+        Recipients: SE who returned it + all Production Managers
+        """
+        try:
+            recipients = []
+            if se_user_id:
+                recipients.append(('se', se_user_id))
+            if pm_user_ids:
+                for pm_id in pm_user_ids:
+                    recipients.append(('pm', pm_id))
+
+            for role_type, user_id in recipients:
+                if check_duplicate_notification(user_id, 'Material Repaired', 'material_name', material_name, minutes=5):
+                    continue
+                if role_type == 'se':
+                    action_url = build_notification_action_url(
+                        user_id=user_id,
+                        base_page='material-receipts',
+                        query_params={'tab': 'history'},
+                        fallback_role_route='site-engineer'
+                    )
+                else:
+                    action_url = build_notification_action_url(
+                        user_id=user_id,
+                        base_page='m2-store/stock-in',
+                        fallback_role_route='production-manager'
+                    )
+                notification = NotificationManager.create_notification(
+                    user_id=user_id,
+                    type='success',
+                    title=f'Material Repaired — {material_name}',
+                    message=f'{quantity} unit(s) of "{material_name}" have been repaired and returned to main stock. Project: {project_name}.',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url=action_url,
+                    action_label='View Stock',
+                    metadata={
+                        'material_name': material_name,
+                        'project_name': project_name,
+                        'workflow': 'material_repaired'
+                    },
+                    sender_name=repaired_by_name
+                )
+                send_notification_to_user(user_id, notification.to_dict())
+        except Exception as e:
+            log.error(f"Error sending material repaired notification: {e}")
+
+    @staticmethod
+    def notify_material_disposed(
+        material_name,
+        project_name,
+        disposed_by_name,
+        se_user_id=None,
+        pm_user_ids=None
+    ):
+        """
+        Notify SE + PMs when material is physically disposed.
+        Trigger: mark_as_disposed() in inventory_controller.py
+        Recipients: SE who returned it + all Production Managers
+        """
+        try:
+            recipients = []
+            if se_user_id:
+                recipients.append(('se', se_user_id))
+            if pm_user_ids:
+                for pm_id in pm_user_ids:
+                    recipients.append(('pm', pm_id))
+
+            for role_type, user_id in recipients:
+                if check_duplicate_notification(user_id, 'Material Disposed', 'material_name', material_name, minutes=5):
+                    continue
+                if role_type == 'se':
+                    action_url = build_notification_action_url(
+                        user_id=user_id,
+                        base_page='material-receipts',
+                        query_params={'tab': 'history'},
+                        fallback_role_route='site-engineer'
+                    )
+                else:
+                    action_url = build_notification_action_url(
+                        user_id=user_id,
+                        base_page='m2-store/disposal',
+                        fallback_role_route='production-manager'
+                    )
+                notification = NotificationManager.create_notification(
+                    user_id=user_id,
+                    type='warning',
+                    title=f'Material Disposed — {material_name}',
+                    message=f'"{material_name}" from {project_name} has been physically disposed by {disposed_by_name}.',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url=action_url,
+                    action_label='View Disposal Log',
+                    metadata={
+                        'material_name': material_name,
+                        'project_name': project_name,
+                        'workflow': 'material_disposed'
+                    },
+                    sender_name=disposed_by_name
+                )
+                send_notification_to_user(user_id, notification.to_dict())
+        except Exception as e:
+            log.error(f"Error sending material disposed notification: {e}")
+
+    @staticmethod
+    def notify_asset_returned_good(
+        category_name,
+        quantity,
+        project_name,
+        returned_by_name,
+        pm_user_ids
+    ):
+        """
+        Notify Production Managers when asset returned in good condition.
+        Trigger: return_asset() in asset_controller.py (good condition path)
+        Recipients: All Production Managers
+        """
+        try:
+            for pm_id in pm_user_ids:
+                if check_duplicate_notification(pm_id, 'Asset Returned', 'category_name', category_name, minutes=5):
+                    continue
+                action_url = build_notification_action_url(
+                    user_id=pm_id,
+                    base_page='returnable-assets/stock-in',
+                    fallback_role_route='production-manager'
+                )
+                notification = NotificationManager.create_notification(
+                    user_id=pm_id,
+                    type='success',
+                    title=f'Asset Returned — {category_name}',
+                    message=f'{returned_by_name} returned {quantity} unit(s) of "{category_name}" in good condition from {project_name}.',
+                    priority='normal',
+                    category='assets',
+                    action_required=False,
+                    action_url=action_url,
+                    action_label='View Assets',
+                    metadata={
+                        'category_name': category_name,
+                        'project_name': project_name,
+                        'workflow': 'asset_returned_good'
+                    },
+                    sender_name=returned_by_name
+                )
+                send_notification_to_user(pm_id, notification.to_dict())
+        except Exception as e:
+            log.error(f"Error sending asset returned good notification: {e}")
+
+    @staticmethod
+    def notify_store_routing(
+        cr_id,
+        cr_number,
+        project_name,
+        buyer_name,
+        buyer_user_id,
+        materials_count,
+        routing_type='store'
+    ):
+        """
+        Notify all Production Managers when buyer routes materials to M2 Store.
+        Trigger: complete_from_store() or route_all_to_store() in store_controller.py
+        Recipients: All Production Managers
+        Priority: NORMAL (PM must process the incoming store request)
+        """
+        try:
+            pm_role = Role.query.filter_by(role='productionManager').first()
+            if not pm_role:
+                log.warning("Production Manager role not found for store routing notification")
+                return
+
+            pm_users = User.query.filter_by(
+                role_id=pm_role.role_id,
+                is_active=True,
+                is_deleted=False
+            ).all()
+
+            label = 'from inventory' if routing_type == 'store' else 'to M2 Store'
+
+            for pm in pm_users:
+                if check_duplicate_notification(pm.user_id, 'Store Request', 'cr_id', cr_id, minutes=5):
+                    continue
+
+                action_url = build_notification_action_url(
+                    user_id=pm.user_id,
+                    base_page='m2-store/stock-in',
+                    query_params={'view': 'store_requests'},
+                    fallback_role_route='production-manager'
+                )
+
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='info',
+                    title=f'Store Request — {project_name}',
+                    message=f'{buyer_name} has sent {materials_count} material(s) {label} for '
+                            f'CR-{cr_number or cr_id} ({project_name}). Please review and process.',
+                    priority='normal',
+                    category='inventory',
+                    action_required=True,
+                    action_url=action_url,
+                    action_label='View Store Requests',
+                    metadata={
+                        'cr_id': cr_id,
+                        'cr_number': cr_number,
+                        'project_name': project_name,
+                        'materials_count': materials_count,
+                        'workflow': 'store_routing',
+                        'target_role': 'productionManager'
+                    },
+                    sender_name=buyer_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+
+                # Email fallback — PM must act on this
+                if ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                    if pm.email:
+                        from utils.email_styles import build_material_email
+                        email_body = build_material_email(
+                            header_title='Store Material Request',
+                            status_label='Action Required',
+                            status_variant='warning',
+                            reference_number=f'CR-{cr_number or cr_id}',
+                            reference_label='Change Request',
+                            project_name=project_name,
+                            detail_rows=[
+                                ('Requested By', buyer_name),
+                                ('Materials', f'{materials_count} material(s) {label}'),
+                            ],
+                            detail_title='Request Details',
+                            action_message='Please log in and go to <strong>M2 Store &rarr; Stock In &rarr; Store Requests</strong> '
+                                           'to review and process this request.',
+                            action_variant='warning',
+                        )
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=pm.email,
+                            subject=f'Store Request — {project_name}',
+                            message=email_body,
+                            notification_type='store_routing'
+                        )
+
+        except Exception as e:
+            log.error(f"Error sending store routing notification: {e}")
+
     @staticmethod
     def send_email_notification(recipient, subject, message, notification_type=None, action_url=None):
         """
@@ -2633,6 +3784,332 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             log.info(f"📧 Email queued: {notification_type or subject} → {recipient}")
         except Exception as e:
             log.error(f"Failed to send email notification to {recipient}: {e}")
+
+    # ==================== INVENTORY MATERIAL REQUEST NOTIFICATIONS ====================
+
+    @staticmethod
+    def notify_imr_sent_for_approval(
+        request_id, request_number, project_name,
+        material_name, quantity, unit, sent_by_name, sent_by_user_id
+    ):
+        """
+        Notify all Production Managers when SE sends Internal Material Request.
+        Trigger: send_internal_material_request() in inventory_controller.py
+        Recipients: All Production Managers
+        """
+        try:
+            pm_role = Role.query.filter_by(role='productionManager').first()
+            if not pm_role:
+                log.warning("productionManager role not found for IMR sent notification")
+                return
+            pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True, is_deleted=False).all()
+            for pm in pm_users:
+                if check_duplicate_notification(pm.user_id, 'Material Request Sent', 'request_number', request_number, minutes=5):
+                    continue
+                action_url = build_notification_action_url(
+                    user_id=pm.user_id,
+                    base_page='m2-store/internal-requests',
+                    query_params={'tab': 'pending'},
+                    fallback_role_route='production-manager'
+                )
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='info',
+                    title=f'Material Request #{request_number} — {project_name}',
+                    message=f'{sent_by_name} sent material request #{request_number} for {quantity} {unit or "units"} of {material_name} from {project_name}. Awaiting your approval.',
+                    priority='high',
+                    category='inventory',
+                    action_required=True,
+                    action_url=action_url,
+                    action_label='Review Request',
+                    metadata={
+                        'request_id': request_id,
+                        'request_number': request_number,
+                        'project_name': project_name,
+                        'workflow': 'imr_sent_for_approval'
+                    },
+                    sender_name=sent_by_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+                if ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                    if pm.email:
+                        from utils.email_styles import build_material_email
+                        email_body = build_material_email(
+                            header_title='Material Request Awaiting Approval',
+                            status_label='Pending Approval',
+                            status_variant='warning',
+                            reference_number=f'#{request_number}',
+                            reference_label='Request',
+                            project_name=project_name,
+                            detail_rows=[
+                                ('Material', material_name),
+                                ('Quantity', f'{quantity} {unit or "units"}'),
+                                ('Requested By', sent_by_name),
+                            ],
+                            detail_title='Request Details',
+                            action_message='Please log in to review and approve this material request.',
+                            action_variant='warning',
+                        )
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=pm.email,
+                            subject=f'Material Request #{request_number} — {project_name}',
+                            message=email_body,
+                            notification_type='imr_sent_for_approval'
+                        )
+        except Exception as e:
+            log.error(f"Error sending IMR sent-for-approval notification: {e}")
+
+    @staticmethod
+    def notify_material_issued_from_inventory(
+        request_number, material_name, quantity, unit,
+        project_name, issued_by_name, requester_user_id
+    ):
+        """
+        Notify the requester when PM issues material from inventory.
+        Trigger: issue_material_from_inventory() in inventory_controller.py
+        Recipients: The user who created the IMR (SE or Buyer)
+        """
+        try:
+            if not requester_user_id:
+                return
+            if check_duplicate_notification(requester_user_id, 'Material Issued', 'request_number', request_number, minutes=5):
+                return
+            action_url = build_notification_action_url(
+                user_id=requester_user_id,
+                base_page='material-receipts',
+                query_params={'tab': 'fulfilled'},
+                fallback_role_route='site-engineer'
+            )
+            notification = NotificationManager.create_notification(
+                user_id=requester_user_id,
+                type='success',
+                title=f'Material Issued — {project_name}',
+                message=f'{issued_by_name} issued {quantity} {unit or "units"} of {material_name} for request #{request_number} from {project_name}.',
+                priority='normal',
+                category='inventory',
+                action_required=False,
+                action_url=action_url,
+                action_label='View Materials',
+                metadata={
+                    'request_number': request_number,
+                    'material_name': material_name,
+                    'project_name': project_name,
+                    'workflow': 'material_issued_from_inventory'
+                },
+                sender_name=issued_by_name
+            )
+            send_notification_to_user(requester_user_id, notification.to_dict())
+        except Exception as e:
+            log.error(f"Error sending material issued notification: {e}")
+
+    @staticmethod
+    def notify_rdn_issued(
+        rdn_number, project_name, materials_count,
+        issued_by_name, issued_by_user_id
+    ):
+        """
+        Notify all Production Managers when SE issues (finalizes) a Return Delivery Note.
+        Trigger: issue_return_delivery_note() in inventory_controller.py
+        Recipients: All Production Managers
+        """
+        try:
+            pm_role = Role.query.filter_by(role='productionManager').first()
+            if not pm_role:
+                log.warning("productionManager role not found for RDN issued notification")
+                return
+            pm_users = User.query.filter_by(role_id=pm_role.role_id, is_active=True, is_deleted=False).all()
+            for pm in pm_users:
+                if check_duplicate_notification(pm.user_id, 'Return Note Issued', 'rdn_number', rdn_number, minutes=5):
+                    continue
+                action_url = build_notification_action_url(
+                    user_id=pm.user_id,
+                    base_page='m2-store/receive-returns',
+                    query_params={'tab': 'issued'},
+                    fallback_role_route='production-manager'
+                )
+                notification = NotificationManager.create_notification(
+                    user_id=pm.user_id,
+                    type='info',
+                    title=f'Return Note Issued — {project_name}',
+                    message=f'{issued_by_name} issued return note {rdn_number} with {materials_count} material(s) from {project_name}. Ready for dispatch.',
+                    priority='high',
+                    category='inventory',
+                    action_required=True,
+                    action_url=action_url,
+                    action_label='View Returns',
+                    metadata={
+                        'rdn_number': rdn_number,
+                        'project_name': project_name,
+                        'workflow': 'rdn_issued'
+                    },
+                    sender_name=issued_by_name
+                )
+                send_notification_to_user(pm.user_id, notification.to_dict())
+                if ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                    if pm.email:
+                        from utils.email_styles import build_material_email
+                        email_body = build_material_email(
+                            header_title='Return Delivery Note Issued',
+                            status_label='Ready for Dispatch',
+                            status_variant='warning',
+                            reference_number=rdn_number,
+                            reference_label='Return Note',
+                            project_name=project_name,
+                            detail_rows=[
+                                ('Issued By', issued_by_name),
+                                ('Materials Count', f'{materials_count} material(s)'),
+                            ],
+                            detail_title='Return Details',
+                            action_message='Please log in to review and dispatch this return.',
+                            action_variant='warning',
+                        )
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=pm.email,
+                            subject=f'Return Note Issued — {project_name}',
+                            message=email_body,
+                            notification_type='rdn_issued'
+                        )
+        except Exception as e:
+            log.error(f"Error sending RDN issued notification: {e}")
+
+    # ==================== MATERIAL DISPOSAL NOTIFICATIONS ====================
+
+    @staticmethod
+    def notify_material_disposal_requested(
+        return_id, material_name, material_code, quantity, unit,
+        disposal_reason, notes, estimated_value,
+        requested_by_name, pm_user_id
+    ):
+        """
+        Notify all Technical Directors when PM requests material disposal.
+        Trigger: request_material_disposal() or request_disposal_from_repair() in inventory_controller.py
+        Recipients: All Technical Directors (bell + email)
+        """
+        try:
+            td_role = Role.query.filter_by(role='technicalDirector').first()
+            if not td_role:
+                log.warning("technicalDirector role not found for material disposal notification")
+                return
+            td_users = User.query.filter_by(role_id=td_role.role_id, is_active=True, is_deleted=False).all()
+            reason_display = disposal_reason.replace('_', ' ').title() if disposal_reason else 'Damaged'
+
+            for td in td_users:
+                if check_duplicate_notification(td.user_id, 'Material Disposal Request', 'return_id', return_id, minutes=5):
+                    continue
+                action_url = build_notification_action_url(
+                    user_id=td.user_id,
+                    base_page='disposal-approvals',
+                    query_params={'tab': 'pending'},
+                    fallback_role_route='technical-director'
+                )
+                notification = NotificationManager.create_notification(
+                    user_id=td.user_id,
+                    type='warning',
+                    title=f'Material Disposal Request — {material_name}',
+                    message=f'{requested_by_name} requests disposal of {quantity} {unit or "units"} of {material_name} ({material_code}). Reason: {reason_display}. Est. value: AED {estimated_value:.2f}',
+                    priority='high',
+                    category='inventory',
+                    action_required=True,
+                    action_url=action_url,
+                    action_label='Review Disposal',
+                    metadata={
+                        'return_id': return_id,
+                        'material_name': material_name,
+                        'material_code': material_code,
+                        'workflow': 'material_disposal_request'
+                    },
+                    sender_name=requested_by_name
+                )
+                send_notification_to_user(td.user_id, notification.to_dict())
+                if ComprehensiveNotificationService.is_user_offline(td.user_id):
+                    if td.email:
+                        from utils.email_styles import build_material_email
+                        email_body = build_material_email(
+                            header_title='Material Disposal Request',
+                            status_label='Awaiting Approval',
+                            status_variant='warning',
+                            reference_number=material_code,
+                            reference_label='Material',
+                            project_name='Materials Catalog',
+                            detail_rows=[
+                                ('Material', material_name),
+                                ('Quantity', f'{quantity} {unit or "units"}'),
+                                ('Reason', reason_display),
+                                ('Est. Value', f'AED {estimated_value:.2f}'),
+                                ('Requested By', requested_by_name),
+                            ],
+                            detail_title='Disposal Details',
+                            action_message='Please log in to review and approve/reject this disposal request.',
+                            action_variant='warning',
+                        )
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=td.email,
+                            subject=f'Material Disposal Request — {material_name}',
+                            message=email_body,
+                            notification_type='material_disposal_request'
+                        )
+        except Exception as e:
+            log.error(f"Error sending material disposal request notification: {e}")
+
+    @staticmethod
+    def notify_material_disposal_reviewed(
+        return_id, material_name, quantity, unit,
+        action, reviewed_by_name, pm_user_id
+    ):
+        """
+        Notify Production Manager when TD reviews (approves/rejects/backup) their disposal request.
+        Trigger: review_disposal() in inventory_controller.py
+        Recipients: The PM who requested the disposal
+        """
+        try:
+            if not pm_user_id:
+                return
+            if check_duplicate_notification(pm_user_id, 'Disposal Review', 'return_id', return_id, minutes=5):
+                return
+
+            if action == 'approved':
+                title = f'Disposal Approved — {material_name}'
+                message = f'{reviewed_by_name} approved disposal of {quantity} {unit or "units"} of {material_name}. Proceed with disposal.'
+                notif_type = 'success'
+                priority = 'normal'
+            elif action == 'backup':
+                title = f'Material Sent to Backup — {material_name}'
+                message = f'{reviewed_by_name} moved {quantity} {unit or "units"} of {material_name} to backup stock.'
+                notif_type = 'info'
+                priority = 'normal'
+            else:
+                title = f'Disposal Rejected — {material_name}'
+                message = f'{reviewed_by_name} rejected disposal of {quantity} {unit or "units"} of {material_name}.'
+                notif_type = 'rejection'
+                priority = 'high'
+
+            action_url = build_notification_action_url(
+                user_id=pm_user_id,
+                base_page='m2-store/disposal',
+                query_params={},
+                fallback_role_route='production-manager'
+            )
+            notification = NotificationManager.create_notification(
+                user_id=pm_user_id,
+                type=notif_type,
+                title=title,
+                message=message,
+                priority=priority,
+                category='inventory',
+                action_required=False,
+                action_url=action_url,
+                action_label='View Disposal',
+                metadata={
+                    'return_id': return_id,
+                    'material_name': material_name,
+                    'action': action,
+                    'workflow': 'material_disposal_reviewed'
+                },
+                sender_name=reviewed_by_name
+            )
+            send_notification_to_user(pm_user_id, notification.to_dict())
+        except Exception as e:
+            log.error(f"Error sending material disposal reviewed notification: {e}")
 
 
 # Create singleton instance

@@ -240,7 +240,7 @@ def get_site_supervisors(project):
         role = batch_roles.get(user.role_id)
         if not role:
             return False
-        role_name_lower = role.role.lower().replace('_', '').replace(' ', '')
+        role_name_lower = role.role.lower().replace('_', '').replace(' ', '').replace('-', '')
         return role_name_lower in ['siteengineer', 'sitesupervisor', 'se']
 
     # Process direct site_supervisor_id
@@ -1779,6 +1779,30 @@ def send_internal_material_request(request_id):
         project = Project.query.get(internal_req.project_id)
         project_details = enrich_project_details(project) if project else None
 
+        # Notify Production Managers about new material request
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            project_name = project.project_name if project else f'Project {internal_req.project_id}'
+            # Get sender's name
+            sender_name = current_user
+            current_user_id = g.user.get('user_id')
+            if current_user_id:
+                sender_user = User.query.get(current_user_id)
+                if sender_user and sender_user.full_name:
+                    sender_name = sender_user.full_name
+            ComprehensiveNotificationService.notify_imr_sent_for_approval(
+                request_id=internal_req.request_id,
+                request_number=request_number,
+                project_name=project_name,
+                material_name=internal_req.item_name or 'Materials',
+                quantity=internal_req.quantity or 0,
+                unit=internal_req.size,
+                sent_by_name=sender_name,
+                sent_by_user_id=current_user_id
+            )
+        except Exception as notif_err:
+            print(f"Failed to send IMR sent-for-approval notification: {notif_err}")
+
         return jsonify({
             'message': 'Internal material request sent for approval successfully',
             'request': internal_req.to_dict(),
@@ -2710,6 +2734,56 @@ def dispatch_material(request_id):
             'size': internal_req.size
         }
 
+        # Send dispatch notification to Site Engineers and Buyer
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            from models.pm_assign_ss import PMAssignSS
+
+            # Build materials summary string
+            materials_summary = (
+                f"{material_info['material_name']} x{internal_req.quantity}"
+                if material_info['material_name']
+                else internal_req.item_name or 'Materials'
+            )
+
+            # Find Site Engineers assigned to this project
+            se_ids = []
+            if project:
+                pm_assignments = PMAssignSS.query.filter_by(
+                    project_id=project.project_id,
+                    is_deleted=False
+                ).all()
+                se_id_set = set()
+                if project.site_supervisor_id:
+                    se_id_set.add(project.site_supervisor_id)
+                for assignment in pm_assignments:
+                    if assignment.ss_ids:
+                        se_id_set.update(assignment.ss_ids)
+                    if assignment.assigned_to_se_id:
+                        se_id_set.add(assignment.assigned_to_se_id)
+                se_ids = list(se_id_set)
+
+            # Get dispatching user's display name
+            dispatcher = User.query.filter_by(email=current_user).first()
+            dispatched_by_name = dispatcher.full_name if dispatcher else current_user
+
+            # Get buyer who raised the request
+            buyer_id = internal_req.routed_by_buyer_id or internal_req.request_buyer_id
+
+            ComprehensiveNotificationService.notify_imr_dispatched(
+                request_number=internal_req.request_number,
+                project_name=project.project_name if project else 'Unknown Project',
+                materials_summary=materials_summary,
+                dispatched_by_name=dispatched_by_name,
+                site_engineer_ids=se_ids,
+                buyer_user_id=buyer_id,
+                dispatch_date=internal_req.dispatch_date,
+                expected_delivery_date=internal_req.expected_delivery_date,
+                request_id=request_id
+            )
+        except Exception as notif_err:
+            print(f"Error sending dispatch notification: {notif_err}")
+
         return jsonify({
             'message': 'Material dispatched successfully to project',
             'request': internal_req.to_dict(),
@@ -2889,6 +2963,40 @@ def issue_material_from_inventory(request_id):
         # Update internal request with transaction ID
         internal_req.inventory_transaction_id = new_transaction.inventory_transaction_id
         db.session.commit()
+
+        # Notify the requester that material has been issued
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            project = Project.query.get(internal_req.project_id)
+            project_name = project.project_name if project else f'Project {internal_req.project_id}'
+            # Resolve issuer name
+            issuer_name = current_user
+            current_user_id = g.user.get('user_id')
+            if current_user_id:
+                issuer_user = User.query.get(current_user_id)
+                if issuer_user and issuer_user.full_name:
+                    issuer_name = issuer_user.full_name
+            # Find who to notify: the requester (by created_by email)
+            requester_user_id = None
+            if internal_req.routed_by_buyer_id:
+                requester_user_id = internal_req.routed_by_buyer_id
+            elif internal_req.request_buyer_id:
+                requester_user_id = internal_req.request_buyer_id
+            else:
+                requester = User.query.filter_by(email=internal_req.created_by, is_active=True).first()
+                if requester:
+                    requester_user_id = requester.user_id
+            ComprehensiveNotificationService.notify_material_issued_from_inventory(
+                request_number=internal_req.request_number,
+                material_name=internal_req.item_name or material.material_name,
+                quantity=internal_req.quantity,
+                unit=material.unit,
+                project_name=project_name,
+                issued_by_name=issuer_name,
+                requester_user_id=requester_user_id
+            )
+        except Exception as notif_err:
+            print(f"Failed to send material issued notification: {notif_err}")
 
         return jsonify({
             'message': 'Material issued successfully from inventory',
@@ -3347,6 +3455,23 @@ def review_disposal(return_id):
                     reviewed_by_name=reviewer_name,
                     site_engineer_id=site_engineer_id
                 )
+
+                # Notify requesting PM that material was sent to backup
+                pm_user_id = None
+                if material_return.created_by:
+                    pm_user = User.query.filter_by(email=material_return.created_by, is_active=True).first()
+                    if pm_user:
+                        pm_user_id = pm_user.user_id
+                if pm_user_id:
+                    ComprehensiveNotificationService.notify_material_disposal_reviewed(
+                        return_id=return_id,
+                        material_name=material.material_name,
+                        quantity=usable_quantity,
+                        unit=material.unit,
+                        action='backup',
+                        reviewed_by_name=reviewer_name,
+                        pm_user_id=pm_user_id
+                    )
             except Exception as notif_err:
                 print(f"Error sending backup stock notification: {notif_err}")
 
@@ -3404,6 +3529,49 @@ def review_disposal(return_id):
                         reviewed_by_name=reviewer_name,
                         site_engineer_id=site_engineer_id
                     )
+
+                    # Escalate to Technical Director for disposal approval
+                    try:
+                        disposal_project = (
+                            Project.query.get(material_return.project_id)
+                            if material_return.project_id and material_return.project_id > 0
+                            else None
+                        )
+                        project_name_str = (
+                            disposal_project.project_name if disposal_project else 'Materials Catalog'
+                        )
+                        ComprehensiveNotificationService.notify_td_inventory_escalation(
+                            item_name=material.material_name,
+                            item_type='material',
+                            condition=material_return.condition or 'defective',
+                            project_name=project_name_str,
+                            escalated_by_name=reviewer_name,
+                            return_id=return_id,
+                            disposal_reason=data.get('notes') if data else None
+                        )
+                    except Exception as td_notif_err:
+                        log.error(f"Failed to send TD disposal escalation: {td_notif_err}")
+
+                    # Notify requesting PM that disposal was approved
+                    try:
+                        pm_user_id = None
+                        if material_return.created_by:
+                            pm_user = User.query.filter_by(email=material_return.created_by, is_active=True).first()
+                            if pm_user:
+                                pm_user_id = pm_user.user_id
+                        if pm_user_id:
+                            ComprehensiveNotificationService.notify_material_disposal_reviewed(
+                                return_id=return_id,
+                                material_name=material.material_name,
+                                quantity=material_return.quantity,
+                                unit=material.unit,
+                                action='approved',
+                                reviewed_by_name=reviewer_name,
+                                pm_user_id=pm_user_id
+                            )
+                    except Exception as pm_notif_err:
+                        log.error(f"Failed to send PM disposal approval notification: {pm_notif_err}")
+
             except Exception as notif_err:
                 print(f"Error sending disposal notification: {notif_err}")
 
@@ -3435,6 +3603,29 @@ def mark_as_disposed(return_id):
         material_return.disposal_notes = data.get('notes', material_return.disposal_notes)
 
         db.session.commit()
+
+        # Notify SE + PMs that material has been disposed
+        try:
+            _disp_project = Project.query.get(material_return.project_id)
+            _disp_project_name = _disp_project.project_name if _disp_project else 'Unknown Project'
+            _disp_material = InventoryMaterial.query.get(material_return.inventory_material_id)
+            _disp_material_name = _disp_material.material_name if _disp_material else 'Material'
+            from models.role import Role as _Role
+            _disp_pm_role = _Role.query.filter_by(role='productionManager').first()
+            _disp_pm_ids = []
+            if _disp_pm_role:
+                _disp_pm_ids = [u.user_id for u in User.query.filter_by(
+                    role_id=_disp_pm_role.role_id, is_active=True, is_deleted=False
+                ).all()]
+            ComprehensiveNotificationService.notify_material_disposed(
+                material_name=_disp_material_name,
+                project_name=_disp_project_name,
+                disposed_by_name=current_user,
+                se_user_id=None,
+                pm_user_ids=_disp_pm_ids
+            )
+        except Exception as notif_err:
+            log.error(f'Failed to send material disposed notification: {notif_err}')
 
         return jsonify({
             'message': 'Material marked as disposed',
@@ -3508,6 +3699,28 @@ def add_repaired_to_stock(return_id):
 
         db.session.commit()
 
+        # Notify SE + PMs that material is back in stock
+        try:
+            _rep_project = Project.query.get(material_return.project_id)
+            _rep_project_name = _rep_project.project_name if _rep_project else 'Unknown Project'
+            from models.role import Role as _Role
+            _rep_pm_role = _Role.query.filter_by(role='productionManager').first()
+            _rep_pm_ids = []
+            if _rep_pm_role:
+                _rep_pm_ids = [u.user_id for u in User.query.filter_by(
+                    role_id=_rep_pm_role.role_id, is_active=True, is_deleted=False
+                ).all()]
+            ComprehensiveNotificationService.notify_material_repaired(
+                material_name=material.material_name,
+                quantity=quantity_to_move,
+                project_name=_rep_project_name,
+                repaired_by_name=current_user,
+                se_user_id=None,
+                pm_user_ids=_rep_pm_ids
+            )
+        except Exception as notif_err:
+            log.error(f'Failed to send material repaired notification: {notif_err}')
+
         return jsonify({
             'message': 'Repaired material added to main stock successfully',
             'return': material_return.to_dict(),
@@ -3557,40 +3770,29 @@ def request_disposal_from_repair(return_id):
 
         db.session.commit()
 
-        # Notify TD for disposal approval
+        # Notify TD for disposal approval (bell + email)
         try:
-            tds = User.query.filter_by(user_role='Technical Director').all()
-            project = Project.query.get(material_return.project_id) if material_return.project_id else None
-            project_name = project.project_name if project else 'N/A'
+            # Get PM requester name
+            requester_name = current_user
+            current_user_id = g.user.get('user_id')
+            if current_user_id:
+                req_user = User.query.get(current_user_id)
+                if req_user and req_user.full_name:
+                    requester_name = req_user.full_name
 
-            for td in tds:
-                ComprehensiveNotificationService.send_email_notification(
-                    recipient=td.email,
-                    subject=f'Material Disposal Request - Repair Failed - {material.material_name}',
-                    message=f'''
-                    <p>A material disposal request has been submitted because repair was not possible.</p>
-
-                    <h3>Material Details:</h3>
-                    <ul>
-                        <li>Material: {material.material_name} ({material.material_code})</li>
-                        <li>Brand: {material.brand or 'N/A'}</li>
-                        <li>Quantity: {material_return.quantity} {material.unit}</li>
-                        <li>Condition: {material_return.condition}</li>
-                        <li>Estimated Value: AED {estimated_value:.2f}</li>
-                        <li>Project: {project_name}</li>
-                    </ul>
-
-                    <h3>Reason:</h3>
-                    <p>{data.get('notes', 'Cannot repair - Disposal requested')}</p>
-
-                    <p>Please review and approve/reject this disposal request in the system.</p>
-
-                    <p>Requested by: {current_user}</p>
-                    ''',
-                    notification_type='disposal_request',
-                    action_url=f'/inventory/disposal-requests'
-                )
-
+            repair_notes = data.get('notes', 'Cannot repair - Disposal requested')
+            ComprehensiveNotificationService.notify_material_disposal_requested(
+                return_id=material_return.return_id,
+                material_name=material.material_name,
+                material_code=material.material_code,
+                quantity=material_return.quantity,
+                unit=material.unit,
+                disposal_reason='repair_failed',
+                notes=repair_notes,
+                estimated_value=estimated_value,
+                requested_by_name=requester_name,
+                pm_user_id=current_user_id
+            )
         except Exception as email_error:
             print(f"Failed to send TD notification: {str(email_error)}")
 
@@ -4432,6 +4634,41 @@ def issue_delivery_note(delivery_note_id):
 
         db.session.commit()
 
+        # Notify Buyer that delivery note has been issued (stock is being prepared)
+        try:
+            _dn_project = Project.query.get(note.project_id)
+            _dn_project_name = _dn_project.project_name if _dn_project else f'Project {note.project_id}'
+            _buyer_user_id = None
+            for _item in note.items:
+                if _item.internal_request_id:
+                    _imr = InternalMaterialRequest.query.get(_item.internal_request_id)
+                    if _imr and _imr.request_buyer_id:
+                        _buyer_user_id = _imr.request_buyer_id
+                        break
+            if _buyer_user_id:
+                from utils.notification_utils import NotificationManager as _NM
+                from socketio_server import send_notification_to_user as _send
+                _notif = _NM.create_notification(
+                    user_id=_buyer_user_id,
+                    type='info',
+                    title=f'Materials Being Prepared — {_dn_project_name}',
+                    message=f'Delivery note {note.delivery_note_number} for {_dn_project_name} has been issued. Materials are being prepared for dispatch to site.',
+                    priority='normal',
+                    category='inventory',
+                    action_required=False,
+                    action_url='/buyer/purchase-orders?tab=ongoing',
+                    action_label='View Purchase Orders',
+                    metadata={
+                        'delivery_note_number': note.delivery_note_number,
+                        'project_name': _dn_project_name,
+                        'workflow': 'delivery_note_issued'
+                    },
+                    sender_name=current_user
+                )
+                _send(_buyer_user_id, _notif.to_dict())
+        except Exception as notif_err:
+            log.error(f'Failed to send delivery note issued notification: {notif_err}')
+
         return jsonify({
             'message': 'Delivery note issued successfully.',
             'delivery_note': note.to_dict()
@@ -4511,20 +4748,51 @@ def dispatch_delivery_note(delivery_note_id):
             project = _Project.query.get(note.project_id) if note.project_id else None
             project_name = project.project_name if project else 'Unknown Project'
 
-            # Get materials summary from note items
+            # Build materials data for professional email table
+            materials_items = []
+            for item in (note.items or []):
+                mat = item.inventory_material
+                if mat:
+                    materials_items.append({
+                        'material_name': mat.material_name,
+                        'brand': mat.brand or '',
+                        'size': mat.size or '',
+                        'quantity': item.quantity,
+                        'unit': mat.unit or '',
+                    })
             materials_summary = ', '.join(
-                item.material_name for item in note.items[:3]
-            ) if note.items else 'materials'
+                m['material_name'] for m in materials_items[:3]
+            ) if materials_items else 'materials'
 
-            # Get Site Engineer IDs for this project via BOQ assignment
+            # Get all Site Engineer IDs for this project.
+            # Uses the same 3-source logic as get_delivery_notes_for_se() so that
+            # every SE who can *see* this MDN on their receipts page also gets notified.
             se_ids = []
-            if note.project_id:
-                from models.boq import BOQ
-                boq = BOQ.query.filter_by(
-                    project_id=note.project_id, is_deleted=False
-                ).first()
-                if boq and boq.assigned_se_user_id:
-                    se_ids = [boq.assigned_se_user_id]
+            if not project:
+                log.warning(f"dispatch_delivery_note: no project found for note {note.delivery_note_number} (project_id={note.project_id})")
+            else:
+                from models.pm_assign_ss import PMAssignSS
+                se_id_set = set()
+                # Source 1: direct project assignment
+                if project.site_supervisor_id:
+                    se_id_set.add(project.site_supervisor_id)
+                # Sources 2 & 3: PMAssignSS table (assigned_to_se_id + ss_ids array)
+                assignments = PMAssignSS.query.filter(
+                    PMAssignSS.project_id == project.project_id,
+                    PMAssignSS.is_deleted == False
+                ).all()
+                for assignment in assignments:
+                    if assignment.assigned_to_se_id:
+                        se_id_set.add(assignment.assigned_to_se_id)
+                    if assignment.ss_ids:
+                        for uid in assignment.ss_ids:
+                            if uid:
+                                se_id_set.add(uid)
+                se_ids = list(se_id_set)
+                if se_ids:
+                    log.info(f"dispatch_delivery_note: notifying SE ids={se_ids} for project '{project_name}'")
+                else:
+                    log.warning(f"dispatch_delivery_note: no SE assigned to project '{project_name}' (id={note.project_id}) — SE will not be notified")
 
             # Get buyer_id from linked IMR if available
             buyer_id = None
@@ -4547,7 +4815,8 @@ def dispatch_delivery_note(delivery_note_id):
                 vehicle_number=note.vehicle_number,
                 driver_name=note.driver_name,
                 driver_contact=note.driver_contact,
-                cr_id=cr_id
+                cr_id=cr_id,
+                materials_items=materials_items
             )
         except Exception as notif_err:
             log.error(f"Failed to send dispatch notification: {notif_err}")
@@ -4564,6 +4833,7 @@ def dispatch_delivery_note(delivery_note_id):
 
 def confirm_delivery(delivery_note_id):
     """Confirm delivery receipt at site"""
+    from models.inventory import InternalMaterialRequest
     try:
         note = MaterialDeliveryNote.query.get(delivery_note_id)
 
@@ -4637,7 +4907,6 @@ def confirm_delivery(delivery_note_id):
             if note.items:
                 first_item = note.items[0]
                 if first_item.internal_request_id:
-                    from models.inventory import InternalMaterialRequest
                     imr = InternalMaterialRequest.query.get(first_item.internal_request_id)
                     if imr:
                         buyer_id = imr.routed_by_buyer_id or imr.request_buyer_id
@@ -5270,6 +5539,20 @@ def create_return_delivery_note():
         db.session.add(new_rdn)
         db.session.commit()
 
+        # Notify Production Managers about new return delivery note
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            materials_count = len(data.get('materials_data', [])) if data.get('materials_data') else 0
+            ComprehensiveNotificationService.notify_rdn_created(
+                rdn_number=new_rdn.return_note_number,
+                project_name=project.project_name if project else f'Project {data["project_id"]}',
+                materials_count=materials_count,
+                returned_by_name=prepared_by_name,
+                returned_by_user_id=current_user_id
+            )
+        except Exception as notif_err:
+            print(f"Failed to send RDN created notification: {notif_err}")
+
         return jsonify({
             'message': 'Return delivery note created successfully',
             'return_delivery_note': new_rdn.to_dict()
@@ -5632,7 +5915,24 @@ def issue_return_delivery_note(return_note_id):
 
         # Send notification to PM
         try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
             project = Project.query.get(rdn.project_id)
+            project_name = project.project_name if project else f'Project {rdn.project_id}'
+            # Get issuer name
+            issuer_name = current_user
+            current_user_id = g.user.get('user_id')
+            if current_user_id:
+                issuer_user = User.query.get(current_user_id)
+                if issuer_user and issuer_user.full_name:
+                    issuer_name = issuer_user.full_name
+            materials_count = len(rdn.items) if rdn.items else 0
+            ComprehensiveNotificationService.notify_rdn_issued(
+                rdn_number=rdn.return_note_number,
+                project_name=project_name,
+                materials_count=materials_count,
+                issued_by_name=issuer_name,
+                issued_by_user_id=current_user_id
+            )
         except Exception as notif_err:
             print(f"Error sending RDN issue notification: {notif_err}")
 
@@ -5676,11 +5976,26 @@ def dispatch_return_delivery_note(return_note_id):
 
         db.session.commit()
 
-        # Send notification to PM
+        # Notify Production Managers — return is in transit
         try:
-            project = Project.query.get(rdn.project_id)
+            _rdn_project = Project.query.get(rdn.project_id)
+            _rdn_project_name = _rdn_project.project_name if _rdn_project else f'Project {rdn.project_id}'
+            from models.role import Role as _Role
+            _pm_role = _Role.query.filter_by(role='productionManager').first()
+            _pm_ids = []
+            if _pm_role:
+                _pm_ids = [u.user_id for u in User.query.filter_by(
+                    role_id=_pm_role.role_id, is_active=True, is_deleted=False
+                ).all()]
+            ComprehensiveNotificationService.notify_rdn_dispatched(
+                rdn_number=rdn.return_note_number,
+                project_name=_rdn_project_name,
+                driver_name=rdn.driver_name or 'Unknown',
+                returned_by_name=rdn.returned_by or current_user,
+                pm_user_ids=_pm_ids
+            )
         except Exception as notif_err:
-            print(f"Error sending RDN dispatch notification: {notif_err}")
+            log.error(f'Failed to send RDN dispatch notification: {notif_err}')
 
         return jsonify({
             'message': 'Return delivery note dispatched successfully. Materials in transit.',
@@ -5758,8 +6073,12 @@ def confirm_return_delivery_receipt(return_note_id):
                 item.material_name for item in rdn.items[:3]
             ) if rdn.items else 'returned materials'
 
-            # Get SE who created the RDN
-            se_user_id = rdn.created_by_user_id if hasattr(rdn, 'created_by_user_id') else None
+            # Get SE who created the RDN (lookup by created_by email)
+            se_user_id = None
+            if rdn.created_by:
+                se_user = User.query.filter_by(email=rdn.created_by, is_active=True).first()
+                if se_user:
+                    se_user_id = se_user.user_id
 
             if se_user_id:
                 ComprehensiveNotificationService.notify_return_received_at_store(
@@ -5920,51 +6239,21 @@ def process_return_delivery_item(return_note_id, item_id):
             material_return.disposal_value = estimated_value
             material_return.disposal_notes = data.get('notes', f'Material beyond repair - Disposal requested from RDN {rdn.return_note_number}')
 
-            # Notify TD for approval
+            # Notify TD for approval — in-app bell + email fallback
             try:
-                tds = User.query.filter_by(user_role='Technical Director').all()
                 project = Project.query.get(rdn.project_id)
                 project_name = project.project_name if project else 'Unknown Project'
-
-                for td in tds:
-                    ComprehensiveNotificationService.send_email_notification(
-                        recipient=td.email,
-                        subject=f'Material Disposal Request - {material.material_name}',
-                        message=f'''
-                        <p>A material disposal request has been submitted from a return delivery note and requires your review.</p>
-
-                        <h3>Return Details:</h3>
-                        <ul>
-                            <li>RDN: {rdn.return_note_number}</li>
-                            <li>Project: {project_name}</li>
-                        </ul>
-
-                        <h3>Material Details:</h3>
-                        <ul>
-                            <li>Material: {material.material_name} ({material.material_code})</li>
-                            <li>Brand: {material.brand or 'N/A'}</li>
-                            <li>Quantity: {material_return.quantity} {material.unit}</li>
-                            <li>Condition: {item.condition}</li>
-                            <li>Estimated Value: AED {estimated_value:.2f}</li>
-                        </ul>
-
-                        <h3>Return Reason:</h3>
-                        <p>{item.return_reason or 'Not specified'}</p>
-
-                        <h3>Disposal Notes:</h3>
-                        <p>{data.get('notes', 'Material beyond repair')}</p>
-
-                        <p>Please review and approve/reject this disposal request in the system.</p>
-
-                        <p>Requested by: {current_user}</p>
-                        ''',
-                        notification_type='disposal_request',
-                        action_url=f'/inventory/disposal-requests'
-                    )
-
+                ComprehensiveNotificationService.notify_td_inventory_escalation(
+                    item_name=material.material_name,
+                    item_type='material',
+                    condition=item.condition,
+                    project_name=project_name,
+                    escalated_by_name=current_user,
+                    return_id=material_return.return_id,
+                    disposal_reason=data.get('notes', 'Material beyond repair - Disposal requested')
+                )
             except Exception as notif_error:
-                print(f"Error sending disposal request notification: {notif_error}")
-                # Don't fail the request if notification fails
+                log.error(f'Error sending disposal request notification: {notif_error}')
 
         elif pm_action == 'reject':
             material_return.disposal_status = 'rejected'
@@ -6146,49 +6435,21 @@ def process_all_return_delivery_items(return_note_id):
                     material_return.disposal_value = estimated_value
                     material_return.disposal_notes = item_action.get('notes', f'Material beyond repair - Disposal requested from RDN {rdn.return_note_number}')
 
-                    # Notify TD for approval (collect for batch notification)
+                    # Notify TD for approval — in-app bell + email fallback
                     try:
-                        tds = User.query.filter_by(user_role='Technical Director').all()
                         project = Project.query.get(rdn.project_id)
                         project_name = project.project_name if project else 'Unknown Project'
-
-                        for td in tds:
-                            ComprehensiveNotificationService.send_email_notification(
-                                recipient=td.email,
-                                subject=f'Material Disposal Request - {material.material_name}',
-                                message=f'''
-                                <p>A material disposal request has been submitted from a return delivery note and requires your review.</p>
-
-                                <h3>Return Details:</h3>
-                                <ul>
-                                    <li>RDN: {rdn.return_note_number}</li>
-                                    <li>Project: {project_name}</li>
-                                </ul>
-
-                                <h3>Material Details:</h3>
-                                <ul>
-                                    <li>Material: {material.material_name} ({material.material_code})</li>
-                                    <li>Brand: {material.brand or 'N/A'}</li>
-                                    <li>Quantity: {material_return.quantity} {material.unit}</li>
-                                    <li>Condition: {item.condition}</li>
-                                    <li>Estimated Value: AED {estimated_value:.2f}</li>
-                                </ul>
-
-                                <h3>Return Reason:</h3>
-                                <p>{item.return_reason or 'Not specified'}</p>
-
-                                <h3>Disposal Notes:</h3>
-                                <p>{item_action.get('notes', 'Material beyond repair')}</p>
-
-                                <p>Please review and approve/reject this disposal request in the system.</p>
-
-                                <p>Requested by: {current_user}</p>
-                                ''',
-                                notification_type='disposal_request',
-                                action_url=f'/inventory/disposal-requests'
-                            )
+                        ComprehensiveNotificationService.notify_td_inventory_escalation(
+                            item_name=material.material_name,
+                            item_type='material',
+                            condition=item.condition,
+                            project_name=project_name,
+                            escalated_by_name=current_user,
+                            return_id=material_return.return_id,
+                            disposal_reason=item_action.get('notes', 'Material beyond repair - Disposal requested')
+                        )
                     except Exception as notif_error:
-                        print(f"Error sending disposal notification: {notif_error}")
+                        log.error(f'Error sending disposal notification: {notif_error}')
 
                 elif pm_action == 'reject':
                     material_return.disposal_status = 'rejected'
@@ -6764,39 +7025,29 @@ def request_material_disposal(material_id):
         db.session.add(disposal_return)
         db.session.commit()
 
-        # Notify TD for approval
+        # Notify TD for approval (bell + email)
         try:
-            # Get all TDs
-            tds = User.query.filter_by(user_role='Technical Director').all()
+            from models.role import Role
+            # Get PM requester name
+            requester_name = current_user
+            current_user_id = g.user.get('user_id')
+            if current_user_id:
+                req_user = User.query.get(current_user_id)
+                if req_user and req_user.full_name:
+                    requester_name = req_user.full_name
 
-            for td in tds:
-                ComprehensiveNotificationService.send_email_notification(
-                    recipient=td.email,
-                    subject=f'Material Disposal Request - {material.material_name}',
-                    message=f'''
-                    <p>A material disposal request has been submitted and requires your review.</p>
-
-                    <h3>Material Details:</h3>
-                    <ul>
-                        <li>Material: {material.material_name} ({material.material_code})</li>
-                        <li>Brand: {material.brand or 'N/A'}</li>
-                        <li>Quantity: {quantity} {material.unit}</li>
-                        <li>Estimated Value: AED {estimated_value:.2f}</li>
-                        <li>Reason: {reason.replace('_', ' ').title()}</li>
-                    </ul>
-
-                    <h3>Justification:</h3>
-                    <p>{notes}</p>
-
-                    <p>Please review and approve/reject this disposal request in the system.</p>
-
-                    <p>Requested by: {current_user}</p>
-                    ''',
-                    notification_type='disposal_request',
-                    action_url=f'/inventory/disposal-requests'
-                )
-
-
+            ComprehensiveNotificationService.notify_material_disposal_requested(
+                return_id=disposal_return.return_id,
+                material_name=material.material_name,
+                material_code=material.material_code,
+                quantity=quantity,
+                unit=material.unit,
+                disposal_reason=reason,
+                notes=notes,
+                estimated_value=estimated_value,
+                requested_by_name=requester_name,
+                pm_user_id=current_user_id
+            )
         except Exception as notif_error:
             print(f"Error sending disposal request notification: {notif_error}")
             # Don't fail the request if notification fails

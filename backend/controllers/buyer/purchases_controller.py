@@ -1830,7 +1830,7 @@ def complete_purchase():
 
                     # Send email notification
                     try:
-                        if pm.email:
+                        if pm.email and ComprehensiveNotificationService.is_user_offline(pm.user_id):
                             ComprehensiveNotificationService.send_email_notification(
                                 recipient=pm.email,
                                 subject=f'Incoming Vendor Delivery - {project_name}',
@@ -1868,7 +1868,7 @@ def complete_purchase():
                 # Send email notification
                 try:
                     creator = User.query.get(cr.requested_by_user_id)
-                    if creator and creator.email:
+                    if creator and creator.email and ComprehensiveNotificationService.is_user_offline(creator.user_id):
                         ComprehensiveNotificationService.send_email_notification(
                             recipient=creator.email,
                             subject=f'Purchase Routed to M2 Store - {project_name}',

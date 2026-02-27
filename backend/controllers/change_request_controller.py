@@ -732,6 +732,23 @@ def send_for_review(cr_id):
                 change_request.assigned_to_buyer_name = next_approver
                 change_request.assigned_to_buyer_date = datetime.utcnow()
 
+                # Notify the assigned buyer (route_to == 'buyer' branch)
+                try:
+                    from utils.comprehensive_notification_service import ComprehensiveNotificationService
+                    _notif_project = Project.query.filter_by(
+                        project_id=change_request.project_id, is_deleted=False
+                    ).first()
+                    ComprehensiveNotificationService.notify_buyer_cr_assigned(
+                        cr_id=change_request.cr_id,
+                        cr_number=f'CR-{change_request.cr_id}',
+                        project_name=_notif_project.project_name if _notif_project else 'Unknown Project',
+                        assigned_by_name=g.user.get('full_name', g.user.get('email', 'System')),
+                        buyer_user_id=next_approver_id,
+                        notes=data.get('notes') if data else None
+                    )
+                except Exception as notif_err:
+                    log.error(f"Failed to send buyer assignment notification: {notif_err}")
+
             elif has_new_materials:
                 # No route_to specified, has new materials - default to Estimator
                 project = Project.query.filter_by(project_id=change_request.project_id, is_deleted=False).first()
@@ -771,6 +788,23 @@ def send_for_review(cr_id):
                 change_request.assigned_to_buyer_user_id = next_approver_id
                 change_request.assigned_to_buyer_name = next_approver
                 change_request.assigned_to_buyer_date = datetime.utcnow()
+
+                # Notify the assigned buyer (else/all-BOQ-materials branch)
+                try:
+                    from utils.comprehensive_notification_service import ComprehensiveNotificationService
+                    _notif_project = Project.query.filter_by(
+                        project_id=change_request.project_id, is_deleted=False
+                    ).first()
+                    ComprehensiveNotificationService.notify_buyer_cr_assigned(
+                        cr_id=change_request.cr_id,
+                        cr_number=f'CR-{change_request.cr_id}',
+                        project_name=_notif_project.project_name if _notif_project else 'Unknown Project',
+                        assigned_by_name=g.user.get('full_name', g.user.get('email', 'System')),
+                        buyer_user_id=next_approver_id,
+                        notes=data.get('notes') if data else None
+                    )
+                except Exception as notif_err:
+                    log.error(f"Failed to send buyer assignment notification: {notif_err}")
 
         elif is_admin:
             # Admin sends to assigned PM
@@ -2102,6 +2136,21 @@ def approve_change_request(cr_id):
                 change_request.assigned_to_buyer_name = next_approver
                 change_request.assigned_to_buyer_date = datetime.utcnow()
 
+                # Notify the assigned buyer (same pattern as send_for_review buyer assignment)
+                try:
+                    from utils.comprehensive_notification_service import ComprehensiveNotificationService
+                    _notif_project = Project.query.filter_by(
+                        project_id=change_request.project_id, is_deleted=False
+                    ).first()
+                    ComprehensiveNotificationService.notify_buyer_cr_assigned(
+                        cr_id=cr_id,
+                        cr_number=f'CR-{change_request.cr_id}',
+                        project_name=_notif_project.project_name if _notif_project else 'Unknown Project',
+                        assigned_by_name=g.user.get('full_name', g.user.get('email', 'System')),
+                        buyer_user_id=next_approver_id,
+                    )
+                except Exception as notif_err:
+                    log.error(f"[approve_cr/pm] Failed to send buyer assignment notification: {notif_err}")
 
             change_request.approval_required_from = next_role
             change_request.current_approver_role = next_role

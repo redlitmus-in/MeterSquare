@@ -63,7 +63,7 @@ const REDIRECT_RULES: RedirectRule[] = [
         return { path: buildPath('/asset-requisition-approvals'), queryParams: { tab: 'approved', ...reqParam } };
       }
       if (role === 'production-manager') {
-        return { path: buildPath('/returnable-assets'), queryParams: reqParam };
+        return { path: buildPath('/returnable-assets/dispatch'), queryParams: reqParam };
       }
       return { path: buildPath('/site-assets'), queryParams: { status: 'approved', ...reqParam } };
     }
@@ -105,7 +105,7 @@ const REDIRECT_RULES: RedirectRule[] = [
         return { path: buildPath('/asset-requisition-approvals'), queryParams: { tab: 'pending', ...reqParam } };
       }
       if (role === 'production-manager') {
-        return { path: buildPath('/returnable-assets'), queryParams: reqParam };
+        return { path: buildPath('/returnable-assets/dispatch'), queryParams: reqParam };
       }
       return { path: buildPath('/site-assets'), queryParams: reqParam };
     }
@@ -114,12 +114,84 @@ const REDIRECT_RULES: RedirectRule[] = [
   // ═══════════════════════════════════════════════════════════
   // RETURNABLE ASSETS (dispatch, receive, return, maintenance)
   // ═══════════════════════════════════════════════════════════
+
+  // ─── ADN Dispatched (PM sent assets to site) → SE goes to site-assets ───
+  {
+    id: 'adn_dispatched',
+    match: ({ titleLower, metadata }) =>
+      metadata?.workflow === 'adn_dispatched' ||
+      has(titleLower, 'assets dispatched to site'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'site-engineer' || role === 'site-supervisor') {
+        return { path: buildPath('/site-assets'), queryParams: { tab: 'assets' } };
+      }
+      return { path: buildPath('/returnable-assets/dispatch'), queryParams: {} };
+    }
+  },
+
+  // ─── ARDN Created (SE created a return note) → PM goes to receive-returns ───
+  {
+    id: 'ardn_created',
+    match: ({ titleLower, metadata }) =>
+      metadata?.workflow === 'ardn_created' ||
+      has(titleLower, 'asset return note created'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/returnable-assets/receive-returns'), queryParams: {} };
+      }
+      return { path: buildPath('/site-assets'), queryParams: { tab: 'returns' } };
+    }
+  },
+
+  // ─── ARDN Issued (SE issued a return note, pending dispatch) → PM goes to receive-returns ───
+  {
+    id: 'ardn_issued',
+    match: ({ titleLower, metadata }) =>
+      metadata?.workflow === 'ardn_issued' ||
+      has(titleLower, 'asset return note issued'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/returnable-assets/receive-returns'), queryParams: {} };
+      }
+      return { path: buildPath('/site-assets'), queryParams: { tab: 'returns' } };
+    }
+  },
+
+  // ─── ARDN Dispatched (SE sent assets back to store) → PM goes to receive-returns ───
+  // Must be before generic asset_return / asset_dispatched rules
+  {
+    id: 'ardn_dispatched',
+    match: ({ titleLower, metadata }) =>
+      metadata?.workflow === 'ardn_dispatched' ||
+      has(titleLower, 'asset return in transit'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/returnable-assets/receive-returns'), queryParams: {} };
+      }
+      return { path: buildPath('/site-assets'), queryParams: { tab: 'history' } };
+    }
+  },
+
+  // ─── Asset Returned (good condition) → PM goes to stock-in ───
+  // Must be before generic asset_return rule
+  {
+    id: 'asset_returned_good',
+    match: ({ titleLower, metadata }) =>
+      metadata?.workflow === 'asset_returned_good' ||
+      (has(titleLower, 'asset') && has(titleLower, 'returned', 'return') && has(titleLower, 'good', 'received')),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/returnable-assets/stock-in'), queryParams: { tab: 'returns' } };
+      }
+      return { path: buildPath('/site-assets'), queryParams: { tab: 'history' } };
+    }
+  },
   {
     id: 'asset_dispatched',
     match: ({ titleLower, category }) =>
       category === 'assets' && has(titleLower, 'dispatched'),
     resolve: ({ buildPath, role }) => ({
-      path: buildPath(role === 'site-engineer' || role === 'site-supervisor' ? '/site-assets' : '/returnable-assets')
+      path: buildPath(role === 'site-engineer' || role === 'site-supervisor' ? '/site-assets' : '/returnable-assets/stock-in')
     })
   },
   {
@@ -127,7 +199,7 @@ const REDIRECT_RULES: RedirectRule[] = [
     match: ({ titleLower, category }) =>
       category === 'assets' && has(titleLower, 'received'),
     resolve: ({ buildPath, role }) => ({
-      path: buildPath(role === 'site-engineer' || role === 'site-supervisor' ? '/site-assets' : '/returnable-assets')
+      path: buildPath(role === 'site-engineer' || role === 'site-supervisor' ? '/site-assets' : '/returnable-assets/stock-in')
     })
   },
   {
@@ -135,7 +207,7 @@ const REDIRECT_RULES: RedirectRule[] = [
     match: ({ titleLower, category }) =>
       category === 'assets' && has(titleLower, 'return'),
     resolve: ({ buildPath, role }) => ({
-      path: buildPath(role === 'site-engineer' || role === 'site-supervisor' ? '/site-assets' : '/returnable-assets')
+      path: buildPath(role === 'site-engineer' || role === 'site-supervisor' ? '/site-assets' : '/returnable-assets/stock-in')
     })
   },
   {
@@ -143,7 +215,39 @@ const REDIRECT_RULES: RedirectRule[] = [
     match: ({ titleLower, category }) =>
       category === 'assets' && has(titleLower, 'maintenance', 'repair', 'write off', 'write_off', 'written off'),
     resolve: ({ buildPath, role }) => ({
-      path: buildPath(role === 'site-engineer' || role === 'site-supervisor' ? '/site-assets' : '/returnable-assets')
+      path: buildPath(role === 'site-engineer' || role === 'site-supervisor' ? '/site-assets' : '/returnable-assets/repairs')
+    })
+  },
+
+  // ─── Asset Disposal (request, approved, rejected) ───
+  {
+    id: 'asset_disposal_request',
+    match: ({ titleLower, metadata }) =>
+      metadata?.workflow === 'asset_disposal_request' ||
+      has(titleLower, 'asset disposal request'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'technical-director') {
+        return { path: buildPath('/asset-disposal-approvals'), queryParams: {} };
+      }
+      return { path: buildPath('/returnable-assets'), queryParams: {} };
+    }
+  },
+  {
+    id: 'asset_disposal_approved',
+    match: ({ titleLower, metadata }) =>
+      metadata?.workflow === 'asset_disposal_approved' ||
+      has(titleLower, 'asset disposal approved'),
+    resolve: ({ buildPath }) => ({
+      path: buildPath('/returnable-assets'), queryParams: {}
+    })
+  },
+  {
+    id: 'asset_disposal_rejected',
+    match: ({ titleLower, metadata }) =>
+      metadata?.workflow === 'asset_disposal_rejected' ||
+      has(titleLower, 'asset disposal rejected'),
+    resolve: ({ buildPath }) => ({
+      path: buildPath('/returnable-assets'), queryParams: {}
     })
   },
 
@@ -524,6 +628,17 @@ const REDIRECT_RULES: RedirectRule[] = [
       return { path: buildPath('/projects') };
     }
   },
+  // ─── Buyer Store Request (buyer sent materials from store inventory) ───
+  {
+    id: 'store_routing',
+    match: ({ titleLower, metadata }) =>
+      metadata?.workflow === 'store_routing' ||
+      has(titleLower, 'store request'),
+    resolve: ({ buildPath }) => ({
+      path: buildPath('/m2-store/stock-out'),
+      queryParams: { tab: 'store_requests' }
+    })
+  },
   // ─── Incoming Vendor Delivery (buyer routed to store) ───
   {
     id: 'vendor_delivery_incoming',
@@ -555,6 +670,172 @@ const REDIRECT_RULES: RedirectRule[] = [
       return { path: buildPath('/projects') };
     }
   },
+  // ═══════════════════════════════════════════════════════════
+  // RETURN DELIVERY NOTES (RDN) — site returning materials to store
+  // ═══════════════════════════════════════════════════════════
+
+  // ─── RDN Created (SE raised return, PM needs to receive it) ───
+  {
+    id: 'rdn_created',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'rdn_created' ||
+      has(titleLower, 'return incoming', 'return delivery note', 'return note created', 'materials to be returned') ||
+      has(messageLower, 'return delivery note', 'materials return'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/receive-returns'), queryParams: { tab: 'pending' } };
+      }
+      // SE who created it — show their return history
+      return { path: buildPath('/material-receipts'), queryParams: { tab: 'returns' } };
+    }
+  },
+  // ─── RDN Dispatched (driver en-route back to store) ───
+  {
+    id: 'rdn_dispatched',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'rdn_dispatched' ||
+      has(titleLower, 'return in transit') ||
+      (has(titleLower, 'return') && has(titleLower, 'dispatched', 'in transit', 'on the way')) ||
+      has(messageLower, 'return delivery note', 'dispatched back to store'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/receive-returns'), queryParams: { tab: 'pending' } };
+      }
+      return { path: buildPath('/material-receipts'), queryParams: { tab: 'returns' } };
+    }
+  },
+
+  // ─── RDN Issued (SE finalized return, ready for dispatch) ───
+  {
+    id: 'rdn_issued',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'rdn_issued' ||
+      (has(titleLower, 'return note issued') && !has(titleLower, 'asset')),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/receive-returns'), queryParams: { tab: 'issued' } };
+      }
+      return { path: buildPath('/material-receipts'), queryParams: { tab: 'returns' } };
+    }
+  },
+
+  // ─── IMR Sent for Approval (SE sent material request to PM) ───
+  {
+    id: 'imr_sent_for_approval',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'imr_sent_for_approval' ||
+      (has(titleLower, 'material request') && has(messageLower, 'awaiting your approval', 'sent material request')),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/internal-requests'), queryParams: { tab: 'pending' } };
+      }
+      return { path: buildPath('/material-receipts') };
+    }
+  },
+
+  // ─── Material Issued from Inventory (PM fulfilled request) ───
+  {
+    id: 'material_issued_from_inventory',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'material_issued_from_inventory' ||
+      (has(titleLower, 'material issued') && has(messageLower, 'issued', 'request #')),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'site-engineer') {
+        return { path: buildPath('/material-receipts'), queryParams: { tab: 'fulfilled' } };
+      }
+      if (role === 'buyer' || role === 'procurement') {
+        return { path: buildPath('/purchase-orders'), queryParams: { tab: 'ongoing' } };
+      }
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/internal-requests'), queryParams: { tab: 'fulfilled' } };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // DELIVERY NOTE ISSUED — notifies buyer their materials left the store
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'delivery_note_issued',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'delivery_note_issued' ||
+      has(titleLower, 'delivery note issued', 'materials issued', 'dn issued') ||
+      has(messageLower, 'delivery note has been issued', 'materials have been issued from'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'buyer' || role === 'procurement') {
+        return { path: buildPath('/purchase-orders'), queryParams: { tab: 'ongoing' } };
+      }
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/stock-out'), queryParams: { tab: 'issued_dn' } };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // MATERIAL REPAIRED / DISPOSED — inventory maintenance outcomes
+  // ═══════════════════════════════════════════════════════════
+
+  // ─── Material Repaired (added back to usable stock) ───
+  {
+    id: 'material_repaired',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'material_repaired' ||
+      has(titleLower, 'material repaired', 'repaired and restocked', 'item repaired') ||
+      has(messageLower, 'has been repaired', 'repaired and added to stock'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/stock-in'), queryParams: { tab: 'repaired' } };
+      }
+      // SE who raised the return — show their receipt history
+      return { path: buildPath('/material-receipts'), queryParams: { tab: 'history' } };
+    }
+  },
+  // ─── Material Disposed (damaged/defective, removed from inventory) ───
+  {
+    id: 'material_disposed',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'material_disposed' ||
+      has(titleLower, 'material disposed', 'item disposed', 'disposed of') ||
+      has(messageLower, 'has been disposed', 'marked for disposal', 'disposal completed'),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/disposal'), queryParams: { tab: 'completed' } };
+      }
+      // SE or other roles — show history
+      return { path: buildPath('/material-receipts'), queryParams: { tab: 'history' } };
+    }
+  },
+
+  // ─── Material Disposal Request (PM requests TD approval) ───
+  {
+    id: 'material_disposal_request',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'material_disposal_request' ||
+      (has(titleLower, 'material disposal request') && has(messageLower, 'requests disposal')),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'technical-director') {
+        return { path: buildPath('/disposal-approvals'), queryParams: { tab: 'pending' } };
+      }
+      return { path: buildPath('/m2-store/disposal') };
+    }
+  },
+
+  // ─── Material Disposal Reviewed (TD approved/rejected/backup → notify PM) ───
+  {
+    id: 'material_disposal_reviewed',
+    match: ({ titleLower, messageLower, metadata }) =>
+      metadata?.workflow === 'material_disposal_reviewed' ||
+      (has(titleLower, 'disposal approved', 'disposal rejected', 'sent to backup') && has(messageLower, 'disposal', 'backup stock')),
+    resolve: ({ buildPath, role }) => {
+      if (role === 'production-manager') {
+        return { path: buildPath('/m2-store/disposal') };
+      }
+      return { path: buildPath('/projects') };
+    }
+  },
+
   {
     id: 'material_dispatched',
     match: ({ titleLower, messageLower, category, metadata }) =>
@@ -1363,6 +1644,50 @@ const REDIRECT_RULES: RedirectRule[] = [
       path: buildPath('/tasks'),
       queryParams: { tab: 'overdue', ...(metadata?.task_id && { task_id: String(metadata.task_id) }) }
     })
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // CR BUYER ASSIGNMENT
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'cr_buyer_assignment',
+    match: ({ titleLower, metadata }: MatchContext) =>
+      has(titleLower, 'cr assigned to you', 'change request assigned to you') ||
+      metadata?.workflow === 'cr_buyer_assignment',
+    resolve: ({ buildPath, metadata }: MatchContext) => ({
+      path: buildPath('/change-requests'),
+      queryParams: {
+        tab: 'assigned',
+        ...(metadata?.cr_id && { cr_id: String(metadata.cr_id) })
+      }
+    })
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // TD INVENTORY ESCALATION (DISPOSAL APPROVAL)
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'td_inventory_escalation',
+    match: ({ titleLower, metadata }: MatchContext) =>
+      has(titleLower, 'disposal approval required') ||
+      metadata?.workflow === 'td_inventory_escalation',
+    resolve: ({ buildPath, metadata, role }: MatchContext) => {
+      if (role === 'technical-director' || role === 'technicaldirector') {
+        return {
+          path: buildPath('/disposal-approvals'),
+          queryParams: {
+            ...(metadata?.return_id && { return_id: String(metadata.return_id) })
+          }
+        };
+      }
+      if (role === 'production-manager' || role === 'productionmanager') {
+        return {
+          path: buildPath('/m2-store/disposal'),
+          queryParams: {}
+        };
+      }
+      return { path: buildPath('/projects') };
+    }
   },
 ];
 

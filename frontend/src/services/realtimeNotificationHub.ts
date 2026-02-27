@@ -183,8 +183,8 @@ class RealtimeNotificationHub {
         console.log('[RealtimeNotificationHub] ❌ Socket.IO disconnected:', { reason });
         // Start polling fallback when Socket.IO disconnects
         this.startPollingFallback();
-        // Immediately fetch missed notifications on disconnect (catches anything in-flight)
-        setTimeout(() => this.fetchMissedNotifications(), 2000);
+        // Fetch missed notifications on disconnect (catches anything in-flight)
+        this.fetchMissedNotifications();
       });
 
       this.socket.on('connect_error', () => {
@@ -259,6 +259,8 @@ class RealtimeNotificationHub {
     // Lazy import to avoid circular dependency
     import('./notificationPollingService').then(({ notificationPollingService }) => {
       notificationPollingService.startPolling();
+    }).catch((err) => {
+      console.error('[RealtimeNotificationHub] CRITICAL: Failed to start polling fallback:', err);
     });
   }
 
@@ -266,17 +268,28 @@ class RealtimeNotificationHub {
    * Handle incoming notification from Socket.IO
    */
   private async handleIncomingNotification(notification: RealtimeNotification) {
-    // Deduplicate: Skip if already processed (normalize ID to string for consistent comparison)
+    // Deduplicate: Track if already processed (normalize ID to string for consistent comparison)
     const notificationIdStr = String(notification.id);
-    if (this.processedNotificationIds.has(notificationIdStr)) {
-      return;
+    const alreadyProcessed = this.processedNotificationIds.has(notificationIdStr);
+
+    // If already processed by polling initial load, still show toast but skip store add
+    // This prevents the race condition where polling loads silently, then Socket.IO delivers
+    // the same notification but can't show the toast because dedup blocks it
+    if (alreadyProcessed) {
+      // Check if toast was already shown — if so, fully skip
+      if (this.shownToastIds.has(notificationIdStr)) {
+        return;
+      }
+      // Toast not shown yet (polling loaded silently) — continue to show toast only
+      console.log('[RealtimeNotificationHub] Already in store from polling, showing toast only:', notification.title);
     }
+
     this.processedNotificationIds.add(notificationIdStr);
 
-    // Clean up old IDs (keep last 100)
-    if (this.processedNotificationIds.size > 100) {
+    // Clean up old IDs (keep last 500 to prevent pruning recently-seen IDs during rapid dispatch)
+    if (this.processedNotificationIds.size > 500) {
       const ids = Array.from(this.processedNotificationIds);
-      this.processedNotificationIds = new Set(ids.slice(-50));
+      this.processedNotificationIds = new Set(ids.slice(-250));
     }
 
     const userData = getSecureUserData();
@@ -355,11 +368,15 @@ class RealtimeNotificationHub {
     // ALWAYS log when notification passes all checks
     console.log('[RealtimeNotificationHub] ✅ Passed all checks, showing notification:', notification.title);
 
-    // Add to notification store (shows in notification panel + badge count)
-    useNotificationStore.getState().addNotification(notificationData);
+    // Only add to store if not already loaded by polling (prevents duplicates in bell icon)
+    if (!alreadyProcessed) {
+      // Add to notification store (shows in notification panel + badge count)
+      useNotificationStore.getState().addNotification(notificationData);
+    }
 
     // Show in-app notification popup (DIFFERENT from action toasts)
     // This is styled differently to distinguish from your own action feedback
+    // ALWAYS show toast — even if polling already loaded the notification silently
     this.showIncomingNotificationPopup(notification);
 
     // Show desktop notification (browser notification for when minimized/background)
@@ -368,8 +385,7 @@ class RealtimeNotificationHub {
 
   /**
    * Show desktop (browser) notification
-   * Only shows when browser tab is in background or minimized
-   * When tab is active/focused, user already sees in-app toast
+   * Shows regardless of tab visibility — user wants OS notification popups
    */
   private async showDesktopNotification(notification: RealtimeNotification) {
     // Prevent duplicate desktop notifications
@@ -381,21 +397,27 @@ class RealtimeNotificationHub {
 
     // Check if browser supports notifications
     if (!('Notification' in window)) {
+      console.warn('[RealtimeNotificationHub] Desktop notifications not supported by browser');
       return;
     }
 
-    // Check permission
-    if (Notification.permission !== 'granted') {
+    // Check permission — request if not yet asked
+    if (Notification.permission === 'default') {
+      console.log('[RealtimeNotificationHub] Desktop notification permission not yet granted, requesting...');
+      try {
+        const result = await Notification.requestPermission();
+        console.log('[RealtimeNotificationHub] Permission result:', result);
+        if (result !== 'granted') return;
+      } catch {
+        return;
+      }
+    } else if (Notification.permission === 'denied') {
+      console.warn('[RealtimeNotificationHub] Desktop notifications are blocked by user. Enable in browser settings.');
       return;
     }
 
-    // Only show desktop notification when tab is NOT active/visible
-    // If user is looking at the app, they'll see the in-app toast
-    const isTabVisible = document.visibilityState === 'visible' && document.hasFocus();
-    if (isTabVisible) {
-      return;
-    }
-
+    // Show desktop notification regardless of tab visibility
+    // User explicitly wants OS notification popups alongside in-app toasts
     try {
       const actionUrl = (notification as any).actionUrl || notification.metadata?.actionUrl;
 
@@ -409,16 +431,33 @@ class RealtimeNotificationHub {
       desktopNotif.onclick = () => {
         window.focus();
         desktopNotif.close();
-        if (actionUrl) {
-          // Use SPA navigation to avoid full page reload
-          navigateTo(actionUrl);
-        }
+        // Use smart redirect (same logic as bell icon)
+        import('@/utils/notificationRedirects').then(({ getNotificationRedirectPath, buildNotificationUrl }) => {
+          const notifData = {
+            id: String(notification.id),
+            type: notification.type || 'info',
+            title: notification.title,
+            message: notification.message,
+            category: (notification as any).category || notification.metadata?.category || 'system',
+            metadata: notification.metadata,
+            actionUrl,
+          };
+          const redirectConfig = getNotificationRedirectPath(notifData as any, this.userRole || '');
+          if (redirectConfig) {
+            navigateTo(buildNotificationUrl(redirectConfig));
+          } else if (actionUrl) {
+            navigateTo(actionUrl);
+          }
+          useNotificationStore.getState().markAsRead(String(notification.id));
+        }).catch(() => {
+          if (actionUrl) navigateTo(actionUrl);
+        });
       };
 
       // Auto close after 8 seconds
       setTimeout(() => desktopNotif.close(), 8000);
-    } catch {
-      // Silent fail
+    } catch (err) {
+      console.error('[RealtimeNotificationHub] Failed to show desktop notification:', err);
     }
   }
 
@@ -465,18 +504,57 @@ class RealtimeNotificationHub {
       ? `From: ${notification.senderName}`
       : '';
 
-    // Use toast.message() for incoming notifications - different from success/error
-    // This creates a neutral-styled notification that looks different from action feedback
-    toast.message(`${getIcon()} ${notification.title}`, {
+    // Build navigation URL using the same smart redirect system as the bell icon
+    const navigateToNotification = () => {
+      // Lazy import to avoid circular dependency
+      import('@/utils/notificationRedirects').then(({ getNotificationRedirectPath, buildNotificationUrl }) => {
+        // Build a notification-like object for the redirect matcher
+        const notifData = {
+          id: String(notification.id),
+          type: notification.type || 'info',
+          title: notification.title,
+          message: notification.message,
+          priority: notification.priority || 'medium',
+          category: (notification as any).category || notification.metadata?.category || 'system',
+          metadata: notification.metadata,
+          actionUrl: (notification as any).actionUrl || notification.metadata?.actionUrl,
+        };
+
+        // Priority 1: Smart content-based redirect (same as bell icon)
+        const redirectConfig = getNotificationRedirectPath(notifData as any, this.userRole || '');
+        if (redirectConfig) {
+          const url = buildNotificationUrl(redirectConfig);
+          // Mark as read
+          useNotificationStore.getState().markAsRead(String(notification.id));
+          navigateTo(url);
+          return;
+        }
+
+        // Priority 2: Backend actionUrl
+        const actionUrl = (notification as any).actionUrl || notification.metadata?.actionUrl;
+        if (actionUrl) {
+          useNotificationStore.getState().markAsRead(String(notification.id));
+          navigateTo(actionUrl);
+          return;
+        }
+
+        // No redirect - just mark as read
+        useNotificationStore.getState().markAsRead(String(notification.id));
+      }).catch(() => {
+        // Fallback: use actionUrl directly
+        const actionUrl = (notification as any).actionUrl || notification.metadata?.actionUrl;
+        if (actionUrl) navigateTo(actionUrl);
+      });
+    };
+
+    // Entire toast is clickable — navigates to relevant page (same as bell icon)
+    toast.info(`${getIcon()} ${notification.title}`, {
       description: `${notification.message}${senderInfo ? `\n${senderInfo}` : ''}`,
       duration: notification.priority === 'urgent' || notification.priority === 'high' ? 8000 : 5000,
-      action: (notification as any).actionUrl ? {
-        label: 'View',
-        onClick: () => {
-          // Use SPA navigation to avoid full page reload
-          navigateTo((notification as any).actionUrl);
-        }
-      } : undefined,
+      action: {
+        label: 'View →',
+        onClick: navigateToNotification,
+      },
     });
   }
 
@@ -593,6 +671,11 @@ class RealtimeNotificationHub {
     this.disconnect();
     this.setupSocketConnection();
     this.setupSupabaseRealtime();
+    // CRITICAL: disconnect() kills healthCheck and authPoll intervals.
+    // We must restart them, plus the polling safety net, otherwise
+    // notifications silently stop arriving after login/reconnect.
+    this.setupPeriodicHealthCheck();
+    this.startPollingFallback();
   }
 
   /**
@@ -638,6 +721,14 @@ class RealtimeNotificationHub {
   }
 
   /**
+   * Check if a toast was already shown for a notification ID.
+   * Used by polling service to avoid duplicate toasts.
+   */
+  hasShownToast(notificationId: string): boolean {
+    return this.shownToastIds.has(notificationId);
+  }
+
+  /**
    * Fetch missed notifications from the backend API
    * Called when user logs in, reconnects, or app mounts
    * PUBLIC method so it can be called from App.tsx on mount
@@ -651,85 +742,70 @@ class RealtimeNotificationHub {
 
       // Fetch recent notifications (read + unread) so read notifications persist after page reload
       const response = await client.get('/notifications', {
-        params: { unread_only: false, limit: 50 }
+        params: { unread_only: false, limit: 100 }
       });
 
       const data = response.data;
 
       if (data.success && data.notifications && Array.isArray(data.notifications)) {
-        const now = Date.now();
-        const RECENT_THRESHOLD = 5 * 60 * 1000; // 5 minutes - show popup for recent notifications
         const store = useNotificationStore.getState();
-        const existingIds = new Set(store.notifications.map(n => String(n.id)));
 
-        // Collect batch for single store update
         const batch: any[] = [];
-        const recentNew: RealtimeNotification[] = [];
 
         for (const notif of data.notifications) {
-          const notification: RealtimeNotification = {
-            id: notif.id,
-            type: notif.type,
+          const notifIdStr = String(notif.id);
+
+          // Track as processed so Socket.IO handleIncomingNotification
+          // doesn't re-add to store (but still shows toast)
+          this.processedNotificationIds.add(notifIdStr);
+
+          batch.push({
+            id: notifIdStr,
+            type: notif.type || 'info',
             title: notif.title,
             message: notif.message,
             priority: notif.priority || 'medium',
-            timestamp: notif.timestamp || notif.createdAt,
-            userId: notif.userId,
-            targetUserId: notif.userId,
-            targetRole: notif.targetRole,
-            senderId: notif.senderId,
-            senderName: notif.senderName,
-            category: notif.category,
+            timestamp: new Date(notif.timestamp || notif.createdAt || Date.now()),
+            read: notif.read === true,
             metadata: {
               ...notif.metadata,
               actionUrl: notif.actionUrl,
               actionLabel: notif.actionLabel
-            }
-          } as any;
-
-          // Skip if already processed (normalize ID to string)
-          const notifIdStr = String(notification.id);
-          if (this.processedNotificationIds.has(notifIdStr)) {
-            continue;
-          }
-          this.processedNotificationIds.add(notifIdStr);
-
-          const notificationData = {
-            id: String(notification.id),
-            type: notification.type || 'info',
-            title: notification.title,
-            message: notification.message,
-            priority: notification.priority || 'medium',
-            timestamp: new Date(notification.timestamp || Date.now()),
-            read: notif.read === true,
-            metadata: notification.metadata,
-            actionUrl: (notification as any).actionUrl || notification.metadata?.actionUrl,
-            actionLabel: (notification as any).actionLabel || notification.metadata?.actionLabel,
-            senderName: notification.senderName,
-            category: (notification as any).category || notif.category || notification.metadata?.category || 'system'
-          };
-
-          batch.push(notificationData);
-
-          // Track recent + truly new notifications for popups
-          const alreadyExists = existingIds.has(notifIdStr);
-          const notificationTime = new Date(notification.timestamp || Date.now()).getTime();
-          const isRecent = (now - notificationTime) < RECENT_THRESHOLD;
-          if (isRecent && !alreadyExists) {
-            recentNew.push(notification);
-          }
+            },
+            actionUrl: notif.actionUrl || notif.metadata?.actionUrl,
+            actionLabel: notif.actionLabel || notif.metadata?.actionLabel,
+            senderName: notif.senderName,
+            category: notif.category || notif.metadata?.category || 'system'
+          });
         }
 
-        // Single store update for all notifications
+        // Single store update — handles dedup internally
         store.addNotifications(batch);
 
-        // Show popups for recent new notifications
-        const isPageHidden = document.hidden || document.visibilityState === 'hidden';
-        for (const notification of recentNew) {
-          if (isPageHidden) {
-            this.showDesktopNotification(notification);
-          }
-          this.showIncomingNotificationPopup(notification);
+        // Show toasts for recent UNREAD notifications (created within last 2 minutes)
+        // Since Socket.IO may be disconnected, this ensures users see toasts on login/reconnect
+        const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+        for (const notif of data.notifications) {
+          if (notif.read) continue;
+          const notifTime = new Date(notif.timestamp || notif.createdAt || 0).getTime();
+          if (notifTime <= twoMinutesAgo) continue;
+
+          const notifIdStr = String(notif.id);
+          if (this.shownToastIds.has(notifIdStr)) continue;
+
+          // Show toast
+          const realtimeNotif: RealtimeNotification = {
+            id: notifIdStr,
+            type: notif.type || 'info',
+            title: notif.title,
+            message: notif.message,
+            priority: notif.priority || 'medium',
+            timestamp: notif.timestamp || notif.createdAt,
+            metadata: notif.metadata,
+            senderName: notif.senderName
+          };
+          this.showIncomingNotificationPopup(realtimeNotif);
+          this.showDesktopNotification(realtimeNotif);
         }
       }
     } catch {
