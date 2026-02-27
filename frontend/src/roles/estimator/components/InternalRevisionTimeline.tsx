@@ -52,16 +52,19 @@ interface InternalRevisionTimelineProps {
   onReject?: (boq: BOQWithInternalRevisions) => void;
   refreshTrigger?: number; // Prop to trigger refresh from parent
   onApprovalComplete?: () => void; // Callback after approval/rejection completes
+  externalSearchTerm?: string; // Search term from parent page
 }
 
 const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   userRole = 'estimator',
   onApprove,
   onReject,
-  refreshTrigger
+  refreshTrigger,
+  externalSearchTerm = ''
 }) => {
   const [boqs, setBOQs] = useState<BOQWithInternalRevisions[]>([]);
   const [selectedBoq, setSelectedBoq] = useState<BOQWithInternalRevisions | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
   const [internalRevisions, setInternalRevisions] = useState<InternalRevision[]>([]);
   const [isLoadingBOQs, setIsLoadingBOQs] = useState(false);
   const [isLoadingRevisions, setIsLoadingRevisions] = useState(false);
@@ -113,16 +116,12 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   }, [showDropdown]);
 
   useEffect(() => {
-    // Skip if this is triggered by initial BOQ selection from loadBOQsWithInternalRevisions
-    if (selectedBoq && !isInitialMount.current) {
-      loadInternalRevisions(selectedBoq.boq_id);
-    }
-    if (isInitialMount.current && selectedBoq) {
-      // On initial mount, load revisions for the first BOQ
+    // Only load revisions when user has clicked to open details
+    if (selectedBoq && showDetails) {
       loadInternalRevisions(selectedBoq.boq_id);
       isInitialMount.current = false;
     }
-  }, [selectedBoq]);
+  }, [selectedBoq, showDetails]);
 
   // Reload data when refreshTrigger changes (parent handles real-time updates via this prop)
   useEffect(() => {
@@ -417,6 +416,19 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
   };
 
   const filteredBOQs = boqs.filter(boq => {
+    // Apply external search term first (from parent page search bar)
+    if (externalSearchTerm) {
+      const extLower = externalSearchTerm.toLowerCase().trim();
+      const boqIdStr = `b-${boq.boq_id || boq.id}`;
+      const matchesExternal =
+        boq.boq_name?.toLowerCase().includes(extLower) ||
+        boq.project?.name?.toLowerCase().includes(extLower) ||
+        boq.project?.client?.toLowerCase().includes(extLower) ||
+        boqIdStr.includes(extLower) ||
+        (boq.boq_id || boq.id)?.toString().includes(externalSearchTerm.trim());
+      if (!matchesExternal) return false;
+    }
+    // Apply internal (dropdown) search term
     const searchLower = searchTerm.toLowerCase().trim();
     // ✅ Search by ID (B-123, 123), BOQ name, project name, or client
     const boqIdString = `b-${boq.boq_id || boq.id}`;
@@ -1188,13 +1200,14 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           <div className="mb-4 space-y-2">
             <p className="text-sm font-semibold text-gray-700 mb-3">Recent Projects:</p>
             <div className="space-y-2">
-              {boqs.slice(0, 5).map((boq) => {
+              {(externalSearchTerm ? filteredBOQs : boqs.slice(0, 5)).map((boq) => {
                 const statusBadge = getStatusBadge(boq.status);
                 return (
                   <button
                     key={boq.boq_id}
                     onClick={() => {
                       setSelectedBoq(boq);
+                      setShowDetails(false);
                       setSearchTerm('');
                       setShowDropdown(false);
                       setSelectedRevisionIndex(null);
@@ -1253,13 +1266,14 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
               className="absolute z-20 w-full mt-2 bg-white border border-gray-300 rounded-lg shadow-xl max-h-80 overflow-y-auto"
             >
               {boqs.length > 0 ? (
-                (searchTerm ? filteredBOQs : boqs.slice(0, 20)).map((boq) => {
+                (searchTerm || externalSearchTerm ? filteredBOQs : boqs.slice(0, 20)).map((boq) => {
                   const statusBadge = getStatusBadge(boq.status);
                   return (
                     <button
                       key={boq.boq_id}
                       onClick={() => {
                         setSelectedBoq(boq);
+                        setShowDetails(false);
                         setSearchTerm('');
                         setShowDropdown(false);
                         setSelectedRevisionIndex(null);
@@ -1299,15 +1313,21 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
           )}
         </div>
 
-        {/* Selected BOQ Info */}
+        {/* Selected BOQ Card - click to open full details */}
         {selectedBoq && !searchTerm && (
-          <div className="mt-4 p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg border border-blue-200">
+          <button
+            onClick={() => setShowDetails(true)}
+            className="mt-4 w-full text-left p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg border border-blue-200 hover:border-blue-400 hover:shadow-md transition-all"
+          >
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="font-bold text-blue-900">{selectedBoq.boq_name}</h4>
                 <p className="text-sm text-blue-700">
                   {selectedBoq.project?.name} • {selectedBoq.project?.client}
                 </p>
+                {!showDetails && (
+                  <p className="text-xs text-blue-500 mt-1">Click to view internal revisions →</p>
+                )}
               </div>
               <div className="text-right">
                 <div className="text-lg font-bold text-blue-900">
@@ -1316,12 +1336,12 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
                 <div className="text-sm text-blue-700">{formatCurrency(selectedBoq.total_cost)}</div>
               </div>
             </div>
-          </div>
+          </button>
         )}
       </div>
 
       {/* Split View: Current (Left) vs Previous (Right) */}
-      {selectedBoq && internalRevisions.length > 0 && (
+      {selectedBoq && showDetails && internalRevisions.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* LEFT SIDE: Current Internal Revision */}
           <motion.div
@@ -2473,7 +2493,7 @@ const InternalRevisionTimeline: React.FC<InternalRevisionTimelineProps> = ({
       )}
 
       {/* No Data State */}
-      {selectedBoq && internalRevisions.length === 0 && !isLoadingRevisions && (
+      {selectedBoq && showDetails && internalRevisions.length === 0 && !isLoadingRevisions && (
         <div className="bg-white rounded-xl shadow-md border border-gray-200 p-12 text-center">
           <Clock className="h-16 w-16 mx-auto mb-4 text-gray-400" />
           <p className="font-medium text-gray-700 text-lg">No internal revision history</p>

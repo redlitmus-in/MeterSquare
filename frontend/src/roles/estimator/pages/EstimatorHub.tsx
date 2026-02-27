@@ -3171,7 +3171,7 @@ const EstimatorHub: React.FC = () => {
       {/* Main Content */}
       {!showFullScreenBOQ && (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
-        {/* Search Bar with Controls */}
+        {/* Controls */}
         <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
           <div className="relative flex-1 max-w-full sm:max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -3182,7 +3182,6 @@ const EstimatorHub: React.FC = () => {
               className="pl-10 border-gray-200 focus:border-gray-300 focus:ring-0 text-sm"
             />
           </div>
-
           <div className="flex items-center gap-3">
             {/* View Mode Toggle */}
             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
