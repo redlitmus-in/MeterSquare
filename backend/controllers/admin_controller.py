@@ -1542,10 +1542,11 @@ def get_top_performers():
             _pm_count_rows = db.session.execute(text(
                 """
                 SELECT pm_id::int AS pm_id, COUNT(*) AS project_count
-                FROM projects,
+                FROM project,
                      jsonb_array_elements_text(user_id) AS pm_id
                 WHERE is_deleted = FALSE
                   AND user_id IS NOT NULL
+                  AND jsonb_typeof(user_id) = 'array'
                 GROUP BY pm_id
                 """
             )).fetchall()
