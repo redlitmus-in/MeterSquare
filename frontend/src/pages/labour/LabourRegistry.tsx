@@ -235,7 +235,8 @@ const LabourRegistry: React.FC = () => {
       emergency_contact: worker.emergency_contact || '',
       emergency_phone: worker.emergency_phone || '',
       id_number: worker.id_number || '',
-      notes: worker.notes || ''
+      notes: worker.notes || '',
+      worker_code: worker.worker_code
     });
     setShowAddModal(true);
   };
@@ -569,6 +570,19 @@ const LabourRegistry: React.FC = () => {
             </div>
 
             <form onSubmit={handleSubmit} className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Worker Code {!editingWorker && <span className="text-gray-400 font-normal">(leave blank to auto-generate)</span>}
+                </label>
+                <input
+                  type="text"
+                  placeholder={!editingWorker ? 'e.g. WRK-006' : ''}
+                  value={formData.worker_code || ''}
+                  onChange={(e) => setFormData({ ...formData, worker_code: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 font-mono"
+                />
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
                 <input

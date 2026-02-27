@@ -52,6 +52,7 @@ export interface CreateWorkerData {
   emergency_contact?: string;
   emergency_phone?: string;
   id_number?: string;
+  worker_code?: string;
   photo_url?: string;
   notes?: string;
 }

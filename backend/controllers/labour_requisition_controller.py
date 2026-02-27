@@ -116,8 +116,14 @@ def create_worker():
         if not data.get('hourly_rate'):
             return jsonify({"error": "hourly_rate is required"}), 400
 
-        # Generate worker code
-        worker_code = Worker.generate_worker_code()
+        # Use provided worker_code or auto-generate one
+        worker_code = data.get('worker_code', '').strip()
+        if worker_code:
+            duplicate = Worker.query.filter_by(worker_code=worker_code, is_deleted=False).first()
+            if duplicate:
+                return jsonify({"error": f"Worker code '{worker_code}' is already in use"}), 400
+        else:
+            worker_code = Worker.generate_worker_code()
 
         worker = Worker(
             worker_code=worker_code,
@@ -140,7 +146,7 @@ def create_worker():
         db.session.add(worker)
         db.session.commit()
 
-        log.info(f"Worker created: {worker_code} by {current_user.get('full_name')}")
+        log.info(f"Worker created: {worker.worker_code} by {current_user.get('full_name')}")
 
         return jsonify({
             "success": True,
@@ -190,6 +196,14 @@ def update_worker(worker_id):
             return jsonify({"error": "Worker not found"}), 404
 
         # Update fields
+        if 'worker_code' in data and data['worker_code']:
+            new_code = data['worker_code'].strip()
+            if new_code != worker.worker_code:
+                duplicate = Worker.query.filter_by(worker_code=new_code, is_deleted=False).first()
+                if duplicate:
+                    return jsonify({"error": f"Worker code '{new_code}' is already in use"}), 400
+                worker.worker_code = new_code
+
         if 'full_name' in data:
             worker.full_name = data['full_name']
         if 'phone' in data:
@@ -659,6 +673,8 @@ def update_requisition(requisition_id):
         # Update fields
         if 'site_name' in data:
             requisition.site_name = data['site_name']
+        if 'worker_code' in data:
+            requisition.worker_code = data['worker_code']
         if 'work_description' in data:
             requisition.work_description = data['work_description']
         if 'skill_required' in data:
