@@ -5,8 +5,7 @@ import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import InternalRevisionTimeline from '@/roles/estimator/components/InternalRevisionTimeline';
-import { API_BASE_URL } from '@/api/config';
+import { apiClient, API_BASE_URL } from '@/api/config';
 
 interface BOQ {
   boq_id: number;
@@ -27,6 +26,20 @@ interface BOQ {
   selling_price?: number;
   status?: string;
   client_rejection_reason?: string | null;
+}
+
+interface InternalRevision {
+  id: number;
+  internal_revision_number: number;
+  action_type: string;
+  actor_role: string;
+  actor_name: string;
+  status_before: string;
+  status_after: string;
+  rejection_reason?: string;
+  approval_comments?: string;
+  changes_summary?: any;
+  created_at: string;
 }
 
 interface TDRevisionComparisonPageProps {
@@ -58,6 +71,18 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
   const [showDropdown, setShowDropdown] = useState(false);
   const [expandedRevisionIndex, setExpandedRevisionIndex] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // === Internal Revisions Tab State ===
+  const [internalBoqs, setInternalBoqs] = useState<any[]>([]);
+  const [internalSelectedBoq, setInternalSelectedBoq] = useState<any | null>(null);
+  const [internalCurrentRevisionData, setInternalCurrentRevisionData] = useState<any>(null);
+  const [internalPreviousRevisions, setInternalPreviousRevisions] = useState<InternalRevision[]>([]);
+  const [internalOriginalBOQ, setInternalOriginalBOQ] = useState<any>(null);
+  const [internalIsLoading, setInternalIsLoading] = useState(false);
+  const [internalSearchTerm, setInternalSearchTerm] = useState('');
+  const [internalShowDropdown, setInternalShowDropdown] = useState(false);
+  const [internalExpandedRevisionIndex, setInternalExpandedRevisionIndex] = useState<number | null>(null);
+  const internalDropdownRef = useRef<HTMLDivElement>(null);
 
   // Helper functions to safely get BOQ data (defined early for use in filters)
   const getProjectTitle = (boq: BOQ) => {
@@ -262,6 +287,107 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
     }
   };
 
+  // === Internal Revisions Data Loading ===
+  const loadInternalBoqList = async () => {
+    try {
+      const response = await apiClient.get('/boqs/internal_revisions');
+      if (response.data.success) {
+        const sorted = [...response.data.data].sort((a: any, b: any) =>
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        );
+        setInternalBoqs(sorted);
+      }
+    } catch (error) {
+      console.error('Error loading internal BOQs:', error);
+    }
+  };
+
+  const loadInternalRevisionData = async (boq: any) => {
+    setInternalIsLoading(true);
+    try {
+      const token = localStorage.getItem('access_token');
+
+      // Fetch current BOQ details (same as client tab)
+      const boqResponse = await fetch(`${API_BASE_URL}/boq/${boq.boq_id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const boqData = await boqResponse.json();
+
+      if (boqData && boqData.boq_id) {
+        const current = {
+          boq_detail_id: boqData.boq_id,
+          boq_id: boqData.boq_id,
+          version: 'current',
+          boq_details: {
+            items: boqData.existing_purchase?.items || [],
+            discount_percentage: boqData.discount_percentage || 0,
+            discount_amount: boqData.discount_amount || 0,
+            total_cost: boqData.total_cost || 0,
+            profit_analysis: boqData.profit_analysis || null,
+            preliminaries: boqData.preliminaries || {},
+            terms_conditions: boqData.terms_conditions || { items: [] }
+          },
+          total_cost: boqData.total_cost || 0,
+          created_at: boqData.created_at
+        };
+        setInternalCurrentRevisionData(current);
+      }
+
+      // Fetch internal revision history
+      const revResponse = await apiClient.get(`/boq/${boq.boq_id}/internal_revisions`);
+      if (revResponse.data.success) {
+        const { internal_revisions, original_boq } = revResponse.data.data;
+        const regularRevisions = (internal_revisions || [])
+          .filter((r: InternalRevision) => r.action_type !== 'ORIGINAL_BOQ')
+          .sort((a: InternalRevision, b: InternalRevision) =>
+            b.internal_revision_number - a.internal_revision_number
+          );
+        setInternalPreviousRevisions(regularRevisions);
+        setInternalOriginalBOQ(original_boq || null);
+      }
+    } catch (error) {
+      console.error('Error loading internal revision data:', error);
+      showError('Failed to load internal revision data');
+    } finally {
+      setInternalIsLoading(false);
+    }
+  };
+
+  // Load internal BOQ list when internal tab is active
+  useEffect(() => {
+    if (activeTab === 'internal') {
+      loadInternalBoqList();
+    }
+  }, [activeTab]);
+
+  // Reload internal list on refresh trigger
+  useEffect(() => {
+    if (refreshTrigger && refreshTrigger > 0 && activeTab === 'internal') {
+      loadInternalBoqList();
+    }
+  }, [refreshTrigger]);
+
+  // Load internal revision data when internal BOQ is selected
+  useEffect(() => {
+    if (internalSelectedBoq) {
+      loadInternalRevisionData(internalSelectedBoq);
+    }
+  }, [internalSelectedBoq]);
+
+  // Close internal dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (internalDropdownRef.current && !internalDropdownRef.current.contains(event.target as Node)) {
+        setInternalShowDropdown(false);
+      }
+    };
+    if (internalShowDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [internalShowDropdown]);
+
+
   const formatCurrency = (amount: number) => {
     return `AED ${amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`;
   };
@@ -449,6 +575,68 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
         </div>
       </div>
     );
+  };
+
+
+  // Internal revision helpers
+  const getInternalRevisionLabel = (revNum: number) => {
+    return revNum === 0 ? 'Original' : `R${revNum}`;
+  };
+
+  const getActionLabel = (actionType: string) => {
+    const labels: Record<string, string> = {
+      'TD_APPROVED': 'TD Approved',
+      'TD_REJECTED': 'TD Rejected',
+      'PM_EDITED': 'PM Edited',
+      'SENT_TO_TD': 'Sent to TD',
+      'SENT_TO_PM': 'Sent to PM',
+      'ESTIMATOR_RESUBMIT': 'Estimator Resubmitted',
+      'INTERNAL_REVISION_EDIT': 'Internal Edit',
+      'ORIGINAL_BOQ': 'Original BOQ',
+    };
+    return labels[actionType] || actionType.replace(/_/g, ' ');
+  };
+
+  const getActionColor = (actionType: string) => {
+    const colors: Record<string, string> = {
+      'TD_APPROVED': 'text-green-700 bg-green-100',
+      'TD_REJECTED': 'text-red-700 bg-red-100',
+      'PM_EDITED': 'text-blue-700 bg-blue-100',
+      'SENT_TO_TD': 'text-purple-700 bg-purple-100',
+      'SENT_TO_PM': 'text-indigo-700 bg-indigo-100',
+      'ESTIMATOR_RESUBMIT': 'text-orange-700 bg-orange-100',
+      'INTERNAL_REVISION_EDIT': 'text-blue-700 bg-blue-100',
+    };
+    return colors[actionType] || 'text-gray-700 bg-gray-100';
+  };
+
+  // Filter internal BOQs by search
+  const filteredInternalBOQs = internalBoqs.filter(boq => {
+    const searchLower = (internalSearchTerm || externalSearchTerm || '').toLowerCase().trim();
+    if (!searchLower) return true;
+    const boqIdString = `b-${boq.boq_id}`;
+    return (
+      boq.boq_name?.toLowerCase().includes(searchLower) ||
+      boq.title?.toLowerCase().includes(searchLower) ||
+      boq.project?.name?.toLowerCase().includes(searchLower) ||
+      boq.project?.client?.toLowerCase().includes(searchLower) ||
+      boqIdString.includes(searchLower) ||
+      boq.boq_id?.toString().includes(searchLower.trim())
+    );
+  });
+
+  // Get previous internal revision for comparison
+  const getInternalPreviousRevision = () => {
+    if (internalPreviousRevisions.length > 0) {
+      return internalPreviousRevisions[0]; // Already sorted descending
+    }
+    return null;
+  };
+
+  // Find matching item in internal revision snapshot
+  const findInternalPreviousItem = (itemName: string, revision: InternalRevision | null) => {
+    if (!revision?.changes_summary?.items) return null;
+    return revision.changes_summary.items.find((item: any) => item.item_name === itemName);
   };
 
   return (
@@ -2296,14 +2484,788 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
         </TabsContent>
 
         {/* Internal Revisions Tab */}
-        <TabsContent value="internal">
-          <InternalRevisionTimeline
-            userRole="technical_director"
-            onApprove={onApprove}
-            onReject={onReject}
-            refreshTrigger={refreshTrigger}
-            externalSearchTerm={externalSearchTerm}
-          />
+        <TabsContent value="internal" className="space-y-6">
+          {/* Project Selection Dropdown - SAME structure as Client tab */}
+          <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Select Project to Review Internal Revisions</h3>
+
+            {/* Search/Select Dropdown */}
+            <div className="relative mb-4" ref={internalDropdownRef}>
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
+                <Search className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                placeholder={internalSelectedBoq ? (internalSelectedBoq.boq_name || internalSelectedBoq.title || 'Selected') : "Click to select project or search..."}
+                value={internalSearchTerm}
+                onChange={(e) => {
+                  setInternalSearchTerm(e.target.value);
+                  setInternalShowDropdown(true);
+                }}
+                onFocus={() => setInternalShowDropdown(true)}
+                onClick={() => setInternalShowDropdown(true)}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer"
+              />
+
+              {/* Dropdown Results */}
+              {internalShowDropdown && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="absolute z-20 w-full mt-2 bg-white border border-gray-300 rounded-lg shadow-xl max-h-80 overflow-y-auto"
+                >
+                  {internalBoqs.length > 0 ? (
+                    (internalSearchTerm || externalSearchTerm ? filteredInternalBOQs : internalBoqs.slice(0, 20)).map((boq) => (
+                      <button
+                        key={boq.boq_id}
+                        onClick={() => {
+                          setInternalSelectedBoq(boq);
+                          setInternalSearchTerm('');
+                          setInternalShowDropdown(false);
+                        }}
+                        className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border-b border-gray-100 last:border-0"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="font-semibold text-gray-900">{boq.boq_name || boq.title}</div>
+                              {(() => {
+                                const status = boq.status?.toLowerCase() || '';
+                                if (status === 'pending_approval' || status === 'pending_revision' || status === 'pending' || status === 'internal_revision_pending') {
+                                  return <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">Pending Review</span>;
+                                }
+                                if (status === 'revision_approved' || status === 'approved') {
+                                  return <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">Approved</span>;
+                                }
+                                if (status === 'rejected') {
+                                  return <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full font-medium">Rejected</span>;
+                                }
+                                return null;
+                              })()}
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {boq.project?.name || boq.project_name} • {boq.project?.client || boq.client}
+                            </div>
+                          </div>
+                          <div className="text-right ml-4">
+                            <div className={`text-sm font-semibold px-2 py-1 rounded inline-block ${
+                              boq.internal_revision_number >= 7 ? 'bg-red-100 text-red-700' :
+                              boq.internal_revision_number >= 4 ? 'bg-orange-100 text-orange-700' :
+                              boq.internal_revision_number > 0 ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-blue-100 text-blue-700'
+                            }`}>
+                              R{boq.internal_revision_number || 0}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-4 py-8 text-center text-gray-500">
+                      <p className="font-medium">No projects with internal revisions found</p>
+                      <p className="text-sm mt-1">All projects are reviewed</p>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </div>
+
+            {/* Recent Projects - visible when no project selected */}
+            {!internalSelectedBoq && internalBoqs.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-gray-700 mb-3">Recent Projects:</p>
+                <div className="space-y-2">
+                  {(externalSearchTerm ? filteredInternalBOQs : internalBoqs.slice(0, 5)).map((boq) => (
+                    <button
+                      key={boq.boq_id}
+                      onClick={() => {
+                        setInternalSelectedBoq(boq);
+                        setInternalSearchTerm('');
+                        setInternalShowDropdown(false);
+                      }}
+                      className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border border-gray-200 rounded-lg"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="font-semibold text-gray-900">{boq.boq_name || boq.title}</div>
+                            {(() => {
+                              const status = boq.status?.toLowerCase() || '';
+                              if (status === 'pending_approval' || status === 'pending_revision' || status === 'pending' || status === 'internal_revision_pending') {
+                                return <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">Pending Review</span>;
+                              }
+                              if (status === 'revision_approved' || status === 'approved') {
+                                return <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">Approved</span>;
+                              }
+                              if (status === 'rejected') {
+                                return <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full font-medium">Rejected</span>;
+                              }
+                              return null;
+                            })()}
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            {boq.project?.name || boq.project_name} • {boq.project?.client || boq.client}
+                          </div>
+                        </div>
+                        <div className="text-right ml-4">
+                          <div className={`text-sm font-semibold px-2 py-1 rounded inline-block ${
+                            boq.internal_revision_number >= 7 ? 'bg-red-100 text-red-700' :
+                            boq.internal_revision_number >= 4 ? 'bg-orange-100 text-orange-700' :
+                            boq.internal_revision_number > 0 ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-blue-100 text-blue-700'
+                          }`}>
+                            R{boq.internal_revision_number || 0}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Selected Project Info - SAME style as Client tab */}
+            {internalSelectedBoq && !internalSearchTerm && (
+              <div className="mt-4 p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg border border-blue-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-blue-900">{internalSelectedBoq.boq_name || internalSelectedBoq.title}</h4>
+                    <p className="text-sm text-blue-700">
+                      {internalSelectedBoq.project?.name || internalSelectedBoq.project_name} • {internalSelectedBoq.project?.client || internalSelectedBoq.client}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-bold text-blue-900">R{internalSelectedBoq.internal_revision_number || 0}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Split View: Current Internal Revision (Left) + Previous Internal Revisions (Right) */}
+          {internalSelectedBoq && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* LEFT SIDE: Current Internal Revision */}
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden"
+              >
+                {/* Header */}
+                <div className="bg-gradient-to-r from-green-50 to-green-100 p-4 border-b border-green-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-bold text-green-900">Current Internal Revision</h3>
+                      <p className="text-sm text-green-700">R{internalSelectedBoq.internal_revision_number || 0}</p>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-green-900">
+                        {formatCurrency(calculateTotalFromItems(internalCurrentRevisionData))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Content */}
+                {internalIsLoading ? (
+                  <div className="p-8 text-center flex flex-col items-center justify-center">
+                    <ModernLoadingSpinners size="md" />
+                    <p className="mt-4 text-gray-600">Loading details...</p>
+                  </div>
+                ) : internalCurrentRevisionData ? (
+                  <div className="p-6 space-y-4 max-h-[600px] overflow-y-auto">
+                    {/* Preliminaries Section */}
+                    {internalCurrentRevisionData.boq_details?.preliminaries && (
+                      <div className="mb-6 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-5 border-2 border-purple-200 shadow-lg">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="p-2 bg-white rounded-lg shadow-sm">
+                            <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-bold text-purple-900">Preliminaries & Approval Works</h3>
+                            <p className="text-sm text-purple-700">Selected conditions and terms</p>
+                          </div>
+                        </div>
+                        {(() => {
+                          const prelimData = internalCurrentRevisionData.boq_details.preliminaries;
+                          const items = prelimData.items || [];
+                          const costDetails = prelimData.cost_details || {};
+                          const amount = costDetails.amount || 0;
+                          return (
+                            <>
+                              {items.length > 0 && (
+                                <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
+                                  <h5 className="text-sm font-semibold text-gray-900 mb-3">Selected Items:</h5>
+                                  <div className="space-y-2">
+                                    {items.filter((item: any) => item.checked || item.selected).map((item: any, idx: number) => (
+                                      <div key={idx} className="flex items-start gap-2">
+                                        <span className="text-green-600 font-bold mt-0.5">✓</span>
+                                        <div className="flex-1">
+                                          <p className="text-sm text-gray-800">{item.description}</p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
+                                <h5 className="text-sm font-semibold text-gray-900 mb-3">Cost Summary</h5>
+                                <div className="grid grid-cols-4 gap-4">
+                                  <div><p className="text-xs text-gray-600 mb-1">Quantity</p><p className="text-sm font-semibold text-gray-900">{costDetails.quantity || 1}</p></div>
+                                  <div><p className="text-xs text-gray-600 mb-1">Unit</p><p className="text-sm font-semibold text-gray-900">{costDetails.unit || 'lot'}</p></div>
+                                  <div><p className="text-xs text-gray-600 mb-1">Rate (AED)</p><p className="text-sm font-semibold text-gray-900">{formatCurrency(costDetails.rate || 0)}</p></div>
+                                  <div><p className="text-xs text-gray-600 mb-1">Amount (AED)</p><p className="text-sm font-bold text-purple-900">{formatCurrency(amount)}</p></div>
+                                </div>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {/* Items - SAME structure as Client tab */}
+                    {internalCurrentRevisionData.boq_details?.items?.map((item: any, index: number) => {
+                      const prevRevision = getInternalPreviousRevision();
+                      const prevItem = prevRevision ? findInternalPreviousItem(item.item_name, prevRevision) : null;
+
+                      return (
+                        <div key={index} className="border-2 rounded-lg overflow-hidden mb-4 bg-white border-blue-300">
+                          <div className="px-4 py-3 bg-blue-50 border-b-2 border-blue-300">
+                            <h4 className="font-bold text-gray-900 text-base flex items-center gap-2">
+                              {item.item_name}
+                            </h4>
+                            {item.description && <p className="text-sm text-gray-600 mt-1">{item.description}</p>}
+                          </div>
+                          <div className="p-4 space-y-4">
+                            {/* Sub Items */}
+                            {item.sub_items && item.sub_items.length > 0 && (
+                              <div className="space-y-3">
+                                <h5 className="text-sm font-bold text-blue-900 bg-blue-50 px-3 py-2 rounded border border-blue-200">
+                                  Sub-Items ({item.sub_items.length})
+                                </h5>
+                                {item.sub_items.map((subItem: any, subIdx: number) => {
+                                  const prevSubItem = prevItem?.sub_items?.find((ps: any) => ps.sub_item_name === subItem.sub_item_name);
+                                  return (
+                                    <div key={subIdx} className="bg-green-50 border border-green-200 rounded-lg p-3">
+                                      <div className="flex justify-between items-start mb-2">
+                                        <div>
+                                          <p className="font-semibold text-sm text-gray-900">{subItem.sub_item_name}</p>
+                                          {subItem.scope && <p className="text-xs text-gray-600">{subItem.scope}</p>}
+                                        </div>
+                                        <div className="text-right text-xs text-gray-600">
+                                          {subItem.size && <div>Size: {subItem.size}</div>}
+                                          {subItem.location && <div>Location: {subItem.location}</div>}
+                                          {subItem.brand && <div>Brand: {subItem.brand}</div>}
+                                        </div>
+                                      </div>
+
+                                      {/* Sub-item Images */}
+                                      {subItem.sub_item_image && Array.isArray(subItem.sub_item_image) && subItem.sub_item_image.length > 0 && (
+                                        <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                          <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                            <ImageIcon className="w-3.5 h-3.5" />
+                                            Attached Images ({subItem.sub_item_image.length})
+                                          </h5>
+                                          <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                                            {subItem.sub_item_image.map((image: any, imgIndex: number) => (
+                                              <div key={imgIndex} className="relative group cursor-pointer" onClick={() => window.open(image.url, '_blank')}>
+                                                <img src={image.url} alt={`${subItem.sub_item_name} - ${image.original_name || image.filename}`} className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:border-green-500 transition-all" />
+                                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center">
+                                                  <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Materials Table */}
+                                      {subItem.materials && subItem.materials.length > 0 && (
+                                        <div className="mb-3">
+                                          <p className="text-xs font-bold text-gray-800 mb-2 flex items-center gap-1">Materials</p>
+                                          <div className="bg-white rounded border border-blue-200 overflow-hidden">
+                                            <table className="w-full text-xs">
+                                              <thead className="bg-blue-100 border-b border-blue-200">
+                                                <tr>
+                                                  <th className="text-left py-1.5 px-2 font-semibold text-blue-900">Material</th>
+                                                  <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Qty</th>
+                                                  <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Unit</th>
+                                                  <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Rate</th>
+                                                  <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Total</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-gray-200">
+                                                {subItem.materials.map((mat: any, matIdx: number) => {
+                                                  const materialTotal = mat.total_price || (mat.quantity * mat.unit_price);
+                                                  const prevMat = prevSubItem?.materials?.find((pm: any) => pm.material_name === mat.material_name);
+                                                  return (
+                                                    <tr key={matIdx} className={`${matIdx % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}`}>
+                                                      <td className="py-1.5 px-2 text-gray-900">{mat.material_name}</td>
+                                                      <td className={`py-1.5 px-2 text-center text-gray-700 ${prevMat && hasChanged(mat.quantity, prevMat.quantity) ? 'bg-yellow-200' : ''}`}>{mat.quantity}</td>
+                                                      <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{mat.unit}</td>
+                                                      <td className={`py-1.5 px-2 text-right text-gray-700 ${prevMat && hasChanged(mat.unit_price, prevMat.unit_price) ? 'bg-yellow-200' : ''}`}>AED {mat.unit_price?.toFixed(2) || '0.00'}</td>
+                                                      <td className="py-1.5 px-2 text-right font-semibold text-blue-700">AED {materialTotal.toFixed(2)}</td>
+                                                    </tr>
+                                                  );
+                                                })}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Labour Table */}
+                                      {subItem.labour && subItem.labour.length > 0 && (
+                                        <div className="mb-3">
+                                          <p className="text-xs font-bold text-gray-800 mb-2 flex items-center gap-1">Labour</p>
+                                          <div className="bg-white rounded border border-green-200 overflow-hidden">
+                                            <table className="w-full text-xs">
+                                              <thead className="bg-green-100 border-b border-green-200">
+                                                <tr>
+                                                  <th className="text-left py-1.5 px-2 font-semibold text-green-900">Role</th>
+                                                  <th className="text-center py-1.5 px-2 font-semibold text-green-900">Hours</th>
+                                                  <th className="text-right py-1.5 px-2 font-semibold text-green-900">Rate/Hr</th>
+                                                  <th className="text-right py-1.5 px-2 font-semibold text-green-900">Total</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-gray-200">
+                                                {subItem.labour.map((lab: any, labIdx: number) => {
+                                                  const prevLab = prevSubItem?.labour?.find((pl: any) => pl.labour_role === lab.labour_role);
+                                                  return (
+                                                    <tr key={labIdx} className={`${labIdx % 2 === 0 ? 'bg-green-50/30' : 'bg-white'}`}>
+                                                      <td className="py-1.5 px-2 text-gray-900">{lab.labour_role}</td>
+                                                      <td className={`py-1.5 px-2 text-center text-gray-700 ${prevLab && hasChanged(lab.hours, prevLab.hours) ? 'bg-yellow-200' : ''}`}>{lab.hours} hrs</td>
+                                                      <td className={`py-1.5 px-2 text-right text-gray-700 ${prevLab && hasChanged(lab.rate_per_hour, prevLab.rate_per_hour) ? 'bg-yellow-200' : ''}`}>AED {lab.rate_per_hour?.toFixed(2)}</td>
+                                                      <td className="py-1.5 px-2 text-right font-semibold text-green-700">AED {(lab.total_cost || (lab.hours * lab.rate_per_hour)).toFixed(2)}</td>
+                                                    </tr>
+                                                  );
+                                                })}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Cost Breakdown */}
+                                      {(() => {
+                                        const clientAmount = (subItem.quantity || 0) * (subItem.rate || 0);
+                                        const miscPercentage = subItem.misc_percentage || 10;
+                                        const overheadProfitPercentage = subItem.overhead_profit_percentage || 25;
+                                        const transportPercentage = subItem.transport_percentage || 5;
+                                        return (
+                                          <div className="bg-purple-50/50 rounded-lg p-3 border border-purple-300 mt-3">
+                                            <h5 className="text-xs font-bold text-purple-900 mb-2 flex items-center gap-2">
+                                              <Calculator className="w-3.5 h-3.5" /> Cost Breakdown Percentages
+                                            </h5>
+                                            <div className="space-y-1.5 text-xs">
+                                              <div className="flex justify-between"><span className="text-gray-700">Client Amount:</span><span className="font-semibold text-gray-900">{formatCurrency(clientAmount)}</span></div>
+                                              <div className="flex justify-between"><span className="text-gray-700">Miscellaneous ({miscPercentage}%):</span><span className="font-semibold text-red-600">- {formatCurrency(clientAmount * miscPercentage / 100)}</span></div>
+                                              <div className="flex justify-between"><span className="text-gray-700">Overhead & Profit ({overheadProfitPercentage}%):</span><span className="font-semibold text-red-600">- {formatCurrency(clientAmount * overheadProfitPercentage / 100)}</span></div>
+                                              <div className="flex justify-between"><span className="text-gray-700">Transport ({transportPercentage}%):</span><span className="font-semibold text-red-600">- {formatCurrency(clientAmount * transportPercentage / 100)}</span></div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Cost Analysis */}
+                            <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                              {(() => {
+                                const clientCost = item.sub_items?.reduce((sum: number, si: any) => sum + ((si.quantity || 0) * (si.rate || 0)), 0) || (item.client_cost || 0);
+                                const internalCost = item.sub_items?.reduce((sum: number, si: any) => sum + (si.internal_cost || 0), 0) || (item.internal_cost || 0);
+                                const margin = clientCost - internalCost;
+                                const marginPct = clientCost > 0 ? ((margin / clientCost) * 100).toFixed(1) : '0.0';
+                                return (
+                                  <div className="space-y-1 text-xs">
+                                    <div className="flex justify-between"><span className="text-gray-700">Client Cost:</span><span className="font-semibold">{formatCurrency(clientCost)}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-700">Internal Cost:</span><span className="font-semibold text-red-600">{formatCurrency(internalCost)}</span></div>
+                                    <div className="flex justify-between font-bold border-t border-gray-300 pt-1"><span>Negotiable Margin ({marginPct}%):</span><span className={margin >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(margin)}</span></div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Terms & Conditions */}
+                    {internalCurrentRevisionData.boq_details?.terms_conditions?.items?.length > 0 && (
+                      <div className="mt-6 mb-6">
+                        <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-300 rounded-t-lg p-4 flex items-center gap-3">
+                          <FileCheck className="w-6 h-6 text-blue-700" />
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">Terms & Conditions</h3>
+                            <p className="text-xs text-gray-600">Selected terms and conditions</p>
+                          </div>
+                        </div>
+                        <div className="bg-white border-x border-b border-blue-300 rounded-b-lg p-4">
+                          <div className="space-y-2">
+                            {internalCurrentRevisionData.boq_details.terms_conditions.items.filter((term: any) => term.checked).map((term: any, index: number) => (
+                              <div key={term.term_id || index} className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                                <div className="flex items-start gap-3">
+                                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">{index + 1}</span>
+                                  <p className="text-sm text-gray-800 leading-relaxed">{term.terms_text}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Grand Total */}
+                    {renderGrandTotalSection(internalCurrentRevisionData.boq_details)}
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-gray-500">
+                    <p className="font-medium">Select a project to view details</p>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="border-t border-gray-200 p-3 bg-gray-50">
+                  {(() => {
+                    const status = internalSelectedBoq.status?.toLowerCase() || '';
+                    const isPending = status === 'pending_approval' || status === 'pending_revision' || status === 'pending' || status === 'internal_revision_pending';
+                    const isApproved = status === 'revision_approved' || status === 'approved';
+
+                    if (isPending) {
+                      return (
+                        <div className="grid grid-cols-3 gap-2">
+                          <button onClick={() => onViewDetails(internalSelectedBoq)} className="text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1" style={{ backgroundColor: 'rgb(36, 61, 138)' }}>
+                            <Eye className="h-3.5 w-3.5" /><span className="hidden sm:inline">View</span>
+                          </button>
+                          <button onClick={() => onApprove(internalSelectedBoq)} className="text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1" style={{ backgroundColor: 'rgb(34, 197, 94)' }}>
+                            <CheckCircle className="h-3.5 w-3.5" /><span className="hidden sm:inline">Approve</span>
+                          </button>
+                          <button onClick={() => onReject(internalSelectedBoq)} className="text-white text-xs h-8 rounded hover:opacity-90 transition-all flex items-center justify-center gap-1" style={{ backgroundColor: 'rgb(239, 68, 68)' }}>
+                            <XCircle className="h-3.5 w-3.5" /><span className="hidden sm:inline">Reject</span>
+                          </button>
+                        </div>
+                      );
+                    }
+                    if (isApproved) {
+                      return (
+                        <div className="text-center text-xs text-green-700 font-medium py-2">
+                          <CheckCircle className="h-5 w-5 mx-auto mb-1 text-green-600" /> Approved
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="text-center text-xs text-gray-600 font-medium py-2">
+                        <Eye className="h-5 w-5 mx-auto mb-1 text-gray-500" /> View Only
+                      </div>
+                    );
+                  })()}
+                </div>
+              </motion.div>
+
+              {/* RIGHT SIDE: Previous Internal Revisions */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden"
+              >
+                <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-4 border-b border-purple-200">
+                  <h3 className="text-lg font-bold text-purple-900">Previous Internal Revisions</h3>
+                  <p className="text-sm text-purple-700">Review history and changes</p>
+                </div>
+
+                {internalIsLoading ? (
+                  <div className="p-8 text-center flex flex-col items-center justify-center">
+                    <ModernLoadingSpinners size="md" />
+                    <p className="mt-4 text-gray-600">Loading revisions...</p>
+                  </div>
+                ) : internalPreviousRevisions.length > 0 ? (
+                  <div className="p-4 space-y-3 max-h-[600px] overflow-y-auto">
+                    {internalPreviousRevisions.map((revision, index) => {
+                      const revTotal = revision.changes_summary ? calculateGrandTotal(revision.changes_summary) : 0;
+                      const change = calculateChange(
+                        internalCurrentRevisionData?.total_cost || 0,
+                        revTotal
+                      );
+                      const isExpanded = internalExpandedRevisionIndex === index;
+
+                      return (
+                        <motion.div
+                          key={index}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="bg-white border border-gray-200 rounded-lg overflow-hidden"
+                        >
+                          {/* Header */}
+                          <div className="bg-gradient-to-r from-gray-50 to-gray-100 p-3 border-b border-gray-200">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getActionColor(revision.action_type)}`}>
+                                  {getActionLabel(revision.action_type)}
+                                </span>
+                                <div>
+                                  <div className="font-bold text-gray-900">
+                                    Internal Rev {revision.internal_revision_number}
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    {revision.actor_name} ({revision.actor_role}) • {new Date(revision.created_at).toLocaleDateString()}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-lg font-bold text-gray-900">
+                                  {formatCurrency(revTotal)}
+                                </div>
+                                {change.percentage !== 0 && (
+                                  <div className={`flex items-center gap-1 text-xs font-semibold ${change.percentage > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                    {change.percentage > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                                    {change.percentage > 0 ? '+' : ''}{change.percentage}%
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Rejection reason / Approval comments */}
+                            {revision.rejection_reason && (
+                              <div className="mt-2 p-2 bg-red-50 rounded border border-red-200 text-xs text-red-700">
+                                <strong>Rejection Reason:</strong> {revision.rejection_reason}
+                              </div>
+                            )}
+                            {revision.approval_comments && (
+                              <div className="mt-2 p-2 bg-green-50 rounded border border-green-200 text-xs text-green-700">
+                                <strong>Approval Notes:</strong> {revision.approval_comments}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Expandable Details */}
+                          {isExpanded && revision.changes_summary?.items && (
+                            <div className="p-4 bg-gradient-to-br from-red-50 to-red-100 space-y-3 max-h-[500px] overflow-y-auto">
+                              {/* Preliminaries */}
+                              {revision.changes_summary.preliminaries && (
+                                <div className="mb-6 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-5 border-2 border-purple-200 shadow-lg">
+                                  <div className="flex items-center gap-3 mb-4">
+                                    <div className="p-2 bg-white rounded-lg shadow-sm">
+                                      <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                      </svg>
+                                    </div>
+                                    <div>
+                                      <h3 className="text-lg font-bold text-purple-900">Preliminaries & Approval Works</h3>
+                                      <p className="text-sm text-purple-700">Selected conditions and terms</p>
+                                    </div>
+                                  </div>
+                                  {(() => {
+                                    const prelimData = revision.changes_summary.preliminaries;
+                                    const items = prelimData.items || [];
+                                    const costDetails = prelimData.cost_details || {};
+                                    const amount = costDetails.amount || 0;
+                                    return (
+                                      <>
+                                        {items.length > 0 && (
+                                          <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
+                                            <h5 className="text-sm font-semibold text-gray-900 mb-3">Selected Items:</h5>
+                                            <div className="space-y-2">
+                                              {items.filter((item: any) => typeof item === 'object' ? (item.checked || item.selected) : true).map((item: any, idx: number) => {
+                                                const itemText = typeof item === 'object' ? (item.description || item.name || '') : item;
+                                                return (
+                                                  <div key={idx} className="flex items-start gap-2">
+                                                    <span className="text-green-600 font-bold mt-0.5">✓</span>
+                                                    <p className="text-sm text-gray-800">{itemText}</p>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        )}
+                                        <div className="mb-4 bg-white rounded-lg p-4 border border-purple-200">
+                                          <h5 className="text-sm font-semibold text-gray-900 mb-3">Cost Summary</h5>
+                                          <div className="grid grid-cols-4 gap-4">
+                                            <div><p className="text-xs text-gray-600 mb-1">Quantity</p><p className="text-sm font-semibold text-gray-900">{costDetails.quantity || 1}</p></div>
+                                            <div><p className="text-xs text-gray-600 mb-1">Unit</p><p className="text-sm font-semibold text-gray-900">{costDetails.unit || 'lot'}</p></div>
+                                            <div><p className="text-xs text-gray-600 mb-1">Rate (AED)</p><p className="text-sm font-semibold text-gray-900">{formatCurrency(costDetails.rate || 0)}</p></div>
+                                            <div><p className="text-xs text-gray-600 mb-1">Amount (AED)</p><p className="text-sm font-bold text-purple-900">{formatCurrency(amount)}</p></div>
+                                          </div>
+                                        </div>
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              )}
+
+                              {/* Items */}
+                              {revision.changes_summary.items.map((item: any, itemIdx: number) => (
+                                <div key={itemIdx} className="bg-white rounded-lg p-4 shadow-sm border border-red-200">
+                                  <h5 className="font-semibold text-gray-900 mb-2 text-sm">{item.item_name}</h5>
+                                  {item.description && <p className="text-xs text-gray-600 mb-3">{item.description}</p>}
+
+                                  {item.sub_items && item.sub_items.length > 0 && (
+                                    <div className="mb-3 space-y-2">
+                                      <h5 className="text-xs font-bold text-red-900 bg-red-100 px-2 py-1.5 rounded border border-red-200">Sub-Items ({item.sub_items.length})</h5>
+                                      {item.sub_items.map((subItem: any, subIdx: number) => (
+                                        <div key={subIdx} className="bg-red-100 border border-red-300 rounded-lg p-2">
+                                          <div className="flex justify-between items-start mb-2">
+                                            <div>
+                                              <p className="font-semibold text-xs text-gray-900">{subItem.sub_item_name}</p>
+                                              {subItem.scope && <p className="text-xs text-gray-600">{subItem.scope}</p>}
+                                            </div>
+                                            <div className="text-right text-xs text-gray-600">
+                                              {subItem.size && <div>Size: {subItem.size}</div>}
+                                              {subItem.location && <div>Loc: {subItem.location}</div>}
+                                              {subItem.brand && <div>Brand: {subItem.brand}</div>}
+                                            </div>
+                                          </div>
+                                          {/* Materials */}
+                                          {subItem.materials && subItem.materials.length > 0 && (
+                                            <div className="mb-3 bg-red-50/20 rounded-lg p-3 border border-red-300">
+                                              <h5 className="text-xs font-bold text-blue-900 mb-2">Raw Materials</h5>
+                                              <div className="bg-white rounded border border-blue-200 overflow-hidden">
+                                                <table className="w-full text-xs">
+                                                  <thead className="bg-blue-100 border-b border-blue-200">
+                                                    <tr>
+                                                      <th className="text-left py-1.5 px-2 font-semibold text-blue-900">Material</th>
+                                                      <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Qty</th>
+                                                      <th className="text-center py-1.5 px-2 font-semibold text-blue-900">Unit</th>
+                                                      <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Rate</th>
+                                                      <th className="text-right py-1.5 px-2 font-semibold text-blue-900">Total</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {subItem.materials.map((mat: any, matIdx: number) => (
+                                                      <tr key={matIdx} className={matIdx % 2 === 0 ? 'bg-blue-50/30' : 'bg-white'}>
+                                                        <td className="py-1.5 px-2 text-gray-900">{mat.material_name}</td>
+                                                        <td className="py-1.5 px-2 text-center text-gray-700">{mat.quantity}</td>
+                                                        <td className="py-1.5 px-2 text-center text-gray-700 uppercase">{mat.unit}</td>
+                                                        <td className="py-1.5 px-2 text-right text-gray-700">AED {mat.unit_price?.toFixed(2) || '0.00'}</td>
+                                                        <td className="py-1.5 px-2 text-right font-semibold text-blue-700">AED {(mat.total_price || mat.quantity * mat.unit_price).toFixed(2)}</td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            </div>
+                                          )}
+                                          {/* Labour */}
+                                          {subItem.labour && subItem.labour.length > 0 && (
+                                            <div className="bg-orange-50/20 rounded-lg p-3 border border-orange-300">
+                                              <h5 className="text-xs font-bold text-orange-900 mb-2">Labour</h5>
+                                              <div className="bg-white rounded border border-orange-200 overflow-hidden">
+                                                <table className="w-full text-xs">
+                                                  <thead className="bg-orange-100 border-b border-orange-200">
+                                                    <tr>
+                                                      <th className="text-left py-1.5 px-2 font-semibold text-orange-900">Role</th>
+                                                      <th className="text-center py-1.5 px-2 font-semibold text-orange-900">Hours</th>
+                                                      <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Rate/hr</th>
+                                                      <th className="text-right py-1.5 px-2 font-semibold text-orange-900">Total</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {subItem.labour.map((lab: any, labIdx: number) => (
+                                                      <tr key={labIdx} className={labIdx % 2 === 0 ? 'bg-orange-50/30' : 'bg-white'}>
+                                                        <td className="py-1.5 px-2 text-gray-900">{lab.labour_role}</td>
+                                                        <td className="py-1.5 px-2 text-center text-gray-700">{lab.hours} hrs</td>
+                                                        <td className="py-1.5 px-2 text-right text-gray-700">AED {lab.rate_per_hour?.toFixed(2) || '0.00'}</td>
+                                                        <td className="py-1.5 px-2 text-right font-semibold text-orange-700">AED {(lab.total_cost || lab.hours * lab.rate_per_hour).toFixed(2)}</td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+
+                              {/* Terms & Conditions */}
+                              {revision.changes_summary.terms_conditions?.items?.length > 0 && (
+                                <div className="mt-6 mb-6 mx-4">
+                                  <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-300 rounded-t-lg p-4 flex items-center gap-3">
+                                    <FileCheck className="w-6 h-6 text-blue-700" />
+                                    <div>
+                                      <h3 className="text-lg font-bold text-gray-900">Terms & Conditions</h3>
+                                    </div>
+                                  </div>
+                                  <div className="bg-white border-x border-b border-blue-300 rounded-b-lg p-4">
+                                    <div className="space-y-2">
+                                      {revision.changes_summary.terms_conditions.items.filter((term: any) => term.checked).map((term: any, idx: number) => (
+                                        <div key={term.term_id || idx} className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                                          <div className="flex items-start gap-3">
+                                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">{idx + 1}</span>
+                                            <p className="text-sm text-gray-800 leading-relaxed">{term.terms_text}</p>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Grand Total */}
+                              {renderGrandTotalSection(revision.changes_summary)}
+                            </div>
+                          )}
+
+                          {/* Expand/Collapse */}
+                          <div className="p-2 bg-gray-50 border-t border-gray-200">
+                            <button
+                              onClick={() => setInternalExpandedRevisionIndex(isExpanded ? null : index)}
+                              className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded hover:bg-gray-100 transition-colors font-medium"
+                            >
+                              {isExpanded ? '▲ Hide Details' : '▼ Show Details'}
+                            </button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+
+                    {/* Original BOQ Card */}
+                    {internalOriginalBOQ && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-white border border-gray-200 rounded-lg overflow-hidden"
+                      >
+                        <div className="bg-gradient-to-r from-gray-50 to-gray-100 p-3 border-b border-gray-200">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xl">📄</span>
+                              <div>
+                                <div className="font-bold text-gray-900">Original BOQ</div>
+                                <div className="text-xs text-gray-500">Before estimator edits</div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-lg font-bold text-gray-900">
+                                {formatCurrency(calculateGrandTotal(internalOriginalBOQ.boq_details || internalOriginalBOQ))}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {internalOriginalBOQ.boq_details?.items?.length || internalOriginalBOQ.items?.length || 0} items
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-gray-500">
+                    <div className="text-5xl mb-3">📝</div>
+                    <p className="font-medium text-gray-700">No Previous Internal Revisions</p>
+                    <p className="text-sm mt-2 text-gray-600">This is the original internal version</p>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>
