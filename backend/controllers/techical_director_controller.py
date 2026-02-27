@@ -347,7 +347,7 @@ def td_mail_send():
         if not estimator_email:
             estimator_email = boq.created_by
             estimator_name = boq.created_by
-            log.warning(f"📧 Could not find estimator user, using BOQ creator: {boq.created_by}")
+            log.warning(f" Could not find estimator user, using BOQ creator: {boq.created_by}")
  
         # Get existing BOQ history
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -420,7 +420,7 @@ def td_mail_send():
                 if email_sent:
                     log.info(f"📧 ✅ TD approval email sent successfully to {estimator_name} ({estimator_email})")
                 else:
-                    log.error(f"📧 ❌ Failed to send TD approval email to {estimator_name}")
+                    log.error(f" Failed to send TD approval email to {estimator_name}")
             else:
                 log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped (in-app notification only)")
  
@@ -483,7 +483,7 @@ def td_mail_send():
                 if email_sent:
                     log.info(f"📧 ✅ TD rejection email sent successfully to {estimator_name} ({estimator_email})")
                 else:
-                    log.error(f"📧 ❌ Failed to send TD rejection email to {estimator_name}")
+                    log.error(f" Failed to send TD rejection email to {estimator_name}")
             else:
                 log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped (in-app notification only)")
  

@@ -326,14 +326,29 @@ def create_delivery_note():
         if not project:
             return jsonify({'success': False, 'error': 'Project not found'}), 404
 
+        # Resolve attention_to_id from name if not provided
+        attention_to_id = data.get('attention_to_id')
+        attention_to_name = data.get('attention_to')
+        if not attention_to_id and attention_to_name:
+            from models.role import Role
+            se_role = Role.query.filter_by(role='siteEngineer').first()
+            if se_role:
+                se_user = User.query.filter(
+                    User.role_id == se_role.role_id,
+                    User.full_name == attention_to_name,
+                    User.is_active == True
+                ).first()
+                if se_user:
+                    attention_to_id = se_user.user_id
+
         # Create ADN
         adn = AssetDeliveryNote(
             adn_number=generate_adn_number(),
             project_id=data['project_id'],
             site_location=data.get('site_location'),
             delivery_date=datetime.fromisoformat(data['delivery_date'].replace('Z', '+00:00')) if data.get('delivery_date') else datetime.utcnow(),
-            attention_to=data.get('attention_to'),
-            attention_to_id=data.get('attention_to_id'),
+            attention_to=attention_to_name,
+            attention_to_id=attention_to_id,
             delivery_from=data.get('delivery_from', 'M2 Store'),
             prepared_by=user_name,
             prepared_by_id=int(user_id) if user_id else None,
@@ -561,6 +576,63 @@ def dispatch_delivery_note(adn_id):
 
         db.session.commit()
 
+        # Notify Site Engineer(s) that assets are on the way
+        try:
+            logger.info(f'[ADN Dispatch] Sending notification for {adn.adn_number}, attention_to={adn.attention_to}, attention_to_id={adn.attention_to_id}')
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            project = Project.query.get(adn.project_id)
+            project_name = project.project_name if project else f'Project {adn.project_id}'
+
+            # Collect SE user IDs
+            se_user_ids = set()
+            # Priority 1: attention_to_id from ADN
+            if adn.attention_to_id:
+                se_user_ids.add(adn.attention_to_id)
+            # Priority 2: Look up SE by name if attention_to is set but ID is missing
+            elif adn.attention_to:
+                from models.role import Role
+                se_role = Role.query.filter_by(role='siteEngineer').first()
+                if se_role:
+                    se_user = User.query.filter(
+                        User.role_id == se_role.role_id,
+                        User.full_name == adn.attention_to,
+                        User.is_active == True
+                    ).first()
+                    if se_user:
+                        se_user_ids.add(se_user.user_id)
+            # Priority 3: project's assigned site supervisor
+            if project and project.site_supervisor_id:
+                se_user_ids.add(project.site_supervisor_id)
+            # Remove dispatcher from recipients (PM shouldn't notify themselves)
+            user_id = g.user.get('user_id')
+            if user_id:
+                se_user_ids.discard(int(user_id))
+
+            logger.info(f'[ADN Dispatch] Resolved SE user IDs: {se_user_ids}')
+            if se_user_ids:
+                # Build item summary
+                item_count = len(adn.items) if adn.items else 0
+                total_qty = sum(item.quantity for item in adn.items) if adn.items else 0
+                category_names = []
+                for item in (adn.items or []):
+                    cat = ReturnableAssetCategory.query.get(item.category_id)
+                    if cat and cat.category_name not in category_names:
+                        category_names.append(cat.category_name)
+
+                ComprehensiveNotificationService.notify_adn_dispatched_to_se(
+                    adn_id=adn.adn_id,
+                    adn_number=adn.adn_number,
+                    project_id=adn.project_id,
+                    project_name=project_name,
+                    item_count=item_count,
+                    total_quantity=total_qty,
+                    category_summary=', '.join(category_names[:3]),
+                    dispatched_by_name=user_name,
+                    se_user_ids=list(se_user_ids)
+                )
+        except Exception as notif_err:
+            logger.error(f'Failed to send ADN dispatch notification to SE: {notif_err}')
+
         return jsonify({
             'success': True,
             'message': f'Delivery note {adn.adn_number} dispatched successfully',
@@ -691,6 +763,23 @@ def create_return_note():
                         original_item.status = 'partial_return'
 
         db.session.commit()
+
+        # Notify Production Managers about the new return note
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            project = Project.query.get(ardn.project_id)
+            project_name = project.project_name if project else f'Project {ardn.project_id}'
+            item_count = len(data['items'])
+            ComprehensiveNotificationService.notify_ardn_created(
+                ardn_id=ardn.ardn_id,
+                ardn_number=ardn.ardn_number,
+                project_id=ardn.project_id,
+                project_name=project_name,
+                item_count=item_count,
+                created_by_name=user_name
+            )
+        except Exception as notif_err:
+            logger.error(f'Failed to send ARDN created notification: {notif_err}')
 
         return jsonify({
             'success': True,
@@ -837,6 +926,23 @@ def issue_return_note(ardn_id):
 
         db.session.commit()
 
+        # Notify Production Managers that return note has been issued
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            project = Project.query.get(ardn.project_id)
+            project_name = project.project_name if project else f'Project {ardn.project_id}'
+            item_count = len(ardn.items) if ardn.items else 0
+            ComprehensiveNotificationService.notify_ardn_issued(
+                ardn_id=ardn.ardn_id,
+                ardn_number=ardn.ardn_number,
+                project_id=ardn.project_id,
+                project_name=project_name,
+                item_count=item_count,
+                issued_by_name=user_name
+            )
+        except Exception as notif_err:
+            logger.error(f'Failed to send ARDN issued notification: {notif_err}')
+
         return jsonify({
             'success': True,
             'message': f'Return note {ardn.ardn_number} issued',
@@ -933,6 +1039,25 @@ def dispatch_return_note(ardn_id):
         ardn.dispatched_by = user_name
 
         db.session.commit()
+
+        # Notify Production Managers that return is on the way
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            project = Project.query.get(ardn.project_id)
+            project_name = project.project_name if project else f'Project {ardn.project_id}'
+            item_count = len(ardn.items) if ardn.items else 0
+            dispatched_by_user_id = g.user.get('user_id') if g.user else None
+            ComprehensiveNotificationService.notify_ardn_dispatched(
+                ardn_id=ardn.ardn_id,
+                ardn_number=ardn.ardn_number,
+                project_id=ardn.project_id,
+                project_name=project_name,
+                item_count=item_count,
+                dispatched_by_name=user_name,
+                dispatched_by_user_id=dispatched_by_user_id
+            )
+        except Exception as notif_err:
+            logger.error(f'Failed to send ARDN dispatch notification: {notif_err}')
 
         return jsonify({
             'success': True,

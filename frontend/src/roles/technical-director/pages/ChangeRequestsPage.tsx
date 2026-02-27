@@ -183,21 +183,18 @@ const ChangeRequestsPage: React.FC = () => {
   // Auto-open change request details when cr_id is in URL (from notification redirect)
   useEffect(() => {
     // Only auto-open if we haven't already opened for this specific urlCrId
-    if (urlCrId && changeRequests.length > 0 && !showDetailsModal && hasAutoOpenedRef.current !== urlCrId) {
+    if (urlCrId && !showDetailsModal && hasAutoOpenedRef.current !== urlCrId) {
       const crIdNum = parseInt(urlCrId, 10);
-      const targetCr = changeRequests.find((cr: ChangeRequestItem) => cr.cr_id === crIdNum);
-      if (targetCr) {
-        setSelectedChangeRequest(targetCr);
-        setShowDetailsModal(true);
-        // Mark this urlCrId as already opened
-        hasAutoOpenedRef.current = urlCrId;
-      }
+      // Mark as opened before async call to prevent duplicate triggers
+      hasAutoOpenedRef.current = urlCrId;
+      // Fetch full details including vendor info (same as manual click) to avoid missing data
+      handleReviewVendorApproval(crIdNum);
     }
     // Reset the ref when urlCrId is cleared
     if (!urlCrId) {
       hasAutoOpenedRef.current = null;
     }
-  }, [urlCrId, changeRequests, showDetailsModal]);
+  }, [urlCrId, showDetailsModal]);
 
   const loadChangeRequests = async (showLoadingSpinner = false) => {
     // Only show loading spinner on initial load, not on auto-refresh

@@ -572,6 +572,22 @@ def complete_from_store(cr_id):
 
         db.session.commit()
 
+        # Notify Production Managers about incoming store request
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            buyer_name = current_user.get('full_name', current_user.get('email', 'Buyer'))
+            ComprehensiveNotificationService.notify_store_routing(
+                cr_id=cr_id,
+                cr_number=getattr(cr, 'cr_number', None) or str(cr_id),
+                project_name=project.project_name if project else f'Project {cr.project_id}',
+                buyer_name=buyer_name,
+                buyer_user_id=current_user.get('user_id'),
+                materials_count=len(grouped_materials),
+                routing_type='store'
+            )
+        except Exception as notif_err:
+            log.error(f"Failed to send store routing notification for CR-{cr_id}: {notif_err}")
+
         return jsonify({
             "success": True,
             "message": f"Material request sent to M2 Store. {len(grouped_materials)} material(s) grouped in {requests_created} request.",
@@ -822,33 +838,18 @@ def route_all_to_store(cr_id):
 
         db.session.commit()
 
-        # Notify Production Manager
+        # Notify Production Managers about incoming store request
         try:
-            from utils.comprehensive_notification_service import notification_service
-            from models.role import Role
-            from models.user import User
-
-            pm_role = Role.query.filter(Role.role_name.ilike('%production%manager%')).first()
-            if pm_role:
-                pms = User.query.filter_by(
-                    role_id=pm_role.role_id,
-                    is_deleted=False,
-                    is_active=True
-                ).all()
-
-                project_name = project.project_name if project else 'Unknown Project'
-                for pm in pms:
-                    notification_service.create_notification(
-                        user_id=pm.user_id,
-                        title=f"📦 Store Request - {project_name}",
-                        message=f"{buyer_name} has sent {len(grouped_materials)} material(s) to M2 Store for project '{project_name}'. Please review and process.",
-                        type='store_request_incoming',
-                        reference_type='change_request',
-                        reference_id=cr_id,
-                        action_url='/store/incoming-deliveries'
-                    )
-                    log.info(f"Notified PM {pm.full_name} about store request for CR-{cr_id}")
-
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            ComprehensiveNotificationService.notify_store_routing(
+                cr_id=cr_id,
+                cr_number=getattr(cr, 'cr_number', None) or str(cr_id),
+                project_name=project.project_name if project else f'Project {cr.project_id}',
+                buyer_name=buyer_name,
+                buyer_user_id=buyer_id,
+                materials_count=len(grouped_materials),
+                routing_type='store'
+            )
         except Exception as notif_error:
             log.error(f"Failed to send PM notification for store routing: {notif_error}")
 

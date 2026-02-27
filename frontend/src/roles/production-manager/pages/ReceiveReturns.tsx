@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   DocumentTextIcon,
   CheckCircleIcon,
@@ -72,6 +73,8 @@ interface ItemAction {
 type TabType = 'pending' | 'received';
 
 const ReceiveReturns: React.FC = () => {
+  const [searchParams] = useSearchParams();
+
   // Lazy loading pattern - separate state for each tab
   const [pendingRDNs, setPendingRDNs] = useState<ReturnDeliveryNote[]>([]);
   const [receivedRDNs, setReceivedRDNs] = useState<ReturnDeliveryNote[]>([]);
@@ -83,7 +86,14 @@ const ReceiveReturns: React.FC = () => {
   const [receivedLoaded, setReceivedLoaded] = useState(false);
 
   const [expandedRDNs, setExpandedRDNs] = useState<Set<number>>(new Set());
-  const [activeTab, setActiveTab] = useState<TabType>('pending');
+
+  // Initialise active tab from ?tab= query param (notification deep-link support)
+  const initialTab = (): TabType => {
+    const tab = searchParams.get('tab');
+    if (tab === 'received') return 'received';
+    return 'pending'; // default, also handles 'pending' and legacy 'in_transit'
+  };
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Improved Confirm Receipt Modal

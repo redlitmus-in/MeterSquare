@@ -287,6 +287,8 @@ const ProfitReportView: React.FC<ProfitReportViewProps> = ({ boq, onClose }) => 
       } else {
         const rows = details.map((r: any) => {
           const isCR = Boolean(r.is_new_cr_material);
+          const vatAmt = r.vat_amount || 0;
+          const actAmtLabel = `AED ${((r.actual_amount || 0) + vatAmt).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`;
           return [
             isCR ? `${r.material_name} [NEW·CR#${r.cr_id}]` : r.material_name,
             r.item_name || '-', r.unit || '-',
@@ -295,7 +297,7 @@ const ProfitReportView: React.FC<ProfitReportViewProps> = ({ boq, onClose }) => 
             isCR ? '-' : `AED ${(r.planned_amount || 0).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
             r.actual_quantity > 0 ? r.actual_quantity.toFixed(2) : '-',
             r.actual_rate > 0 ? `AED ${r.actual_rate.toLocaleString('en-AE', { minimumFractionDigits: 2 })}` : '-',
-            `AED ${((r.actual_amount_with_vat ?? r.actual_amount) || 0).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+            actAmtLabel,
             isCR ? 'Unplanned' : (r.status === 'over' ? 'Over Budget' : r.status === 'under' ? 'Saved' : 'On Plan')
           ];
         });
@@ -691,6 +693,7 @@ const ProfitReportView: React.FC<ProfitReportViewProps> = ({ boq, onClose }) => 
                               {data.materials.details.map((row: any, idx: number) => {
                                 const isCR = Boolean(row.is_new_cr_material);
                                 const isPending = isCR && row.actual_amount === 0;
+                                const vatAmt = row.vat_amount || 0;
                                 return (
                                 <tr key={idx} className={`transition-colors ${isCR ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-gray-50'}`}>
                                   <td className="px-4 py-3 font-medium text-gray-800">
@@ -711,9 +714,11 @@ const ProfitReportView: React.FC<ProfitReportViewProps> = ({ boq, onClose }) => 
                                   <td className="px-4 py-3 text-right text-gray-600">{row.actual_quantity > 0 ? row.actual_quantity.toFixed(2) : '-'}</td>
                                   <td className="px-4 py-3 text-right text-gray-600">{row.actual_rate > 0 ? formatCurrency(row.actual_rate) : '-'}</td>
                                   <td className="px-4 py-3 text-right font-semibold text-gray-800">
-                                    {formatCurrency(row.actual_amount_with_vat ?? row.actual_amount)}
-                                    {isCR && row.vat_amount > 0 && (
-                                      <p className="text-xs text-gray-400 font-normal">(incl. VAT)</p>
+                                    {formatCurrency(row.actual_amount + vatAmt)}
+                                    {vatAmt > 0 && (
+                                      <div className="text-xs text-gray-400 font-normal mt-0.5">
+                                        (incl. VAT {formatCurrency(vatAmt)})
+                                      </div>
                                     )}
                                   </td>
                                   <td className="px-4 py-3 text-center">
@@ -738,7 +743,9 @@ const ProfitReportView: React.FC<ProfitReportViewProps> = ({ boq, onClose }) => 
                                 <td colSpan={5} className="px-4 py-3 text-sm font-bold text-gray-700">Total</td>
                                 <td className="px-4 py-3 text-right font-bold text-gray-900">{formatCurrency(data.materials?.planned || 0)}</td>
                                 <td colSpan={2}></td>
-                                <td className="px-4 py-3 text-right font-bold text-gray-900">{formatCurrency(data.materials?.actual || 0)}</td>
+                                <td className="px-4 py-3 text-right font-bold text-gray-900">
+                                  {formatCurrency((data.materials?.actual || 0) + (data.materials?.total_vat || 0))}
+                                </td>
                                 <td className="px-4 py-3 text-center">
                                   <VarianceBadge
                                     variance={data.materials?.variance || 0}

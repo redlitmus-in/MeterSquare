@@ -602,7 +602,7 @@ def send_boq_to_project_manager():
             if email_sent:
                 log.info(f"✅ BOQ approval email sent to offline PM {pm.full_name} ({pm.email})")
             else:
-                log.error(f"❌ Failed to send BOQ approval email to PM {pm.full_name} ({pm.email})")
+                log.error(f" Failed to send BOQ approval email to PM {pm.full_name} ({pm.email})")
         else:
             log.info(f"⏭️  PM {pm.full_name} is '{pm.user_status}' - skipping email, in-app notification only")
 
@@ -855,7 +855,7 @@ def send_boq_to_technical_director():
             if email_sent:
                 log.info(f"📧 ✅ SUCCESS: BOQ submission email sent to TD {td.email}")
             else:
-                log.error(f"📧 ❌ FAILED: Could not send email to TD {td.email}")
+                log.error(f" FAILED: Could not send email to TD {td.email}")
         else:
             log.info(f"📧 ⏭️  TD is ONLINE (status='{td_status}') - Email skipped, in-app notification will be sent")
 

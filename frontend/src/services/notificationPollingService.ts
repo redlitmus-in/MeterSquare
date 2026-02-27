@@ -99,12 +99,11 @@ class NotificationPollingService {
    */
   private async fetchNotifications() {
     try {
+      // Moderate backoff when Socket.IO is connected (max 2x = 60s)
+      // Still poll to catch silent Socket.IO failures, but less aggressively
       const hubStatus = realtimeNotificationHub.getStatus();
-      if (hubStatus.socketConnected) {
-        // Socket.IO connected - use max backoff to reduce server load but still poll
-        if (this.backoffMultiplier < this.maxBackoffMultiplier) {
-          this.backoffMultiplier = this.maxBackoffMultiplier;
-        }
+      if (hubStatus.socketConnected && this.backoffMultiplier < 2) {
+        this.backoffMultiplier = 2;
       }
 
       const token = localStorage.getItem('access_token');
@@ -187,6 +186,48 @@ class NotificationPollingService {
           }
 
           store.addNotifications(allNotifications);
+
+          // Mark all initial notifications as processed to prevent re-processing on next poll
+          for (const notif of data.notifications) {
+            this.processedNotificationIds.add(String(notif.id));
+          }
+
+          // Show toasts for recent UNREAD notifications (created within last 2 minutes)
+          // This ensures users see toast popups on login/reload, not just bell icon
+          const twoMinutesAgo = currentTime - 2 * 60 * 1000;
+          const recentUnread = data.notifications.filter((notif: any) => {
+            if (notif.read) return false;
+            const notifTime = new Date(notif.timestamp || notif.createdAt).getTime();
+            return notifTime > twoMinutesAgo;
+          });
+
+          if (recentUnread.length > 0) {
+            if (import.meta.env.DEV) {
+              console.log('[Polling] Showing toasts for', recentUnread.length, 'recent unread notifications');
+            }
+            for (const notif of recentUnread) {
+              const notifIdStr = String(notif.id);
+              if (realtimeNotificationHub.hasShownToast(notifIdStr)) continue;
+
+              const notificationData = {
+                id: notifIdStr,
+                type: notif.type || 'info',
+                title: notif.title,
+                message: notif.message,
+                priority: notif.priority || 'medium',
+                timestamp: new Date(notif.timestamp || notif.createdAt),
+                read: false,
+                category: notif.category || 'system',
+                metadata: notif.metadata,
+                actionUrl: notif.actionUrl,
+                actionLabel: notif.actionLabel,
+                senderName: notif.senderName
+              };
+              this.showInAppNotification(notificationData);
+              this.showDesktopNotification(notificationData);
+            }
+          }
+
           this.lastFetchTime = currentTime;
 
           if (import.meta.env.DEV) {
@@ -229,19 +270,23 @@ class NotificationPollingService {
 
         const newNotifications = data.notifications.filter((notif: any) => {
           // Skip if already processed (normalize to string for consistent comparison)
+          // This is the ONLY check needed — processedNotificationIds is the single
+          // source of truth. No timestamp comparison (avoids browser/server clock skew).
           const notifIdStr = String(notif.id);
-          if (this.processedNotificationIds.has(notifIdStr)) {
-            return false;
-          }
-
-          const createdAt = new Date(notif.timestamp || notif.createdAt).getTime();
-          const isNew = createdAt > this.lastFetchTime;
-          return isNew;
+          return !this.processedNotificationIds.has(notifIdStr);
         });
+
+        if (import.meta.env.DEV) {
+          console.log('[Polling] Poll result:', {
+            totalFromAPI: data.notifications.length,
+            newCount: newNotifications.length,
+            processedCount: this.processedNotificationIds.size
+          });
+        }
 
         if (newNotifications.length > 0) {
 
-          // Add each new notification to the store AND show popup
+          // Add each new notification to the store AND show toast
           const store = useNotificationStore.getState();
           for (const notif of newNotifications) {
             // Normalize ID to string for consistent comparison
@@ -264,7 +309,8 @@ class NotificationPollingService {
               message: notif.message,
               priority: notif.priority || 'medium',
               timestamp: new Date(notif.timestamp || notif.createdAt),
-              read: false,
+              read: notif.read || false,
+              category: notif.category || 'system',
               metadata: notif.metadata,
               actionUrl: notif.actionUrl,
               actionLabel: notif.actionLabel,
@@ -273,29 +319,29 @@ class NotificationPollingService {
 
             store.addNotification(notificationData);
 
-            // Show popup based on page visibility
-            // This ensures notifications appear even when Socket.IO/Supabase Realtime fail
-            const isPageHidden = document.hidden || document.visibilityState === 'hidden';
+            // Skip toast for already-read notifications
+            if (notif.read) {
+              continue;
+            }
 
+            // Only skip toast if Socket.IO already showed a toast for this notification.
+            // Hub's fetchMissedNotifications loads store-only (no toast), so being in
+            // the store alone is NOT sufficient to skip the toast.
+            const toastAlreadyShown = realtimeNotificationHub.hasShownToast(notifIdStr);
+            if (toastAlreadyShown) {
+              if (import.meta.env.DEV) {
+                console.log('[Polling] Skipping toast - Socket.IO already showed toast:', notificationData.title);
+              }
+              continue;
+            }
+
+            // Always show BOTH in-app toast AND desktop notification
+            // User explicitly wants OS notification popups alongside toasts
             if (import.meta.env.DEV) {
-              console.log('[Polling] Page visibility:', { isPageHidden, title: notificationData.title });
+              console.log('[Polling] Showing toast + desktop notification for:', notificationData.title);
             }
-
-            if (isPageHidden) {
-              // Page HIDDEN/MINIMIZED: Show BOTH desktop AND in-app notification
-              // Desktop notification alerts the user, in-app notification is ready when they return
-              if (import.meta.env.DEV) {
-                console.log('[Polling] Page hidden - showing BOTH desktop and in-app notification');
-              }
-              this.showDesktopNotification(notificationData);
-              this.showInAppNotification(notificationData);
-            } else {
-              // Page VISIBLE: Show in-app toast only (no desktop)
-              if (import.meta.env.DEV) {
-                console.log('[Polling] Page visible - showing ONLY in-app notification');
-              }
-              this.showInAppNotification(notificationData);
-            }
+            this.showInAppNotification(notificationData);
+            this.showDesktopNotification(notificationData);
           }
 
           // Reset backoff multiplier since we found new notifications
@@ -355,7 +401,11 @@ class NotificationPollingService {
     }
     try {
       // Dynamic import to avoid circular dependencies
-      import('sonner').then(({ toast }) => {
+      Promise.all([
+        import('sonner'),
+        import('@/utils/notificationRedirects'),
+        import('@/store/notificationStore')
+      ]).then(([{ toast }, { getNotificationRedirectPath, buildNotificationUrl }, { useNotificationStore }]) => {
         const getIcon = () => {
           switch (notification.type) {
             case 'approval':
@@ -372,16 +422,39 @@ class NotificationPollingService {
           }
         };
 
-        toast.message(notification.title, {
+        // Build navigation URL using the same smart redirect system as the bell icon
+        const navigateToNotification = () => {
+          const hubStatus = realtimeNotificationHub.getStatus();
+          const userRole = hubStatus.userRole || '';
+
+          // Priority 1: Smart content-based redirect (same as bell icon)
+          const redirectConfig = getNotificationRedirectPath(notification, userRole);
+          if (redirectConfig) {
+            const url = buildNotificationUrl(redirectConfig);
+            useNotificationStore.getState().markAsRead(String(notification.id));
+            window.location.href = url;
+            return;
+          }
+
+          // Priority 2: Backend actionUrl
+          if (notification.actionUrl) {
+            useNotificationStore.getState().markAsRead(String(notification.id));
+            window.location.href = notification.actionUrl;
+            return;
+          }
+
+          // No redirect - just mark as read
+          useNotificationStore.getState().markAsRead(String(notification.id));
+        };
+
+        // Toast with clickable "View" button — navigates like the bell icon
+        toast.info(`${getIcon()} ${notification.title}`, {
           description: notification.message,
-          icon: getIcon(),
           duration: 5000,
-          action: notification.actionUrl ? {
-            label: notification.actionLabel || 'View',
-            onClick: () => {
-              window.location.href = notification.actionUrl;
-            }
-          } : undefined
+          action: {
+            label: 'View →',
+            onClick: navigateToNotification,
+          },
         });
 
         if (import.meta.env.DEV) {
@@ -398,40 +471,67 @@ class NotificationPollingService {
   /**
    * Show desktop notification
    */
-  private showDesktopNotification(notification: any) {
-    if (import.meta.env.DEV) {
-      console.log('[Polling] 🖥️ Attempting desktop notification for:', notification.title);
-      console.log('[Polling] Desktop notification permission:', Notification.permission);
-    }
+  private async showDesktopNotification(notification: any) {
+    console.log('[Polling] Attempting desktop notification for:', notification.title, '| Permission:', Notification?.permission);
     try {
-      if ('Notification' in window && Notification.permission === 'granted') {
-        const desktopNotif = new Notification(notification.title, {
-          body: notification.message,
-          icon: '/favicon.ico',
-          tag: notification.id, // Prevent duplicate desktop notifications
-          requireInteraction: notification.priority === 'urgent'
-        });
+      if (!('Notification' in window)) {
+        console.warn('[Polling] Desktop notifications not supported by browser');
+        return;
+      }
 
-        if (import.meta.env.DEV) {
-          console.log('[Polling] ✅ Desktop notification created successfully');
-        }
+      // Request permission if not yet asked
+      if (Notification.permission === 'default') {
+        console.log('[Polling] Requesting desktop notification permission...');
+        const result = await Notification.requestPermission();
+        console.log('[Polling] Permission result:', result);
+        if (result !== 'granted') return;
+      } else if (Notification.permission === 'denied') {
+        console.warn('[Polling] Desktop notifications blocked by user. Enable in browser settings.');
+        return;
+      }
 
-        desktopNotif.onclick = () => {
-          window.focus();
+      const desktopNotif = new Notification(notification.title, {
+        body: notification.message,
+        icon: '/favicon.ico',
+        tag: notification.id,
+        requireInteraction: notification.priority === 'urgent'
+      });
+
+      console.log('[Polling] Desktop notification created successfully');
+
+      desktopNotif.onclick = () => {
+        window.focus();
+        desktopNotif.close();
+
+        // Use smart redirect system (same as bell icon)
+        import('@/utils/notificationRedirects').then(({ getNotificationRedirectPath, buildNotificationUrl }) => {
+          const hubStatus = realtimeNotificationHub.getStatus();
+          const userRole = hubStatus.userRole || '';
+
+          const redirectConfig = getNotificationRedirectPath(notification, userRole);
+          if (redirectConfig) {
+            const url = buildNotificationUrl(redirectConfig);
+            useNotificationStore.getState().markAsRead(String(notification.id));
+            window.location.href = url;
+            return;
+          }
+
+          if (notification.actionUrl) {
+            useNotificationStore.getState().markAsRead(String(notification.id));
+            window.location.href = notification.actionUrl;
+            return;
+          }
+
+          useNotificationStore.getState().markAsRead(String(notification.id));
+        }).catch(() => {
+          // Fallback if dynamic import fails
           if (notification.actionUrl) {
             window.location.href = notification.actionUrl;
           }
-          desktopNotif.close();
-        };
-      } else {
-        if (import.meta.env.DEV) {
-          console.log('[Polling] ❌ Desktop notification not available or permission denied');
-        }
-      }
+        });
+      };
     } catch (error) {
-      if (import.meta.env.DEV) {
-        console.error('[Polling] Failed to show desktop notification:', error);
-      }
+      console.error('[Polling] Failed to show desktop notification:', error);
     }
   }
 }

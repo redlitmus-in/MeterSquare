@@ -522,4 +522,4 @@ if __name__ == "__main__":
     logger = get_logger()
     logger.info(f"Starting MeterSquare ERP Server - Environment: {environment}, Port: {port}, Debug: {debug}")
 
-    app.socketio.run(app, host="0.0.0.0", port=port, debug=debug, allow_unsafe_werkzeug=True)
+    app.socketio.run(app, host="0.0.0.0", port=port, debug=debug, allow_unsafe_werkzeug=True, use_reloader=False)

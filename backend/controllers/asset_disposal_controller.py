@@ -150,6 +150,19 @@ def create_disposal_request():
 
         db.session.commit()
 
+        # Notify TD for disposal approval
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            ComprehensiveNotificationService.notify_asset_disposal_requested(
+                disposal_id=disposal.disposal_id,
+                category_name=category.category_name,
+                quantity=quantity,
+                disposal_reason=data['disposal_reason'],
+                requested_by_name=user_name
+            )
+        except Exception as notif_err:
+            logger.error(f'Failed to send disposal request notification: {notif_err}')
+
         return jsonify({
             'success': True,
             'data': disposal.to_dict(),
@@ -287,6 +300,21 @@ def approve_disposal(disposal_id):
 
         db.session.commit()
 
+        # Notify PM that disposal was approved
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            if disposal.requested_by_id:
+                category_name = disposal.category.category_name if disposal.category else 'Unknown'
+                ComprehensiveNotificationService.notify_asset_disposal_approved(
+                    disposal_id=disposal.disposal_id,
+                    category_name=category_name,
+                    quantity=disposal.quantity,
+                    approved_by_name=user_name,
+                    pm_user_id=disposal.requested_by_id
+                )
+        except Exception as notif_err:
+            logger.error(f'Failed to send disposal approved notification: {notif_err}')
+
         return jsonify({
             'success': True,
             'data': disposal.to_dict(),
@@ -338,6 +366,23 @@ def reject_disposal(disposal_id):
             disposal.asset_item.current_status = 'available'
 
         db.session.commit()
+
+        # Notify PM that disposal was rejected
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            if disposal.requested_by_id:
+                category_name = disposal.category.category_name if disposal.category else 'Unknown'
+                ComprehensiveNotificationService.notify_asset_disposal_rejected(
+                    disposal_id=disposal.disposal_id,
+                    category_name=category_name,
+                    quantity=disposal.quantity,
+                    action=action,
+                    rejected_by_name=user_name,
+                    review_notes=data.get('notes', ''),
+                    pm_user_id=disposal.requested_by_id
+                )
+        except Exception as notif_err:
+            logger.error(f'Failed to send disposal rejected notification: {notif_err}')
 
         message = 'Disposal rejected. Asset returned to stock.' if action == 'return_to_stock' else 'Disposal rejected. Asset sent back for repair.'
 
@@ -441,6 +486,19 @@ def request_catalog_disposal(category_id):
         category.available_quantity = max(0, (category.available_quantity or 0) - quantity)
 
         db.session.commit()
+
+        # Notify TD for disposal approval
+        try:
+            from utils.comprehensive_notification_service import ComprehensiveNotificationService
+            ComprehensiveNotificationService.notify_asset_disposal_requested(
+                disposal_id=disposal.disposal_id,
+                category_name=category.category_name,
+                quantity=quantity,
+                disposal_reason=data['disposal_reason'],
+                requested_by_name=user_name
+            )
+        except Exception as notif_err:
+            logger.error(f'Failed to send catalog disposal request notification: {notif_err}')
 
         return jsonify({
             'success': True,

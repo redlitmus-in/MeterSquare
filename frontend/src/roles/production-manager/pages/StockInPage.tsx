@@ -192,6 +192,7 @@ const StockInPage: React.FC = () => {
       quantity: number; unit_price: number; driver_name?: string;
       vehicle_number?: string; reference_number?: string; per_unit_transport_fee?: number;
     }>;
+    project_id?: number;
   } | null>(null);
 
 
@@ -653,7 +654,7 @@ const StockInPage: React.FC = () => {
       const acceptedMaterials: AcceptedMaterialForStockIn[] = response.data?.accepted_materials ?? [];
       if (acceptedMaterials.length > 0) {
         setActiveStockInInspectionId(response.data?.inspection_id ?? null);
-        setPrefillStockInData({ materials: acceptedMaterials });
+        setPrefillStockInData({ materials: acceptedMaterials, project_id: selectedIMR?.project_id });
         setShowPurchaseModal(true);
       }
     } catch (error) {
@@ -672,7 +673,7 @@ const StockInPage: React.FC = () => {
     setActiveStockInInspectionId(inspection.id);
     // Close Inspection Centre, then open the regular stock-in form with prefilled materials
     setShowVendorDeliveriesModal(false);
-    setPrefillStockInData({ materials: acceptedMaterials });
+    setPrefillStockInData({ materials: acceptedMaterials, project_id: inspection.project_id });
     setShowPurchaseModal(true);
   };
 

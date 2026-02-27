@@ -12,7 +12,9 @@ from models.inventory import *
 from models.role import Role
 from config.logging import get_logger
 from datetime import datetime, timedelta
-from utils.comprehensive_notification_service import notification_service
+from utils.comprehensive_notification_service import notification_service, ComprehensiveNotificationService
+from utils.notification_utils import NotificationManager
+from socketio_server import send_notification_to_user
 import json
 
 log = get_logger()
@@ -1633,9 +1635,9 @@ def complete_purchase():
                                 elif isinstance(raw_sub_item_id, str) and raw_sub_item_id.isdigit():
                                     sub_item_id_int = int(raw_sub_item_id)
                                 else:
-                                    log.warning(f"⚠️ sub_item_id has unexpected format: {raw_sub_item_id} (type: {type(raw_sub_item_id)})")
+                                    log.warning(f" sub_item_id has unexpected format: {raw_sub_item_id} (type: {type(raw_sub_item_id)})")
                             except Exception as e:
-                                log.warning(f"❌ Could not parse sub_item_id '{raw_sub_item_id}': {e}")
+                                log.warning(f" Could not parse sub_item_id '{raw_sub_item_id}': {e}")
 
                         # Fallback to change request sub_item_id if still None
                         if sub_item_id_int is None and cr.sub_item_id:
@@ -1643,7 +1645,7 @@ def complete_purchase():
 
                         # Log warning if sub_item_id is still None
                         if sub_item_id_int is None:
-                            log.warning(f"⚠️ No valid sub_item_id found for material '{material_name}' in CR-{cr_id}")
+                            log.warning(f" No valid sub_item_id found for material '{material_name}' in CR-{cr_id}")
 
                         new_material = MasterMaterial(
                             material_name=material_name,
@@ -1684,7 +1686,7 @@ def complete_purchase():
         if po_children_exist:
             log.info(f"CR-{cr_id} has POChildren - skipping individual request creation (handled by POChild completion)")
         elif existing_imr_count > 0:
-            log.warning(f"⚠️ CR-{cr_id} already has {existing_imr_count} Internal Material Request(s) - skipping creation to prevent duplicates")
+            log.warning(f" CR-{cr_id} already has {existing_imr_count} Internal Material Request(s) - skipping creation to prevent duplicates")
             created_imr_count = existing_imr_count  # Use existing count for notification
         else:
             try:
@@ -1788,7 +1790,7 @@ def complete_purchase():
                     log.warning(f"No valid materials found for CR-{cr_id}")
 
             except Exception as imr_error:
-                log.error(f"❌ Error creating grouped Internal Material Request: {imr_error}")
+                log.error(f" Error creating grouped Internal Material Request: {imr_error}")
                 # Don't fail the whole request, but log the error
 
         db.session.commit()
@@ -1798,7 +1800,7 @@ def complete_purchase():
         # ========================================
         try:
             # Notify Production Manager(s)
-            pm_role = Role.query.filter_by(role='production_manager').first()
+            pm_role = Role.query.filter_by(role='productionManager').first()
             if pm_role:
                 pms = User.query.filter_by(
                     role_id=pm_role.role_id,
@@ -1808,34 +1810,77 @@ def complete_purchase():
 
                 project_name = cr.project.project_name if cr.project else 'Unknown Project'
                 vendor_name = cr.selected_vendor_name or 'Selected Vendor'
+                pm_message = f"{buyer_name} has routed {created_imr_count} material(s) from vendor '{vendor_name}' to M2 Store for project '{project_name}'. Materials will be delivered to warehouse for inspection and dispatch to site."
 
                 for pm in pms:
-                    notification_service.create_notification(
+                    notification = NotificationManager.create_notification(
                         user_id=pm.user_id,
                         title=f"📦 Incoming Vendor Delivery - {project_name}",
-                        message=f"{buyer_name} has routed {created_imr_count} material(s) from vendor '{vendor_name}' to M2 Store for project '{project_name}'. Materials will be delivered to warehouse for inspection and dispatch to site.",
+                        message=pm_message,
                         type='vendor_delivery_incoming',
-                        reference_type='change_request',
-                        reference_id=cr_id,
-                        action_url=f'/store/incoming-deliveries'
+                        category='project',
+                        priority='high',
+                        action_required=True,
+                        action_url='/production-manager/m2-store/stock-in?view=vendor_deliveries',
+                        action_label='View Incoming Materials',
+                        metadata={'reference_type': 'change_request', 'reference_id': cr_id}
                     )
+                    send_notification_to_user(pm.user_id, notification.to_dict())
                     log.info(f"✅ Notified PM {pm.full_name} about incoming vendor delivery for CR-{cr_id}")
 
+                    # Send email notification
+                    try:
+                        if pm.email and ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                            ComprehensiveNotificationService.send_email_notification(
+                                recipient=pm.email,
+                                subject=f'Incoming Vendor Delivery - {project_name}',
+                                message=f'''
+                                <h2>Incoming Vendor Delivery</h2>
+                                <p>{pm_message}</p>
+                                <p>Please go to <strong>M2 Store → Stock In</strong> to inspect and confirm receipt once the vendor delivers.</p>
+                                ''',
+                                notification_type='vendor_delivery_incoming'
+                            )
+                    except Exception as email_err:
+                        log.error(f"Failed to send PM email notification: {email_err}")
+
         except Exception as pm_notif_error:
-            log.error(f"❌ Failed to send PM notification: {pm_notif_error}")
+            log.error(f" Failed to send PM notification: {pm_notif_error}")
 
         # Send notification to CR creator about purchase routing
         try:
             if cr.requested_by_user_id:
                 project_name = cr.project.project_name if cr.project else 'Unknown Project'
-                notification_service.create_notification(
+                creator_message = f"{buyer_name} has completed the purchase and routed materials to M2 Store. Production Manager will receive materials from vendor and dispatch to your site."
+                notification = NotificationManager.create_notification(
                     user_id=cr.requested_by_user_id,
                     title=f"Purchase Routed to M2 Store - {project_name}",
-                    message=f"{buyer_name} has completed the purchase and routed materials to M2 Store. Production Manager will receive materials from vendor and dispatch to your site.",
+                    message=creator_message,
                     type='cr_routed_to_store',
-                    reference_type='change_request',
-                    reference_id=cr_id
+                    category='project',
+                    priority='medium',
+                    action_url=f'/project-manager/change-requests?tab=completed',
+                    action_label='View Change Request',
+                    metadata={'reference_type': 'change_request', 'reference_id': cr_id}
                 )
+                send_notification_to_user(cr.requested_by_user_id, notification.to_dict())
+
+                # Send email notification
+                try:
+                    creator = User.query.get(cr.requested_by_user_id)
+                    if creator and creator.email and ComprehensiveNotificationService.is_user_offline(creator.user_id):
+                        ComprehensiveNotificationService.send_email_notification(
+                            recipient=creator.email,
+                            subject=f'Purchase Routed to M2 Store - {project_name}',
+                            message=f'''
+                            <h2>Purchase Routed to Store</h2>
+                            <p>{creator_message}</p>
+                            <p>You will receive further notifications as your materials move through the delivery process.</p>
+                            ''',
+                            notification_type='cr_routed_to_store'
+                        )
+                except Exception as email_err:
+                    log.error(f"Failed to send CR creator email notification: {email_err}")
         except Exception as notif_error:
             log.error(f"Failed to send CR routing notification: {notif_error}")
 

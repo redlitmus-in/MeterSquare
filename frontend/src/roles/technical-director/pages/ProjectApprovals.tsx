@@ -1303,6 +1303,19 @@ const ProjectApprovals: React.FC = () => {
   }, [estimations]);
 
   const filteredEstimations = useMemo(() => sortedEstimations.filter(est => {
+    // Apply search term filter
+    if (searchTerm) {
+      const s = searchTerm.toLowerCase().trim();
+      const idStr = `b-${est.id}`;
+      const matchesSearch =
+        idStr.includes(s) ||
+        est.id?.toString().includes(s) ||
+        est.projectName?.toLowerCase().includes(s) ||
+        est.projectCode?.toLowerCase().includes(s) ||
+        est.clientName?.toLowerCase().includes(s);
+      if (!matchesSearch) return false;
+    }
+
     if (filterStatus === 'pending') {
       // Pending: Waiting for TD internal approval (status = pending, sent via email to TD)
       return est.status === 'pending' && !est.pmAssigned;
@@ -1340,7 +1353,7 @@ const ProjectApprovals: React.FC = () => {
       return est.status === 'cancelled';
     }
     return false;
-  }), [sortedEstimations, filterStatus, selectedRevisionNumber]);
+  }), [sortedEstimations, filterStatus, selectedRevisionNumber, searchTerm]);
 
   // Pagination calculation
   const totalPages = Math.ceil(filteredEstimations.length / ITEMS_PER_PAGE);
@@ -1819,7 +1832,14 @@ const ProjectApprovals: React.FC = () => {
         {/* TD Revision Comparison Page - Show only for revisions tab */}
         {filterStatus === 'revisions' ? (
           <TDRevisionComparisonPage
-            boqList={boqs}
+            boqList={searchTerm ? boqs.filter(boq => {
+              const s = searchTerm.toLowerCase().trim();
+              const title = (boq.title || boq.boq_name || boq.project_name || '').toLowerCase();
+              const client = (boq.client || (boq as any).project?.client || (boq as any).project_details?.client || '').toLowerCase();
+              const code = ((boq as any).project_code || '').toLowerCase();
+              return title.includes(s) || client.includes(s) || code.includes(s) || boq.boq_id?.toString().includes(s);
+            }) : boqs}
+            externalSearchTerm={searchTerm}
             onApprove={(boq) => {
               // Try to find in filteredEstimations first, otherwise create from BOQ
               let estimation = filteredEstimations.find(est => est.id === boq.boq_id);

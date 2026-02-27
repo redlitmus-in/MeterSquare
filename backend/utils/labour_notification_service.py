@@ -47,6 +47,26 @@ class LabourNotificationMixin:
                     sender_name=se_name
                 )
                 send_notification_to_user(pm_id, notification.to_dict())
+                # Email fallback -- PM must approve this (action required)
+                try:
+                    from utils.comprehensive_notification_service import ComprehensiveNotificationService as CNS
+                    if CNS.is_user_offline(pm_id):
+                        pm_user = User.query.get(pm_id)
+                        if pm_user and pm_user.email:
+                            CNS.send_email_notification(
+                                recipient=pm_user.email,
+                                subject=f'Labour Requisition Pending Approval - {project_name}',
+                                message=f'''
+                                <h2>Labour Requisition Needs Your Approval</h2>
+                                <p>A new labour requisition has been submitted for
+                                <strong>{project_name}</strong> and requires your approval.</p>
+                                <p>Please log in and go to
+                                <strong>Labour &rarr; Approvals</strong> to review and approve.</p>
+                                ''',
+                                notification_type='labour_requisition_pending'
+                            )
+                except Exception as email_err:
+                    pass  # Don't fail notification on email error
 
             log.info(f"Sent labour requisition notification for {requisition_code}")
         except Exception as e:
@@ -126,7 +146,7 @@ class LabourNotificationMixin:
         """
         try:
             prod_managers = User.query.join(Role, User.role_id == Role.role_id).filter(
-                Role.role == 'production-manager',
+                Role.role.ilike('%productionmanager%'),
                 User.is_active == True,
                 User.is_deleted == False
             ).all()

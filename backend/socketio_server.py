@@ -57,6 +57,7 @@ def authenticate_socket(f):
         token = request.args.get('token')
 
         if not token:
+            log.warning("[Socket.IO] Connection rejected: no token provided")
             disconnect()
             return {'error': 'Authentication required'}
 
@@ -68,6 +69,7 @@ def authenticate_socket(f):
             username = data.get('username', 'Unknown')
 
             if not user_id:
+                log.warning("[Socket.IO] Connection rejected: token has no user_id")
                 disconnect()
                 return {'error': 'Invalid token'}
 
@@ -77,9 +79,11 @@ def authenticate_socket(f):
             kwargs['username'] = username
 
         except jwt.ExpiredSignatureError:
+            log.warning(f"[Socket.IO] Connection rejected: token expired (SID: {request.sid})")
             disconnect()
             return {'error': 'Token has expired'}
-        except jwt.InvalidTokenError:
+        except jwt.InvalidTokenError as e:
+            log.warning(f"[Socket.IO] Connection rejected: invalid token - {e}")
             disconnect()
             return {'error': 'Invalid token'}
 
@@ -308,6 +312,20 @@ def broadcast_notification(notification_data):
     socketio.emit('notification', notification_data, broadcast=True)
     log.debug(f"Broadcast notification to all users")
 
+
+def is_user_connected(user_id) -> bool:
+    """
+    Check if a user currently has an active Socket.IO connection.
+    Uses the in-memory active_connections dict (keyed by socket session ID).
+    Returns True if the user has at least one active session right now.
+    Note: compare as strings to avoid int/str mismatch (JWT decode returns int,
+    but join:user handler may store string from frontend).
+    """
+    target = str(user_id)
+    return any(
+        str(conn.get('user_id', '')) == target
+        for conn in list(active_connections.values())
+    )
 
 # Project-specific events
 

@@ -626,6 +626,9 @@ class InventoryService {
       formData.append('unit_price', transaction.unit_price.toString());
       formData.append('total_amount', transaction.total_amount.toString());
 
+      if (transaction.project_id) {
+        formData.append('project_id', transaction.project_id.toString());
+      }
       if (transaction.reference_number) {
         formData.append('reference_number', transaction.reference_number);
       }

@@ -833,11 +833,9 @@ function App() {
         Notification.requestPermission();
       }
 
-      // Fetch missed notifications on app mount/login
-      // This ensures notifications show even if user was offline when they were sent
-      setTimeout(() => {
-        realtimeNotificationHub.fetchMissedNotifications();
-      }, 1000); // Small delay to ensure Socket.IO is connected first
+      // Fetch missed notifications immediately on app mount/login
+      // No delay needed — polling fallback handles delivery even if Socket.IO isn't ready
+      realtimeNotificationHub.fetchMissedNotifications();
 
       // ONLY cleanup on actual logout (isAuthenticated changes to false)
       return () => {
@@ -1273,7 +1271,7 @@ function App() {
               </ProductionManagerRoute>
             } />
             {/* Returnable Assets - New DN/RDN Flow */}
-            <Route path="returnable-assets" element={<Navigate to="returnable-assets/stock-in" replace />} />
+            <Route path="returnable-assets" element={<Navigate to="stock-in" replace />} />
             <Route path="returnable-assets/stock-in" element={
               <ProductionManagerRoute>
                 <AssetStockIn />

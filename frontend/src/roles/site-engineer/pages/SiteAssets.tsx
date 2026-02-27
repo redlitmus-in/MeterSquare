@@ -2489,14 +2489,7 @@ const SiteAssets: React.FC = () => {
                                 Confirm Receipt
                               </button>
                             )}
-                            {canCancelRequisition(req, currentUserId) && (
-                              <button
-                                onClick={() => handleCancelRequisition(req.requisition_id)}
-                                className="px-3 py-1.5 text-red-600 text-xs hover:bg-red-50 rounded-lg border border-red-200"
-                              >
-                                Cancel
-                              </button>
-                            )}
+                            {/* Cancel button hidden until Cancelled tab is implemented */}
                           </div>
                         </div>
                       </div>
@@ -2727,14 +2720,7 @@ const SiteAssets: React.FC = () => {
                                 Edit
                               </button>
                             )}
-                            {canCancelRequisition(req, currentUserId) && (
-                              <button
-                                onClick={() => handleCancelRequisition(req.requisition_id)}
-                                className="px-3 py-1.5 text-red-600 text-xs hover:bg-red-50 rounded-lg border border-red-200"
-                              >
-                                Cancel
-                              </button>
-                            )}
+                            {/* Cancel button hidden until Cancelled tab is implemented */}
                           </div>
                         </div>
                       </div>

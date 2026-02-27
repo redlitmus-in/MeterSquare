@@ -37,6 +37,7 @@ interface TDRevisionComparisonPageProps {
   onRefresh?: () => Promise<void>;
   refreshTrigger?: number; // Trigger for InternalRevisionTimeline refresh
   defaultSubTab?: 'client' | 'internal'; // Default sub-tab from URL parameter
+  externalSearchTerm?: string; // Search term from parent page
 }
 
 const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
@@ -46,7 +47,8 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
   onViewDetails,
   onRefresh,
   refreshTrigger,
-  defaultSubTab = 'client'
+  defaultSubTab = 'client',
+  externalSearchTerm = ''
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBoq, setSelectedBoq] = useState<BOQ | null>(null);
@@ -2300,6 +2302,7 @@ const TDRevisionComparisonPage: React.FC<TDRevisionComparisonPageProps> = ({
             onApprove={onApprove}
             onReject={onReject}
             refreshTrigger={refreshTrigger}
+            externalSearchTerm={externalSearchTerm}
           />
         </TabsContent>
       </Tabs>

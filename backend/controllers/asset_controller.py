@@ -1564,6 +1564,36 @@ def return_asset():
         category.last_modified_by = current_user
         db.session.commit()
 
+        # Notify PMs — asset returned in good condition
+        try:
+            _ret_project = Project.query.get(project_id)
+            _ret_project_name = _ret_project.project_name if _ret_project else f'Project {project_id}'
+            from models.role import Role as _Role
+            _ret_pm_role = _Role.query.filter_by(role='productionManager').first()
+            _ret_pm_ids = []
+            if _ret_pm_role:
+                _ret_pm_ids = [u.user_id for u in User.query.filter_by(
+                    role_id=_ret_pm_role.role_id, is_active=True, is_deleted=False
+                ).all()]
+            # Calculate good qty returned (exclude damaged items going to maintenance)
+            if category.tracking_mode == 'individual':
+                _damaged_count = len(maintenance_created)
+                _total_returned = len(movements_created)
+                _good_qty = _total_returned - _damaged_count
+            else:
+                _damaged_qty = data.get('damaged_quantity', 0)
+                _good_qty = data.get('quantity', len(movements_created)) - _damaged_qty
+            if _good_qty > 0 and _ret_pm_ids:
+                ComprehensiveNotificationService.notify_asset_returned_good(
+                    category_name=category.name,
+                    quantity=_good_qty,
+                    project_name=_ret_project_name,
+                    returned_by_name=current_user,
+                    pm_user_ids=_ret_pm_ids
+                )
+        except Exception as notif_err:
+            current_app.logger.error(f'Failed to send asset return notification: {notif_err}')
+
         return jsonify({
             'message': 'Assets returned successfully',
             'movements': [m.to_dict() for m in movements_created],
@@ -1625,6 +1655,7 @@ def update_maintenance(maintenance_id):
 
         # Use SELECT FOR UPDATE to prevent race conditions
         category = ReturnableAssetCategory.query.with_for_update().get(maint.category_id)
+        _item_code = None  # Capture item_code for notification (set below if item_id exists)
 
         if action == 'in_progress':
             maint.status = 'in_progress'
@@ -1651,6 +1682,7 @@ def update_maintenance(maintenance_id):
             if maint.item_id:
                 item = ReturnableAssetItem.query.with_for_update().get(maint.item_id)
                 if item:
+                    _item_code = item.item_code
                     item.current_status = 'available'
                     item.current_condition = condition_after
                     item.last_modified_by = current_user
@@ -1672,6 +1704,7 @@ def update_maintenance(maintenance_id):
             if maint.item_id:
                 item = ReturnableAssetItem.query.with_for_update().get(maint.item_id)
                 if item:
+                    _item_code = item.item_code
                     item.current_status = 'retired'
                     item.is_active = False
                     item.last_modified_by = current_user
@@ -1686,6 +1719,31 @@ def update_maintenance(maintenance_id):
             category.last_modified_by = current_user
 
         db.session.commit()
+
+        # Notify Production Managers about asset maintenance completion (repair or write_off only)
+        if action in ('repair', 'write_off') and category:
+            try:
+                from models.role import Role
+                pm_role = Role.query.filter_by(role='productionManager').first()
+                pm_user_ids = []
+                if pm_role:
+                    pms = User.query.filter_by(
+                        role_id=pm_role.role_id,
+                        is_active=True,
+                        is_deleted=False
+                    ).all()
+                    pm_user_ids = [pm.user_id for pm in pms]
+
+                ComprehensiveNotificationService.notify_asset_maintenance_complete(
+                    category_name=category.category_name,
+                    category_code=category.category_code,
+                    item_code=_item_code,
+                    action=action,
+                    pm_user_ids=pm_user_ids,
+                    completed_by_name=g.user.get('full_name', g.user.get('email', 'System'))
+                )
+            except Exception as notif_err:
+                current_app.logger.error(f"Failed to send asset maintenance notification: {notif_err}")
 
         return jsonify({
             'message': f'Maintenance {action} completed',
@@ -1956,7 +2014,7 @@ def create_return_request():
             # Get PM user IDs by joining User with Role
             from models.role import Role
             pm_users = User.query.join(Role, User.role_id == Role.role_id).filter(
-                Role.role == 'production-manager',
+                Role.role.ilike('%productionmanager%'),
                 User.is_active == True
             ).all()
             pm_user_ids = [pm.user_id for pm in pm_users]

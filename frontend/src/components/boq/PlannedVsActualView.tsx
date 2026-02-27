@@ -142,6 +142,13 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
     setShowBreakdownModal(true);
   };
 
+  // Sum actual material amounts including VAT — matches what Sub Items table displays
+  const getActualMaterialsWithVAT = (materials: any[]): number =>
+    (materials || []).reduce((sum: number, mat: any) => {
+      if (!mat.actual) return sum;
+      return sum + (mat.actual.total_with_vat ?? mat.actual.total ?? 0);
+    }, 0);
+
   // Calculate totals from items
   const calculateTotals = () => {
     if (!data?.items) return { planned_materials: 0, planned_labour: 0, actual_materials: 0, actual_labour: 0 };
@@ -149,7 +156,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
     return data.items.reduce((acc: any, item: any) => {
       acc.planned_materials += item.planned.materials_total || 0;
       acc.planned_labour += item.planned.labour_total || 0;
-      acc.actual_materials += item.actual.materials_total || 0;
+      acc.actual_materials += getActualMaterialsWithVAT(item.materials || []);
       acc.actual_labour += item.actual.labour_total || 0;
       return acc;
     }, { planned_materials: 0, planned_labour: 0, actual_materials: 0, actual_labour: 0 });
@@ -1082,21 +1089,28 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                         </tr>
                       </thead>
                       <tbody>
-                        {item.materials.map((mat: any, mIdx: number) => (
+                        {item.materials.map((mat: any, mIdx: number) => {
+                          const isNotPurchased = !mat.actual && mat.status === 'pending';
+                          return (
                           <tr key={mIdx} className={`border-t border-gray-100 ${
-                            mat.status === 'unplanned' ? 'bg-yellow-50' : ''
+                            mat.status === 'unplanned' ? 'bg-yellow-50' :
+                            isNotPurchased ? 'bg-gray-50' : ''
                           }`}>
                             <td className="py-2 px-3">
                               <div className="flex flex-col">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-gray-700">{mat.material_name}</span>
                                   {mat.source === 'change_request' ? (
                                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-200">
                                       NEW - CR #{mat.change_request_id}
                                     </span>
-                                  ) : mat.status === 'unplanned' && (
+                                  ) : mat.status === 'unplanned' ? (
                                     <span className="px-1.5 py-0.5 text-xs bg-orange-500 text-white rounded font-semibold">
                                       NEW
+                                    </span>
+                                  ) : isNotPurchased && (
+                                    <span className="px-1.5 py-0.5 text-xs bg-gray-200 text-gray-500 rounded font-semibold">
+                                      Not Purchased
                                     </span>
                                   )}
                                 </div>
@@ -1106,24 +1120,29 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                               </div>
                             </td>
                             <td className="py-2 px-3 text-right">
-                              <span className={`font-medium ${
-                                mat.variance?.status === 'overrun' ? 'text-red-600' :
-                                mat.variance?.status === 'saved' ? 'text-green-600' :
-                                'text-gray-900'
-                              }`}>
-                                {mat.actual
-                                  ? formatCurrency(mat.actual.total_with_vat ?? mat.actual.total)
-                                  : mat.planned ? formatCurrency(mat.planned.total) : '-'}
-                              </span>
+                              {isNotPurchased ? (
+                                <span className="font-medium text-gray-400">AED 0.00</span>
+                              ) : (
+                                <span className={`font-medium ${
+                                  mat.variance?.status === 'overrun' ? 'text-red-600' :
+                                  mat.variance?.status === 'saved' ? 'text-green-600' :
+                                  'text-gray-900'
+                                }`}>
+                                  {mat.actual
+                                    ? formatCurrency(mat.actual.total_with_vat ?? mat.actual.total)
+                                    : mat.planned ? formatCurrency(mat.planned.total) : '-'}
+                                </span>
+                              )}
                               {mat.actual?.vat_amount > 0 && (
                                 <p className="text-xs text-gray-400">(incl. VAT)</p>
                               )}
                             </td>
                             <td className="py-2 px-3 text-xs text-gray-500 italic">
-                              {mat.variance_reason || '-'}
+                              {isNotPurchased ? 'Pending purchase' : (mat.variance_reason || '-')}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1148,9 +1167,9 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   <div className="flex justify-between py-1">
                     <span className="text-gray-600">Material Total:</span>
                     <span className={`font-medium ${
-                      item.actual.materials_total > item.planned.materials_total ? 'text-red-600' : 'text-gray-900'
+                      getActualMaterialsWithVAT(item.materials) > item.planned.materials_total ? 'text-red-600' : 'text-gray-900'
                     }`}>
-                      {formatCurrency(item.actual.materials_total)}
+                      {formatCurrency(getActualMaterialsWithVAT(item.materials))}
                     </span>
                   </div>
                   <div className="flex justify-between py-1 pb-2">
@@ -1169,9 +1188,9 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                       </span>
                     </span>
                     <span className={
-                      (item.actual.materials_total + item.actual.labour_total) > (item.planned.materials_total + item.planned.labour_total) ? 'text-red-600' : 'text-gray-900'
+                      (getActualMaterialsWithVAT(item.materials) + item.actual.labour_total) > (item.planned.materials_total + item.planned.labour_total) ? 'text-red-600' : 'text-gray-900'
                     }>
-                      {formatCurrency(item.actual.materials_total + item.actual.labour_total)}
+                      {formatCurrency(getActualMaterialsWithVAT(item.materials) + item.actual.labour_total)}
                     </span>
                   </div>
                   <div className="flex justify-between py-1 text-gray-600">
@@ -1188,17 +1207,25 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     <span className="font-medium text-gray-900">{formatCurrency(item.actual.transport_amount || 0)}</span>
                   </div>
                   <div className="bg-yellow-50 border border-yellow-200 rounded px-2 py-2 mt-2 -mx-2">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-yellow-900 font-semibold">Actual Spending:</span>
-                      <span className="font-bold text-yellow-900">{formatCurrency(item.actual.spending || 0)}</span>
-                    </div>
-                    <div className="text-[10px] text-yellow-800 mt-1 italic bg-yellow-100 px-2 py-1 rounded">
-                      <strong>Formula:</strong> Actual Spending = Materials + Labour + Misc + Transport
-                      <br />
-                      = {formatCurrency(item.actual.materials_total)} + {formatCurrency(item.actual.labour_total)} + {formatCurrency(item.actual.miscellaneous_amount || 0)} + {formatCurrency(item.actual.transport_amount || 0)}
-                      <br />
-                      = {formatCurrency(item.actual.spending || 0)}
-                    </div>
+                    {(() => {
+                        const actMat = getActualMaterialsWithVAT(item.materials);
+                        const actSpend = actMat + (item.actual.labour_total || 0) + (item.actual.miscellaneous_amount || 0) + (item.actual.transport_amount || 0);
+                        return (
+                          <>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-yellow-900 font-semibold">Actual Spending:</span>
+                              <span className="font-bold text-yellow-900">{formatCurrency(actSpend)}</span>
+                            </div>
+                            <div className="text-[10px] text-yellow-800 mt-1 italic bg-yellow-100 px-2 py-1 rounded">
+                              <strong>Formula:</strong> Actual Spending = Materials + Labour + Misc + Transport
+                              <br />
+                              = {formatCurrency(actMat)} + {formatCurrency(item.actual.labour_total)} + {formatCurrency(item.actual.miscellaneous_amount || 0)} + {formatCurrency(item.actual.transport_amount || 0)}
+                              <br />
+                              = {formatCurrency(actSpend)}
+                            </div>
+                          </>
+                        );
+                      })()}
                   </div>
                   <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-gray-50 -mx-4 px-4">
                     <span className="font-bold text-gray-900">
@@ -1222,20 +1249,27 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   )}
 
                   {/* Negotiable Margin Calculation */}
-                  <div className="mt-3 pt-3 border-t-2 border-gray-400 bg-gray-50 -mx-4 px-4 pb-3">
-                    <div className="flex justify-between text-sm font-semibold mb-2">
-                      <span className="text-gray-700">Negotiable Margin:</span>
-                      <span className={`text-lg ${(item.actual.negotiable_margin || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                        {formatCurrency(item.actual.negotiable_margin || 0)}
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-gray-700 italic bg-gray-100 px-2 py-1 rounded">
-                      Formula: Negotiable Margin = Client Pays - Actual Spending
-                      <br />
-                      = {formatCurrency(item.actual.total)} - {formatCurrency(item.actual.spending || 0)}
-                      = {formatCurrency(item.actual.negotiable_margin || 0)}
-                    </div>
-                  </div>
+                  {(() => {
+                    const actMat = getActualMaterialsWithVAT(item.materials);
+                    const actSpend = actMat + (item.actual.labour_total || 0) + (item.actual.miscellaneous_amount || 0) + (item.actual.transport_amount || 0);
+                    const negMargin = (item.actual.total || 0) - actSpend;
+                    return (
+                      <div className="mt-3 pt-3 border-t-2 border-gray-400 bg-gray-50 -mx-4 px-4 pb-3">
+                        <div className="flex justify-between text-sm font-semibold mb-2">
+                          <span className="text-gray-700">Negotiable Margin:</span>
+                          <span className={`text-lg ${negMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                            {formatCurrency(negMargin)}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-gray-700 italic bg-gray-100 px-2 py-1 rounded">
+                          Formula: Negotiable Margin = Client Pays - Actual Spending
+                          <br />
+                          = {formatCurrency(item.actual.total)} - {formatCurrency(actSpend)}
+                          = {formatCurrency(negMargin)}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Actual Margin Breakdown */}
                   <div className="mt-3 pt-3 border-t-2 border-blue-300 bg-blue-50 -mx-4 px-4 pb-3">
@@ -1245,7 +1279,9 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                         // Use O&P values provided by backend (already calculated correctly)
                         const opPercentage = item.planned.overhead_profit_percentage || 25;
                         const opAllocation = (item.planned.overhead_amount || 0) + (item.planned.profit_amount || 0);
-                        const negotiableMargin = item.actual.negotiable_margin || 0;
+                        const actMat = getActualMaterialsWithVAT(item.materials);
+                        const actSpend = actMat + (item.actual.labour_total || 0) + (item.actual.miscellaneous_amount || 0) + (item.actual.transport_amount || 0);
+                        const negotiableMargin = (item.actual.total || 0) - actSpend;
                         const actualMargin = opAllocation + negotiableMargin;
 
                         return (
@@ -1481,6 +1517,7 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     {formatCurrency(totals.actual_materials + totals.actual_labour)}
                   </span>
                 </div>
+
                 <div className="flex justify-between py-1 text-gray-600">
                   <span className="flex items-center gap-1">
                     <span className="text-lg">+</span> Miscellaneous:
@@ -1498,19 +1535,26 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                     {formatCurrency(data.summary.total_actual_transport || 0)}
                   </span>
                 </div>
-                <div className="bg-yellow-50 border border-yellow-200 rounded px-3 py-2 mt-2 -mx-3">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-yellow-900 font-semibold">Total Actual Spending:</span>
-                    <span className="font-bold text-yellow-900">{formatCurrency(data.summary.actual_spending || 0)}</span>
-                  </div>
-                  <div className="text-[10px] text-yellow-800 mt-1 italic bg-yellow-100 px-2 py-1 rounded">
-                    <strong>Formula:</strong> Total Actual Spending = Materials + Labour + Misc + Transport
-                    <br />
-                    = {formatCurrency(totals.actual_materials)} + {formatCurrency(totals.actual_labour)} + {formatCurrency(data.summary.total_actual_miscellaneous || 0)} + {formatCurrency(data.summary.total_actual_transport || 0)}
-                    <br />
-                    = {formatCurrency(data.summary.actual_spending || 0)}
-                  </div>
-                </div>
+                {(() => {
+                  const totalActualSpending = totals.actual_materials + totals.actual_labour +
+                    (data.summary.total_actual_miscellaneous || 0) +
+                    (data.summary.total_actual_transport || 0);
+                  return (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded px-3 py-2 mt-2 -mx-3">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-yellow-900 font-semibold">Total Actual Spending:</span>
+                        <span className="font-bold text-yellow-900">{formatCurrency(totalActualSpending)}</span>
+                      </div>
+                      <div className="text-[10px] text-yellow-800 mt-1 italic bg-yellow-100 px-2 py-1 rounded">
+                        <strong>Formula:</strong> Total Actual Spending = Materials + Labour + Misc + Transport
+                        <br />
+                        = {formatCurrency(totals.actual_materials)} + {formatCurrency(totals.actual_labour)} + {formatCurrency(data.summary.total_actual_miscellaneous || 0)} + {formatCurrency(data.summary.total_actual_transport || 0)}
+                        <br />
+                        = {formatCurrency(totalActualSpending)}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="flex justify-between py-3 border-t-2 border-gray-400 bg-gray-50 -mx-6 px-6">
                   <span className="font-bold text-gray-900">
                     Client Pays:
@@ -1731,11 +1775,11 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                 <div className="text-center p-4 bg-gray-50 rounded-lg border border-gray-200">
                   <p className="text-xs text-gray-600 mb-1">Sub Item Cost Variance:</p>
                   <p className={`text-lg font-bold ${
-                    (data.summary.actual_materials_total || 0) - (data.summary.planned_materials_total || 0) > 0
+                    totals.actual_materials - totals.planned_materials > 0
                       ? 'text-red-600'
                       : 'text-green-600'
                   }`}>
-                    {formatCurrency(Math.abs((data.summary.actual_materials_total || 0) - (data.summary.planned_materials_total || 0)))}
+                    {formatCurrency(Math.abs(totals.actual_materials - totals.planned_materials))}
                   </p>
                 </div>
                 <div className="text-center p-4 bg-gray-50 rounded-lg border border-gray-200">
@@ -1944,11 +1988,11 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   <div className="flex justify-between py-1">
                     <span>Sub Item Cost:</span>
                     <span className={`font-semibold ${
-                      selectedItemForBreakdown.actual.materials_total > selectedItemForBreakdown.planned.materials_total
+                      getActualMaterialsWithVAT(selectedItemForBreakdown.materials) > selectedItemForBreakdown.planned.materials_total
                         ? 'text-red-600'
                         : 'text-green-600'
                     }`}>
-                      {formatCurrency(selectedItemForBreakdown.actual.materials_total)}
+                      {formatCurrency(getActualMaterialsWithVAT(selectedItemForBreakdown.materials))}
                     </span>
                   </div>
                   <div className="flex justify-between py-1">
@@ -1994,12 +2038,12 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   <div className="flex justify-between">
                     <span>Sub Item Cost Variance:</span>
                     <span className={`font-semibold ${
-                      (selectedItemForBreakdown.actual.materials_total - selectedItemForBreakdown.planned.materials_total) > 0
+                      (getActualMaterialsWithVAT(selectedItemForBreakdown.materials) - selectedItemForBreakdown.planned.materials_total) > 0
                         ? 'text-red-600'
                         : 'text-green-600'
                     }`}>
-                      {(selectedItemForBreakdown.actual.materials_total - selectedItemForBreakdown.planned.materials_total) > 0 ? '+' : ''}
-                      {formatCurrency(Math.abs(selectedItemForBreakdown.actual.materials_total - selectedItemForBreakdown.planned.materials_total))}
+                      {(getActualMaterialsWithVAT(selectedItemForBreakdown.materials) - selectedItemForBreakdown.planned.materials_total) > 0 ? '+' : ''}
+                      {formatCurrency(Math.abs(getActualMaterialsWithVAT(selectedItemForBreakdown.materials) - selectedItemForBreakdown.planned.materials_total))}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -2070,19 +2114,19 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   <div className="flex justify-between py-1">
                     <span className="text-gray-600">Material Total:</span>
                     <span className="font-medium text-gray-900">
-                      {formatCurrency(data.summary.actual_materials_total || 0)}
+                      {formatCurrency(totals.actual_materials)}
                     </span>
                   </div>
                   <div className="flex justify-between py-1">
                     <span className="text-gray-600">Labour Total:</span>
                     <span className="font-medium text-gray-900">
-                      {formatCurrency(data.summary.actual_labour_total || 0)}
+                      {formatCurrency(totals.actual_labour)}
                     </span>
                   </div>
                   <div className="flex justify-between py-1 border-t border-gray-300 pt-2">
                     <span className="text-gray-700 font-semibold">Base Cost:</span>
                     <span className="font-semibold text-gray-900">
-                      {formatCurrency((data.summary.actual_materials_total || 0) + (data.summary.actual_labour_total || 0))}
+                      {formatCurrency(totals.actual_materials + totals.actual_labour)}
                     </span>
                   </div>
                   <div className="flex justify-between py-1">
@@ -2101,11 +2145,11 @@ const PlannedVsActualView: React.FC<PlannedVsActualViewProps> = ({ boqId, onClos
                   <div className="flex justify-between py-2 border-t-2 border-gray-400 pt-2">
                     <span className="text-gray-900 font-bold">Total Actual Spending:</span>
                     <span className="font-bold text-red-600 text-lg">
-                      {formatCurrency(data.summary.actual_spending || 0)}
+                      {formatCurrency(totals.actual_materials + totals.actual_labour + (data.summary.total_actual_miscellaneous || 0) + (data.summary.total_actual_transport || 0))}
                     </span>
                   </div>
                   <div className="text-[10px] text-gray-600 mt-1 italic">
-                    = {formatCurrency(data.summary.actual_materials_total || 0)} + {formatCurrency(data.summary.actual_labour_total || 0)} + {formatCurrency(data.summary.total_actual_miscellaneous || 0)} + {formatCurrency(data.summary.total_actual_transport || 0)}
+                    = {formatCurrency(totals.actual_materials)} + {formatCurrency(totals.actual_labour)} + {formatCurrency(data.summary.total_actual_miscellaneous || 0)} + {formatCurrency(data.summary.total_actual_transport || 0)}
                   </div>
                 </div>
               </div>

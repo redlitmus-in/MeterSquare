@@ -118,8 +118,9 @@ def get_notifications(current_user_id, current_user_role):
     except ValueError as e:
         return jsonify({'error': f'Invalid parameter: {str(e)}'}), 400
     except Exception as e:
-        log.error(f"Error fetching notifications: {e}")
-        return jsonify({'error': 'Failed to fetch notifications'}), 500
+        import traceback
+        log.error(f"Error fetching notifications: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': f'Failed to fetch notifications: {str(e)}'}), 500
 
 
 @notification_bp.route('/notifications/<notification_id>', methods=['GET'])

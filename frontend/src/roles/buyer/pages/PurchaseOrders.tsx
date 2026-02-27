@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Input } from '@/components/ui/input';
@@ -611,6 +611,32 @@ const PurchaseOrders: React.FC = () => {
       }
     }
   }, [location.search]); // Run whenever URL parameters change
+
+  // Auto-open purchase details when cr_id is in URL (from notification redirect)
+  const hasAutoOpenedCrRef = useRef<string | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const crIdParam = params.get('cr_id');
+    if (!crIdParam || hasAutoOpenedCrRef.current === crIdParam) return;
+
+    const crId = parseInt(crIdParam, 10);
+    if (isNaN(crId)) return;
+
+    // Search across all purchase lists for the matching cr_id
+    const allPurchases = [
+      ...pendingPurchaseItems,
+      ...storeApprovedItems,
+      ...vendorApprovedItems,
+      ...completedPurchases,
+      ...rejectedPurchases,
+    ];
+    const target = allPurchases.find(p => p.cr_id === crId);
+    if (target) {
+      hasAutoOpenedCrRef.current = crIdParam;
+      setSelectedPurchase(target);
+      setIsDetailsModalOpen(true);
+    }
+  }, [location.search, pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, completedPurchases, rejectedPurchases]);
 
   // Reset ALL sub-tab pages when search term changes
   // This ensures search results start from page 1

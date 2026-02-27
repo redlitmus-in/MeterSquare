@@ -30,6 +30,7 @@ interface PurchaseTransaction {
   quantity: number;
   unit_price: number;
   total_amount: number;
+  project_id?: number;
   reference_number?: string;
   notes?: string;
   delivery_note_url?: string;
@@ -67,6 +68,7 @@ interface PrefillMaterial {
 
 interface PrefillData {
   materials: PrefillMaterial[];
+  project_id?: number;
 }
 
 interface ManualStockInFormProps {
@@ -124,6 +126,16 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
   const [batchNotes, setBatchNotes] = useState('');
   const [savingProgress, setSavingProgress] = useState<{current: number; total: number} | null>(null);
   const [expandedNotes, setExpandedNotes] = useState<Set<number>>(new Set());
+
+  // Project selector state (used in single-material/manual mode)
+  const [projectsList, setProjectsList] = useState<{ project_id: number; project_name: string }[]>([]);
+
+  useEffect(() => {
+    if (prefillData?.project_id) return; // project already known from inspection
+    inventoryService.getAllProjects().then((projects) => {
+      setProjectsList(projects.map((p: any) => ({ project_id: p.project_id, project_name: p.project_name })));
+    }).catch(() => {});
+  }, []);
 
   // Initialise batch rows when prefillData + allMaterials are ready
   useEffect(() => {
@@ -225,6 +237,7 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
             quantity: row.quantity,
             unit_price: row.unit_price,
             total_amount: row.quantity * row.unit_price,
+            project_id: prefillData?.project_id,
             driver_name: batchDriver,
             vehicle_number: batchVehicle,
             reference_number: batchReference,
@@ -274,6 +287,7 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
     quantity: 0,
     unit_price: 0,
     total_amount: 0,
+    project_id: prefillData?.project_id,
     reference_number: '',
     notes: '',
     driver_name: '',
@@ -1002,6 +1016,28 @@ const ManualStockInForm: React.FC<ManualStockInFormProps> = ({
                 />
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Project Selector — shown only for manual stock-in (not from inspection) */}
+        {!prefillData?.project_id && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Project <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={purchaseFormData.project_id ?? ''}
+              onChange={(e) => {
+                const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                setPurchaseFormData((prev) => ({ ...prev, project_id: val }));
+              }}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">— Select project —</option>
+              {projectsList.map((p) => (
+                <option key={p.project_id} value={p.project_id}>{p.project_name}</option>
+              ))}
+            </select>
           </div>
         )}
 
