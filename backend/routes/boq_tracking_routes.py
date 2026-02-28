@@ -32,3 +32,10 @@ def get_all_purchase_boq_route():
 @jwt_required
 def get_labour_workflow_details_route(boq_id):
     return get_labour_workflow_details(boq_id)
+
+
+# Get profit report with transport, material, and item breakdown
+@boq_tracking_routes.route('/profit-report/<int:boq_id>', methods=['GET'])
+@jwt_required
+def get_profit_report_route(boq_id):
+    return get_profit_report(boq_id)

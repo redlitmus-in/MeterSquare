@@ -297,14 +297,14 @@ export default function PurchaseComparison() {
           .filter((material: any) => {
             const purchases = material.purchases || [];
             const hasActivePurchase = purchases.some((p: any) =>
-              ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+              ['pending', 'send_to_td', 'approved_by_pm', 'send_to_est', 'approved', 'approved_by_estimator', 'approved_by_td', 'pending_td_approval', 'send_to_buyer', 'assigned_to_buyer', 'vendor_approved', 'purchase_completed', 'routed_to_store'].includes(p.cr_status)
             );
             return (material.actual_amount || 0) > 0 || hasActivePurchase || material.is_new_material === true;
           })
           .forEach((material: any) => {
             const purchases = material.purchases || [];
             purchases.forEach((p: any) => {
-              if (['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)) {
+              if (['pending', 'send_to_td', 'approved_by_pm', 'send_to_est', 'approved', 'approved_by_estimator', 'approved_by_td', 'pending_td_approval', 'send_to_buyer', 'assigned_to_buyer', 'vendor_approved', 'purchase_completed', 'routed_to_store'].includes(p.cr_status)) {
                 if (!groupHasData) {
                   // Add item header
                   actualSpendingData.push({
@@ -563,14 +563,15 @@ export default function PurchaseComparison() {
       groupedByItem.forEach((group) => {
         // Estimate height needed for this section
         const plannedRowCount = group.plannedMaterials.length;
+        const PDF_ACTIVE_STATUSES = ['pending', 'send_to_td', 'approved_by_pm', 'send_to_est', 'approved', 'approved_by_estimator', 'approved_by_td', 'pending_td_approval', 'send_to_buyer', 'assigned_to_buyer', 'vendor_approved', 'purchase_completed', 'routed_to_store'];
         const actualMaterials = group.actualMaterials.filter((m: any) => {
           const purchases = m.purchases || [];
-          return purchases.some((p: any) => ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status));
+          return purchases.some((p: any) => PDF_ACTIVE_STATUSES.includes(p.cr_status));
         });
         let actualRowCount = 0;
         actualMaterials.forEach((m: any) => {
           const purchases = m.purchases || [];
-          actualRowCount += purchases.filter((p: any) => ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)).length;
+          actualRowCount += purchases.filter((p: any) => PDF_ACTIVE_STATUSES.includes(p.cr_status)).length;
         });
         const maxRows = Math.max(plannedRowCount, actualRowCount, 1);
         const estimatedHeight = 35 + (maxRows * 6) + 20;
@@ -665,7 +666,7 @@ export default function PurchaseComparison() {
         actualMaterials.forEach((material: any) => {
           const purchases = material.purchases || [];
           purchases.forEach((p: any) => {
-            if (['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)) {
+            if (PDF_ACTIVE_STATUSES.includes(p.cr_status)) {
               const total = (p.amount || 0) + (p.vat_amount || 0);
               actualRows.push([
                 material.material_name,
@@ -919,7 +920,13 @@ export default function PurchaseComparison() {
     // Note: Unlike comparison materials, unplanned materials have actual_amount WITHOUT VAT
     // So we need to add vat_amount for unplanned materials
     unplannedItems.forEach((item: any) => {
-      const itemName = item.item_name || 'Uncategorized';
+      const rawItemName = item.item_name || 'Uncategorized';
+      // Case-insensitive lookup: reuse the existing group key if it matches ignoring case
+      // This handles situations where the CR stores item_name in a different case than the BOQ
+      const existingKey = Object.keys(grouped).find(
+        k => k.toLowerCase() === rawItemName.toLowerCase()
+      );
+      const itemName = existingKey || rawItemName;
 
       if (!grouped[itemName]) {
         grouped[itemName] = {
@@ -955,6 +962,18 @@ export default function PurchaseComparison() {
           crDataMap[crId].totalVat = materialVat;
         }
 
+        // For unplanned/new materials, map any non-rejected CR status to 'purchase_completed'
+        // so the rendering loop (which filters by ACTIVE_STATUSES) always shows them.
+        // Statuses like 'split_to_sub_crs' are truthy but not in ACTIVE_STATUSES, which would
+        // cause the material to be silently hidden even though is_new_material === true.
+        const EXCLUDED_CR_STATUSES = ['rejected', 'cancelled'];
+        const normCrStatus = EXCLUDED_CR_STATUSES.includes(material.cr_status)
+          ? material.cr_status
+          : (material.cr_status || 'purchase_completed');
+        const effectiveCrStatus = EXCLUDED_CR_STATUSES.includes(normCrStatus)
+          ? normCrStatus
+          : 'purchase_completed';
+
         grouped[itemName].actualMaterials.push({
           material_name: material.material_name,
           sub_item_name: material.sub_item_name || material.item_name || itemName,
@@ -967,7 +986,7 @@ export default function PurchaseComparison() {
           justification: null,
           purchases: [{
             cr_id: material.change_request_id || null,
-            cr_status: material.cr_status || 'purchase_completed',
+            cr_status: effectiveCrStatus,
             is_new_material: true,
             amount: materialAmount,
             vat_amount: materialVat,
@@ -1407,8 +1426,9 @@ export default function PurchaseComparison() {
                                   {group.actualMaterials.filter((m: any) => {
                                     const amount = m.actual_amount || 0;
                                     const purchases = m.purchases || [];
+                                    const ACTIVE_STATUSES = ['pending', 'send_to_td', 'approved_by_pm', 'send_to_est', 'approved', 'approved_by_estimator', 'approved_by_td', 'pending_td_approval', 'send_to_buyer', 'assigned_to_buyer', 'vendor_approved', 'purchase_completed', 'routed_to_store'];
                                     const hasActivePurchase = purchases.some((p: any) =>
-                                      ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+                                      ACTIVE_STATUSES.includes(p.cr_status)
                                     );
                                     return amount > 0 || hasActivePurchase || m.is_new_material === true;
                                   }).length === 0 ? (
@@ -1419,20 +1439,22 @@ export default function PurchaseComparison() {
                                     (() => {
                                       // Group all purchases by CR ID to show CR summary with VAT
                                       const purchasesByCR: { [crId: string]: { materials: any[], totalAmount: number, totalVat: number, hasNewMaterial: boolean } } = {};
+                                      const ACTIVE_STATUSES = ['pending', 'send_to_td', 'approved_by_pm', 'send_to_est', 'approved', 'approved_by_estimator', 'approved_by_td', 'pending_td_approval', 'send_to_buyer', 'assigned_to_buyer', 'vendor_approved', 'purchase_completed', 'routed_to_store'];
 
                                       group.actualMaterials
                                         .filter((material: any) => {
                                           const amount = material.actual_amount || 0;
                                           const purchases = material.purchases || [];
                                           const hasActivePurchase = purchases.some((p: any) =>
-                                            ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+                                            ACTIVE_STATUSES.includes(p.cr_status)
                                           );
                                           return amount > 0 || hasActivePurchase || material.is_new_material === true;
                                         })
                                         .forEach((material: any) => {
                                           const purchases = material.purchases || [];
                                           const activePurchases = purchases.filter((p: any) =>
-                                            ['vendor_approved', 'purchase_completed', 'pending_td_approval'].includes(p.cr_status)
+                                            ACTIVE_STATUSES.includes(p.cr_status) ||
+                                            (p.is_new_material === true && !['rejected', 'cancelled'].includes(p.cr_status))
                                           );
 
                                           activePurchases.forEach((purchase: any) => {
@@ -1465,12 +1487,11 @@ export default function PurchaseComparison() {
                                         const numMaterials = crData.materials.length;
 
                                         // Render each material in this CR
+                                        // Each material shows its amount + proportional VAT for consistency
+                                        // with the Report tab and View Details pages.
                                         crData.materials.forEach((item: any, idx: number) => {
-                                          const isLastMaterial = idx === numMaterials - 1;
-                                          // For the last material in CR, show total with VAT; otherwise show material amount
-                                          const displayAmount = isLastMaterial && numMaterials === 1
-                                            ? crTotal  // Single material CR: show total with VAT
-                                            : (item.purchase.amount || 0);  // Multi-material CR: show individual amount
+                                          const matVat = item.purchase.vat_amount || 0;
+                                          const displayAmount = (item.purchase.amount || 0) + matVat;
 
                                           elements.push(
                                             <div key={`cr-${crId}-mat-${idx}`} className="px-4 py-3 flex justify-between items-start">
@@ -1493,25 +1514,13 @@ export default function PurchaseComparison() {
                                                 <p className="text-sm font-medium text-gray-900">
                                                   {displayAmount.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </p>
-                                                {isLastMaterial && numMaterials === 1 && crData.totalVat > 0 && (
+                                                {matVat > 0 && (
                                                   <p className="text-xs text-gray-400">(incl. VAT)</p>
                                                 )}
                                               </div>
                                             </div>
                                           );
                                         });
-
-                                        // Add PO summary row with total (including VAT) only for multi-material POs
-                                        if (numMaterials > 1) {
-                                          elements.push(
-                                            <div key={`cr-${crId}-summary`} className="px-4 py-2 bg-gray-50 border-t border-gray-200">
-                                              <div className="flex justify-between items-center text-sm font-semibold text-gray-700">
-                                                <span>PO #{crId} Total {crData.totalVat > 0 ? '(incl. VAT)' : ''}</span>
-                                                <span>{crTotal.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                              </div>
-                                            </div>
-                                          );
-                                        }
 
                                         return elements;
                                       });

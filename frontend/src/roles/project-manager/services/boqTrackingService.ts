@@ -195,6 +195,19 @@ class BOQTrackingService {
   }
 
   /**
+   * Get profit report with transport, material, and item breakdown
+   * Used by the Report tab in Profit Comparison page
+   * API: /api/profit-report/<boq_id>
+   */
+  async getProfitReport(boq_id: number) {
+    const response = await apiClient.get(
+      `/profit-report/${boq_id}`,
+      { headers: this.getHeaders() }
+    );
+    return response.data;
+  }
+
+  /**
    * Get comprehensive labour workflow details for a BOQ
    * Includes:
    * - Labour requisitions (who requested, approval status)

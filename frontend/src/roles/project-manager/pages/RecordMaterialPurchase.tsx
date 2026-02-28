@@ -6,17 +6,19 @@ import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelp
 import { PAGINATION } from '@/lib/constants';
 import { boqTrackingService } from '../services/boqTrackingService';
 import PlannedVsActualView from '@/components/boq/PlannedVsActualView';
+import ProfitReportView from '@/components/boq/ProfitReportView';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Eye, User } from 'lucide-react';
+import { Eye, User, BarChart3 } from 'lucide-react';
 
 export default function RecordMaterialPurchase() {
   const [searchParams] = useSearchParams();
   const [selectedBOQ, setSelectedBOQ] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState('live');
   const [currentPage, setCurrentPage] = useState(1);
+  const [reportSelectedBOQ, setReportSelectedBOQ] = useState<any | null>(null);
 
   // Real-time auto-sync for BOQ list
   const { data: boqData, isLoading: loading, refetch } = useProjectsAutoSync(
@@ -258,6 +260,14 @@ export default function RecordMaterialPurchase() {
                         return projectStatus === 'completed' || projectStatus === 'closed';
                       }).length}
                     </span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="report"
+                    className="px-6 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm transition-all"
+                    onClick={() => setReportSelectedBOQ(null)}
+                  >
+                    <BarChart3 className="w-4 h-4 mr-2 inline-block" />
+                    <span className="font-semibold">Report</span>
                   </TabsTrigger>
                 </TabsList>
               </div>
@@ -518,7 +528,7 @@ export default function RecordMaterialPurchase() {
                         <div className="px-5 pb-5">
                           <button
                             onClick={() => handleBOQChange(boq.boq_id)}
-                            className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white py-3 px-4 rounded-lg font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2 shadow-md hover:shadow-lg group-hover:scale-[1.02]"
+                            className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-3 px-4 rounded-lg font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2 shadow-md hover:shadow-lg group-hover:scale-[1.02]"
                           >
                             <Eye className="w-4 h-4" />
                             View Comparison
@@ -587,7 +597,7 @@ export default function RecordMaterialPurchase() {
                                 onClick={() => setCurrentPage(page)}
                                 className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${
                                   page === currentPage
-                                    ? 'z-10 bg-green-600 text-white focus:z-20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600'
+                                    ? 'z-10 bg-blue-600 text-white focus:z-20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600'
                                     : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
                                 }`}
                               >
@@ -606,6 +616,96 @@ export default function RecordMaterialPurchase() {
                         </nav>
                       </div>
                     </div>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Report Tab Content */}
+              <TabsContent value="report" className="m-0">
+                {reportSelectedBOQ ? (
+                  <ProfitReportView
+                    boq={reportSelectedBOQ}
+                    onClose={() => setReportSelectedBOQ(null)}
+                  />
+                ) : (
+                  <div className="p-6">
+                    <p className="text-sm text-gray-500 mb-5">Select a project to view its detailed profit report with Transport, Material, and Item filters.</p>
+                    {boqList.length === 0 ? (
+                      <div className="text-center py-12">
+                        <DocumentTextIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                        <p className="text-gray-500 font-medium">No projects found</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {boqList.map((boq: any) => (
+                          <motion.div
+                            key={boq.boq_id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="group bg-white rounded-xl border-2 border-gray-200 hover:border-indigo-400 hover:shadow-xl transition-all duration-300 overflow-hidden"
+                          >
+                            <div className="relative p-5 bg-gradient-to-br from-gray-50 to-white">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="p-2 bg-indigo-100 rounded-lg">
+                                  <DocumentTextIcon className="w-6 h-6 text-indigo-600" />
+                                </div>
+                                <Badge className={`${getStatusColor(boq)} border px-2 py-1 text-xs font-semibold`}>
+                                  {getStatusLabel(boq)}
+                                </Badge>
+                              </div>
+                              <h3 className="font-bold text-gray-900 text-lg mb-1 line-clamp-2 min-h-[3rem]">
+                                {boq.project_name}
+                              </h3>
+                              <p className="text-sm text-gray-600 line-clamp-1 mb-3">
+                                BOQ for {boq.boq_name || boq.project_name}
+                              </p>
+                            </div>
+                            <div className="px-5 pb-4 space-y-2">
+                              <div className="flex justify-between items-center py-1 border-b border-gray-100">
+                                <span className="text-xs text-gray-500 font-medium">BOQ ID:</span>
+                                <span className="text-sm font-bold text-gray-900">#{boq.boq_id}</span>
+                              </div>
+                              {boq.created_at && (
+                                <div className="flex justify-between items-center py-1 border-b border-gray-100">
+                                  <span className="text-xs text-gray-500 font-medium">Created:</span>
+                                  <span className="text-sm font-semibold text-gray-700">
+                                    {new Date(boq.created_at).toLocaleDateString('en-GB', {
+                                      day: '2-digit', month: 'short', year: 'numeric'
+                                    })}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="mt-3 pt-3 border-t border-gray-200">
+                                <div className="flex items-center gap-3">
+                                  <div className="p-2 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg">
+                                    <User className="w-4 h-4 text-indigo-600" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-[10px] text-gray-500 mb-0.5">Current Location</p>
+                                    <p className="text-sm font-bold text-gray-900 truncate">
+                                      {getSenderReceiver(boq).receiver.name}
+                                    </p>
+                                    <p className="text-[10px] text-indigo-600 font-medium">
+                                      {getSenderReceiver(boq).receiver.role}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="px-5 pb-5">
+                              <button
+                                onClick={() => setReportSelectedBOQ(boq)}
+                                className="w-full bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white py-3 px-4 rounded-lg font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2 shadow-md hover:shadow-lg group-hover:scale-[1.02]"
+                              >
+                                <BarChart3 className="w-4 h-4" />
+                                View Report
+                              </button>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </TabsContent>

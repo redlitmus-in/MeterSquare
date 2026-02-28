@@ -8,7 +8,6 @@ from decimal import Decimal
 import json
 from models.change_request import ChangeRequest
 from models.lpo_customization import LPOCustomization
-from utils.get_actual_transport_fee import get_actual_transport_for_project
 
 log = get_logger()
 
@@ -73,6 +72,58 @@ def get_boq_planned_vs_actual(boq_id):
             boq_id=boq_id,
             is_deleted=False
         ).all()
+
+        # Load POChildren for all CRs to get actual vendor purchase prices
+        # When buyer selects a vendor and sets prices, the amounts go into POChild.materials_data
+        # The parent CR's materials_data may still have 0 prices
+        from models.po_child import POChild
+        cr_ids_all = [cr.cr_id for cr in change_requests]
+        po_children_all = []
+        if cr_ids_all:
+            po_children_all = POChild.query.filter(
+                POChild.parent_cr_id.in_(cr_ids_all),
+                POChild.is_deleted == False
+            ).all()
+
+        # Build a map: cr_id -> list of (material_name_lower, unit_price, total_price)
+        # from POChild materials_data so we can look up actual purchase prices per material
+        po_child_prices_by_cr = {}  # {cr_id: {mat_name_lower: {'unit_price': x, 'total_price': y}}}
+        for poc in po_children_all:
+            cr_id = poc.parent_cr_id
+            if cr_id not in po_child_prices_by_cr:
+                po_child_prices_by_cr[cr_id] = {}
+            mats = poc.materials_data or []
+            if isinstance(mats, str):
+                import json as _j
+                try:
+                    mats = _j.loads(mats)
+                except Exception:
+                    mats = []
+            for m in mats:
+                m_name = (m.get('material_name') or m.get('sub_item_name') or '').lower().strip()
+                neg_price = m.get('negotiated_price') or m.get('unit_price') or 0
+                qty = float(m.get('quantity', 0) or 0)
+                unit_price = float(neg_price or 0)
+                total_price = float(m.get('total_price', 0) or unit_price * qty)
+                if m_name and (unit_price > 0 or total_price > 0):
+                    # Keep the highest total_price across all POChildren for this material
+                    existing = po_child_prices_by_cr[cr_id].get(m_name, {})
+                    if total_price > existing.get('total_price', 0):
+                        po_child_prices_by_cr[cr_id][m_name] = {
+                            'unit_price': unit_price,
+                            'quantity': qty,
+                            'total_price': total_price,
+                        }
+
+        # Fetch VAT percent from LPOCustomization for each CR (for profit comparison display)
+        lpo_vat_lookup = {}  # {cr_id: vat_percent}
+        if cr_ids_all:
+            lpo_customs = LPOCustomization.query.filter(
+                LPOCustomization.cr_id.in_(cr_ids_all),
+                LPOCustomization.po_child_id == None  # Parent CR VAT only
+            ).all()
+            for lpo in lpo_customs:
+                lpo_vat_lookup[lpo.cr_id] = float(lpo.vat_percent or 5.0)
 
         # Merge CR materials into BOQ data as sub-items
         # IMPORTANT: Only add truly NEW materials, not updates to existing materials
@@ -523,23 +574,211 @@ def get_boq_planned_vs_actual(boq_id):
 
                 total_items_base_cost += sub_item_base_total
 
-        # Calculate total ACTUAL transport for this project (ONCE for entire BOQ)
-        # This is the REAL transport spending from all delivery/return notes
-        try:
-            total_actual_transport_for_project = get_actual_transport_for_project(boq.project_id)
-            # Ensure it's a Decimal
-            if not isinstance(total_actual_transport_for_project, Decimal):
-                total_actual_transport_for_project = Decimal(str(total_actual_transport_for_project))
-        except Exception as e:
-            log.error(f"Error getting actual transport for project {boq.project_id}: {e}")
-            total_actual_transport_for_project = Decimal('0')
+        # Build actual transport per BOQ item from vendor delivery inspections
+        # Chain: VendorDeliveryInspection.cr_id -> ChangeRequest.item_id
+        #        materials_inspection._stock_in_reference_number -> InventoryTransaction.transport_fee
+        actual_transport_per_item = {}  # {str(master_item_id): Decimal}
+        all_vdi_ref_numbers = set()  # ALL VDI refs for this project (including null-item_id CRs)
+        from models.inventory import InventoryTransaction
+        if cr_ids_all:
+            from models.vendor_inspection import VendorDeliveryInspection
+            inspections = VendorDeliveryInspection.query.filter(
+                VendorDeliveryInspection.cr_id.in_(cr_ids_all),
+                VendorDeliveryInspection.stock_in_completed == True,
+                VendorDeliveryInspection.is_deleted == False
+            ).all()
+            cr_to_item_id = {cr.cr_id: str(cr.item_id) for cr in change_requests if cr.item_id}
+            # Build fallback reference map: cr_id → formatted reference used when
+            # _stock_in_reference_number was not entered during inspection.
+            # ManualStockInForm pre-fills batchReference with this same fallback so
+            # the transaction's reference_number matches even when the VDI field is blank.
+            cr_to_fallback_ref = {cr.cr_id: cr.get_formatted_cr_id() for cr in change_requests}
+            # Load POChild formatted IDs for inspections that came from a PO child
+            _po_child_ids = [insp.po_child_id for insp in inspections if insp.po_child_id]
+            if _po_child_ids:
+                from models.po_child import POChild
+                _po_children = POChild.query.filter(POChild.id.in_(_po_child_ids)).all()
+                _poc_map = {poc.id: poc for poc in _po_children}
+                for insp in inspections:
+                    if insp.po_child_id and insp.po_child_id in _poc_map:
+                        cr_to_fallback_ref[insp.cr_id] = _poc_map[insp.po_child_id].get_formatted_id()
+            ref_number_to_item_id = {}
+            for insp in inspections:
+                item_id = cr_to_item_id.get(insp.cr_id)
+                mats_insp = insp.materials_inspection or []
+                if isinstance(mats_insp, str):
+                    try:
+                        mats_insp = json.loads(mats_insp)
+                    except Exception:
+                        mats_insp = []
+                for mat in mats_insp:
+                    ref_num = mat.get('_stock_in_reference_number')
+                    # Fallback: when PM didn't enter a reference during inspection,
+                    # _stock_in_reference_number is blank but ManualStockInForm pre-fills
+                    # the CR/PO formatted ID as the transaction reference — use that.
+                    if not ref_num:
+                        ref_num = cr_to_fallback_ref.get(insp.cr_id, '')
+                    if ref_num:
+                        all_vdi_ref_numbers.add(ref_num)  # Always collect — even for null-item_id CRs
+                        if item_id:
+                            ref_number_to_item_id[ref_num] = item_id
+            if ref_number_to_item_id:
+                ref_numbers = list(ref_number_to_item_id.keys())
+                transactions = InventoryTransaction.query.filter(
+                    InventoryTransaction.project_id == boq.project_id,
+                    InventoryTransaction.delivery_batch_ref.like('MSQ-IN-%'),
+                    InventoryTransaction.reference_number.in_(ref_numbers),
+                    InventoryTransaction.transport_fee.isnot(None),
+                    InventoryTransaction.transport_fee > 0
+                ).all()
+                # Deduplicate by (delivery_batch_ref, item_id): when multiple materials
+                # from the same delivery batch each create a transaction with the same
+                # transport_fee (inherited from the batch), only count it once per item.
+                _seen_vdi_batch_keys = set()
+                for txn in transactions:
+                    item_id = ref_number_to_item_id.get(txn.reference_number)
+                    if item_id:
+                        transport = Decimal(str(txn.transport_fee or 0))
+                        if txn.delivery_batch_ref:
+                            batch_key = (txn.delivery_batch_ref, item_id)
+                            if batch_key in _seen_vdi_batch_keys:
+                                continue
+                            _seen_vdi_batch_keys.add(batch_key)
+                        actual_transport_per_item[item_id] = (
+                            actual_transport_per_item.get(item_id, Decimal('0')) + transport
+                        )
 
-        # Calculate total PLANNED transport across all items for proportional distribution
-        total_planned_transport_for_boq = Decimal('0')
-        for item in boq_data.get('items', []):
-            for sub_item in item.get('sub_items', []):
-                transport_amt = sub_item.get('transport_amount', 0) or 0
-                total_planned_transport_for_boq += Decimal(str(transport_amt))
+        # Compute total actual project transport — mirrors ALL sources from the Profit Report
+        # Transport Details page so both views show the same total.
+        # Sources: MDN, RDN, InventoryTransaction PURCHASE, LabourRequisition,
+        #          AssetDeliveryNote, AssetReturnDeliveryNote
+        from models.inventory import MaterialDeliveryNote, ReturnDeliveryNote
+        from models.returnable_assets import AssetDeliveryNote, AssetReturnDeliveryNote
+        from models.labour_requisition import LabourRequisition
+        _total_actual_project_transport = Decimal('0')
+
+        # Material Delivery Notes (Store → Site)
+        _mdn_transport_records = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.project_id == boq.project_id,
+            MaterialDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
+        ).all()
+        for _mdn in _mdn_transport_records:
+            _total_actual_project_transport += Decimal(str(_mdn.transport_fee or 0))
+
+        # Return Delivery Notes (Site → Store)
+        _rdn_transport_records = ReturnDeliveryNote.query.filter(
+            ReturnDeliveryNote.project_id == boq.project_id,
+            ReturnDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
+        ).all()
+        for _rdn in _rdn_transport_records:
+            _total_actual_project_transport += Decimal(str(_rdn.transport_fee or 0))
+
+        # Inventory Transactions (Vendor → Store) — only PURCHASE transactions with a
+        # properly auto-generated delivery_batch_ref (MSQ-IN-XX format set by ManualStockInForm).
+        # Transactions with NULL or non-MSQ-IN delivery_batch_ref are old/unlinked stock-ins
+        # with garbage reference_numbers and are excluded.
+        _seen_inv_batches_total = set()
+        _seen_inv_refs_total = set()
+        _inv_transport_records = InventoryTransaction.query.filter(
+            InventoryTransaction.project_id == boq.project_id,
+            InventoryTransaction.transaction_type == 'PURCHASE',
+            InventoryTransaction.delivery_batch_ref.like('MSQ-IN-%')
+        ).order_by(InventoryTransaction.created_at.desc()).all()
+        for _txn in _inv_transport_records:
+            _fee = Decimal(str(_txn.transport_fee or 0))
+            if _fee <= 0:
+                continue
+            if _txn.delivery_batch_ref:
+                if _txn.delivery_batch_ref in _seen_inv_batches_total:
+                    continue
+                _seen_inv_batches_total.add(_txn.delivery_batch_ref)
+            if _txn.reference_number:
+                _seen_inv_refs_total.add(_txn.reference_number)
+            _total_actual_project_transport += _fee
+
+        # Labour Requisitions (Labour Transport)
+        _lab_transport_records = LabourRequisition.query.filter(
+            LabourRequisition.project_id == boq.project_id,
+            LabourRequisition.is_deleted == False
+        ).all()
+        for _lr in _lab_transport_records:
+            _total_actual_project_transport += Decimal(str(_lr.transport_fee or 0))
+
+        # Asset Delivery Notes
+        _adn_transport_records = AssetDeliveryNote.query.filter(
+            AssetDeliveryNote.project_id == boq.project_id,
+            AssetDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
+        ).all()
+        for _adn in _adn_transport_records:
+            _total_actual_project_transport += Decimal(str(_adn.transport_fee or 0))
+
+        # Asset Return Delivery Notes
+        _ardn_transport_records = AssetReturnDeliveryNote.query.filter(
+            AssetReturnDeliveryNote.project_id == boq.project_id,
+            AssetReturnDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
+        ).all()
+        for _ardn in _ardn_transport_records:
+            _total_actual_project_transport += Decimal(str(_ardn.transport_fee or 0))
+
+        # Reset per-item attribution: VDI _stock_in_reference_number values are unreliable
+        # (PMs type arbitrary strings). Using them for per-item attribution causes partial
+        # or inflated totals. Instead, distribute the authoritative _total_actual_project_transport
+        # proportionally across BOQ items to guarantee the totals always match the Transport Report.
+        actual_transport_per_item = {}
+
+        # All project transport is unattributed — will be distributed proportionally below.
+        _vdi_attributed = Decimal('0')
+        _unattributed = _total_actual_project_transport
+
+        if _unattributed > 0:
+            _total_planned_transport = Decimal('0')
+            _total_planned_base = Decimal('0')
+            _item_planned_map = {}
+            _item_base_map = {}
+            for _pi in boq_data.get('items', []):
+                _pid = str(_pi.get('master_item_id'))
+                _ipt = Decimal('0')
+                _ipb = Decimal('0')
+                for _sub in _pi.get('sub_items', []):
+                    _qty = Decimal(str(_sub.get('quantity', 1)))
+                    _rate = Decimal(str(_sub.get('rate', 0)))
+                    _base = (_qty * _rate) if (_qty > 0 and _rate > 0) else Decimal(str(
+                        _sub.get('base_total') or _sub.get('per_unit_cost') or _sub.get('client_rate') or 0
+                    ))
+                    if _base == 0:
+                        # Fallback: use internal cost (materials + labour) — mirrors the response builder
+                        _mat_cost = sum(
+                            Decimal(str(m.get('total', 0) or
+                                       float(m.get('quantity', 0)) * float(m.get('unit_price', 0))))
+                            for m in _sub.get('materials', [])
+                        )
+                        _lab_cost = sum(
+                            Decimal(str(l.get('total_cost', 0) or
+                                       float(l.get('hours', 0)) * float(l.get('rate_per_hour', 0))))
+                            for l in _sub.get('labour', [])
+                        )
+                        _base = _mat_cost + _lab_cost
+                    _ipt += _base * (Decimal(str(_sub.get('transport_percentage', 5))) / 100)
+                    _ipb += _base
+                _item_planned_map[_pid] = _ipt
+                _item_base_map[_pid] = _ipb
+                _total_planned_transport += _ipt
+                _total_planned_base += _ipb
+            if _total_planned_transport > 0:
+                for _pid, _ipt in _item_planned_map.items():
+                    if _ipt > 0:
+                        _share = _unattributed * (_ipt / _total_planned_transport)
+                        actual_transport_per_item[_pid] = (
+                            actual_transport_per_item.get(_pid, Decimal('0')) + _share
+                        )
+            elif _total_planned_base > 0:
+                # BOQ has no planned transport percentages; distribute by base cost share
+                for _pid, _ipb in _item_base_map.items():
+                    if _ipb > 0:
+                        _share = _unattributed * (_ipb / _total_planned_base)
+                        actual_transport_per_item[_pid] = (
+                            actual_transport_per_item.get(_pid, Decimal('0')) + _share
+                        )
 
         # Process each item
         for planned_item in boq_data.get('items', []):
@@ -608,6 +847,60 @@ def get_boq_planned_vs_actual(boq_id):
                                 'master_sub_item_id': sub_item.get('master_sub_item_id')
                             })
 
+            # SUPPLEMENT: Populate cr_materials_map directly from change_requests for
+            # existing BOQ materials that were purchased at a vendor-negotiated price.
+            # The merge step above only adds NEW CR materials to sub_items, so existing
+            # materials updated by CRs are never captured via the sub_items loop above.
+            for cr in change_requests:
+                # Only apply this CR to the current BOQ item it belongs to.
+                # Without this check, a material like "sengal" that appears in multiple BOQ
+                # items would receive the same CR actual price in every item, causing duplicates.
+                cr_item_id_str = str(cr.item_id) if cr.item_id else None
+                cr_item_name_lower = (cr.item_name or '').lower().strip()
+                current_item_id_str = str(master_item_id) if master_item_id else None
+                current_item_name_lower = (planned_item.get('item_name', '') or '').lower().strip()
+
+                if cr_item_id_str and current_item_id_str and cr_item_id_str != current_item_id_str:
+                    continue
+                if not cr_item_id_str and cr_item_name_lower and current_item_name_lower and cr_item_name_lower != current_item_name_lower:
+                    continue
+
+                cr_mats_raw = cr.sub_items_data or cr.materials_data or []
+                if isinstance(cr_mats_raw, str):
+                    try:
+                        cr_mats_raw = json.loads(cr_mats_raw)
+                    except Exception:
+                        cr_mats_raw = []
+                if not isinstance(cr_mats_raw, list):
+                    continue
+                for mat in cr_mats_raw:
+                    mat_id = mat.get('master_material_id')
+                    mat_name_key = (mat.get('material_name', '') or '').lower().strip()
+                    cr_id_val = cr.cr_id
+                    # Only process if this material matches one of the original BOQ materials
+                    for orig_mat_info in original_materials:
+                        orig_mat = orig_mat_info['data']
+                        check_mat_id = orig_mat.get('master_material_id')
+                        check_mat_name = (orig_mat.get('material_name', '') or '').lower().strip()
+                        if (mat_id and check_mat_id and mat_id == check_mat_id) or \
+                           (mat_name_key and check_mat_name and mat_name_key == check_mat_name):
+                            # CR updates an existing material — add to map (keep latest CR)
+                            if mat_id:
+                                if mat_id not in cr_materials_map or cr_id_val > cr_materials_map.get(mat_id, {}).get('cr_id', 0):
+                                    cr_materials_map[mat_id] = {'cr_id': cr_id_val, 'data': mat, 'sub_item_name': orig_mat_info['sub_item_name']}
+                            if mat_name_key:
+                                if mat_name_key not in cr_materials_name_map or cr_id_val > cr_materials_name_map.get(mat_name_key, {}).get('cr_id', 0):
+                                    cr_materials_name_map[mat_name_key] = {'cr_id': cr_id_val, 'data': mat, 'sub_item_name': orig_mat_info['sub_item_name']}
+                            break
+
+            # Deduplication guards: prevent the same CR update or actual purchase record
+            # from being applied to more than one planned material (e.g. two sub-items both
+            # named "Tempered glass" with the same master_material_id would otherwise both
+            # receive the same CR actual price, doubling the value shown).
+            cr_update_consumed_ids = set()    # master_material_id values already used for CR update
+            cr_update_consumed_names = set()  # material_name_lower values already used for CR update
+            used_actual_mat_ids = set()       # purchase_tracking_id values already matched
+
             # Process ONLY original materials (CR materials are processed separately)
             for orig_mat_info in original_materials:
                 planned_mat = orig_mat_info['data']
@@ -673,6 +966,16 @@ def get_boq_planned_vs_actual(boq_id):
                         if actual_mat:
                             break
 
+                # Deduplicate actual_mat: once a MaterialPurchaseTracking record has been used
+                # for one planned material, don't reuse it for another (e.g. two sub-items with
+                # the same material name that share one tracking record).
+                if actual_mat is not None:
+                    tracking_id = getattr(actual_mat, 'purchase_tracking_id', None)
+                    if tracking_id is not None and tracking_id in used_actual_mat_ids:
+                        actual_mat = None
+                    elif tracking_id is not None:
+                        used_actual_mat_ids.add(tracking_id)
+
                 # Calculate planned total
                 # Check if this material is from a change request (planned_quantity: 0)
                 is_from_change_request = planned_mat.get('is_from_change_request', False)
@@ -694,25 +997,59 @@ def get_boq_planned_vs_actual(boq_id):
                 actual_avg_unit_price = Decimal('0')
                 purchase_history = []
 
-                # Check if this original material has been updated by a CR
+                # Check if this original material has been updated by a CR.
+                # Use consumed-sets so the same CR update is applied at most once.
                 cr_update_data = None
                 cr_update_id = None
                 if not is_from_change_request:
                     # Check by material ID first
-                    if master_material_id and master_material_id in cr_materials_map:
+                    if master_material_id and master_material_id in cr_materials_map \
+                            and master_material_id not in cr_update_consumed_ids:
                         cr_update_data = cr_materials_map[master_material_id]['data']
                         cr_update_id = cr_materials_map[master_material_id]['cr_id']
+                        cr_update_consumed_ids.add(master_material_id)
                     # Check by material name if no ID match
                     elif material_name and material_name.lower().strip() in cr_materials_name_map:
-                        cr_update_data = cr_materials_name_map[material_name.lower().strip()]['data']
-                        cr_update_id = cr_materials_name_map[material_name.lower().strip()]['cr_id']
+                        _mat_name_key = material_name.lower().strip()
+                        if _mat_name_key not in cr_update_consumed_names:
+                            cr_update_data = cr_materials_name_map[_mat_name_key]['data']
+                            cr_update_id = cr_materials_name_map[_mat_name_key]['cr_id']
+                            cr_update_consumed_names.add(_mat_name_key)
 
                 # If this material has been updated by a CR, use CR data for actual values
                 if cr_update_data:
-                    # Use CR data for actual values
-                    actual_quantity = Decimal(str(cr_update_data.get('quantity', 0)))
-                    actual_avg_unit_price = Decimal(str(cr_update_data.get('unit_price', 0)))
-                    actual_total = Decimal(str(cr_update_data.get('total_price', 0)))
+                    cr_upd_mat_name = (material_name or '').lower().strip()
+                    # Priority 1: POChild prices
+                    po_upd_prices = po_child_prices_by_cr.get(cr_update_id, {}).get(cr_upd_mat_name, {})
+                    # Priority 2: material_vendor_selections.negotiated_price
+                    cr_upd_record = next((cr for cr in change_requests if cr.cr_id == cr_update_id), None)
+                    upd_vendor_price = 0.0
+                    if cr_upd_record:
+                        upd_mvs = cr_upd_record.material_vendor_selections or {}
+                        upd_mvs_entry = upd_mvs.get(material_name) or upd_mvs.get(cr_upd_mat_name)
+                        if not upd_mvs_entry:
+                            for k, v in upd_mvs.items():
+                                if k.lower().strip() == cr_upd_mat_name:
+                                    upd_mvs_entry = v
+                                    break
+                        if upd_mvs_entry:
+                            upd_vendor_price = float(upd_mvs_entry.get('negotiated_price', 0) or 0)
+
+                    if po_upd_prices and po_upd_prices.get('total_price', 0) > 0:
+                        actual_quantity = Decimal(str(po_upd_prices.get('quantity', cr_update_data.get('quantity', 0))))
+                        actual_avg_unit_price = Decimal(str(po_upd_prices['unit_price']))
+                        actual_total = Decimal(str(po_upd_prices['total_price']))
+                    elif upd_vendor_price > 0:
+                        actual_quantity = Decimal(str(cr_update_data.get('quantity', 0)))
+                        actual_avg_unit_price = Decimal(str(upd_vendor_price))
+                        actual_total = actual_quantity * actual_avg_unit_price
+                    else:
+                        # Fallback: use CR materials_data values
+                        actual_quantity = Decimal(str(cr_update_data.get('quantity', 0)))
+                        actual_avg_unit_price = Decimal(str(cr_update_data.get('unit_price', 0)))
+                        actual_total = Decimal(str(cr_update_data.get('total_price', 0)))
+                        if actual_total == 0 and actual_quantity > 0 and actual_avg_unit_price > 0:
+                            actual_total = actual_quantity * actual_avg_unit_price
 
                     # Add purchase history from CR
                     purchase_history.append({
@@ -890,6 +1227,11 @@ def get_boq_planned_vs_actual(boq_id):
                         if cr_record:
                             justification_text = cr_record.justification
 
+                # Compute VAT for materials that were purchased via a CR (updated original BOQ materials)
+                upd_vat_pct = lpo_vat_lookup.get(cr_update_id, 0.0) if (cr_update_data and cr_update_id) else 0.0
+                upd_vat_amount = round(float(actual_total) * upd_vat_pct / 100, 2) if upd_vat_pct > 0 else 0.0
+                upd_total_with_vat = float(actual_total) + upd_vat_amount
+
                 materials_comparison.append({
                     "material_name": material_name,
                     "sub_item_name": sub_item_name,  # Sub item name from parent sub_item
@@ -906,6 +1248,8 @@ def get_boq_planned_vs_actual(boq_id):
                         "unit": purchase_history[0].get('unit') if purchase_history else planned_mat.get('unit'),
                         "unit_price": float(actual_avg_unit_price),
                         "total": float(actual_total),
+                        "vat_amount": upd_vat_amount,
+                        "total_with_vat": upd_total_with_vat,
                         "purchase_history": purchase_history
                     } if actual_quantity > 0 else None,
                     "variance": {
@@ -1056,10 +1400,50 @@ def get_boq_planned_vs_actual(boq_id):
                 planned_unit_price = Decimal('0')
                 planned_total = Decimal('0')
 
-                # Actual values from CR
-                actual_quantity = Decimal(str(cr_mat_data.get('quantity', 0)))
-                actual_avg_unit_price = Decimal(str(cr_mat_data.get('unit_price', 0)))
-                actual_total = Decimal(str(cr_mat_data.get('total_price', 0)))
+                # Actual values: look up from multiple sources in priority order:
+                # 1. POChild.materials_data (vendor's actual purchase price)
+                # 2. CR.material_vendor_selections[material_name].negotiated_price
+                # 3. CR materials_data unit_price/total_price (may be 0 if estimator didn't set price)
+                mat_name_lower = (material_name or '').lower().strip()
+
+                # Priority 1: POChild prices
+                po_prices = po_child_prices_by_cr.get(cr_id, {}).get(mat_name_lower, {})
+
+                # Priority 2: CR.material_vendor_selections - this stores negotiated_price per material
+                cr_record = next((cr for cr in change_requests if cr.cr_id == cr_id), None)
+                vendor_selection_price = 0.0
+                vendor_name_label = f"Change Request #{cr_id}"
+                if cr_record:
+                    mvs = cr_record.material_vendor_selections or {}
+                    # Try exact material name key first, then case-insensitive match
+                    mvs_entry = mvs.get(material_name) or mvs.get(mat_name_lower)
+                    if not mvs_entry:
+                        # Try case-insensitive match
+                        for k, v in mvs.items():
+                            if k.lower().strip() == mat_name_lower:
+                                mvs_entry = v
+                                break
+                    if mvs_entry:
+                        vendor_selection_price = float(mvs_entry.get('negotiated_price', 0) or 0)
+                        vendor_name_label = mvs_entry.get('vendor_name', vendor_name_label)
+
+                if po_prices and po_prices.get('total_price', 0) > 0:
+                    # Use actual vendor purchase price from POChild
+                    actual_quantity = Decimal(str(po_prices.get('quantity', cr_mat_data.get('quantity', 0))))
+                    actual_avg_unit_price = Decimal(str(po_prices['unit_price']))
+                    actual_total = Decimal(str(po_prices['total_price']))
+                elif vendor_selection_price > 0:
+                    # Use negotiated price from material_vendor_selections
+                    actual_quantity = Decimal(str(cr_mat_data.get('quantity', 0)))
+                    actual_avg_unit_price = Decimal(str(vendor_selection_price))
+                    actual_total = actual_quantity * actual_avg_unit_price
+                else:
+                    # Fallback: use CR materials_data values
+                    actual_quantity = Decimal(str(cr_mat_data.get('quantity', 0)))
+                    actual_avg_unit_price = Decimal(str(cr_mat_data.get('unit_price', 0)))
+                    actual_total = Decimal(str(cr_mat_data.get('total_price', 0)))
+                    if actual_total == 0 and actual_quantity > 0 and actual_avg_unit_price > 0:
+                        actual_total = actual_quantity * actual_avg_unit_price
 
                 # Add to totals
                 actual_materials_total += actual_total
@@ -1071,15 +1455,18 @@ def get_boq_planned_vs_actual(boq_id):
                     "unit": cr_mat_data.get('unit'),
                     "unit_price": float(actual_avg_unit_price),
                     "total_price": float(actual_total),
-                    "purchased_by": f"Change Request #{cr_id}"
+                    "purchased_by": vendor_name_label
                 }]
 
-                # Get justification
+                # Get justification (cr_record already fetched above)
                 justification_text = cr_mat_data.get('justification')
-                if not justification_text and cr_id:
-                    cr_record = next((cr for cr in change_requests if cr.cr_id == cr_id), None)
-                    if cr_record:
-                        justification_text = cr_record.justification
+                if not justification_text and cr_record:
+                    justification_text = cr_record.justification
+
+                # Calculate VAT for this CR material (proportional: material_amount × vat_percent / 100)
+                cr_vat_percent = lpo_vat_lookup.get(cr_id, 5.0)
+                vat_amount = round(float(actual_total) * cr_vat_percent / 100, 2)
+                total_with_vat = float(actual_total) + vat_amount
 
                 materials_comparison.append({
                     "material_name": material_name,
@@ -1097,6 +1484,8 @@ def get_boq_planned_vs_actual(boq_id):
                         "unit": cr_mat_data.get('unit'),
                         "unit_price": float(actual_avg_unit_price),
                         "total": float(actual_total),
+                        "vat_amount": vat_amount,
+                        "total_with_vat": total_with_vat,
                         "purchase_history": purchase_history
                     },
                     "variance": {
@@ -1260,6 +1649,26 @@ def get_boq_planned_vs_actual(boq_id):
             # Track which labour IDs and roles have been processed across ALL sub-items to prevent double-counting
             item_level_labour_ids_processed = set()
             item_level_labour_roles_processed = set()
+
+            # Use each item's proportional share of actual transport (pre-computed above).
+            # actual_transport_per_item distributes _total_actual_project_transport
+            # by each item's planned-transport weight so each item shows only its share.
+            item_actual_transport = actual_transport_per_item.get(str(master_item_id), Decimal('0'))
+            # Pre-compute total planned transport and total planned base across all sub-items
+            item_total_planned_transport = Decimal('0')
+            item_total_planned_base = Decimal('0')
+            for _sub in planned_item.get('sub_items', []):
+                _qty = Decimal(str(_sub.get('quantity', 1)))
+                _rate = Decimal(str(_sub.get('rate', 0)))
+                if _qty > 0 and _rate > 0:
+                    _base = _qty * _rate
+                else:
+                    _base = Decimal(str(
+                        _sub.get('base_total') or _sub.get('per_unit_cost') or _sub.get('client_rate') or 0
+                    ))
+                _transport_pct = Decimal(str(_sub.get('transport_percentage', 5)))
+                item_total_planned_transport += _base * (_transport_pct / 100)
+                item_total_planned_base += _base
 
             for sub_item in planned_item.get('sub_items', []):
                 sub_item_name = sub_item.get('sub_item_name', '')
@@ -1481,25 +1890,16 @@ def get_boq_planned_vs_actual(boq_id):
                 sub_actual_misc = sub_item_base_total * (misc_pct / 100)  # Same as planned
                 sub_actual_overhead = sub_planned_overhead  # Keep as allocation for tracking
 
-                # ACTUAL TRANSPORT: Distribute total actual transport proportionally based on planned transport
-                # This uses REAL transport fees from all delivery/return notes (not just planned percentage)
-                try:
-                    if total_planned_transport_for_boq > 0:
-                        # Ensure all values are Decimals before calculation
-                        sub_planned_transport_decimal = Decimal(str(sub_planned_transport)) if not isinstance(sub_planned_transport, Decimal) else sub_planned_transport
-                        total_planned_transport_decimal = Decimal(str(total_planned_transport_for_boq)) if not isinstance(total_planned_transport_for_boq, Decimal) else total_planned_transport_for_boq
-                        total_actual_transport_decimal = Decimal(str(total_actual_transport_for_project)) if not isinstance(total_actual_transport_for_project, Decimal) else total_actual_transport_for_project
-
-                        # Distribute actual transport proportionally based on this sub-item's planned transport share
-                        transport_proportion = sub_planned_transport_decimal / total_planned_transport_decimal
-                        sub_actual_transport = total_actual_transport_decimal * transport_proportion
-                    else:
-                        # No planned transport, so no actual transport allocated to this sub-item
-                        sub_actual_transport = Decimal('0')
-                except Exception as e:
-                    log.error(f"Error calculating actual transport for sub-item: {e}. Types: sub_planned={type(sub_planned_transport)}, total_planned={type(total_planned_transport_for_boq)}, total_actual={type(total_actual_transport_for_project)}")
-                    # Fallback to planned value to avoid breaking the entire response
-                    sub_actual_transport = sub_planned_transport
+                # ACTUAL TRANSPORT: Distribute actual item transport proportionally across
+                # sub-items by planned transport weight. This ensures per-item actual spending
+                # uses real transport costs from MDN/RDN/VDI records (via item_actual_transport)
+                # rather than the planned allocation.
+                if item_total_planned_transport > 0:
+                    sub_actual_transport = item_actual_transport * (sub_planned_transport / item_total_planned_transport)
+                elif item_total_planned_base > 0:
+                    sub_actual_transport = item_actual_transport * (sub_item_base_total / item_total_planned_base)
+                else:
+                    sub_actual_transport = Decimal('0')
 
                 # Calculate actual spending (NO O&P, NO Profit included in spending)
                 # Actual Spending = Materials + Labour + Misc + Transport
@@ -1585,6 +1985,9 @@ def get_boq_planned_vs_actual(boq_id):
                     'actual_spending': float(sub_actual_spending),
                     'calculation_note': 'Negotiable Margin = Client Amount - (Materials + Labour + Misc + Transport). O&P is included in margin, not subtracted.'
                 })
+
+            # actual_transport is accumulated as the proportional share of real project transport
+            # distributed across sub-items by planned transport weight.
 
             # Get overall percentages for display
             # Calculate actual percentages from the aggregated amounts and base cost
@@ -1688,7 +2091,7 @@ def get_boq_planned_vs_actual(boq_id):
             base_cost_variance = actual_base - planned_base
             misc_variance = Decimal('0')  # Miscellaneous stays at allocation
             overhead_variance = Decimal('0')  # Overhead stays at allocation (but included in margin now)
-            transport_variance = Decimal('0')  # Transport stays at allocation
+            transport_variance = actual_transport - planned_transport  # positive = overspent, negative = saved
 
             # Calculate savings/overrun (use absolute values for display)
             cost_savings = abs(planned_base - actual_base)  # Always positive
@@ -1794,7 +2197,7 @@ def get_boq_planned_vs_actual(boq_id):
                     "profit_consumed": float(profit_impact_from_extra_costs),  # All extra costs impact profit
                     "profit_remaining": float(after_discount_negotiable_margin),  # Actual negotiable margin
                     "profit_variance": float(profit_variance),
-                    "explanation": "Miscellaneous, Overhead, and Transport are fixed allocations. All extra costs (overruns + unplanned items) directly reduce the Negotiable Margin (profit)."
+                    "explanation": "Miscellaneous and Overhead are fixed allocations. Transport uses actual costs (MDN/RDN records) distributed proportionally across items. All extra costs (overruns + unplanned items) directly reduce the Negotiable Margin (profit)."
                 },
                 "savings_breakdown": {
                     "total_cost_savings": float(cost_savings),
@@ -1842,15 +2245,24 @@ def get_boq_planned_vs_actual(boq_id):
         total_planned = sum(float(item['planned']['total']) for item in comparison['items'])
         total_actual = sum(float(item['actual']['total']) for item in comparison['items'])
         total_planned_spending = sum(float(item['planned']['spending']) for item in comparison['items'])  # NEW: Planned spending
-        total_actual_spending = sum(float(item['actual']['spending']) for item in comparison['items'])  # NEW: Actual spending
+        # Each item includes the full _total_actual_project_transport in its spending.
+        # To avoid counting transport N times (once per item), sum only materials+labour+misc
+        # from items and add the project transport exactly once.
+        total_actual_spending = (
+            sum(
+                float(item['actual']['materials_total']) + float(item['actual']['labour_total']) + float(item['actual']['miscellaneous_amount'])
+                for item in comparison['items']
+            )
+            + float(_total_actual_project_transport)
+        )
         total_discount_amount = sum(float(item['planned']['discount_amount']) for item in comparison['items'])
         total_client_amount_after_discount = sum(float(item['planned']['client_amount_after_discount']) for item in comparison['items'])
         total_profit_before_discount = sum(float(item['actual']['profit_before_discount']) for item in comparison['items'])
         total_after_discount_profit = sum(float(item['actual']['negotiable_margin']) for item in comparison['items'])
 
-        # Calculate items subtotal (base cost only, without preliminary shares)
-        # This is the sum of items' base costs before adding preliminaries
-        items_only_subtotal = Decimal(str(total_base_cost))
+        # Calculate items subtotal using client-facing amount (what client is quoted)
+        # This is the sum of items' client amounts before discount
+        items_only_subtotal = Decimal(str(total_client_amount_before_discount))
 
         # Add materials and labour totals for variance display
         total_planned_materials = sum(float(item['planned']['materials_total']) for item in comparison['items'])
@@ -1865,7 +2277,9 @@ def get_boq_planned_vs_actual(boq_id):
         total_planned_profit = sum(float(item['planned']['profit_amount']) for item in comparison['items'])
         total_negotiable_margin = sum(float(item['actual']['profit_amount']) for item in comparison['items'])
         total_planned_transport = sum(float(item['planned']['transport_amount']) for item in comparison['items'])
-        total_actual_transport = sum(float(item['actual']['transport_amount']) for item in comparison['items'])
+        # Use the authoritative real actual transport from MDN/RDN/VDI records, not the per-item
+        # planned-transport allocations (which are fixed and equal to planned at item level).
+        total_actual_transport = float(_total_actual_project_transport)
 
         # Calculate overall discount percentage
         total_discount_percentage = (total_discount_amount / total_client_amount_before_discount * 100) if total_client_amount_before_discount > 0 else 0
@@ -1907,7 +2321,12 @@ def get_boq_planned_vs_actual(boq_id):
 
         if boq_level_discount_percentage > 0:
             combined_discount_percentage = boq_level_discount_percentage
-            combined_discount_amount = combined_subtotal_before_discount * (combined_discount_percentage / Decimal('100'))
+            # Use stored discount amount if available (matches BOQ Details page exactly)
+            # Otherwise recompute from percentage
+            if boq_level_discount_amount > 0:
+                combined_discount_amount = boq_level_discount_amount
+            else:
+                combined_discount_amount = combined_subtotal_before_discount * (combined_discount_percentage / Decimal('100'))
 
         # Calculate grand total after discount (this is what client pays)
         combined_grand_total_after_discount = combined_subtotal_before_discount - combined_discount_amount
@@ -2147,27 +2566,24 @@ def get_purchase_comparision(project_id):
             if record.change_request_id:
                 cr_ids.add(record.change_request_id)
 
-        # Fetch all ChangeRequests for this project with status: vendor_approved, purchase_completed, pending_td_approval
-        # These are the only statuses that should show in actual materials
-        valid_statuses = ['vendor_approved', 'purchase_completed', 'pending_td_approval', 'split_to_sub_crs']
-
-        all_project_crs = ChangeRequest.query.filter(
-            ChangeRequest.project_id == project_id,
-            ChangeRequest.is_deleted == False,
-            ChangeRequest.status.in_(valid_statuses)
+        # Include ALL non-rejected statuses so newly added CR materials appear immediately.
+        # Query all CRs for this BOQ regardless of status (same as Profit Report).
+        # No status filter — every non-deleted CR for the BOQ is included.
+        all_boq_crs = ChangeRequest.query.filter(
+            ChangeRequest.boq_id == boq_id,
+            ChangeRequest.is_deleted == False
         ).all()
 
-        for cr in all_project_crs:
+        for cr in all_boq_crs:
             cr_ids.add(cr.cr_id)
 
-        # Fetch all related change requests - only with valid statuses
+        # Fetch all related change requests - no status filter, matches Profit Report approach
         # Actual material amount comes from ChangeRequest.materials_data JSON
         change_requests_lookup = {}
         if cr_ids:
             change_requests = ChangeRequest.query.filter(
                 ChangeRequest.cr_id.in_(list(cr_ids)),
-                ChangeRequest.is_deleted == False,
-                ChangeRequest.status.in_(valid_statuses)
+                ChangeRequest.is_deleted == False
             ).all()
             for cr in change_requests:
                 # Build per-material list from sub_items_data JSON (PRIMARY source)
@@ -2187,9 +2603,10 @@ def get_purchase_comparision(project_id):
                     if isinstance(mvs, dict):
                         vendor_selections = mvs
 
-                # Parse sub_items_data (PRIMARY source with unit_price, total_price)
-                if cr.sub_items_data:
-                    sub_items_data = cr.sub_items_data
+                # Parse sub_items_data (PRIMARY source) with fallback to materials_data
+                raw_mats_source = cr.sub_items_data or cr.materials_data
+                if raw_mats_source:
+                    sub_items_data = raw_mats_source
                     if isinstance(sub_items_data, str):
                         sub_items_data = json.loads(sub_items_data)
 
@@ -2208,13 +2625,16 @@ def get_purchase_comparision(project_id):
                             # Use negotiated price if available, otherwise fall back to BOQ price
                             actual_unit_price = float(negotiated_price) if negotiated_price else boq_unit_price
 
+                            # is_new_material: check both 'is_new_material' and 'is_new' field names
+                            is_new_mat = bool(mat.get('is_new_material') or mat.get('is_new', False))
+
                             mat_info = {
                                 'master_material_id': mat.get('master_material_id'),
                                 'material_name': material_name,
                                 'amount': quantity * actual_unit_price,  # Calculate from qty * actual price
                                 'quantity': quantity,
                                 'unit_price': actual_unit_price,  # Use vendor price if available
-                                'is_new_material': mat.get('is_new', False),
+                                'is_new_material': is_new_mat,
                                 'item_name': cr_item_name,  # Use item_name from CR record
                                 'sub_item_name': mat.get('sub_item_name', ''),
                                 'master_item_id': mat.get('master_item_id') or cr.item_id,
@@ -2253,7 +2673,7 @@ def get_purchase_comparision(project_id):
             po_children = POChild.query.filter(
                 POChild.parent_cr_id.in_(split_cr_ids),
                 POChild.is_deleted == False,
-                POChild.status.in_(['vendor_approved', 'purchase_completed', 'pending_td_approval'])
+                POChild.status.notin_(['rejected', 'cancelled'])
             ).all()
             for po_child in po_children:
                 if po_child.parent_cr_id not in po_children_by_cr:
@@ -2308,9 +2728,13 @@ def get_purchase_comparision(project_id):
                         for idx, (mat, material_quantity, material_unit_price, material_amount, material_name) in enumerate(materials_with_prices):
                             is_new_material = mat.get('is_new', False) or mat.get('is_new_material', False)
 
-                            # VAT: Show full PO child VAT only on LAST material (avoid splitting)
-                            is_last_material = (idx == num_po_child_materials - 1)
-                            material_vat_amount = po_child_total_vat if is_last_material else 0
+                            # VAT: Distribute proportionally by each material's share of PO subtotal
+                            # This gives the same result as applying vat_percent directly per material
+                            if po_child_subtotal > 0 and material_amount > 0:
+                                material_vat_amount = round((material_amount / po_child_subtotal) * po_child_total_vat, 2)
+                            else:
+                                is_last_material = (idx == num_po_child_materials - 1)
+                                material_vat_amount = po_child_total_vat if is_last_material else 0
 
                             total_actual_quantity += material_quantity
                             total_actual_amount += Decimal(str(material_amount))
@@ -2365,11 +2789,13 @@ def get_purchase_comparision(project_id):
                 master_item_id = mat_info.get('master_item_id')
                 unit = mat_info.get('unit', '')
 
-                # VAT: Show full CR VAT only on LAST material of this CR (avoid splitting)
-                # For single-material CRs, show full VAT
-                # For multi-material CRs, show VAT only on last material
-                is_last_material = (idx == num_materials - 1)
-                material_vat_amount = cr_total_vat if is_last_material else 0
+                # VAT: Distribute proportionally by each material's share of CR subtotal
+                # This gives the same result as applying vat_percent directly per material
+                if cr_subtotal > 0 and material_amount > 0:
+                    material_vat_amount = round((material_amount / cr_subtotal) * cr_total_vat, 2)
+                else:
+                    is_last_material = (idx == num_materials - 1)
+                    material_vat_amount = cr_total_vat if is_last_material else 0
 
                 total_actual_quantity += material_quantity
                 total_actual_amount += Decimal(str(material_amount))
@@ -2539,6 +2965,7 @@ def get_purchase_comparision(project_id):
                 unplanned_materials.append({
                     'material_name': mat['material_name'],
                     'master_material_id': mat_id,
+                    'master_item_id': mat.get('master_item_id'),  # BOQ item link (needed for grouping)
                     'item_name': mat.get('item_name', ''),
                     'sub_item_name': mat.get('sub_item_name', ''),
                     'unit': mat.get('unit', ''),
@@ -2573,10 +3000,35 @@ def get_purchase_comparision(project_id):
         # Convert to list
         comparison_items_list = list(comparison_by_item.values())
 
-        # Group unplanned materials by item_name
+        # Build lookup: BOQ item ID → item_name.
+        # Used to resolve the item_name for unplanned materials whose CR has item_name = NULL.
+        # (e.g. "plain black cover" belongs to CR with item_id=X; X maps to "TEST GLASS")
+        master_item_id_to_name = {}
+        for p in planned_materials_list:
+            mid = p.get('master_item_id')
+            iname = p.get('item_name', '')
+            if mid and iname:
+                master_item_id_to_name[mid] = iname
+
+        # Group unplanned materials by item_name, with two levels of fallback:
+        # 1. If item_name is empty, resolve via master_item_id → BOQ item name.
+        # 2. Normalise case so "test glass" merges into the existing "TEST GLASS" group.
+        _comparison_norm_map = {k.lower().strip(): k for k in comparison_by_item.keys()}
+
         unplanned_by_item = {}
         for mat in unplanned_materials:
-            item_name = mat.get('item_name', '') or 'Other'
+            raw_item_name = mat.get('item_name', '') or ''
+
+            # Fallback 1: resolve empty item_name from the BOQ item ID
+            if not raw_item_name:
+                mat_item_id = mat.get('master_item_id')
+                raw_item_name = master_item_id_to_name.get(mat_item_id, '') if mat_item_id else ''
+
+            raw_item_name = raw_item_name or 'Other'
+
+            # Fallback 2: prefer the existing comparison group key (preserves BOQ casing)
+            item_name = _comparison_norm_map.get(raw_item_name.lower().strip(), raw_item_name)
+
             if item_name not in unplanned_by_item:
                 unplanned_by_item[item_name] = {
                     'item_name': item_name,
@@ -2634,28 +3086,25 @@ def get_purchase_comparision(project_id):
 
 def get_all_purchase_comparision_projects():
     """
-    Get all projects that have at least one ChangeRequest with valid purchase status.
-    Valid statuses: vendor_approved, purchase_completed, pending_td_approval, split_to_sub_crs
+    Get all projects that have a BOQ (for purchase comparison).
+    Shows ALL projects so Live and Completed tabs both work correctly.
+    The comparison view will show planned materials vs actual purchases (actual may be 0 if no purchases yet).
     """
     try:
-        valid_statuses = ['vendor_approved', 'purchase_completed', 'pending_td_approval', 'split_to_sub_crs']
+        # Get all BOQs that are not deleted
+        boqs = BOQ.query.filter_by(is_deleted=False).all()
 
-        # Get distinct project_ids that have CRs with valid statuses
-        project_ids_with_purchases = db.session.query(ChangeRequest.project_id).filter(
-            ChangeRequest.is_deleted == False,
-            ChangeRequest.status.in_(valid_statuses)
-        ).distinct().all()
-
-        project_ids = [p[0] for p in project_ids_with_purchases]
-
-        if not project_ids:
+        if not boqs:
             return jsonify({
                 "success": True,
                 "data": [],
                 "count": 0
             }), 200
 
-        # Get projects with their BOQ info
+        # Collect project_ids from BOQs
+        project_ids = list({boq.project_id for boq in boqs if boq.project_id})
+
+        # Get all those projects
         projects = Project.query.filter(
             Project.project_id.in_(project_ids),
             Project.is_deleted == False
@@ -2679,8 +3128,9 @@ def get_all_purchase_comparision_projects():
             project_list.append({
                 'project_id': project.project_id,
                 'project_name': project.project_name,
-                'boq_id': boq.boq_id if boq else None,
-                'boq_status': boq.status if boq else None,
+                'project_status': project.status,
+                'boq_id': boq.boq_id,
+                'boq_status': boq.status,
                 'end_date': project.end_date.isoformat() if project.end_date else None
             })
 
@@ -2981,6 +3431,713 @@ def get_labour_workflow_details(boq_id):
 
     except Exception as e:
         log.error(f"Error in get_labour_workflow_details: {str(e)}")
+        import traceback
+        log.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+
+def get_profit_report(boq_id):
+    """
+    Get profit report for a BOQ with transport, material, and item breakdown.
+    Used by the Report tab in the Profit Comparison page.
+
+    Returns:
+    - transport: planned vs actual with detailed rows (driver, vehicle, purpose)
+    - materials: planned vs actual per material
+    - items: planned vs actual per item
+    """
+    try:
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"error": "BOQ not found"}), 404
+
+        boq_detail = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq_detail or not boq_detail.boq_details:
+            return jsonify({"error": "BOQ details not found"}), 404
+
+        boq_data = json.loads(boq_detail.boq_details) if isinstance(boq_detail.boq_details, str) else boq_detail.boq_details
+        project_id = boq.project_id
+
+        # ============================================================
+        # 1. PLANNED DATA from BOQ JSON
+        # ============================================================
+        planned_transport = Decimal('0')
+        materials_planned = {}
+        items_planned = []
+
+        for item in boq_data.get('items', []):
+            item_planned_materials = Decimal('0')
+            item_planned_transport = Decimal('0')
+
+            for sub_item in item.get('sub_items', []):
+                # Mirror the purchase-comparison calculation exactly:
+                # 1. Use stored transport_amount if present (> 0).
+                # 2. Otherwise derive base_total: qty×rate → boq fields → internal cost fallback.
+                # 3. transport = base_total × transport_percentage / 100.
+                sub_transport_pct = Decimal(str(sub_item.get('transport_percentage', 5) or 5))
+                stored_transport = sub_item.get('transport_amount', 0) or 0
+                if stored_transport:
+                    transport_amt = Decimal(str(stored_transport))
+                else:
+                    sub_qty = Decimal(str(sub_item.get('quantity', 0) or 0))
+                    sub_rate = Decimal(str(sub_item.get('rate', 0) or 0))
+                    if sub_qty > 0 and sub_rate > 0:
+                        sub_base_total = sub_qty * sub_rate
+                    else:
+                        sub_base_total = Decimal(str(
+                            sub_item.get('base_total') or
+                            sub_item.get('per_unit_cost') or
+                            sub_item.get('client_rate') or
+                            0
+                        ))
+                        if sub_base_total == 0:
+                            # Fall back to internal cost: sum of materials + labour
+                            mat_cost = sum(
+                                Decimal(str(m.get('total', 0) or
+                                           float(m.get('quantity', 0)) * float(m.get('unit_price', 0))))
+                                for m in sub_item.get('materials', [])
+                            )
+                            lab_cost = sum(
+                                Decimal(str(l.get('total_cost', 0) or
+                                           float(l.get('hours', 0)) * float(l.get('rate_per_hour', 0))))
+                                for l in sub_item.get('labour', [])
+                            )
+                            sub_base_total = mat_cost + lab_cost
+                    transport_amt = sub_base_total * (sub_transport_pct / 100)
+                planned_transport += transport_amt
+                item_planned_transport += transport_amt
+
+                for mat in sub_item.get('materials', []):
+                    mat_name = (mat.get('material_name') or '').strip()
+                    if not mat_name:
+                        continue
+                    mat_qty = float(mat.get('quantity', 0) or 0)
+                    mat_rate = float(mat.get('unit_price', 0) or 0)
+                    mat_total = float(mat.get('total', mat_qty * mat_rate) or mat_qty * mat_rate)
+
+                    if mat_name not in materials_planned:
+                        materials_planned[mat_name] = {
+                            'material_name': mat_name,
+                            'unit': mat.get('unit', ''),
+                            'planned_quantity': 0.0,
+                            'planned_rate': mat_rate,
+                            'planned_amount': 0.0,
+                            'item_name': item.get('item_name', ''),
+                        }
+                    materials_planned[mat_name]['planned_quantity'] += mat_qty
+                    materials_planned[mat_name]['planned_amount'] += mat_total
+                    item_planned_materials += Decimal(str(mat_total))
+
+            items_planned.append({
+                'item_name': item.get('item_name', ''),
+                'master_item_id': item.get('master_item_id'),
+                'planned_amount': float(item_planned_materials),
+                'planned_transport': float(item_planned_transport),
+            })
+
+        # ============================================================
+        # 2. ACTUAL TRANSPORT DETAILS from delivery note tables
+        # ============================================================
+        from models.inventory import MaterialDeliveryNote, ReturnDeliveryNote, InventoryTransaction
+        from models.returnable_assets import AssetDeliveryNote, AssetReturnDeliveryNote
+        from models.labour_requisition import LabourRequisition
+        from models.user import User
+
+        transport_details = []
+        actual_transport_total = Decimal('0')
+
+        # Material Delivery Notes (Store → Site) - show all issued/dispatched/delivered notes
+        mdn_records = MaterialDeliveryNote.query.filter(
+            MaterialDeliveryNote.project_id == project_id,
+            MaterialDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
+        ).order_by(MaterialDeliveryNote.dispatched_at.desc()).all()
+
+        # Return Delivery Notes (Site → Store) - show all issued/in-transit/received notes
+        rdn_records = ReturnDeliveryNote.query.filter(
+            ReturnDeliveryNote.project_id == project_id,
+            ReturnDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
+        ).order_by(ReturnDeliveryNote.created_at.desc()).all()
+
+        # Batch-resolve dispatched_by email → user full_name for MDN and RDN
+        dispatcher_emails = set()
+        for m in mdn_records:
+            if m.dispatched_by:
+                dispatcher_emails.add(m.dispatched_by)
+        for r in rdn_records:
+            if r.dispatched_by:
+                dispatcher_emails.add(r.dispatched_by)
+        user_name_map = {}
+        if dispatcher_emails:
+            dispatcher_users = User.query.filter(User.email.in_(list(dispatcher_emails))).all()
+            for u in dispatcher_users:
+                if u.email not in user_name_map:
+                    user_name_map[u.email] = u.full_name
+
+        for m in mdn_records:
+            fee = Decimal(str(m.transport_fee or 0))
+            actual_transport_total += fee
+            dispatcher_name = user_name_map.get(m.dispatched_by, m.dispatched_by) if m.dispatched_by else '-'
+            transport_details.append({
+                'purpose': 'Store to Site',
+                'driver_name': m.driver_name or '-',
+                'vehicle_number': m.vehicle_number or '-',
+                'driver_contact': m.driver_contact or '-',
+                'vendor_name': dispatcher_name or '-',
+                'amount': float(fee),
+                'date': m.dispatched_at.isoformat() if m.dispatched_at else None,
+                'reference': m.delivery_note_number or '-',
+                'status': m.status or '-',
+                'notes': m.notes or '-',
+            })
+
+        for r in rdn_records:
+            fee = Decimal(str(r.transport_fee or 0))
+            actual_transport_total += fee
+            dispatcher_name = user_name_map.get(r.dispatched_by, r.dispatched_by) if r.dispatched_by else '-'
+            transport_details.append({
+                'purpose': 'Site to Store (Return)',
+                'driver_name': r.driver_name or '-',
+                'vehicle_number': r.vehicle_number or '-',
+                'driver_contact': r.driver_contact or '-',
+                'vendor_name': dispatcher_name or '-',
+                'amount': float(fee),
+                'date': r.created_at.isoformat() if r.created_at else None,
+                'reference': r.return_note_number or '-',
+                'status': r.status or '-',
+                'notes': '-',
+            })
+
+        # Inventory Transactions (Vendor → Store) — filter strictly by delivery_batch_ref
+        # derived from this project's PURCHASE transactions that have a properly
+        # auto-generated delivery_batch_ref (MSQ-IN-XX format, set by ManualStockInForm).
+        # Transactions with NULL or non-MSQ-IN delivery_batch_ref are old/unlinked stock-ins
+        # with garbage reference_numbers and are excluded.
+        _seen_inv_batches_pr = set()
+        _seen_inv_refs_pr = set()
+        inv_records = InventoryTransaction.query.filter(
+            InventoryTransaction.project_id == project_id,
+            InventoryTransaction.transaction_type == 'PURCHASE',
+            InventoryTransaction.delivery_batch_ref.like('MSQ-IN-%')
+        ).order_by(InventoryTransaction.created_at.desc()).all()
+        for t in inv_records:
+            fee = Decimal(str(t.transport_fee or 0))
+            if t.reference_number:
+                _seen_inv_refs_pr.add(t.reference_number)
+            if t.delivery_batch_ref:
+                _seen_inv_refs_pr.add(t.delivery_batch_ref)
+            if fee <= 0:
+                continue
+            if t.delivery_batch_ref:
+                if t.delivery_batch_ref in _seen_inv_batches_pr:
+                    continue
+                _seen_inv_batches_pr.add(t.delivery_batch_ref)
+            actual_transport_total += fee
+            ref_label = t.delivery_batch_ref or t.reference_number or (t.material.material_name if t.material else '-')
+            transport_details.append({
+                'purpose': 'Vendor to Store',
+                'driver_name': t.driver_name or '-',
+                'vehicle_number': t.vehicle_number or '-',
+                'driver_contact': '-',
+                'vendor_name': '-',
+                'amount': float(fee),
+                'date': t.created_at.isoformat() if t.created_at else None,
+                'reference': ref_label,
+                'status': 'Completed',
+                'notes': t.notes or '-',
+            })
+
+        # Labour Requisitions (Labour Transport) - show all active requisitions
+        lab_records = LabourRequisition.query.filter(
+            LabourRequisition.project_id == project_id,
+            LabourRequisition.is_deleted == False
+        ).order_by(LabourRequisition.created_at.desc()).all()
+
+        for lr in lab_records:
+            fee = Decimal(str(lr.transport_fee or 0))
+            actual_transport_total += fee
+            transport_details.append({
+                'purpose': 'Labour Transport',
+                'driver_name': lr.driver_name or '-',
+                'vehicle_number': lr.vehicle_number or '-',
+                'driver_contact': lr.driver_contact or '-',
+                'vendor_name': lr.skill_required or '-',
+                'amount': float(fee),
+                'date': lr.created_at.isoformat() if lr.created_at else None,
+                'reference': f'LR-{lr.requisition_id}',
+                'status': lr.status or '-',
+                'notes': '-',
+            })
+
+        # Asset Delivery Notes - show all issued/dispatched/delivered notes
+        adn_records = AssetDeliveryNote.query.filter(
+            AssetDeliveryNote.project_id == project_id,
+            AssetDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
+        ).order_by(AssetDeliveryNote.dispatched_at.desc()).all()
+
+        for a in adn_records:
+            fee = Decimal(str(a.transport_fee or 0))
+            actual_transport_total += fee
+            transport_details.append({
+                'purpose': 'Asset Delivery',
+                'driver_name': a.driver_name or '-',
+                'vehicle_number': a.vehicle_number or '-',
+                'driver_contact': a.driver_contact or '-',
+                'vendor_name': '-',
+                'amount': float(fee),
+                'date': a.dispatched_at.isoformat() if a.dispatched_at else None,
+                'reference': a.adn_number or '-',
+                'status': a.status or '-',
+                'notes': '-',
+            })
+
+        # Asset Return Delivery Notes - show all issued/in-transit/received notes
+        ardn_records = AssetReturnDeliveryNote.query.filter(
+            AssetReturnDeliveryNote.project_id == project_id,
+            AssetReturnDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
+        ).order_by(AssetReturnDeliveryNote.return_date.desc()).all()
+
+        for ar in ardn_records:
+            fee = Decimal(str(ar.transport_fee or 0))
+            actual_transport_total += fee
+            transport_details.append({
+                'purpose': 'Asset Return',
+                'driver_name': ar.driver_name or '-',
+                'vehicle_number': ar.vehicle_number or '-',
+                'driver_contact': ar.driver_contact or '-',
+                'vendor_name': '-',
+                'amount': float(fee),
+                'date': ar.return_date.isoformat() if ar.return_date else None,
+                'reference': ar.ardn_number or '-',
+                'status': ar.status or '-',
+                'notes': '-',
+            })
+
+        # Sort transport details by date descending
+        transport_details.sort(key=lambda x: x['date'] or '', reverse=True)
+
+        # ============================================================
+        # 3. ACTUAL MATERIAL DATA from purchase tracking
+        # ============================================================
+        from models.boq import MaterialPurchaseTracking
+
+        mat_records = MaterialPurchaseTracking.query.filter(
+            MaterialPurchaseTracking.boq_id == boq_id,
+            MaterialPurchaseTracking.is_deleted == False
+        ).all()
+
+        mat_actuals = {}
+        for r in mat_records:
+            name = (r.material_name or '').strip()
+            actual_amount = float(r.total_quantity_purchased or 0) * float(r.latest_unit_price or 0)
+            if name in mat_actuals:
+                mat_actuals[name]['actual_quantity'] += float(r.total_quantity_purchased or 0)
+                mat_actuals[name]['actual_amount'] += actual_amount
+            else:
+                mat_actuals[name] = {
+                    'actual_quantity': float(r.total_quantity_purchased or 0),
+                    'actual_rate': float(r.latest_unit_price or 0),
+                    'actual_amount': actual_amount,
+                    'unit': r.unit or '',
+                }
+
+        # ============================================================
+        # 3b. SUPPLEMENT actual material data from Change Requests
+        # CR new materials won't be in material_purchase_tracking yet —
+        # their prices are in material_vendor_selections (negotiated_price)
+        # or in sub_items_data/materials_data (unit_price, usually 0)
+        # ============================================================
+        cr_for_boq = ChangeRequest.query.filter(
+            ChangeRequest.boq_id == boq_id,
+            ChangeRequest.is_deleted == False
+        ).all()
+
+        # Fetch VAT percent from LPOCustomization for each CR
+        cr_ids_for_boq = [cr.cr_id for cr in cr_for_boq]
+        profit_lpo_vat_lookup = {}  # {cr_id: vat_percent}
+        if cr_ids_for_boq:
+            profit_lpo_customs = LPOCustomization.query.filter(
+                LPOCustomization.cr_id.in_(cr_ids_for_boq),
+                LPOCustomization.po_child_id == None
+            ).all()
+            for lpo in profit_lpo_customs:
+                profit_lpo_vat_lookup[lpo.cr_id] = float(lpo.vat_percent or 5.0)
+
+        for cr in cr_for_boq:
+            # Get negotiated prices from vendor selections
+            mvs = cr.material_vendor_selections or {}
+            if isinstance(mvs, str):
+                try:
+                    mvs = json.loads(mvs)
+                except Exception:
+                    mvs = {}
+
+            # Get materials list: prefer sub_items_data, fallback to materials_data
+            cr_mats = cr.sub_items_data or cr.materials_data or []
+            if isinstance(cr_mats, str):
+                try:
+                    cr_mats = json.loads(cr_mats)
+                except Exception:
+                    cr_mats = []
+            if not isinstance(cr_mats, list):
+                cr_mats = []
+
+            for mat in cr_mats:
+                mat_name = (mat.get('material_name') or '').strip()
+                if not mat_name:
+                    continue
+
+                is_new = bool(mat.get('is_new_material') or mat.get('is_new', False))
+                quantity = float(mat.get('quantity', 0) or 0)
+
+                # Price priority (highest to lowest):
+                # 1. material_vendor_selections.negotiated_price (vendor confirmed price)
+                # 2. materials_data.unit_price (estimator's proposed price at CR creation)
+                # 3. 0 (unknown, pending)
+                negotiated_price = 0.0
+                mvs_entry = mvs.get(mat_name)
+                if not mvs_entry:
+                    for k, v in mvs.items():
+                        if isinstance(v, dict) and k.lower().strip() == mat_name.lower().strip():
+                            mvs_entry = v
+                            break
+                if mvs_entry and isinstance(mvs_entry, dict):
+                    negotiated_price = float(mvs_entry.get('negotiated_price', 0) or 0)
+
+                # Fallback to materials_data unit_price when no vendor negotiated price yet
+                mat_unit_price = float(mat.get('unit_price', 0) or 0)
+                mat_total_price = float(mat.get('total_price', 0) or 0)
+                if negotiated_price == 0 and mat_unit_price > 0:
+                    negotiated_price = mat_unit_price
+
+                # Calculate actual amount
+                if mat_total_price > 0 and negotiated_price == mat_unit_price:
+                    # Use stored total_price directly (avoids rounding from qty × unit_price)
+                    actual_amount = mat_total_price
+                else:
+                    actual_amount = quantity * negotiated_price
+
+                # Only supplement if this material is NOT already tracked by purchase_tracking
+                if mat_name not in mat_actuals:
+                    # Show the material if it has any price or it's a new pending CR material
+                    if negotiated_price > 0 or is_new:
+                        mat_actuals[mat_name] = {
+                            'actual_quantity': quantity,
+                            'actual_rate': negotiated_price,
+                            'actual_amount': actual_amount,
+                            'unit': mat.get('unit', ''),
+                            'cr_id': cr.cr_id,
+                        }
+                elif negotiated_price > 0:
+                    # Override stale MaterialPurchaseTracking data with the actual vendor
+                    # negotiated price. MaterialPurchaseTracking.latest_unit_price can be
+                    # set to the original BOQ planned rate if it was never updated after
+                    # the vendor selection step.
+                    mat_actuals[mat_name]['actual_rate'] = negotiated_price
+                    mat_actuals[mat_name]['actual_amount'] = actual_amount
+                    mat_actuals[mat_name]['actual_quantity'] = quantity
+                    mat_actuals[mat_name]['cr_id'] = cr.cr_id  # needed for VAT lookup
+
+                # If it's a new CR material (not in BOQ), add it to materials_planned with 0 values
+                # so it appears as a row with planned=0, actual=CR amount
+                if is_new and mat_name not in materials_planned:
+                    materials_planned[mat_name] = {
+                        'material_name': mat_name,
+                        'unit': mat.get('unit', ''),
+                        'planned_quantity': 0.0,
+                        'planned_rate': 0.0,
+                        'planned_amount': 0.0,
+                        'item_name': cr.item_name or '',
+                        'is_new_cr_material': True,
+                        'cr_id': cr.cr_id,
+                        'cr_status': cr.status,
+                    }
+
+        all_mat_names = set(list(materials_planned.keys()) + list(mat_actuals.keys()))
+        materials_comparison = []
+        for mat_name in all_mat_names:
+            planned = materials_planned.get(mat_name, {})
+            actual = mat_actuals.get(mat_name, {})
+            planned_amt = float(planned.get('planned_amount', 0))
+            actual_amt = float(actual.get('actual_amount', 0))
+            is_new_cr = bool(planned.get('is_new_cr_material', False))
+            cr_id_val = planned.get('cr_id') or actual.get('cr_id')
+            cr_status_val = planned.get('cr_status', '')
+            # Compute VAT for ALL CR-purchased materials (both new CR materials and
+            # existing BOQ materials bought via a CR) using LPOCustomization vat_percent.
+            # Only apply VAT when the CR has a LPO with a VAT configuration.
+            has_cr_vat = bool(cr_id_val and cr_id_val in profit_lpo_vat_lookup)
+            vat_pct = profit_lpo_vat_lookup.get(cr_id_val, 0.0) if has_cr_vat else 0.0
+            vat_amount = round(actual_amt * vat_pct / 100, 2) if has_cr_vat else 0.0
+            actual_amount_with_vat = round(actual_amt + vat_amount, 2)
+            materials_comparison.append({
+                'material_name': mat_name,
+                'unit': planned.get('unit') or actual.get('unit', ''),
+                'item_name': planned.get('item_name', ''),
+                'planned_quantity': float(planned.get('planned_quantity', 0)),
+                'planned_rate': float(planned.get('planned_rate', 0)),
+                'planned_amount': planned_amt,
+                'actual_quantity': float(actual.get('actual_quantity', 0)),
+                'actual_rate': float(actual.get('actual_rate', 0)),
+                'actual_amount': actual_amt,
+                'vat_amount': vat_amount,
+                'actual_amount_with_vat': actual_amount_with_vat,
+                'variance': round(planned_amt - actual_amt, 2),
+                'variance_pct': round((planned_amt - actual_amt) / planned_amt * 100, 2) if planned_amt > 0 else 0,
+                'is_new_cr_material': is_new_cr,
+                'cr_id': cr_id_val,
+                'cr_status': cr_status_val,
+                'status': 'under' if actual_amt < planned_amt else ('over' if actual_amt > planned_amt else 'on_plan'),
+            })
+        materials_comparison.sort(key=lambda x: x['planned_amount'], reverse=True)
+
+        total_planned_materials = sum(m['planned_amount'] for m in materials_comparison)
+        total_actual_materials = sum(m['actual_amount'] for m in materials_comparison)
+        total_vat_materials = sum(m['vat_amount'] for m in materials_comparison)
+
+        # ============================================================
+        # 4. LABOUR COMPARISON
+        # ============================================================
+
+        # Planned labour from BOQ JSON (check both item-level and sub-item-level labour)
+        planned_labour_total = Decimal('0')
+        planned_workers = []
+        for item in boq_data.get('items', []):
+            item_name = item.get('item_name') or item.get('name', '')
+            # Item-level labour
+            for lab in item.get('labour', []):
+                role = lab.get('labour_role') or lab.get('role', '')
+                hours = float(lab.get('hours', 0) or lab.get('planned_hours', 0) or 0)
+                rate = float(lab.get('rate_per_hour', 0) or lab.get('rate', 0) or 0)
+                lab_total = float(lab.get('total', 0) or 0)
+                if lab_total == 0:
+                    lab_total = hours * rate
+                # Skip placeholder entries with no role and no meaningful cost
+                if not role and rate == 0 and lab_total == 0:
+                    continue
+                planned_labour_total += Decimal(str(lab_total))
+                planned_workers.append({
+                    'labour_role': role or '-',
+                    'hours': round(hours, 2),
+                    'rate_per_hour': round(rate, 2),
+                    'total': round(lab_total, 2),
+                    'item_name': item_name,
+                })
+            # Sub-item-level labour
+            for sub_item in item.get('sub_items', []):
+                sub_name = sub_item.get('sub_item_name') or sub_item.get('name', '')
+                for lab in sub_item.get('labour', []):
+                    role = lab.get('labour_role') or lab.get('role', '')
+                    hours = float(lab.get('hours', 0) or lab.get('planned_hours', 0) or 0)
+                    rate = float(lab.get('rate_per_hour', 0) or lab.get('rate', 0) or 0)
+                    lab_total = float(lab.get('total', 0) or 0)
+                    if lab_total == 0:
+                        lab_total = hours * rate
+                    # Skip placeholder entries with no role and no meaningful cost
+                    if not role and rate == 0 and lab_total == 0:
+                        continue
+                    planned_labour_total += Decimal(str(lab_total))
+                    planned_workers.append({
+                        'labour_role': role or '-',
+                        'hours': round(hours, 2),
+                        'rate_per_hour': round(rate, 2),
+                        'total': round(lab_total, 2),
+                        'item_name': (f"{item_name} / {sub_name}" if sub_name else item_name),
+                    })
+
+        # Actual labour: per-worker breakdown from daily_attendance
+        from sqlalchemy import func
+        from models.daily_attendance import DailyAttendance
+        from models.worker import Worker
+
+        total_cost_expr = func.sum(func.coalesce(DailyAttendance.total_cost, 0))
+
+        worker_rows = (
+            db.session.query(
+                Worker.worker_id,
+                Worker.worker_code,
+                Worker.full_name.label('worker_name'),
+                Worker.phone,
+                DailyAttendance.labour_role,
+                func.count(DailyAttendance.attendance_date.distinct()).label('working_days'),
+                func.sum(func.coalesce(DailyAttendance.regular_hours, 0)).label('regular_hours'),
+                func.sum(func.coalesce(DailyAttendance.overtime_hours, 0)).label('overtime_hours'),
+                func.sum(func.coalesce(DailyAttendance.total_hours, 0)).label('total_hours'),
+                func.avg(func.coalesce(DailyAttendance.hourly_rate, 0)).label('avg_hourly_rate'),
+                total_cost_expr.label('total_cost'),
+                func.min(DailyAttendance.attendance_date).label('first_date'),
+                func.max(DailyAttendance.attendance_date).label('last_date'),
+            )
+            .join(Worker, DailyAttendance.worker_id == Worker.worker_id)
+            .filter(
+                DailyAttendance.project_id == project_id,
+                DailyAttendance.is_deleted == False,
+                DailyAttendance.is_absent == False,
+            )
+            .group_by(
+                Worker.worker_id,
+                Worker.worker_code,
+                Worker.full_name,
+                Worker.phone,
+                DailyAttendance.labour_role,
+            )
+            .order_by(total_cost_expr.desc())
+            .all()
+        )
+
+        workers_list = []
+        total_actual_labour = Decimal('0')
+        total_actual_hours = 0.0
+        total_regular_hours = 0.0
+        total_overtime_hours = 0.0
+        total_working_days = 0
+
+        for r in worker_rows:
+            cost = float(r.total_cost or 0)
+            total_actual_labour += Decimal(str(cost))
+            total_actual_hours += float(r.total_hours or 0)
+            total_regular_hours += float(r.regular_hours or 0)
+            total_overtime_hours += float(r.overtime_hours or 0)
+            total_working_days += int(r.working_days or 0)
+            workers_list.append({
+                'worker_code': r.worker_code or '-',
+                'worker_name': r.worker_name or '-',
+                'phone': r.phone or '-',
+                'labour_role': r.labour_role or '-',
+                'working_days': int(r.working_days or 0),
+                'regular_hours': round(float(r.regular_hours or 0), 2),
+                'overtime_hours': round(float(r.overtime_hours or 0), 2),
+                'total_hours': round(float(r.total_hours or 0), 2),
+                'avg_hourly_rate': round(float(r.avg_hourly_rate or 0), 2),
+                'total_cost': round(cost, 2),
+                'first_date': r.first_date.isoformat() if r.first_date else None,
+                'last_date': r.last_date.isoformat() if r.last_date else None,
+            })
+
+        # Requisition summary for the project
+        from models.worker_assignment import WorkerAssignment
+
+        req_records = LabourRequisition.query.filter(
+            LabourRequisition.project_id == project_id,
+            LabourRequisition.is_deleted == False
+        ).order_by(LabourRequisition.required_date.desc()).all()
+
+        req_ids = [lr.requisition_id for lr in req_records]
+
+        # Batch: assigned worker count per requisition
+        assigned_counts = {}
+        if req_ids:
+            assign_agg = (
+                db.session.query(
+                    WorkerAssignment.requisition_id,
+                    func.count(WorkerAssignment.assignment_id).label('cnt')
+                )
+                .filter(
+                    WorkerAssignment.requisition_id.in_(req_ids),
+                    WorkerAssignment.is_deleted == False
+                )
+                .group_by(WorkerAssignment.requisition_id)
+                .all()
+            )
+            assigned_counts = {row.requisition_id: int(row.cnt) for row in assign_agg}
+
+        # Batch: attended count, total hours, total cost per requisition
+        attendance_agg = {}
+        if req_ids:
+            attend_rows = (
+                db.session.query(
+                    DailyAttendance.requisition_id,
+                    func.count(DailyAttendance.worker_id.distinct()).label('attended_count'),
+                    func.sum(func.coalesce(DailyAttendance.total_hours, 0)).label('total_hours'),
+                    func.sum(func.coalesce(DailyAttendance.total_cost, 0)).label('total_cost'),
+                )
+                .filter(
+                    DailyAttendance.requisition_id.in_(req_ids),
+                    DailyAttendance.is_deleted == False,
+                    DailyAttendance.is_absent == False,
+                )
+                .group_by(DailyAttendance.requisition_id)
+                .all()
+            )
+            attendance_agg = {row.requisition_id: row for row in attend_rows}
+
+        requisitions_list = []
+        for lr in req_records:
+            labour_items = lr.labour_items if lr.labour_items else []
+            if isinstance(labour_items, str):
+                try:
+                    labour_items = json.loads(labour_items)
+                except Exception:
+                    labour_items = []
+            skill_summary = ', '.join(
+                str(li.get('skill_required') or li.get('labour_role', ''))
+                for li in labour_items if isinstance(li, dict)
+            ) if labour_items else (lr.skill_required or '-')
+
+            agg = attendance_agg.get(lr.requisition_id)
+            requisitions_list.append({
+                'requisition_code': lr.requisition_code or '-',
+                'site_name': lr.site_name or '-',
+                'required_date': lr.required_date.isoformat() if lr.required_date else None,
+                'requested_by': lr.requested_by_name or '-',
+                'requester_role': lr.requester_role or '-',
+                'status': lr.status or '-',
+                'assignment_status': lr.assignment_status or '-',
+                'skill_summary': skill_summary,
+                'workers_requested': int(lr.workers_count or 0),
+                'workers_assigned': assigned_counts.get(lr.requisition_id, 0),
+                'workers_attended': int(agg.attended_count if agg else 0),
+                'approved_by': lr.approved_by_name or '-',
+                'approval_date': lr.approval_date.isoformat() if lr.approval_date else None,
+                'total_hours': round(float(agg.total_hours if agg else 0), 2),
+                'total_cost': round(float(agg.total_cost if agg else 0), 2),
+            })
+
+        labour_variance = float(planned_labour_total) - float(total_actual_labour)
+
+        transport_variance = float(planned_transport) - float(actual_transport_total)
+
+        return jsonify({
+            'success': True,
+            'boq_id': boq_id,
+            'project_id': project_id,
+            'project_name': boq.project.project_name if boq.project else '',
+            'boq_name': boq.boq_name,
+            'transport': {
+                'planned': float(planned_transport),
+                'actual': float(actual_transport_total),
+                'variance': round(transport_variance, 2),
+                'variance_pct': round(transport_variance / float(planned_transport) * 100, 2) if planned_transport > 0 else 0,
+                'details': transport_details,
+            },
+            'materials': {
+                'planned': round(total_planned_materials, 2),
+                'actual': round(total_actual_materials, 2),
+                'total_vat': round(total_vat_materials, 2),
+                'variance': round(total_planned_materials - total_actual_materials, 2),
+                'variance_pct': round((total_planned_materials - total_actual_materials) / total_planned_materials * 100, 2) if total_planned_materials > 0 else 0,
+                'details': materials_comparison,
+            },
+            'labour': {
+                'planned': round(float(planned_labour_total), 2),
+                'actual': round(float(total_actual_labour), 2),
+                'variance': round(labour_variance, 2),
+                'variance_pct': round(labour_variance / float(planned_labour_total) * 100, 2) if planned_labour_total > 0 else 0,
+                'summary': {
+                    'total_workers': len(workers_list),
+                    'total_working_days': total_working_days,
+                    'total_hours': round(total_actual_hours, 2),
+                    'regular_hours': round(total_regular_hours, 2),
+                    'overtime_hours': round(total_overtime_hours, 2),
+                    'total_requisitions': len(requisitions_list),
+                },
+                'planned_workers': planned_workers,
+                'workers': workers_list,
+                'requisitions': requisitions_list,
+            },
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error in get_profit_report: {str(e)}")
         import traceback
         log.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
