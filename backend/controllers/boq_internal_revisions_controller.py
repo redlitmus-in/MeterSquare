@@ -768,26 +768,22 @@ def update_internal_revision_boq(boq_id):
         flag_modified(boq_details, 'boq_details')
         # ===== END MASTER TABLES SYNC =====
 
-        # Save preliminary selections to boq_preliminaries junction table
+        # Save preliminary selections to boq_preliminaries as single JSONB row (ID array only)
         preliminaries_data = data.get("preliminaries", {})
         if preliminaries_data and isinstance(preliminaries_data, dict):
             prelim_items = preliminaries_data.get("items", [])
             if prelim_items:
-                # Delete existing preliminary selections for this BOQ
-                BOQPreliminary.query.filter_by(boq_id=boq_id).delete()
+                checked_prelim_ids = [
+                    p.get('prelim_id') for p in prelim_items
+                    if p.get('prelim_id') and (p.get('checked', False) or p.get('selected', False))
+                ]
 
-                # Insert new selections
-                for prelim in prelim_items:
-                    prelim_id = prelim.get('prelim_id')
-                    is_checked = prelim.get('checked', False) or prelim.get('selected', False)
-
-                    if prelim_id:  # Only save master preliminary items
-                        boq_prelim = BOQPreliminary(
-                            boq_id=boq_id,
-                            prelim_id=prelim_id,
-                            is_checked=is_checked
-                        )
-                        db.session.add(boq_prelim)
+                boq_prelim_row = BOQPreliminary.query.filter_by(boq_id=boq_id).first()
+                if boq_prelim_row:
+                    boq_prelim_row.prelim_id = checked_prelim_ids
+                else:
+                    boq_prelim_row = BOQPreliminary(boq_id=boq_id, prelim_id=checked_prelim_ids)
+                    db.session.add(boq_prelim_row)
 
         # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
         terms_conditions = data.get("terms_conditions", [])

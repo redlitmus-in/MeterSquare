@@ -38,29 +38,44 @@ class PreliminaryMaster(db.Model):
 
 
 class BOQPreliminary(db.Model):
-    """Junction table linking BOQs with selected preliminary items"""
+    """
+    Stores selected preliminary IDs for a BOQ as a single JSONB row.
+    One row per BOQ. prelim_id contains an array of prelim_ids
+    referencing preliminaries_master. Full details are queried from master at read time.
+    """
     __tablename__ = "boq_preliminaries"
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    boq_id = db.Column(db.Integer, db.ForeignKey("boq.boq_id", ondelete="CASCADE"), nullable=False)
-    prelim_id = db.Column(db.Integer, db.ForeignKey("preliminaries_master.prelim_id"), nullable=False)
-    is_checked = db.Column(db.Boolean, default=False, nullable=False)
+    boq_id = db.Column(
+        db.Integer,
+        db.ForeignKey("boq.boq_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True  # One row per BOQ
+    )
+    prelim_id = db.Column(JSONB, nullable=False, default=list)
+    """
+    JSONB array of selected preliminary IDs: [1, 3, 6, 11]
+    Full details fetched from preliminaries_master at query time.
+    """
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    boq = db.relationship("BOQ", backref=db.backref("boq_preliminaries", lazy=True, cascade="all, delete-orphan"))
-    preliminary = db.relationship("PreliminaryMaster", backref=db.backref("boq_selections", lazy=True))
+    boq = db.relationship("BOQ", backref=db.backref("boq_preliminaries", uselist=False, cascade="all, delete-orphan"))
 
     def to_dict(self):
         """Convert to dictionary for API responses"""
         return {
             'id': self.id,
             'boq_id': self.boq_id,
-            'prelim_id': self.prelim_id,
-            'is_checked': self.is_checked,
-            'preliminary': self.preliminary.to_dict() if self.preliminary else None
+            'prelim_id': self.prelim_id or [],
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+
+    def get_selected_prelim_ids(self):
+        """Return set of prelim_ids that are selected"""
+        return set(self.prelim_id or [])
 
 
 class BOQInternalRevision(db.Model):

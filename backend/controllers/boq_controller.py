@@ -1135,15 +1135,14 @@ def create_boq():
         db.session.add(boq_details)
         db.session.flush()  # Flush to get IDs
 
-        # Save preliminary selections to boq_preliminaries junction table
+        # Save preliminary selections to boq_preliminaries as single JSONB row (ID array only)
         if preliminary_selections_to_save:
-            for selection in preliminary_selections_to_save:
-                boq_prelim = BOQPreliminary(
-                    boq_id=boq.boq_id,
-                    prelim_id=selection['prelim_id'],
-                    is_checked=selection['is_checked']
-                )
-                db.session.add(boq_prelim)
+            checked_prelim_ids = [s['prelim_id'] for s in preliminary_selections_to_save if s.get('is_checked')]
+            boq_prelim = BOQPreliminary(
+                boq_id=boq.boq_id,
+                prelim_id=checked_prelim_ids
+            )
+            db.session.add(boq_prelim)
 
         # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
         terms_conditions = data.get("terms_conditions", [])
@@ -1602,36 +1601,30 @@ def get_boq(boq_id):
         if boq.status == "new_purchase_approved" and user_role in ['technicaldirector', 'technical_director']:
             display_status = "approved"
 
-        # Get preliminaries from NEW boq_preliminaries junction table
+        # Get preliminaries from boq_preliminaries JSONB row (ID array) + master table
         from models.preliminary_master import BOQPreliminary, PreliminaryMaster
 
         preliminaries = {}
         try:
-            # Fetch selected preliminaries for this BOQ
-            boq_prelims = db.session.query(
-                BOQPreliminary, PreliminaryMaster
-            ).join(
-                PreliminaryMaster, BOQPreliminary.prelim_id == PreliminaryMaster.prelim_id
-            ).filter(
-                BOQPreliminary.boq_id == boq.boq_id,
-                BOQPreliminary.is_checked == True
-            ).order_by(PreliminaryMaster.display_order.asc()).all()
-
-            # Build preliminaries data with selected items (both master and custom)
+            boq_prelim = BOQPreliminary.query.filter_by(boq_id=boq.boq_id).first()
             items = []
-            for boq_prelim, prelim_master in boq_prelims:
-                # Mark as custom if display_order is 9999 (our custom indicator)
-                is_custom = prelim_master.display_order == 9999
-
-                items.append({
-                    'id': f'prelim-{prelim_master.prelim_id}',
-                    'prelim_id': prelim_master.prelim_id,
-                    'description': prelim_master.description,
-                    'name': prelim_master.name,
-                    'checked': True,
-                    'selected': True,
-                    'isCustom': is_custom
-                })
+            if boq_prelim and boq_prelim.prelim_id:
+                selected_ids = boq_prelim.prelim_id
+                masters = PreliminaryMaster.query.filter(
+                    PreliminaryMaster.prelim_id.in_(selected_ids),
+                    PreliminaryMaster.is_deleted == False
+                ).order_by(PreliminaryMaster.display_order.asc()).all()
+                for m in masters:
+                    is_custom = (m.display_order == 9999)
+                    items.append({
+                        'id': f'prelim-{m.prelim_id}',
+                        'prelim_id': m.prelim_id,
+                        'description': m.description or '',
+                        'name': m.name or '',
+                        'checked': True,
+                        'selected': True,
+                        'isCustom': is_custom
+                    })
 
             # Get cost details and notes from JSON
             stored_preliminaries = boq_details.boq_details.get("preliminaries", {}) if boq_details.boq_details else {}
@@ -1646,7 +1639,6 @@ def get_boq(boq_id):
             master_count = len(items) - custom_count
         except Exception as e:
             log.error(f"Error fetching preliminaries for BOQ {boq.boq_id}: {str(e)}")
-            # Fallback to empty
             preliminaries = {'items': [], 'cost_details': {}, 'notes': ''}
 
         # Get discount values from boq_details JSON
@@ -2476,16 +2468,13 @@ def update_boq(boq_id):
             )
             db.session.add(boq_history)
 
-        # Update preliminary selections in boq_preliminaries junction table
+        # Update preliminary selections in boq_preliminaries (single JSONB row)
         preliminaries = data.get("preliminaries", {})
         if preliminaries and preliminaries.get('items'):
             from models.preliminary_master import BOQPreliminary, PreliminaryMaster
 
             preliminary_items = preliminaries.get('items', [])
-            # Delete all existing preliminary selections for this BOQ
-            BOQPreliminary.query.filter_by(boq_id=boq_id).delete()
-            # Insert new selections
-            preliminary_selections_saved = 0
+            preliminary_selections_to_save = []
             custom_preliminaries_created = 0
 
             # Batch pre-fetch PreliminaryMaster records for all non-custom items
@@ -2543,14 +2532,16 @@ def update_boq(boq_id):
                             prelim_id = new_custom_prelim.prelim_id
                             custom_preliminaries_created += 1
 
-                if prelim_id:
-                    boq_prelim = BOQPreliminary(
-                        boq_id=boq_id,
-                        prelim_id=prelim_id,
-                        is_checked=is_checked
-                    )
-                    db.session.add(boq_prelim)
-                    preliminary_selections_saved += 1
+                if prelim_id and is_checked:
+                    preliminary_selections_to_save.append(prelim_id)
+
+            # Upsert single JSONB row with ID array only
+            boq_prelim = BOQPreliminary.query.filter_by(boq_id=boq_id).first()
+            if boq_prelim:
+                boq_prelim.prelim_id = preliminary_selections_to_save
+            else:
+                boq_prelim = BOQPreliminary(boq_id=boq_id, prelim_id=preliminary_selections_to_save)
+                db.session.add(boq_prelim)
 
         # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
         terms_conditions = data.get("terms_conditions", [])
@@ -2843,26 +2834,24 @@ def revision_boq(boq_id):
             boq_detail_history.boq_details = payload_copy
             # ===== END MASTER TABLES SYNC =====
 
-            # Save preliminary selections to boq_preliminaries junction table
+            # Save preliminary selections to boq_preliminaries as single JSONB row (ID array only)
             preliminaries_data = data.get("preliminaries", {})
             if preliminaries_data and isinstance(preliminaries_data, dict):
                 prelim_items = preliminaries_data.get("items", [])
                 if prelim_items:
-                    # Delete existing preliminary selections for this BOQ
-                    BOQPreliminary.query.filter_by(boq_id=boq_id).delete()
+                    # Collect checked prelim_ids
+                    checked_prelim_ids = [
+                        p.get('prelim_id') for p in prelim_items
+                        if p.get('prelim_id') and (p.get('checked', False) or p.get('selected', False))
+                    ]
 
-                    # Insert new selections
-                    for prelim in prelim_items:
-                        prelim_id = prelim.get('prelim_id')
-                        is_checked = prelim.get('checked', False) or prelim.get('selected', False)
-
-                        if prelim_id:  # Only save master preliminary items
-                            boq_prelim = BOQPreliminary(
-                                boq_id=boq_id,
-                                prelim_id=prelim_id,
-                                is_checked=is_checked
-                            )
-                            db.session.add(boq_prelim)
+                    # Upsert single JSONB row with ID array only
+                    boq_prelim_row = BOQPreliminary.query.filter_by(boq_id=boq_id).first()
+                    if boq_prelim_row:
+                        boq_prelim_row.prelim_id = checked_prelim_ids
+                    else:
+                        boq_prelim_row = BOQPreliminary(boq_id=boq_id, prelim_id=checked_prelim_ids)
+                        db.session.add(boq_prelim_row)
             # Save terms & conditions selections to boq_terms_selections (single row with term_ids array)
             terms_conditions = data.get("terms_conditions", [])
             if terms_conditions and isinstance(terms_conditions, list):

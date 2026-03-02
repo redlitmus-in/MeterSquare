@@ -38,12 +38,9 @@ def get_all_preliminary_masters():
 
 def get_boq_preliminaries_with_selections(boq_id):
     """
-    Get all preliminary masters with their selection status for a specific BOQ
-    This returns ALL available preliminaries with is_checked=true/false based on BOQ selections
-
-    Used when:
-    - Creating new BOQ: All items returned with is_checked=false
-    - Editing existing BOQ: Items returned with their saved is_checked status
+    Get all preliminary masters with their selection status for a specific BOQ.
+    Returns ALL available preliminaries with is_checked=true/false based on
+    whether their prelim_id exists in the BOQ's JSONB array.
     """
     try:
         # Fetch all active preliminary masters
@@ -52,11 +49,12 @@ def get_boq_preliminaries_with_selections(boq_id):
             is_active=True
         ).order_by(PreliminaryMaster.display_order.asc()).all()
 
-        # Fetch existing selections for this BOQ
-        boq_selections = {}
+        # Fetch the selected prelim_ids from the single JSONB row
+        selected_ids = set()
         if boq_id:
-            selections = BOQPreliminary.query.filter_by(boq_id=boq_id).all()
-            boq_selections = {sel.prelim_id: sel.is_checked for sel in selections}
+            boq_prelim = BOQPreliminary.query.filter_by(boq_id=boq_id).first()
+            if boq_prelim and boq_prelim.prelim_id:
+                selected_ids = set(boq_prelim.prelim_id)
 
         # Build response with all preliminaries and their selection status
         result = []
@@ -68,7 +66,7 @@ def get_boq_preliminaries_with_selections(boq_id):
                 'unit': prelim.unit,
                 'rate': prelim.rate,
                 'display_order': prelim.display_order,
-                'is_checked': boq_selections.get(prelim.prelim_id, False)  # Default to False if not found
+                'is_checked': prelim.prelim_id in selected_ids
             })
 
         return jsonify({
@@ -76,7 +74,7 @@ def get_boq_preliminaries_with_selections(boq_id):
             "boq_id": boq_id,
             "data": result,
             "count": len(result),
-            "selected_count": sum(1 for item in result if item['is_checked'])
+            "selected_count": len(selected_ids)
         }), 200
 
     except Exception as e:
@@ -89,8 +87,8 @@ def get_boq_preliminaries_with_selections(boq_id):
 
 def save_boq_preliminary_selections(boq_id):
     """
-    Save preliminary selections for a BOQ
-    This updates the boq_preliminaries junction table with user selections
+    Save preliminary selections for a BOQ as a single JSONB row.
+    Stores only the prelim_ids of checked items: [1, 3, 6]
 
     Expected JSON:
     {
@@ -111,38 +109,35 @@ def save_boq_preliminary_selections(boq_id):
                 "error": "No selections provided"
             }), 400
 
-        # Get current user
-        current_user = getattr(g, 'user', None)
-        user_id = current_user.get('user_id') if current_user else None
+        # Filter to only checked items and collect their prelim_ids
+        checked_prelim_ids = [
+            s['prelim_id'] for s in selections
+            if s.get('is_checked', False) and s.get('prelim_id')
+        ]
 
-        # Delete existing selections for this BOQ
-        BOQPreliminary.query.filter_by(boq_id=boq_id).delete()
+        # Upsert: find existing row or create new one
+        boq_prelim = BOQPreliminary.query.filter_by(boq_id=boq_id).first()
 
-        # Insert new selections (store ALL items with their checked status)
-        for selection in selections:
-            prelim_id = selection.get('prelim_id')
-            is_checked = selection.get('is_checked', False)
-
-            if not prelim_id:
-                continue
-
+        if boq_prelim:
+            boq_prelim.prelim_id = checked_prelim_ids
+            boq_prelim.updated_at = datetime.utcnow()
+        else:
             boq_prelim = BOQPreliminary(
                 boq_id=boq_id,
-                prelim_id=prelim_id,
-                is_checked=is_checked
+                prelim_id=checked_prelim_ids
             )
             db.session.add(boq_prelim)
 
         db.session.commit()
 
-        log.info(f"Saved {len(selections)} preliminary selections for BOQ {boq_id}")
+        log.info(f"Saved {len(checked_prelim_ids)} selected preliminary IDs for BOQ {boq_id}")
 
         return jsonify({
             "success": True,
             "message": "Preliminary selections saved successfully",
             "boq_id": boq_id,
             "total_items": len(selections),
-            "selected_items": sum(1 for s in selections if s.get('is_checked'))
+            "selected_items": len(checked_prelim_ids)
         }), 200
 
     except Exception as e:
@@ -156,30 +151,31 @@ def save_boq_preliminary_selections(boq_id):
 
 def get_selected_boq_preliminaries(boq_id):
     """
-    Get only the SELECTED (is_checked=true) preliminaries for a BOQ
-    Used for displaying in BOQ views/reports
+    Get only the SELECTED preliminaries for a BOQ.
+    Reads prelim_ids from JSONB, then fetches full details from master table.
     """
     try:
-        # Join boq_preliminaries with preliminaries_master to get full details
-        selected = db.session.query(
-            BOQPreliminary, PreliminaryMaster
-        ).join(
-            PreliminaryMaster, BOQPreliminary.prelim_id == PreliminaryMaster.prelim_id
-        ).filter(
-            BOQPreliminary.boq_id == boq_id,
-            BOQPreliminary.is_checked == True
-        ).order_by(PreliminaryMaster.display_order.asc()).all()
+        boq_prelim = BOQPreliminary.query.filter_by(boq_id=boq_id).first()
+        selected_ids = (boq_prelim.prelim_id or []) if boq_prelim else []
 
         result = []
-        for boq_prelim, prelim_master in selected:
-            result.append({
-                'prelim_id': prelim_master.prelim_id,
-                'name': prelim_master.name,
-                'description': prelim_master.description,
-                'unit': prelim_master.unit,
-                'rate': prelim_master.rate,
-                'is_checked': True
-            })
+        if selected_ids:
+            masters = PreliminaryMaster.query.filter(
+                PreliminaryMaster.prelim_id.in_(selected_ids),
+                PreliminaryMaster.is_deleted == False
+            ).order_by(PreliminaryMaster.display_order.asc()).all()
+
+            result = [
+                {
+                    'prelim_id': m.prelim_id,
+                    'name': m.name,
+                    'description': m.description,
+                    'unit': m.unit,
+                    'rate': m.rate,
+                    'is_checked': True
+                }
+                for m in masters
+            ]
 
         return jsonify({
             "success": True,

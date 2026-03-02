@@ -3,7 +3,7 @@ Preliminary Purchase Controller - CRUD operations for preliminary purchase reque
 Implements simplified workflow: PM → Buyer (skip TD and Estimator approval)
 """
 from flask import jsonify, request, g
-from models.preliminary_master import PreliminaryPurchaseRequest, BOQPreliminary, PreliminaryMaster
+from models.preliminary_master import PreliminaryPurchaseRequest, BOQPreliminary
 from models.boq import BOQ
 from models.project import Project
 from models.user import User
@@ -358,9 +358,9 @@ def reject_preliminary_purchase(ppr_id):
 
 def get_boq_selected_preliminaries_for_purchase(boq_id):
     """
-    Get the selected preliminaries for a BOQ that can be used for purchase requests
-    Returns only the preliminaries that were checked/selected in the BOQ
-    Also includes allocated amount from BOQ details JSON
+    Get the selected preliminaries for a BOQ that can be used for purchase requests.
+    Reads from the single JSONB row in boq_preliminaries.
+    Also includes allocated amount from BOQ details JSON.
     """
     try:
         from models.boq import BOQDetails
@@ -382,44 +382,41 @@ def get_boq_selected_preliminaries_for_purchase(boq_id):
 
         result = []
 
-        # Get selected preliminaries from boq_preliminaries junction table
-        # This is the authoritative source for which preliminaries are selected
-        selected = db.session.query(
-            BOQPreliminary, PreliminaryMaster
-        ).join(
-            PreliminaryMaster, BOQPreliminary.prelim_id == PreliminaryMaster.prelim_id
-        ).filter(
-            BOQPreliminary.boq_id == boq_id,
-            BOQPreliminary.is_checked == True,
-            PreliminaryMaster.is_deleted == False,
-            PreliminaryMaster.is_active == True
-        ).order_by(PreliminaryMaster.display_order.asc()).all()
+        # Get selected prelim_ids from JSONB column, then fetch details from master
+        from models.preliminary_master import PreliminaryMaster
+        boq_prelim = BOQPreliminary.query.filter_by(boq_id=boq_id).first()
+        selected_ids = (boq_prelim.prelim_id or []) if boq_prelim else []
 
-        log.info(f"BOQ {boq_id}: Found {len(selected)} selected preliminaries in junction table")
+        log.info(f"BOQ {boq_id}: Found {len(selected_ids)} selected preliminary IDs in JSONB")
 
         # Calculate per-item amount if we have a total
-        num_items = len(selected)
+        num_items = len(selected_ids)
         per_item_amount = total_preliminary_amount / num_items if num_items > 0 and total_preliminary_amount > 0 else 0
 
-        for idx, (boq_prelim, prelim_master) in enumerate(selected):
-            result.append({
-                'prelim_id': prelim_master.prelim_id,
-                'name': prelim_master.name,
-                'description': prelim_master.description,
-                'unit': prelim_master.unit or 'nos',
-                'rate': total_preliminary_amount if num_items == 1 else per_item_amount,
-                'allocated_amount': total_preliminary_amount if num_items == 1 else per_item_amount,
-                'allocated_quantity': 1,
-                'display_order': prelim_master.display_order or idx
-            })
+        if selected_ids:
+            masters = PreliminaryMaster.query.filter(
+                PreliminaryMaster.prelim_id.in_(selected_ids),
+                PreliminaryMaster.is_deleted == False
+            ).order_by(PreliminaryMaster.display_order.asc()).all()
 
-        # If junction table is empty, try getting from JSON items as fallback
+            for idx, m in enumerate(masters):
+                result.append({
+                    'prelim_id': m.prelim_id,
+                    'name': m.name,
+                    'description': m.description,
+                    'unit': m.unit or 'nos',
+                    'rate': total_preliminary_amount if num_items == 1 else per_item_amount,
+                    'allocated_amount': total_preliminary_amount if num_items == 1 else per_item_amount,
+                    'allocated_quantity': 1,
+                    'display_order': m.display_order or idx
+                })
+
+        # If JSONB is empty, try getting from BOQ details JSON items as fallback
         if not result:
-            log.info(f"BOQ {boq_id}: No items in junction table, checking JSON items")
+            log.info(f"BOQ {boq_id}: No items in JSONB, checking BOQ details JSON items")
             prelim_items_from_boq = stored_preliminaries.get('items', [])
 
             for idx, item in enumerate(prelim_items_from_boq):
-                # Only include checked/selected items
                 is_checked = item.get('checked', False) or item.get('selected', False) or item.get('is_checked', True)
                 if not is_checked:
                     continue
@@ -431,7 +428,6 @@ def get_boq_selected_preliminaries_for_purchase(boq_id):
                 rate = float(item.get('rate', 0) or 0)
                 quantity = float(item.get('quantity', 1) or 1)
 
-                # Calculate allocated amount
                 amount = item.get('amount')
                 if amount:
                     allocated_amount = float(amount)
