@@ -66,7 +66,7 @@ def get_all_raw_materials():
     - category (optional): Filter by material category
     - active_only (optional): If true, return only active materials (default: true)
     - page (optional): Page number for pagination (default: 1)
-    - per_page (optional): Items per page (default: 50, max: 200)
+    - per_page (optional): Items per page (default: 50, max: 2000)
 
     Returns:
     - materials: List of material objects
@@ -80,7 +80,7 @@ def get_all_raw_materials():
         category = request.args.get('category', None)
         active_only = request.args.get('active_only', 'true').lower() == 'true'
         page = int(request.args.get('page', 1))
-        per_page = min(int(request.args.get('per_page', 50)), 200)  # Cap at 200
+        per_page = min(int(request.args.get('per_page', 50)), 2000)  # Cap at 2000
 
         # Build query
         query = RawMaterialsCatalog.query
