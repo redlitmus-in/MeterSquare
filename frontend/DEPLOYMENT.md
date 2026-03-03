@@ -207,3 +207,12 @@ If deployment issues persist:
 2. Check server error logs
 3. Verify `dist` folder contents match checklist above
 4. Contact development team with error screenshots
+
+
+## frontend build command
+
+# For ATH server (msq.ath.cx)
+cd frontend && npm run build:staging
+
+# For KOL server (msq.kol.tel)
+cd frontend && npm run build:production
