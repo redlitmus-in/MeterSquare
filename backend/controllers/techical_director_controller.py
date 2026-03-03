@@ -2537,105 +2537,66 @@ def get_td_rejected_boq():
         }), 500
 
 def get_td_tab_counts():
-    """Get counts for all TD tabs"""
+    """Get counts for all TD tabs - OPTIMIZED: single query instead of 7 separate queries"""
     try:
+        from sqlalchemy import case as sa_case
         current_user = getattr(g, 'user', None)
         if not current_user:
             return jsonify({'error': 'Authentication required'}), 401
 
-        # OPTIMIZED: Use func.count() for better performance (2-3x faster)
-
-        # Count for Pending tab (Pending_TD_Approval and Pending statuses)
-        pending_count = db.session.query(BOQ).join(
+        # OPTIMIZED: Single aggregated query replaces 7 separate COUNT queries.
+        # One DB round-trip instead of seven = ~7x faster.
+        row = db.session.query(
+            func.count(sa_case(
+                (BOQ.status.in_(['Pending_TD_Approval', 'Pending']), 1)
+            )).label('pending'),
+            func.count(sa_case(
+                (and_(
+                    BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'Sent_for_Confirmation']),
+                    or_(Project.user_id == None, Project.user_id == '[]', Project.user_id == 'null')
+                ), 1)
+            )).label('approved'),
+            func.count(sa_case(
+                (BOQ.status.in_(['Client_Confirmed', 'client_confirmed', 'Client_Rejected', 'client_rejected']), 1)
+            )).label('sent'),
+            func.count(sa_case(
+                (BOQ.revision_number > 0, 1)
+            )).label('revisions'),
+            func.count(sa_case(
+                (and_(
+                    Project.user_id != None,
+                    Project.user_id != '[]',
+                    Project.user_id != 'null',
+                    ~BOQ.status.in_(['Rejected', 'rejected', 'Completed', 'completed', 'Client_Cancelled', 'Cancelled', 'cancelled'])
+                ), 1)
+            )).label('assigned'),
+            func.count(sa_case(
+                (BOQ.status.in_(['Completed', 'completed']), 1)
+            )).label('completed'),
+            func.count(sa_case(
+                (BOQ.status.in_(['Rejected', 'rejected']), 1)
+            )).label('rejected'),
+            func.count(sa_case(
+                (BOQ.status.in_(['Client_Cancelled', 'Cancelled', 'cancelled']), 1)
+            )).label('cancelled'),
+        ).join(
             Project, BOQ.project_id == Project.project_id
         ).filter(
             BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Pending_TD_Approval', 'Pending'])
-        ).with_entities(func.count()).scalar()
-
-        # Count for Approved tab (Approved, Revision_Approved, Sent_for_Confirmation AND not assigned to PM)
-        approved_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'Sent_for_Confirmation']),
-            or_(
-                Project.user_id == None,
-                Project.user_id == '[]',
-                Project.user_id == 'null'
-            )
-        ).with_entities(func.count()).scalar()
-
-        # Count for Client Response tab (Client_Confirmed or Client_Rejected)
-        client_response_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Client_Confirmed', 'client_confirmed', 'Client_Rejected', 'client_rejected'])
-        ).with_entities(func.count()).scalar()
-
-        # Count for Revisions tab (revision_number > 0)
-        revisions_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.revision_number > 0
-        ).with_entities(func.count()).scalar()
-
-        # Count for Assigned tab (projects where user_id is not null/empty AND NOT rejected/completed/cancelled)
-        assigned_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            Project.user_id != None,
-            Project.user_id != '[]',
-            Project.user_id != 'null',
-            ~BOQ.status.in_(['Rejected', 'rejected', 'Completed', 'completed', 'Client_Cancelled', 'Cancelled', 'cancelled'])
-        ).with_entities(func.count()).scalar()
-
-        # Count for Completed tab
-        completed_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Completed', 'completed'])
-        ).with_entities(func.count()).scalar()
-
-        # Count for Rejected by TD tab
-        rejected_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Rejected', 'rejected'])
-        ).with_entities(func.count()).scalar()
-
-        # Count for Cancelled tab
-        cancelled_count = db.session.query(BOQ).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Client_Cancelled', 'Cancelled', 'cancelled'])
-        ).with_entities(func.count()).scalar()
+            Project.is_deleted == False
+        ).one()
 
         return jsonify({
             "success": True,
             "counts": {
-                "pending": pending_count,
-                "approved": approved_count,
-                "sent": client_response_count,
-                "revisions": revisions_count,
-                "assigned": assigned_count,
-                "completed": completed_count,
-                "rejected": rejected_count,
-                "cancelled": cancelled_count
+                "pending": row.pending or 0,
+                "approved": row.approved or 0,
+                "sent": row.sent or 0,
+                "revisions": row.revisions or 0,
+                "assigned": row.assigned or 0,
+                "completed": row.completed or 0,
+                "rejected": row.rejected or 0,
+                "cancelled": row.cancelled or 0
             }
         }), 200
 
