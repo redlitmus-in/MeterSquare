@@ -41,6 +41,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { DeadlineBadge } from '@/utils/deadlineBadge';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
 import { Progress } from '@/components/ui/progress';
@@ -536,7 +537,14 @@ const ModernDashboard: React.FC = () => {
               <div key={project.id} className="p-3 border rounded-lg hover:bg-gray-50 transition-colors">
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1">
-                    <h4 className="text-sm font-semibold text-gray-900">{project.name}</h4>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-sm font-semibold text-gray-900">{project.name}</h4>
+                      <DeadlineBadge
+                        endDate={project.deadline}
+                        status={project.status}
+                        size="compact"
+                      />
+                    </div>
                     <p className="text-xs text-gray-600">{project.client}</p>
                   </div>
                   <Badge className={`${getStatusColor(project.status)} text-xs`}>

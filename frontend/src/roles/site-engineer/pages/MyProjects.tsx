@@ -27,6 +27,7 @@ import RejectedRequestsSection from '@/components/boq/RejectedRequestsSection';
 import { changeRequestService, ChangeRequestItem } from '@/services/changeRequestService';
 import { useProjectsAutoSync } from '@/hooks/useAutoSync';
 import AssignBuyerModal from '@/components/sitesupervisor/AssignBuyerModal';
+import { DeadlineBadge } from '@/utils/deadlineBadge';
 
 interface BOQItem {
   id: number;
@@ -688,6 +689,7 @@ const MyProjects: React.FC = () => {
                     <div className="flex items-center justify-between gap-2 mb-1.5 sm:mb-2">
                       <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
                         <h3 className="text-sm sm:text-xl font-bold text-gray-900 truncate">{project.project_name}</h3>
+                        <DeadlineBadge endDate={project.end_date} status={project.status} size="compact" />
                         {project.project_code && (
                           <span className="px-1.5 sm:px-3 py-0.5 sm:py-1.5 rounded text-[10px] sm:text-sm font-bold bg-[#243d8a] text-white whitespace-nowrap flex-shrink-0">
                             {project.project_code}

@@ -510,6 +510,11 @@ def create_app():
     socketio = init_socketio(app)
     app.socketio = socketio  # Make socketio accessible to other modules
 
+
+    # Initialize deadline reminder scheduler (APScheduler)
+    from utils.deadline_scheduler import init_deadline_scheduler
+    init_deadline_scheduler(app)
+
     return app
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { formatDate } from '@/utils/dateFormatter';
+import { DeadlineBadge } from '@/utils/deadlineBadge';
 import {
   Plus,
   FolderOpen,
@@ -313,7 +314,10 @@ const ProjectsPage: React.FC = () => {
                     <div className="flex items-center gap-2">
                       {getTypeIcon(project.type)}
                       <div>
-                        <CardTitle className="text-lg">{project.name}</CardTitle>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <CardTitle className="text-lg">{project.name}</CardTitle>
+                          <DeadlineBadge endDate={project.endDate} status={project.status} size="compact" />
+                        </div>
                         <p className="text-sm text-gray-500">{project.client}</p>
                       </div>
                     </div>

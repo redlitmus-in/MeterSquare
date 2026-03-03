@@ -1235,6 +1235,8 @@ def approve_day_extension(boq_id):
         project.duration_days = final_duration
         if final_end_date:
             project.end_date = final_end_date
+        # Reset deadline notification so new deadline gets fresh warnings
+        project.last_deadline_notified_at = None
         project.extension_status = 'approved'
         project.extension_days = None
         project.extension_original_days = None

@@ -36,6 +36,7 @@ import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 import DayExtensionRequestModal from '../components/DayExtensionRequestModal';
 import AssignItemToSEModal from '@/components/modals/AssignItemToSEModal';
 import { API_BASE_URL } from '@/api/config';
+import { DeadlineBadge } from '@/utils/deadlineBadge';
 
 interface BOQDetails {
   boq_detail_id?: number;
@@ -1146,6 +1147,7 @@ const MyProjects: React.FC = () => {
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="text-xl font-bold text-gray-900">{project.project_name}</h3>
+                        <DeadlineBadge endDate={project.end_date} status={project.status} size="compact" />
                         {project.project_code && (
                           <span className="px-3 py-1.5 rounded-md text-sm font-bold bg-[#243d8a] text-white">
                             {project.project_code}

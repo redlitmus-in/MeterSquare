@@ -39,3 +39,6 @@ reportlab==4.4.4
 flask-compress==1.23
 flask-limiter==4.0.0
 flask-caching==2.3.1
+
+# Scheduling
+APScheduler==3.10.4

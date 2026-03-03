@@ -26,6 +26,7 @@ class Project(db.Model):
     start_date = db.Column(db.Date, nullable=True)  # Optional - changed from required
     end_date = db.Column(db.Date, nullable=True)
     duration_days = db.Column(db.Integer, nullable=True)  # Project duration in days
+    last_deadline_notified_at = db.Column(db.Date, nullable=True)
     status = db.Column(db.String(50), nullable=False, default='active')  # Default status
     description = db.Column(db.Text, nullable=True)  # Changed to Text for longer descriptions
     completion_requested = db.Column(db.Boolean, default=False)  # SE completion request flag
@@ -76,6 +77,7 @@ class Project(db.Model):
             'start_date': self.start_date.isoformat() if self.start_date else None,
             'duration_days': self.duration_days,
             'end_date': end_date,
+            'last_deadline_notified_at': self.last_deadline_notified_at.isoformat() if self.last_deadline_notified_at else None,
             'status': self.status,
             'description': self.description,
             'completion_requested': self.completion_requested,
