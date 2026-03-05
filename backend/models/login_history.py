@@ -15,6 +15,7 @@ class LoginHistory(db.Model):
     - User agent (browser/device info)
     - Login method (email OTP, SMS OTP)
     - Session status (active, logged_out, expired)
+    - JWT ID (jti) for token blacklisting on force logout
     """
     __tablename__ = 'login_history'
 
@@ -24,6 +25,9 @@ class LoginHistory(db.Model):
     # Login details
     login_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     logout_at = db.Column(db.DateTime, nullable=True)
+
+    # JWT ID — stored so force_logout_user can blacklist the token
+    jti = db.Column(db.String(36), nullable=True, index=True)
 
     # Client information
     ip_address = db.Column(db.String(45), nullable=True)  # IPv6 can be up to 45 chars
@@ -45,7 +49,7 @@ class LoginHistory(db.Model):
     user = db.relationship('User', backref=db.backref('login_history', lazy='dynamic'))
 
     def __init__(self, user_id, ip_address=None, user_agent=None, device_type=None,
-                 browser=None, os=None, login_method='email_otp'):
+                 browser=None, os=None, login_method='email_otp', jti=None):
         self.user_id = user_id
         self.ip_address = ip_address
         self.user_agent = user_agent
@@ -53,6 +57,7 @@ class LoginHistory(db.Model):
         self.browser = browser
         self.os = os
         self.login_method = login_method
+        self.jti = jti
         self.login_at = datetime.utcnow()
         self.status = 'active'
 
@@ -60,8 +65,9 @@ class LoginHistory(db.Model):
         return {
             "id": self.id,
             "user_id": self.user_id,
-            "login_at": self.login_at.isoformat() if self.login_at else None,
-            "logout_at": self.logout_at.isoformat() if self.logout_at else None,
+            "login_at": self.login_at.isoformat() + 'Z' if self.login_at else None,
+            "logout_at": self.logout_at.isoformat() + 'Z' if self.logout_at else None,
+            "jti": self.jti,
             "ip_address": self.ip_address,
             "user_agent": self.user_agent,
             "device_type": self.device_type,
@@ -69,7 +75,7 @@ class LoginHistory(db.Model):
             "os": self.os,
             "login_method": self.login_method,
             "status": self.status,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "created_at": self.created_at.isoformat() + 'Z' if self.created_at else None
         }
 
     def mark_logged_out(self):

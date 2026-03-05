@@ -50,9 +50,8 @@ class LabourNotificationMixin:
                 # Email fallback -- PM must approve this (action required)
                 try:
                     from utils.comprehensive_notification_service import ComprehensiveNotificationService as CNS
-                    if CNS.is_user_offline(pm_id):
-                        pm_user = User.query.get(pm_id)
-                        if pm_user and pm_user.email:
+                    pm_user = User.query.get(pm_id)
+                    if pm_user and pm_user.email and CNS.is_user_offline(pm_id, user=pm_user):
                             CNS.send_email_notification(
                                 recipient=pm_user.email,
                                 subject=f'Labour Requisition Pending Approval - {project_name}',

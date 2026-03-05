@@ -163,24 +163,25 @@ def mark_as_read(current_user_id, current_user_role):
         if not notification_ids:
             return jsonify({'error': 'notification_ids is required'}), 400
 
-        # Update notifications - only for this specific user
-        notifications = Notification.query.filter(
+        # Bulk update — single UPDATE query instead of N individual updates
+        updated_count = Notification.query.filter(
             and_(
                 Notification.id.in_(notification_ids),
                 Notification.user_id == current_user_id,
-                Notification.deleted_at.is_(None)
+                Notification.deleted_at.is_(None),
+                Notification.read == False
             )
-        ).all()
-
-        for notification in notifications:
-            notification.mark_as_read()
+        ).update(
+            {'read': True, 'read_at': datetime.utcnow()},
+            synchronize_session=False  # Safe: we commit immediately and don't read updated rows
+        )
 
         db.session.commit()
 
         return jsonify({
             'success': True,
-            'message': f'Marked {len(notifications)} notification(s) as read',
-            'updated_count': len(notifications)
+            'message': f'Marked {updated_count} notification(s) as read',
+            'updated_count': updated_count
         }), 200
 
     except Exception as e:
@@ -194,24 +195,24 @@ def mark_as_read(current_user_id, current_user_role):
 def mark_all_as_read(current_user_id, current_user_role):
     """Mark all notifications as read for the current user"""
     try:
-        # Update all unread notifications - only for this specific user
-        notifications = Notification.query.filter(
+        # Bulk update — single UPDATE query instead of loading N rows and updating one by one
+        updated_count = Notification.query.filter(
             and_(
                 Notification.user_id == current_user_id,
                 Notification.read == False,
                 Notification.deleted_at.is_(None)
             )
-        ).all()
-
-        for notification in notifications:
-            notification.mark_as_read()
+        ).update(
+            {'read': True, 'read_at': datetime.utcnow()},
+            synchronize_session=False  # Safe: we commit immediately and don't read updated rows
+        )
 
         db.session.commit()
 
         return jsonify({
             'success': True,
-            'message': f'Marked {len(notifications)} notification(s) as read',
-            'updated_count': len(notifications)
+            'message': f'Marked {updated_count} notification(s) as read',
+            'updated_count': updated_count
         }), 200
 
     except Exception as e:
@@ -255,22 +256,23 @@ def delete_notification(current_user_id, current_user_role, notification_id):
 def delete_all_notifications(current_user_id, current_user_role):
     """Soft delete all notifications for the current user"""
     try:
-        notifications = Notification.query.filter(
+        # Bulk update — single UPDATE query instead of loading N rows and updating one by one
+        deleted_count = Notification.query.filter(
             and_(
                 Notification.user_id == current_user_id,
                 Notification.deleted_at.is_(None)
             )
-        ).all()
-
-        for notification in notifications:
-            notification.mark_as_deleted()
+        ).update(
+            {'deleted_at': datetime.utcnow()},
+            synchronize_session=False  # Safe: we commit immediately and don't read updated rows
+        )
 
         db.session.commit()
 
         return jsonify({
             'success': True,
-            'message': f'Deleted {len(notifications)} notification(s)',
-            'deleted_count': len(notifications)
+            'message': f'Deleted {deleted_count} notification(s)',
+            'deleted_count': deleted_count
         }), 200
 
     except Exception as e:
@@ -479,25 +481,26 @@ def mark_support_notifications_read_public():
         if not notification_ids:
             return jsonify({'error': 'notification_ids is required'}), 400
 
-        # Update notifications - only for support-management targeted notifications
-        notifications = Notification.query.filter(
+        # Bulk update — single UPDATE query instead of loading N rows
+        updated_count = Notification.query.filter(
             and_(
                 Notification.id.in_(notification_ids),
                 Notification.category == 'support',
                 Notification.target_role == 'support-management',
-                Notification.deleted_at.is_(None)
+                Notification.deleted_at.is_(None),
+                Notification.read == False
             )
-        ).all()
-
-        for notification in notifications:
-            notification.mark_as_read()
+        ).update(
+            {'read': True, 'read_at': datetime.utcnow()},
+            synchronize_session=False  # Safe: we commit immediately and don't read updated rows
+        )
 
         db.session.commit()
 
         return jsonify({
             'success': True,
-            'message': f'Marked {len(notifications)} notification(s) as read',
-            'updated_count': len(notifications)
+            'message': f'Marked {updated_count} notification(s) as read',
+            'updated_count': updated_count
         }), 200
 
     except Exception as e:

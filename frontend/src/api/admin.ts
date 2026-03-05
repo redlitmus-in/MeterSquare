@@ -24,6 +24,8 @@ export interface User {
   last_login?: string;
   created_at?: string;
   last_modified_at?: string;
+  is_blocked?: boolean;
+  blocked_reason?: string;
 }
 
 export interface CreateUserData {
@@ -206,12 +208,75 @@ export const adminApi = {
   }): Promise<LoginHistoryResponse> {
     const response = await apiClient.get(`/admin/login-history`, { params });
     return response.data;
+  },
+
+  // Get all users with online/offline status
+  async getOnlineUsers(): Promise<OnlineUsersResponse> {
+    const response = await apiClient.get(`/admin/users/online`);
+    return response.data;
+  },
+
+  // Force logout a user — terminates all their active sessions immediately
+  async forceLogout(userId: number): Promise<{ success: boolean; message: string; sessions_terminated: number }> {
+    const response = await apiClient.post(`/admin/users/${userId}/force-logout`);
+    return response.data;
+  },
+
+  // Block a user — prevents them from logging in
+  async blockUser(userId: number, reason: string): Promise<{ success: boolean; message: string }> {
+    const response = await apiClient.post(`/admin/users/${userId}/block`, { reason });
+    return response.data;
+  },
+
+  // Unblock a user — restores their ability to log in
+  async unblockUser(userId: number): Promise<{ success: boolean; message: string }> {
+    const response = await apiClient.post(`/admin/users/${userId}/unblock`);
+    return response.data;
+  },
+
+  // Get security/suspicious activity alerts
+  async getSecurityAlerts(unresolvedOnly = false): Promise<SecurityAlertsResponse> {
+    const response = await apiClient.get(`/admin/security/alerts`, {
+      params: { unresolved: unresolvedOnly ? 'true' : 'false' }
+    });
+    return response.data;
+  },
+
+  // Resolve a specific security alert
+  async resolveAlert(alertId: number): Promise<{ success: boolean; message: string }> {
+    const response = await apiClient.post(`/admin/security/alerts/${alertId}/resolve`);
+    return response.data;
   }
 };
 
 // ============================================
 // TYPE DEFINITIONS
 // ============================================
+
+export interface OnlineUserRecord {
+  user_id: number;
+  full_name: string;
+  email: string;
+  role: string;
+  is_online: boolean;
+  session_status: 'active' | 'logged_out' | 'expired' | 'never_logged_in';
+  last_login_at: string | null;
+  last_logout_at: string | null;
+  ip_address?: string;
+  browser?: string;
+  os?: string;
+  device_type?: string;
+}
+
+export interface OnlineUsersResponse {
+  success: boolean;
+  users: OnlineUserRecord[];
+  summary: {
+    total: number;
+    online: number;
+    offline: number;
+  };
+}
 
 export interface Role {
   role_id: number;
@@ -370,6 +435,33 @@ export interface LoginHistoryResponse {
   filter?: {
     days: number;
   };
+}
+
+// ============================================
+// SECURITY ALERTS TYPES
+// ============================================
+
+export interface SuspiciousAlert {
+  id: number;
+  user_id: number;
+  alert_type: 'multiple_ips' | 'unusual_hours' | 'rapid_logins';
+  severity: 'low' | 'medium' | 'high';
+  description: string;
+  details: Record<string, unknown>;
+  is_resolved: boolean;
+  resolved_by: number | null;
+  resolved_at: string | null;
+  created_at: string;
+  user_name: string;
+  user_email: string | null;
+  user_role: string | null;
+}
+
+export interface SecurityAlertsResponse {
+  success: boolean;
+  data: SuspiciousAlert[];
+  unresolved_count: number;
+  total: number;
 }
 
 // ============================================

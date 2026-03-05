@@ -1,0 +1,34 @@
+[Unit]
+Description=MeterSquare Backend (Gunicorn + Flask-SocketIO)
+Documentation=https://github.com/your-org/metersquare
+After=network.target
+
+[Service]
+User=root
+Group=root
+
+WorkingDirectory=/root/msq/backend
+Environment="PATH=/root/msq/backend/venv/bin"
+
+# Load all environment variables from .env file
+EnvironmentFile=/root/msq/backend/.env
+
+# Start Gunicorn with the config file
+ExecStart=/root/msq/backend/venv/bin/gunicorn \
+    --config /root/msq/backend/gunicorn.conf.py \
+    "app:create_app()"
+
+# Graceful reload (no downtime): sudo systemctl reload msq
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# Auto-restart on crash
+Restart=always
+RestartSec=5
+
+# Output to systemd journal (view with: sudo journalctl -u msq -f)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=msq
+
+[Install]
+WantedBy=multi-user.target

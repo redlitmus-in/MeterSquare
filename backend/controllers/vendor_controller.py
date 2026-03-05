@@ -67,6 +67,9 @@ def create_vendor():
             td_role = Role.query.filter_by(role='technicalDirector').first()
             if td_role:
                 td_users = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
+
+                # Batch create notifications (single commit instead of one per TD)
+                notifications = []
                 for td_user in td_users:
                     notification = NotificationManager.create_notification(
                         user_id=td_user.user_id,
@@ -81,8 +84,13 @@ def create_vendor():
                         sender_id=current_user['user_id'],
                         sender_name=current_user.get('full_name', 'Buyer')
                     )
-                    send_notification_to_user(td_user.user_id, notification.to_dict())
-                    log.info(f"Sent vendor creation notification to TD {td_user.user_id}")
+                    notifications.append((td_user.user_id, notification))
+
+                # Single commit for all notifications, then send socket events
+                db.session.commit()
+                for td_user_id, notification in notifications:
+                    send_notification_to_user(td_user_id, notification.to_dict())
+                log.info(f"Sent vendor creation notification to {len(notifications)} TD(s)")
         except Exception as notif_error:
             log.error(f"Failed to send vendor creation notification: {notif_error}")
 

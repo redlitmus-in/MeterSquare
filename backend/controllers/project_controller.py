@@ -268,20 +268,79 @@ def get_all_projects():
             except Exception:
                 return []
 
-        # Enrich projects with manager names
+        # ── Batch pre-fetch all user IDs and PM assignments for the page ──
+        # Collects every user_id referenced across all paginated projects,
+        # then runs ONE User query and ONE PMAssignSS query for the entire page.
+        # Before: ~100 queries for 20 projects.  After: 3 queries total.
+
+        all_user_ids = set()
+        project_ids = []
+        def _safe_id_list(val):
+            """Convert JSONB user_id field to a list of valid IDs, handling null/empty strings"""
+            if not val or val in ('null', '[]', None):
+                return []
+            return val if isinstance(val, list) else [val]
+
+        for p in paginated.items:
+            project_ids.append(p.project_id)
+            all_user_ids.update(_safe_id_list(p.user_id))
+            all_user_ids.update(_safe_id_list(p.mep_supervisor_id))
+            all_user_ids.update(_safe_id_list(p.site_supervisor_id))
+
+        # 1) One query for ALL PM assignment site engineers across all projects
+        all_assignments = PMAssignSS.query.filter(
+            PMAssignSS.project_id.in_(project_ids),
+            PMAssignSS.is_deleted == False,
+            PMAssignSS.assigned_to_se_id != None
+        ).all() if project_ids else []
+
+        # Collect SE user IDs from assignments
+        for a in all_assignments:
+            all_user_ids.add(a.assigned_to_se_id)
+
+        # 2) One query for ALL users referenced on this page
+        all_user_ids.discard(None)
+        user_map = {}
+        if all_user_ids:
+            user_map = {u.user_id: u for u in User.query.filter(User.user_id.in_(list(all_user_ids))).all()}
+
+        # Group PM assignments by project_id for fast lookup
+        assignments_by_project = {}
+        for a in all_assignments:
+            assignments_by_project.setdefault(a.project_id, []).append(a)
+
+        def _user_details_from_map(user_ids):
+            """Build user detail dicts from the pre-fetched user_map"""
+            if not user_ids or user_ids in ('null', '[]', None):
+                return []
+            ids_list = user_ids if isinstance(user_ids, list) else [user_ids]
+            return [
+                {'user_id': uid, 'full_name': user_map[uid].full_name, 'email': user_map[uid].email}
+                for uid in ids_list if uid in user_map
+            ]
+
+        # Enrich projects with manager names (no extra DB queries)
         projects = []
         for project in paginated.items:
             project_data = project.to_dict()
-            # Add project managers details
-            project_data['project_managers'] = get_user_details(project.user_id)
-            # Add MEP supervisors details
-            project_data['mep_supervisors'] = get_user_details(project.mep_supervisor_id)
-            # Add site supervisors/engineers details (from project assignment)
-            site_supervisors = get_user_details(project.site_supervisor_id)
-            existing_se_ids = [se['user_id'] for se in site_supervisors]
-            # Also add Site Engineers from PM assignments (pm_assign_ss table)
-            pm_assigned_site_engineers = get_site_engineers_from_pm_assignments(project.project_id, existing_se_ids)
-            site_supervisors.extend(pm_assigned_site_engineers)
+            project_data['project_managers'] = _user_details_from_map(project.user_id)
+            project_data['mep_supervisors'] = _user_details_from_map(project.mep_supervisor_id)
+
+            site_supervisors = _user_details_from_map(project.site_supervisor_id)
+            existing_se_ids = {se['user_id'] for se in site_supervisors}
+
+            # Add Site Engineers from PM assignments (from pre-fetched data)
+            for a in assignments_by_project.get(project.project_id, []):
+                if a.assigned_to_se_id not in existing_se_ids:
+                    user = user_map.get(a.assigned_to_se_id)
+                    if user:
+                        site_supervisors.append({
+                            'user_id': user.user_id,
+                            'full_name': user.full_name,
+                            'email': user.email
+                        })
+                        existing_se_ids.add(a.assigned_to_se_id)
+
             project_data['site_supervisors'] = site_supervisors
             projects.append(project_data)
 

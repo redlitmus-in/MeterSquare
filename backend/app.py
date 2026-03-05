@@ -4,6 +4,7 @@ from flask_compress import Compress
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_caching import Cache
+from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 from config.routes import initialize_routes
 from config.db import initialize_db as initialize_sqlalchemy, db
@@ -32,6 +33,10 @@ configure_quiet_logging()
 def create_app():
     app = Flask(__name__)
     app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default-secret-key")
+
+    # Trust the reverse proxy (Nginx) to forward the real client IP via X-Forwarded-For.
+    # x_for=1 means trust 1 proxy hop — increase if you have multiple proxies.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
     # Get environment (default to development)
     environment = os.getenv("ENVIRONMENT", "development")

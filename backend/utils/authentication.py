@@ -11,6 +11,7 @@ from email.utils import formataddr
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import jwt
+import uuid as _uuid
 from models.user import User
 
 try:
@@ -102,7 +103,7 @@ def parse_user_agent(user_agent_string):
     }
 
 
-def record_login_history(user_id, login_method='email_otp'):
+def record_login_history(user_id, login_method='email_otp', jti=None):
     """
     Record a login event to the login_history table
     Extracts IP address and user agent from the current request
@@ -111,10 +112,14 @@ def record_login_history(user_id, login_method='email_otp'):
         from models.login_history import LoginHistory
         from config.db import db
 
-        # Get client info from request
-        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-        if ip_address and ',' in ip_address:
-            ip_address = ip_address.split(',')[0].strip()
+        # Get client info from request.
+        # ProxyFix (applied in app.py) makes request.remote_addr the real IP when behind Nginx.
+        # Explicit fallback chain handles edge cases: X-Forwarded-For → X-Real-IP → remote_addr
+        ip_address = (
+            request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+            or request.headers.get('X-Real-IP', '').strip()
+            or request.remote_addr
+        )
 
         user_agent = request.headers.get('User-Agent', '')
         ua_info = parse_user_agent(user_agent)
@@ -127,11 +132,24 @@ def record_login_history(user_id, login_method='email_otp'):
             device_type=ua_info['device_type'],
             browser=ua_info['browser'],
             os=ua_info['os'],
-            login_method=login_method
+            login_method=login_method,
+            jti=jti
         )
 
         db.session.add(login_record)
         db.session.commit()
+
+        # Run suspicious activity detection (non-blocking)
+        try:
+            from utils.suspicious_activity_detector import check_suspicious_activity
+            check_suspicious_activity(
+                user_id=user_id,
+                ip_address=ip_address,
+                login_at=login_record.login_at
+            )
+        except Exception as _det_err:
+            import logging as _log
+            _log.getLogger(__name__).error(f"Suspicious activity detector import failed: {_det_err}")
 
         log.debug(f"Recorded login for user {user_id} ({ua_info['browser']} on {ua_info['os']})")
 
@@ -433,6 +451,12 @@ def verification_otp():
         else:
             return jsonify({"error": "User not found or inactive"}), 404
     
+    if user.is_blocked:
+        return jsonify({
+            'error': 'Account blocked',
+            'message': 'Your account has been blocked by an administrator. Please contact support.'
+        }), 403
+
     # OTP data already retrieved above
     stored_otp = otp_data.get("otp")
     expires_at = datetime.fromtimestamp(otp_data.get("expires_at"))
@@ -455,9 +479,6 @@ def verification_otp():
     user.last_login = current_time
     user.user_status = 'online'  # Auto-set online on login
     db.session.commit()
-
-    # Record login history for audit trail
-    record_login_history(user.user_id, login_method='email_otp')
 
     # Audit log successful login for security tracking
     on_login_success(user.user_id)
@@ -489,12 +510,16 @@ def verification_otp():
         'permissions': role_permissions,
         'full_name': user.full_name,
         'creation_time': current_time.isoformat(),
+        'jti': str(_uuid.uuid4()),
         'exp': expiration_time
     }
     session_token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
     # jwt.encode returns bytes in PyJWT < 2.0, decode to str if needed
     if isinstance(session_token, bytes):
         session_token = session_token.decode('utf-8')
+
+    # Record login history for audit trail (after payload is created)
+    record_login_history(user.user_id, login_method='email_otp', jti=payload.get('jti'))
 
     response_data = {
         "message": "Login successful",
@@ -569,6 +594,14 @@ def jwt_required(f):
 
             # Decode the token
             data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            # Check token blacklist (for force-logout support)
+            try:
+                from models.token_blacklist import TokenBlacklist
+                jti = data.get('jti')
+                if jti and TokenBlacklist.is_blacklisted(jti):
+                    return jsonify({'error': 'Session has been terminated', 'message': 'Your session was ended by an administrator'}), 401
+            except Exception as _bl_err:
+                pass  # Never fail auth due to blacklist check errors
             log.debug(f"Token decoded successfully for user_id: {data.get('user_id')}")
 
             # Get the user from the database
@@ -581,6 +614,11 @@ def jwt_required(f):
             if not current_user:
                 log.warning(f"User not found or inactive for user_id: {data.get('user_id')}")
                 return jsonify({'message': 'User not found or inactive'}), 401
+
+            # Check if user has been blocked by an administrator
+            if getattr(current_user, 'is_blocked', False):
+                log.warning(f"Blocked user attempted access: user_id={current_user.user_id}")
+                return jsonify({'error': 'Account blocked', 'message': 'Your account has been blocked by an administrator.'}), 403
 
             # Get role name safely
             role_name = "user"

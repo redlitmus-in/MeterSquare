@@ -12,6 +12,7 @@ import jwt
 from config.db import db
 from models.user import User
 from models.role import Role
+from models.login_history import LoginHistory
 from config.logging import get_logger
 from utils.authentication import send_otp
 from utils.async_email import send_otp_async
@@ -329,8 +330,20 @@ def logout():
                     user = User.query.filter_by(user_id=user_id).first()
                     if user:
                         user.user_status = 'offline'
-                        db.session.commit()
-                        log.info(f"User {user_id} logged out and set to offline")
+
+                    # Mark active login session as logged out
+                    try:
+                        active_session = LoginHistory.query.filter_by(
+                            user_id=user_id, status='active'
+                        ).order_by(LoginHistory.login_at.desc()).first()
+                        if active_session:
+                            active_session.mark_logged_out()
+                            log.info(f"Marked login session {active_session.id} as logged out for user {user_id}")
+                    except Exception as e:
+                        log.error(f"Error marking login session as logged out: {str(e)}")
+
+                    db.session.commit()
+                    log.info(f"User {user_id} logged out and set to offline")
             except jwt.ExpiredSignatureError:
                 # Token expired, still try to set offline from request body
                 pass
@@ -346,8 +359,17 @@ def logout():
             user = User.query.filter_by(user_id=user_id).first()
             if user:
                 user.user_status = 'offline'
-                db.session.commit()
-                log.info(f"User {user_id} set to offline via request body")
+            try:
+                active_session = LoginHistory.query.filter_by(
+                    user_id=user_id, status='active'
+                ).order_by(LoginHistory.login_at.desc()).first()
+                if active_session:
+                    active_session.mark_logged_out()
+                    log.info(f"Marked login session {active_session.id} as logged out for user {user_id} (body path)")
+            except Exception as e:
+                log.error(f"Error marking login session as logged out (body path): {str(e)}")
+            db.session.commit()
+            log.info(f"User {user_id} set to offline via request body")
     except Exception as e:
         log.error(f"Error during logout status update: {str(e)}")
         # Don't fail logout if status update fails
@@ -599,15 +621,14 @@ def verify_sms_otp_login():
         # Remove OTP from storage
         del otp_storage[storage_key]
 
-        # Get role information
+        # Get role information — use the already-joined Role from the query above
+        # (User was fetched with JOIN Role at line 596, so user.role_id is available)
         role_permissions = []
         role_name = "user"
-        if user.role_id:
-            role = Role.query.filter_by(role_id=user.role_id, is_deleted=False).first()
-            if role:
-                role_name = role.role
-                if hasattr(role, 'permissions') and role.permissions:
-                    role_permissions = role.permissions if isinstance(role.permissions, list) else []
+        if user.role_id and user.role:
+            role_name = user.role.role
+            if hasattr(user.role, 'permissions') and user.role.permissions:
+                role_permissions = user.role.permissions if isinstance(user.role.permissions, list) else []
 
         # Create JWT token
         import os

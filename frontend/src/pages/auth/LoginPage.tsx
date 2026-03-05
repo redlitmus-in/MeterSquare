@@ -136,6 +136,9 @@ const LoginPage: React.FC = () => {
   const [phoneError, setPhoneError] = useState('');
   const isSiteEngineer = userRole === 'siteEngineer';
   
+  // Check if redirected here due to account block
+  const isBlocked = new URLSearchParams(window.location.search).get('blocked') === 'true';
+
   // Timer for resend OTP
   useEffect(() => {
     if (resendTimer > 0) {
@@ -709,6 +712,16 @@ const LoginPage: React.FC = () => {
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.5, delay: 0.1 }}
           >
+            {/* Account Blocked Notice */}
+            {isBlocked && (
+              <div className="mb-4 flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
+                <span className="text-red-500 text-lg mt-0.5">🚫</span>
+                <div>
+                  <p className="text-sm font-semibold text-red-700">Account Blocked</p>
+                  <p className="text-xs text-red-600 mt-0.5">Your account has been blocked by an administrator. Please contact support for assistance.</p>
+                </div>
+              </div>
+            )}
             <AnimatePresence mode="wait">
               {step === 'email' ? (
                 <motion.form

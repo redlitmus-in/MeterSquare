@@ -1,0 +1,30 @@
+[Unit]
+Description=MeterSquare Backend msq.ath.cx (Gunicorn + Flask-SocketIO)
+After=network.target
+
+[Service]
+User=root
+Group=root
+
+WorkingDirectory=/root/msq-ath/backend
+
+# Load environment variables from .env
+EnvironmentFile=/root/msq-ath/backend/.env
+
+# Uses system Python (no venv) — gunicorn installed via pip3
+ExecStart=/usr/local/bin/gunicorn \
+    --config /root/msq-ath/backend/gunicorn-ath.conf.py \
+    "app:create_app()"
+
+# Graceful reload (no downtime): systemctl reload msq-ath
+ExecReload=/bin/kill -s HUP $MAINPID
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=msq-ath
+
+[Install]
+WantedBy=multi-user.target

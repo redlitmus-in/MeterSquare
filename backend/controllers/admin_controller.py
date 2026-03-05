@@ -96,6 +96,8 @@ def get_all_users():
                 "role_name": role.role if role else None,
                 "department": user.department,
                 "is_active": user.is_active,
+                "is_blocked": user.is_blocked,
+                "blocked_reason": user.blocked_reason,
                 "user_status": user.user_status,
                 "last_login": user.last_login.isoformat() if user.last_login else None,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -328,6 +330,17 @@ def toggle_user_status(user_id):
         user.is_active = is_active
         user.last_modified_at = datetime.utcnow()
         db.session.commit()
+
+        # Send activation/deactivation notification email (non-blocking)
+        try:
+            if is_active:
+                from utils.async_email import send_account_activated_email
+                send_account_activated_email(email_id=user.email, full_name=user.full_name)
+            else:
+                from utils.async_email import send_account_deactivated_email
+                send_account_deactivated_email(email_id=user.email, full_name=user.full_name)
+        except Exception as _email_err:
+            log.error(f"Failed to queue status email for user {user_id}: {_email_err}")
 
         return jsonify({
             "message": f"User {'activated' if is_active else 'deactivated'} successfully",
@@ -1065,6 +1078,269 @@ def get_all_login_history():
         return jsonify({"error": f"Failed to fetch login history: {str(e)}"}), 500
 
 
+def get_online_users():
+    """
+    Get all users with their online/offline status based on latest login session.
+    A session is only considered active if it falls within the JWT expiry window.
+    Stale 'active' sessions (JWT already expired) are auto-marked as 'expired' in DB.
+    """
+    try:
+        current_user = g.get("user")
+
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        from models.login_history import LoginHistory
+        from sqlalchemy import func
+        from config.security_config import SecurityConfig
+
+        # JWT expiry window — a session older than this cannot be active
+        jwt_expiry_seconds = SecurityConfig.JWT_ACCESS_TOKEN_EXPIRES
+        token_expiry_cutoff = datetime.utcnow() - timedelta(seconds=jwt_expiry_seconds)
+
+        # Step 1: Auto-expire stale 'active' sessions whose JWT has expired
+        stale_sessions = LoginHistory.query.filter(
+            LoginHistory.status == 'active',
+            LoginHistory.login_at < token_expiry_cutoff
+        ).all()
+        for session in stale_sessions:
+            session.mark_expired()
+        if stale_sessions:
+            db.session.commit()
+            log.info(f"Auto-expired {len(stale_sessions)} stale login sessions")
+
+        # Step 2: Subquery — latest login_history id per user
+        latest_session_sq = db.session.query(
+            LoginHistory.user_id,
+            func.max(LoginHistory.id).label('max_id')
+        ).group_by(LoginHistory.user_id).subquery()
+
+        # Step 3: Join users with their latest session
+        results = db.session.query(
+            User.user_id,
+            User.full_name,
+            User.email,
+            Role.role,
+            LoginHistory.status,
+            LoginHistory.login_at,
+            LoginHistory.logout_at,
+            LoginHistory.ip_address,
+            LoginHistory.browser,
+            LoginHistory.os,
+            LoginHistory.device_type,
+        ).outerjoin(
+            latest_session_sq, latest_session_sq.c.user_id == User.user_id
+        ).outerjoin(
+            LoginHistory, LoginHistory.id == latest_session_sq.c.max_id
+        ).join(
+            Role, User.role_id == Role.role_id
+        ).filter(
+            User.is_deleted == False,
+            Role.role != 'admin'
+        ).order_by(
+            db.case((LoginHistory.status == 'active', 0), else_=1),
+            User.full_name
+        ).all()
+
+        users_list = []
+        for row in results:
+            is_online = row.status == 'active'
+            users_list.append({
+                "user_id": row.user_id,
+                "full_name": row.full_name,
+                "email": row.email,
+                "role": row.role,
+                "is_online": is_online,
+                "session_status": row.status or "never_logged_in",
+                "last_login_at": row.login_at.isoformat() + 'Z' if row.login_at else None,
+                "last_logout_at": row.logout_at.isoformat() + 'Z' if row.logout_at else None,
+                "ip_address": row.ip_address,
+                "browser": row.browser,
+                "os": row.os,
+                "device_type": row.device_type,
+            })
+
+        online_count = sum(1 for u in users_list if u["is_online"])
+        offline_count = len(users_list) - online_count
+
+        return jsonify({
+            "success": True,
+            "users": users_list,
+            "summary": {
+                "total": len(users_list),
+                "online": online_count,
+                "offline": offline_count,
+            }
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching online users: {str(e)}")
+        import traceback
+        log.error(traceback.format_exc())
+        return jsonify({"error": f"Failed to fetch user status: {str(e)}"}), 500
+
+
+def force_logout_user(user_id):
+    """
+    Force logout a user by expiring all their active login sessions.
+    """
+    try:
+        current_user = g.get("user")
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        if current_user.get("user_id") == user_id:
+            return jsonify({"error": "Cannot force logout yourself"}), 400
+
+        from models.login_history import LoginHistory
+
+        target_user = User.query.filter_by(user_id=user_id, is_deleted=False).first()
+        if not target_user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Fetch active sessions BEFORE marking expired so we can blacklist tokens
+        active_sessions = LoginHistory.query.filter_by(
+            user_id=user_id, status='active'
+        ).all()
+
+        # Blacklist each active JWT so requests with those tokens are rejected immediately
+        from models.token_blacklist import TokenBlacklist
+        from datetime import timedelta
+
+        for session in active_sessions:
+            if session.jti:
+                expires_at = session.login_at + timedelta(hours=10)  # match JWT_ACCESS_TOKEN_EXPIRES
+                try:
+                    TokenBlacklist.add(
+                        jti=session.jti,
+                        user_id=user_id,
+                        expires_at=expires_at,
+                        reason='force_logout'
+                    )
+                except Exception as _bl_err:
+                    # Duplicate jti — already blacklisted; safe to ignore
+                    db.session.rollback()
+                    log.warning(f"JTI {session.jti} already blacklisted: {_bl_err}")
+
+        # Mark all active sessions as expired
+        for session in active_sessions:
+            session.mark_expired()
+
+        # Update user status to offline
+        target_user.user_status = 'offline'
+        db.session.commit()
+
+        log.info(f"Admin {current_user.get('user_id')} force-logged-out user {user_id} ({len(active_sessions)} sessions)")
+
+        return jsonify({
+            "success": True,
+            "message": f"User {target_user.full_name} has been logged out",
+            "sessions_terminated": len(active_sessions)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error force logging out user {user_id}: {str(e)}")
+        return jsonify({"error": f"Failed to force logout: {str(e)}"}), 500
+
+def block_user(user_id):
+    """Block a user — they cannot log in until unblocked."""
+    try:
+        current_user = g.get("user")
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+        if current_user.get("user_id") == user_id:
+            return jsonify({"error": "Cannot block yourself"}), 400
+
+        data = request.get_json(silent=True) or {}
+        reason = data.get("reason", "Blocked by administrator")
+
+        target_user = User.query.filter_by(user_id=user_id, is_deleted=False).first()
+        if not target_user:
+            return jsonify({"error": "User not found"}), 404
+        if target_user.is_blocked:
+            return jsonify({"error": "User is already blocked"}), 409
+
+        target_user.is_blocked = True
+        target_user.blocked_reason = reason
+        target_user.blocked_at = datetime.utcnow()
+        target_user.blocked_by = current_user.get("user_id")
+        target_user.user_status = 'offline'
+
+        # Also expire all active sessions
+        from models.login_history import LoginHistory
+        active_sessions = LoginHistory.query.filter_by(user_id=user_id, status='active').all()
+        for session in active_sessions:
+            session.mark_expired()
+
+        db.session.commit()
+        log.info(f"Admin {current_user.get('user_id')} blocked user {user_id}. Reason: {reason}")
+
+        # Send account-blocked notification email (non-blocking)
+        try:
+            from utils.async_email import send_account_blocked_email
+            send_account_blocked_email(
+                email_id=target_user.email,
+                full_name=target_user.full_name,
+                reason=reason
+            )
+        except Exception as _email_err:
+            log.error(f"Failed to queue blocked email for user {user_id}: {_email_err}")
+
+        return jsonify({
+            "success": True,
+            "message": f"User {target_user.full_name} has been blocked",
+            "sessions_terminated": len(active_sessions)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error blocking user {user_id}: {str(e)}")
+        return jsonify({"error": f"Failed to block user: {str(e)}"}), 500
+
+
+def unblock_user(user_id):
+    """Unblock a previously blocked user."""
+    try:
+        current_user = g.get("user")
+        if current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        target_user = User.query.filter_by(user_id=user_id, is_deleted=False).first()
+        if not target_user:
+            return jsonify({"error": "User not found"}), 404
+        if not target_user.is_blocked:
+            return jsonify({"error": "User is not blocked"}), 409
+
+        target_user.is_blocked = False
+        target_user.blocked_reason = None
+        target_user.blocked_at = None
+        target_user.blocked_by = None
+
+        db.session.commit()
+        log.info(f"Admin {current_user.get('user_id')} unblocked user {user_id}")
+
+        # Send account-unblocked notification email (non-blocking)
+        try:
+            from utils.async_email import send_account_unblocked_email
+            send_account_unblocked_email(
+                email_id=target_user.email,
+                full_name=target_user.full_name
+            )
+        except Exception as _email_err:
+            log.error(f"Failed to queue unblocked email for user {user_id}: {_email_err}")
+
+        return jsonify({
+            "success": True,
+            "message": f"User {target_user.full_name} has been unblocked"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"Error unblocking user {user_id}: {str(e)}")
+        return jsonify({"error": f"Failed to unblock user: {str(e)}"}), 500
+
+
 # ============================================
 # COMPREHENSIVE DASHBOARD ANALYTICS APIs
 # ============================================
@@ -1742,3 +2018,81 @@ def get_financial_summary():
         import traceback
         log.error(traceback.format_exc())
         return jsonify({"error": "Failed to fetch financial summary. Please try again later."}), 500
+
+
+# ============================================
+# SUSPICIOUS ACTIVITY ALERT APIs
+# ============================================
+
+def get_suspicious_alerts():
+    """
+    GET /api/admin/security/alerts
+    Return all suspicious activity alerts enriched with user info.
+    Query params:
+      - unresolved=true  : only return unresolved alerts
+      - limit            : max results (default 100, max 200)
+      - offset           : pagination offset (default 0)
+    """
+    current_user = g.get('user') or {}
+    if current_user.get('role') != 'admin':
+        return jsonify({'success': False, 'error': 'Admin access required'}), 403
+
+    from models.suspicious_activity import SuspiciousActivityAlert
+
+    only_unresolved = request.args.get('unresolved', 'false').lower() == 'true'
+    limit = min(request.args.get('limit', 100, type=int) or 100, 200)
+    offset = max(request.args.get('offset', 0, type=int) or 0, 0)
+
+    if only_unresolved:
+        alerts = SuspiciousActivityAlert.get_unresolved(limit=limit)
+    else:
+        alerts = SuspiciousActivityAlert.get_all(limit=limit, offset=offset)
+
+    # Bulk fetch users to avoid N+1 query
+    user_ids = list({a.user_id for a in alerts})
+    users_by_id = {u.user_id: u for u in User.query.filter(User.user_id.in_(user_ids)).all()} if user_ids else {}
+
+    result = []
+    for alert in alerts:
+        d = alert.to_dict()
+        user = users_by_id.get(alert.user_id)
+        d['user_name'] = user.full_name if user else 'Unknown'
+        d['user_email'] = user.email if user else None
+        role_obj = user.role if user else None
+        d['user_role'] = role_obj.role if hasattr(role_obj, 'role') and isinstance(role_obj.role, str) else (str(role_obj) if role_obj else None)
+        result.append(d)
+
+    unresolved_count = SuspiciousActivityAlert.query.filter_by(is_resolved=False).count()
+
+    return jsonify({
+        'success': True,
+        'data': result,
+        'unresolved_count': unresolved_count,
+        'total': len(result)
+    }), 200
+
+
+def resolve_suspicious_alert(alert_id):
+    """
+    POST /api/admin/security/alerts/<alert_id>/resolve
+    Mark a suspicious activity alert as resolved by the current admin.
+    """
+    current_user = g.get('user') or {}
+    if current_user.get('role') != 'admin':
+        return jsonify({'success': False, 'error': 'Admin access required'}), 403
+
+    from models.suspicious_activity import SuspiciousActivityAlert
+
+    alert = SuspiciousActivityAlert.query.get(alert_id)
+    if not alert:
+        return jsonify({'success': False, 'error': 'Alert not found'}), 404
+
+    if alert.is_resolved:
+        return jsonify({'success': False, 'error': 'Alert already resolved'}), 400
+
+    alert.is_resolved = True
+    alert.resolved_by = g.user['user_id']
+    alert.resolved_at = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({'success': True, 'message': 'Alert resolved', 'data': alert.to_dict()}), 200

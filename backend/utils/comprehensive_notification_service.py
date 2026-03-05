@@ -29,13 +29,18 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
     # ==================== OFFLINE DETECTION ====================
 
     @staticmethod
-    def is_user_offline(user_id: int, threshold_minutes: int = 30) -> bool:
+    def is_user_offline(user_id: int, threshold_minutes: int = 30, user=None) -> bool:
         """
         Determine if a user should receive an email fallback notification.
 
         Logic (BOTH must be true to consider user offline):
           1. No active Socket.IO connection right now
           2. last_login > threshold_minutes ago (or user never logged in)
+
+        Args:
+            user_id: The user's ID
+            threshold_minutes: Minutes since last login to consider offline
+            user: Optional pre-fetched User object to avoid an extra DB query
 
         Returns True  -> user is offline, send email
         Returns False -> user is online, skip email (they will see the bell notification)
@@ -53,7 +58,9 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 log.debug(f"is_user_offline: no active Socket.IO connections tracked — relying on last_login for user {user_id}")
 
             # Check 2: recent login fallback
-            user = User.query.get(user_id)
+            # Use pre-fetched user if provided, otherwise query
+            if user is None:
+                user = User.query.get(user_id)
             if not user or not user.last_login:
                 return True  # No record -> treat as offline
 
@@ -922,6 +929,51 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(pm_user_id, notification.to_dict())
+
+            # Send email if PM is offline
+            if ComprehensiveNotificationService.is_user_offline(pm_user_id):
+                from models.user import User
+                from utils.boq_email_service import BOQEmailService
+                pm = User.query.get(pm_user_id)
+                if pm and pm.email:
+                    email_html = f"""
+                    <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+                      <div style="background:#111827;padding:28px 32px;">
+                        <p style="margin:0 0 4px;color:#9ca3af;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;">MeterSquare ERP</p>
+                        <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;">Day Extension Approved</h1>
+                      </div>
+                      <div style="background:#f0fdf4;border-bottom:1px solid #16a34a33;padding:14px 32px;">
+                        <span style="display:inline-block;background:#16a34a;color:#ffffff;font-size:12px;font-weight:700;letter-spacing:0.5px;padding:4px 14px;border-radius:20px;text-transform:uppercase;">Approved</span>
+                      </div>
+                      <div style="padding:28px 32px;">
+                        <table style="width:100%;border-collapse:collapse;font-size:14px;color:#111827;">
+                          <tr style="border-bottom:1px solid #f3f4f6;">
+                            <td style="padding:12px 0;color:#6b7280;width:38%;font-weight:500;">Project</td>
+                            <td style="padding:12px 0;font-weight:600;">{project_name}</td>
+                          </tr>
+                          <tr style="border-bottom:1px solid #f3f4f6;">
+                            <td style="padding:12px 0;color:#6b7280;font-weight:500;">Days Added</td>
+                            <td style="padding:12px 0;font-weight:600;color:#16a34a;">+{days_approved} day{'s' if days_approved != 1 else ''}</td>
+                          </tr>
+                          <tr>
+                            <td style="padding:12px 0;color:#6b7280;font-weight:500;">Approved By</td>
+                            <td style="padding:12px 0;font-weight:600;">{td_name}</td>
+                          </tr>
+                        </table>
+                        <div style="margin-top:24px;padding:16px;background:#f9fafb;border-left:3px solid #111827;border-radius:0 4px 4px 0;">
+                          <p style="margin:0;font-size:13px;color:#374151;">The project deadline has been updated. Please log in to MeterSquare ERP to view the new schedule.</p>
+                        </div>
+                      </div>
+                      <div style="padding:16px 32px;border-top:1px solid #f3f4f6;background:#f9fafb;">
+                        <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">This is an automated notification from MeterSquare ERP &mdash; please do not reply to this email.</p>
+                      </div>
+                    </div>
+                    """
+                    BOQEmailService().send_email_async(
+                        pm.email,
+                        f"✅ Day Extension Approved — {project_name}",
+                        email_html
+                    )
         except Exception as e:
             log.error(f"Error sending day extension approved notification: {e}")
 
@@ -2207,7 +2259,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
                 send_notification_to_user(pm.user_id, notification.to_dict())
                 # Email fallback -- PM must review damaged material (urgent action required)
-                if ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                if ComprehensiveNotificationService.is_user_offline(pm.user_id, user=pm):
                     if pm.email:
                         from utils.email_styles import build_material_email
                         email_body = build_material_email(
@@ -3328,7 +3380,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 send_notification_to_user(td.user_id, notification.to_dict())
 
                 # Email fallback — TD must approve (action required)
-                if ComprehensiveNotificationService.is_user_offline(td.user_id):
+                if ComprehensiveNotificationService.is_user_offline(td.user_id, user=td):
                     if td.email:
                         from utils.email_styles import build_material_email
                         detail_rows = [
@@ -3408,7 +3460,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=returned_by_name
                 )
                 send_notification_to_user(pm.user_id, notification.to_dict())
-                if ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                if ComprehensiveNotificationService.is_user_offline(pm.user_id, user=pm):
                     if pm.email:
                         from utils.email_styles import build_material_email
                         email_body = build_material_email(
@@ -3477,7 +3529,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 )
                 send_notification_to_user(pm_id, notification.to_dict())
                 pm_user = User.query.get(pm_id)
-                if pm_user and ComprehensiveNotificationService.is_user_offline(pm_id):
+                if pm_user and ComprehensiveNotificationService.is_user_offline(pm_id, user=pm_user):
                     if pm_user.email:
                         from utils.email_styles import build_material_email
                         email_body = build_material_email(
@@ -3729,7 +3781,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                 send_notification_to_user(pm.user_id, notification.to_dict())
 
                 # Email fallback — PM must act on this
-                if ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                if ComprehensiveNotificationService.is_user_offline(pm.user_id, user=pm):
                     if pm.email:
                         from utils.email_styles import build_material_email
                         email_body = build_material_email(
@@ -3831,7 +3883,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=sent_by_name
                 )
                 send_notification_to_user(pm.user_id, notification.to_dict())
-                if ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                if ComprehensiveNotificationService.is_user_offline(pm.user_id, user=pm):
                     if pm.email:
                         from utils.email_styles import build_material_email
                         email_body = build_material_email(
@@ -3945,7 +3997,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=issued_by_name
                 )
                 send_notification_to_user(pm.user_id, notification.to_dict())
-                if ComprehensiveNotificationService.is_user_offline(pm.user_id):
+                if ComprehensiveNotificationService.is_user_offline(pm.user_id, user=pm):
                     if pm.email:
                         from utils.email_styles import build_material_email
                         email_body = build_material_email(
@@ -4021,7 +4073,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     sender_name=requested_by_name
                 )
                 send_notification_to_user(td.user_id, notification.to_dict())
-                if ComprehensiveNotificationService.is_user_offline(td.user_id):
+                if ComprehensiveNotificationService.is_user_offline(td.user_id, user=td):
                     if td.email:
                         from utils.email_styles import build_material_email
                         email_body = build_material_email(

@@ -22,11 +22,19 @@ import {
   Globe,
   Clock,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Wifi,
+  WifiOff,
+  LogOut,
+  ShieldOff,
+  ShieldCheck,
+  AlertTriangle,
+  CheckCircle,
+  Shield
 } from 'lucide-react';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import { formatDateTimeLocal } from '@/utils/dateFormatter';
-import { adminApi, User, Role, CreateUserData, LoginHistoryRecord } from '@/api/admin';
+import { adminApi, User, Role, CreateUserData, LoginHistoryRecord, OnlineUserRecord, SuspiciousAlert } from '@/api/admin';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 
 const UserManagement: React.FC = () => {
@@ -42,15 +50,45 @@ const UserManagement: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showLoginHistoryModal, setShowLoginHistoryModal] = useState(false);
   const [selectedUserForHistory, setSelectedUserForHistory] = useState<User | null>(null);
+  const [showOnlineUsersModal, setShowOnlineUsersModal] = useState(false);
+  const [showSecurityAlerts, setShowSecurityAlerts] = useState(false);
+  const [securityAlerts, setSecurityAlerts] = useState<SuspiciousAlert[]>([]);
+  const [unresolvedCount, setUnresolvedCount] = useState(0);
+  const [loadingAlerts, setLoadingAlerts] = useState(false);
+  const [showResolvedAlerts, setShowResolvedAlerts] = useState(false);
 
   useEffect(() => {
     fetchUsers();
     fetchRoles();
+    adminApi.getSecurityAlerts(true).then(res => setUnresolvedCount(res.unresolved_count)).catch(() => {});
   }, [currentPage, searchQuery, selectedRole, statusFilter]);
 
   const handleViewLoginHistory = (user: User) => {
     setSelectedUserForHistory(user);
     setShowLoginHistoryModal(true);
+  };
+
+  const fetchSecurityAlerts = async () => {
+    setLoadingAlerts(true);
+    try {
+      const res = await adminApi.getSecurityAlerts(false);
+      setSecurityAlerts(res.data);
+      setUnresolvedCount(res.unresolved_count);
+    } catch (err) {
+      showError('Failed to load security alerts');
+    } finally {
+      setLoadingAlerts(false);
+    }
+  };
+
+  const handleResolveAlert = async (alertId: number) => {
+    try {
+      const res = await adminApi.resolveAlert(alertId);
+      showSuccess(res.message);
+      fetchSecurityAlerts();
+    } catch (err: any) {
+      showError('Failed to resolve alert', { description: err.response?.data?.error });
+    }
   };
 
   const fetchUsers = async () => {
@@ -108,6 +146,29 @@ const UserManagement: React.FC = () => {
     }
   };
 
+  const handleBlockToggle = async (user: User) => {
+    if (user.is_blocked) {
+      if (!window.confirm(`Unblock ${user.full_name}? They will be able to log in again.`)) return;
+      try {
+        const res = await adminApi.unblockUser(user.user_id);
+        showSuccess(res.message);
+        fetchUsers();
+      } catch (err: any) {
+        showError('Failed to unblock user', { description: err.response?.data?.error });
+      }
+    } else {
+      const reason = window.prompt(`Reason for blocking ${user.full_name}:`, 'Blocked by administrator');
+      if (reason === null) return;
+      try {
+        const res = await adminApi.blockUser(user.user_id, reason || 'Blocked by administrator');
+        showSuccess(res.message);
+        fetchUsers();
+      } catch (err: any) {
+        showError('Failed to block user', { description: err.response?.data?.error });
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {/* Header */}
@@ -120,13 +181,34 @@ const UserManagement: React.FC = () => {
             </h1>
             <p className="text-gray-500 mt-1">Manage system users and permissions</p>
           </div>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 px-6 py-3 bg-[#243d8a] text-white rounded-lg hover:bg-[#1e3270] transition-colors shadow-md"
-          >
-            <Plus className="w-5 h-5" />
-            Add User
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => { setShowSecurityAlerts(true); fetchSecurityAlerts(); }}
+              className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors text-sm font-medium"
+            >
+              <AlertTriangle className="w-4 h-4" />
+              Security Alerts
+              {unresolvedCount > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs bg-amber-600 text-white rounded-full font-bold">
+                  {unresolvedCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setShowOnlineUsersModal(true)}
+              className="flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shadow-md"
+            >
+              <Wifi className="w-5 h-5" />
+              Online Status
+            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-2 px-6 py-3 bg-[#243d8a] text-white rounded-lg hover:bg-[#1e3270] transition-colors shadow-md"
+            >
+              <Plus className="w-5 h-5" />
+              Add User
+            </button>
+          </div>
         </div>
       </div>
 
@@ -248,7 +330,12 @@ const UserManagement: React.FC = () => {
                             </span>
                           </div>
                           <div>
-                            <p className="font-medium text-gray-900">{user.full_name || 'No name'}</p>
+                            <p className="font-medium text-gray-900 flex items-center flex-wrap gap-1">
+                              {user.full_name || 'No name'}
+                              {user.is_blocked && (
+                                <span className="px-1.5 py-0.5 text-xs bg-red-100 text-red-600 rounded font-medium ml-1">Blocked</span>
+                              )}
+                            </p>
                             {user.phone && (
                               <p className="text-xs text-gray-500 flex items-center gap-1">
                                 <Phone className="w-3 h-3" />
@@ -302,6 +389,17 @@ const UserManagement: React.FC = () => {
                             <span className="text-gray-400 italic">Never logged in</span>
                           )}
                           <History className="w-4 h-4 text-gray-400 group-hover:text-[#243d8a] transition-colors" />
+                        </button>
+                        <button
+                          onClick={() => handleBlockToggle(user)}
+                          title={user.is_blocked ? 'Unblock user' : 'Block user'}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            user.is_blocked
+                              ? 'text-green-500 hover:bg-green-50 hover:text-green-700'
+                              : 'text-orange-400 hover:bg-orange-50 hover:text-orange-600'
+                          }`}
+                        >
+                          {user.is_blocked ? <ShieldCheck className="w-4 h-4" /> : <ShieldOff className="w-4 h-4" />}
                         </button>
                       </td>
                     </motion.tr>
@@ -360,6 +458,102 @@ const UserManagement: React.FC = () => {
           }}
           user={selectedUserForHistory}
         />
+      )}
+
+      {/* Online Users Modal */}
+      <OnlineUsersModal
+        isOpen={showOnlineUsersModal}
+        onClose={() => setShowOnlineUsersModal(false)}
+      />
+
+      {/* Security Alerts Modal */}
+      {showSecurityAlerts && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+                <h2 className="text-lg font-semibold text-gray-800">Security Alerts</h2>
+                {unresolvedCount > 0 && (
+                  <span className="px-2 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full font-medium">
+                    {unresolvedCount} unresolved
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowResolvedAlerts(prev => !prev)}
+                  className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                >
+                  {showResolvedAlerts ? 'Hide Resolved' : 'Show All'}
+                </button>
+                <button
+                  onClick={fetchSecurityAlerts}
+                  className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                >
+                  Refresh
+                </button>
+                <button
+                  onClick={() => setShowSecurityAlerts(false)}
+                  className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="overflow-y-auto flex-1 p-4 space-y-3">
+              {loadingAlerts ? (
+                <div className="text-center py-8 text-gray-400">Loading...</div>
+              ) : (() => {
+                const displayed = showResolvedAlerts ? securityAlerts : securityAlerts.filter(a => !a.is_resolved);
+                if (displayed.length === 0) {
+                  return (
+                    <div className="text-center py-8 text-gray-400 flex flex-col items-center gap-2">
+                      <Shield className="w-8 h-8 text-gray-300" />
+                      <span>{showResolvedAlerts ? 'No alerts found' : 'No unresolved alerts'}</span>
+                    </div>
+                  );
+                }
+                return displayed.map(alert => (
+                  <div
+                    key={alert.id}
+                    className={`rounded-lg border p-3 ${alert.is_resolved ? 'bg-gray-50 border-gray-200 opacity-60' : alert.severity === 'high' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`text-xs font-bold uppercase px-1.5 py-0.5 rounded ${alert.severity === 'high' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {alert.severity}
+                          </span>
+                          <span className="text-xs text-gray-500">{alert.alert_type.replace(/_/g, ' ')}</span>
+                          {alert.is_resolved && <span className="text-xs text-green-600 font-medium">&#10003; Resolved</span>}
+                        </div>
+                        <p className="text-sm font-medium text-gray-800">{alert.description}</p>
+                        <div className="text-xs text-gray-500 mt-1">
+                          <span className="font-medium">{alert.user_name}</span>
+                          {alert.user_email && <span> &middot; {alert.user_email}</span>}
+                          <span> &middot; {new Date(alert.created_at).toLocaleString()}</span>
+                        </div>
+                      </div>
+                      {!alert.is_resolved && (
+                        <button
+                          onClick={() => handleResolveAlert(alert.id)}
+                          title="Mark as resolved"
+                          className="shrink-0 p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -522,6 +716,7 @@ const UserFormModal: React.FC<UserFormModalProps> = ({
     </AnimatePresence>
   );
 };
+
 
 // Login History Modal Component
 interface LoginHistoryModalProps {
@@ -695,7 +890,7 @@ const LoginHistoryModal: React.FC<LoginHistoryModalProps> = ({
                                   <span>• {record.os}</span>
                                 )}
                                 {record.ip_address && (
-                                  <span>• IP: {record.ip_address}</span>
+                                  <span>• IP: {formatIP(record.ip_address)}</span>
                                 )}
                               </div>
                               <div className="flex items-center gap-2 mt-2">
@@ -737,6 +932,260 @@ const LoginHistoryModal: React.FC<LoginHistoryModalProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+};
+
+// Online Users Modal Component
+interface OnlineUsersModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+const formatIP = (ip?: string): string => {
+  if (!ip) return '';
+  if (ip === '127.0.0.1' || ip === '::1') return 'Local';
+  // Private ranges: 10.x, 192.168.x, 172.16-31.x
+  if (/^10\./.test(ip) || /^192\.168\./.test(ip) || /^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return ip;
+  return ip;
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  pm: 'bg-blue-100 text-blue-700',
+  td: 'bg-purple-100 text-purple-700',
+  se: 'bg-orange-100 text-orange-700',
+  estimator: 'bg-yellow-100 text-yellow-700',
+  buyer: 'bg-pink-100 text-pink-700',
+  vendor: 'bg-teal-100 text-teal-700',
+};
+
+const getRoleColor = (role: string) =>
+  ROLE_COLORS[role.toLowerCase()] ?? 'bg-gray-100 text-gray-700';
+
+const OnlineUsersModal: React.FC<OnlineUsersModalProps> = ({ isOpen, onClose }) => {
+  const [users, setUsers] = useState<OnlineUserRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'all' | 'online' | 'offline'>('all');
+  const [summary, setSummary] = useState({ total: 0, online: 0, offline: 0 });
+
+  const [loggingOutId, setLoggingOutId] = useState<number | null>(null);
+
+  const handleForceLogout = async (user: OnlineUserRecord) => {
+    if (!window.confirm(`Force logout ${user.full_name}? Their session will be terminated immediately.`)) return;
+    setLoggingOutId(user.user_id);
+    try {
+      const res = await adminApi.forceLogout(user.user_id);
+      showSuccess(res.message);
+      fetchOnlineUsers();
+    } catch (err: any) {
+      showError('Failed to force logout', { description: err.response?.data?.error || err.message });
+    } finally {
+      setLoggingOutId(null);
+    }
+  };
+
+  const fetchOnlineUsers = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await adminApi.getOnlineUsers();
+      setUsers(response.users);
+      setSummary(response.summary);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to fetch user status');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) fetchOnlineUsers();
+  }, [isOpen]);
+
+  const filteredUsers = users.filter((u) => {
+    if (filter === 'online') return u.is_online;
+    if (filter === 'offline') return !u.is_online;
+    return true;
+  });
+
+  const getDeviceIcon = (deviceType?: string) => {
+    if (deviceType === 'mobile') return <Smartphone className="w-3.5 h-3.5" />;
+    if (deviceType === 'tablet') return <Tablet className="w-3.5 h-3.5" />;
+    return <Monitor className="w-3.5 h-3.5" />;
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-50"
+            onClick={onClose}
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <div className="flex items-center gap-3">
+                  <Wifi className="w-5 h-5 text-emerald-600" />
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">User Online Status</h2>
+                    {!isLoading && (
+                      <p className="text-xs text-gray-500">
+                        {summary.online} online · {summary.offline} offline · {summary.total} total
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={fetchOnlineUsers}
+                    className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+                    title="Refresh"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={onClose}
+                    className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Filter tabs */}
+              <div className="flex gap-1 px-6 py-3 border-b border-gray-100 bg-gray-50">
+                {(['all', 'online', 'offline'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setFilter(tab)}
+                    className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors capitalize ${
+                      filter === tab
+                        ? tab === 'online'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : tab === 'offline'
+                          ? 'bg-gray-200 text-gray-700'
+                          : 'bg-[#243d8a] text-white'
+                        : 'text-gray-500 hover:bg-gray-100'
+                    }`}
+                  >
+                    {tab === 'all' ? `All (${summary.total})` : tab === 'online' ? `Online (${summary.online})` : `Offline (${summary.offline})`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
+                {isLoading ? (
+                  <div className="flex justify-center py-12">
+                    <ModernLoadingSpinners type="spinner" size="md" color="blue" />
+                  </div>
+                ) : error ? (
+                  <div className="flex flex-col items-center py-10 text-red-500 gap-2">
+                    <AlertCircle className="w-8 h-8" />
+                    <p className="text-sm">{error}</p>
+                  </div>
+                ) : filteredUsers.length === 0 ? (
+                  <div className="flex flex-col items-center py-10 text-gray-400 gap-2">
+                    <WifiOff className="w-10 h-10" />
+                    <p className="text-sm">No users found</p>
+                  </div>
+                ) : (
+                  filteredUsers.map((user) => (
+                    <div
+                      key={user.user_id}
+                      className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50 transition-colors"
+                    >
+                      {/* Status dot */}
+                      <div className="relative flex-shrink-0">
+                        <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-semibold text-gray-600">
+                          {user.full_name.charAt(0).toUpperCase()}
+                        </div>
+                        <span
+                          className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
+                            user.is_online ? 'bg-emerald-500' : 'bg-gray-400'
+                          }`}
+                        />
+                      </div>
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-gray-900 text-sm truncate">{user.full_name}</span>
+                          <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${getRoleColor(user.role)}`}>
+                            {user.role}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                              user.is_online ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                            }`}
+                          >
+                            {user.is_online ? 'Online' : 'Offline'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-400 truncate mt-0.5">{user.email}</p>
+                        {user.is_online && (
+                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
+                            {user.device_type && (
+                              <span className="flex items-center gap-1">
+                                {getDeviceIcon(user.device_type)}
+                                {user.browser} · {user.os}
+                              </span>
+                            )}
+                            {user.ip_address && (
+                              <span className="flex items-center gap-1">
+                                <Globe className="w-3 h-3" />
+                                {formatIP(user.ip_address)}
+                              </span>
+                            )}
+                            {user.last_login_at && (
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                Since {formatDateTimeLocal(user.last_login_at).split(',')[0]}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {!user.is_online && user.last_login_at && (
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            Last seen: {formatDateTimeLocal(user.last_login_at)}
+                          </p>
+                        )}
+                        {!user.is_online && !user.last_login_at && (
+                          <p className="text-xs text-gray-400 mt-0.5">Never logged in</p>
+                        )}
+                      </div>
+                      {user.is_online && (
+                        <button
+                          onClick={() => handleForceLogout(user)}
+                          disabled={loggingOutId === user.user_id}
+                          className="ml-auto flex-shrink-0 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                          title="Force logout"
+                        >
+                          {loggingOutId === user.user_id
+                            ? <RefreshCw className="w-4 h-4 animate-spin" />
+                            : <LogOut className="w-4 h-4" />}
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </motion.div>
         </>

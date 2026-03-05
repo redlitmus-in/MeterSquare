@@ -48,6 +48,7 @@ import { Button } from '@/components/ui/button';
 import { estimatorService } from '@/roles/estimator/services/estimatorService';
 import { tdService } from '@/roles/technical-director/services/tdService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { DeadlineBadge } from '@/utils/deadlineBadge';
 import BOQHistoryTimeline from '@/roles/estimator/components/BOQHistoryTimeline';
 import BOQRevisionHistory from '@/roles/estimator/components/BOQRevisionHistory';
 import TDRevisionComparisonPage from '@/roles/technical-director/components/TDRevisionComparisonPage';
@@ -2103,8 +2104,9 @@ const ProjectApprovals: React.FC = () => {
               <div className="p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1.5">
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                       <h3 className="text-base font-bold text-gray-900">{estimation.projectName}</h3>
+                      <DeadlineBadge endDate={estimation.endDate} status={estimation.status} size="compact" />
                       {estimation.projectCode && (
                         <span className="px-2 py-0.5 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
                           {estimation.projectCode}

@@ -1636,10 +1636,49 @@ const REDIRECT_RULES: RedirectRule[] = [
       queryParams: { tab: 'completed', ...(metadata?.task_id && { task_id: String(metadata.task_id) }) }
     })
   },
+  // ═══════════════════════════════════════════════════════════
+  // PROJECT DEADLINE ALERTS (must come BEFORE task_overdue)
+  // Matches the scheduler titles: "Project Deadline in X Days",
+  // "Project Deadline Is Today", "Project Overdue by X days"
+  // ═══════════════════════════════════════════════════════════
+  {
+    id: 'project_deadline_alert',
+    match: ({ titleLower, messageLower, category, metadata }) =>
+      category === 'project' && (
+        has(titleLower, 'project deadline', 'project overdue') ||
+        has(messageLower, 'deadline is in', 'deadline is today', 'days overdue') ||
+        metadata?.deadline_level != null
+      ),
+    resolve: ({ buildPath, role, metadata }) => {
+      const projectId = metadata?.project_id;
+      // TD → project-approvals assigned tab
+      if (role === 'technical-director' || role === 'technicaldirector') {
+        return {
+          path: buildPath('/project-approvals'),
+          queryParams: {
+            tab: 'assigned',
+            ...(projectId && { projectId: String(projectId) })
+          }
+        };
+      }
+      // PM → my-projects
+      if (role === 'project-manager' || role === 'productionmanager') {
+        return {
+          path: buildPath('/my-projects'),
+          queryParams: projectId ? { projectId: String(projectId) } : {}
+        };
+      }
+      // SE / others → projects
+      return {
+        path: buildPath('/projects'),
+        queryParams: projectId ? { projectId: String(projectId) } : {}
+      };
+    }
+  },
   {
     id: 'task_overdue',
-    match: ({ titleLower, messageLower }) =>
-      has(titleLower, 'overdue') || has(messageLower, 'overdue'),
+    match: ({ titleLower, messageLower, category }) =>
+      category !== 'project' && (has(titleLower, 'overdue') || has(messageLower, 'overdue')),
     resolve: ({ buildPath, metadata }) => ({
       path: buildPath('/tasks'),
       queryParams: { tab: 'overdue', ...(metadata?.task_id && { task_id: String(metadata.task_id) }) }

@@ -461,6 +461,21 @@ apiClient.interceptors.response.use(
       });
     }
 
+    // Handle 403 Account Blocked - clear session and redirect to login with notice
+    if (error.response?.status === 403 && error.response?.data?.error === 'Account blocked') {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user');
+      localStorage.removeItem('auth-storage');
+      try {
+        const authStore = (await import('@/store/authStore')).useAuthStore;
+        authStore.setState({ user: null, isAuthenticated: false, isLoading: false, error: null });
+      } catch {}
+      if (!window.location.pathname.includes('/login')) {
+        window.location.replace('/login?blocked=true');
+      }
+      return Promise.reject(error);
+    }
+
     // Handle 401 Unauthorized - with consecutive count and debounce
     if (error.response?.status === 401) {
       // Skip auth endpoints - these 401s are expected for invalid credentials
@@ -468,7 +483,7 @@ apiClient.interceptors.response.use(
         await handleUnauthorized(error.config?.url);
       }
     }
-    
+
     // DISABLED: All automatic error page redirects for debugging
     // Uncomment this block to re-enable error page redirects
     /*

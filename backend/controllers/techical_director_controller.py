@@ -906,47 +906,36 @@ def get_td_dashboard_stats():
             BOQ.status != 'Pending_PM_Approval'
         ).all()
 
-        # Count BOQs using EXACT same logic as TD tab counts endpoint
-        # Pending tab: Pending_TD_Approval and Pending statuses
-        pending_count = db.session.query(func.count(BOQ.boq_id)).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Pending_TD_Approval', 'Pending'])
-        ).scalar() or 0
+        # Single aggregated query for all BOQ status counts (was 4 separate COUNT queries)
+        from sqlalchemy import case as sa_case
 
-        # Approved tab: Approved, Revision_Approved, Sent_for_Confirmation AND not assigned to PM
-        approved_count = db.session.query(func.count(BOQ.boq_id)).join(
+        _counts = db.session.query(
+            func.count(sa_case(
+                (BOQ.status.in_(['Pending_TD_Approval', 'Pending']), BOQ.boq_id)
+            )).label('pending'),
+            func.count(sa_case(
+                (and_(
+                    BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'Sent_for_Confirmation']),
+                    or_(Project.user_id == None, Project.user_id == '[]', Project.user_id == 'null')
+                ), BOQ.boq_id)
+            )).label('approved'),
+            func.count(sa_case(
+                (BOQ.revision_number > 0, BOQ.boq_id)
+            )).label('revisions'),
+            func.count(sa_case(
+                (BOQ.status.in_(['Rejected', 'rejected']), BOQ.boq_id)
+            )).label('rejected')
+        ).join(
             Project, BOQ.project_id == Project.project_id
         ).filter(
             BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Approved', 'approved', 'Revision_Approved', 'Sent_for_Confirmation']),
-            or_(
-                Project.user_id == None,
-                Project.user_id == '[]',
-                Project.user_id == 'null'
-            )
-        ).scalar() or 0
+            Project.is_deleted == False
+        ).first()
 
-        # Revisions tab: revision_number > 0
-        revisions_count = db.session.query(func.count(BOQ.boq_id)).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.revision_number > 0
-        ).scalar() or 0
-
-        # Rejected by TD tab
-        rejected_count = db.session.query(func.count(BOQ.boq_id)).join(
-            Project, BOQ.project_id == Project.project_id
-        ).filter(
-            BOQ.is_deleted == False,
-            Project.is_deleted == False,
-            BOQ.status.in_(['Rejected', 'rejected'])
-        ).scalar() or 0
+        pending_count = _counts.pending or 0
+        approved_count = _counts.approved or 0
+        revisions_count = _counts.revisions or 0
+        rejected_count = _counts.rejected or 0
 
         status_counts = {
             'in_progress': revisions_count,  # Revisions
@@ -1149,49 +1138,45 @@ def get_td_dashboard_stats():
             })
             disposal_month_labels.append(month_start.strftime('%b'))
 
-        # Count current totals by status
-        # Asset Disposals
-        asset_pending = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
-            AssetDisposal.status == 'pending_review'
-        ).scalar() or 0
+        # Asset disposal counts + value — single query (was 4 separate queries)
+        _asset_stats = db.session.query(
+            func.count(sa_case((AssetDisposal.status == 'pending_review', AssetDisposal.disposal_id))).label('pending'),
+            func.count(sa_case((AssetDisposal.status == 'approved', AssetDisposal.disposal_id))).label('approved'),
+            func.count(sa_case((AssetDisposal.status == 'rejected', AssetDisposal.disposal_id))).label('rejected'),
+            func.sum(sa_case(
+                (AssetDisposal.status.in_(['pending_review', 'approved']), AssetDisposal.estimated_value),
+                else_=0
+            )).label('total_value')
+        ).first()
 
-        asset_approved = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
-            AssetDisposal.status == 'approved'
-        ).scalar() or 0
+        asset_pending = _asset_stats.pending or 0
+        asset_approved = _asset_stats.approved or 0
+        asset_rejected = _asset_stats.rejected or 0
+        total_disposal_value = _asset_stats.total_value or 0
 
-        asset_rejected = db.session.query(func.count(AssetDisposal.disposal_id)).filter(
-            AssetDisposal.status == 'rejected'
-        ).scalar() or 0
-
-        # Material Disposals (Damaged/Defective returns)
-        material_pending = db.session.query(func.count(MaterialReturn.return_id)).filter(
-            MaterialReturn.condition.in_(['Damaged', 'Defective']),
-            or_(MaterialReturn.disposal_status == 'pending_review', MaterialReturn.disposal_status == None)
-        ).scalar() or 0
-
-        material_approved = db.session.query(func.count(MaterialReturn.return_id)).filter(
-            MaterialReturn.condition.in_(['Damaged', 'Defective']),
-            MaterialReturn.disposal_status.in_(['approved', 'approved_for_disposal', 'disposed'])
-        ).scalar() or 0
-
-        material_rejected = db.session.query(func.count(MaterialReturn.return_id)).filter(
-            MaterialReturn.condition.in_(['Damaged', 'Defective']),
-            MaterialReturn.disposal_status == 'rejected'
-        ).scalar() or 0
-
-        # Get total estimated value of asset disposals
-        total_disposal_value = db.session.query(
-            func.sum(AssetDisposal.estimated_value)
-        ).filter(
-            AssetDisposal.status.in_(['pending_review', 'approved'])
-        ).scalar() or 0
-
-        # Get total material disposal value
-        total_material_disposal_value = db.session.query(
-            func.sum(MaterialReturn.disposal_value)
+        # Material disposal counts + value — single query (was 4 separate queries)
+        _mat_stats = db.session.query(
+            func.count(sa_case((
+                or_(MaterialReturn.disposal_status == 'pending_review', MaterialReturn.disposal_status == None),
+                MaterialReturn.return_id
+            ))).label('pending'),
+            func.count(sa_case((
+                MaterialReturn.disposal_status.in_(['approved', 'approved_for_disposal', 'disposed']),
+                MaterialReturn.return_id
+            ))).label('approved'),
+            func.count(sa_case((
+                MaterialReturn.disposal_status == 'rejected',
+                MaterialReturn.return_id
+            ))).label('rejected'),
+            func.sum(func.coalesce(MaterialReturn.disposal_value, 0)).label('total_value')
         ).filter(
             MaterialReturn.condition.in_(['Damaged', 'Defective'])
-        ).scalar() or 0
+        ).first()
+
+        material_pending = _mat_stats.pending or 0
+        material_approved = _mat_stats.approved or 0
+        material_rejected = _mat_stats.rejected or 0
+        total_material_disposal_value = _mat_stats.total_value or 0
 
         disposal_stats = {
             'asset': {
@@ -1309,6 +1294,34 @@ def get_td_dashboard_stats():
                 'dueDate': project.end_date.strftime('%Y-%m-%d') if project.end_date else None
             })
 
+        # ============ Pending Day Extension Requests ============
+        pending_day_ext_rows = db.session.query(
+            Project.project_id,
+            Project.project_name,
+            Project.project_code,
+            Project.extension_status,
+            Project.extension_days,
+            Project.extension_original_days,
+            Project.extension_reason
+        ).filter(
+            Project.is_deleted == False,
+            Project.extension_status.in_(['day_request_send_td', 'day_edit_td'])
+        ).all()
+
+        pending_day_extensions = [
+            {
+                'project_id': row.project_id,
+                'project_name': row.project_name,
+                'project_code': row.project_code,
+                'extension_status': row.extension_status,
+                'requested_days': row.extension_original_days or row.extension_days or 0,
+                'edited_days': row.extension_days if row.extension_status == 'day_edit_td' else None,
+                'reason': row.extension_reason or 'No reason provided',
+                'is_edited': row.extension_status == 'day_edit_td'
+            }
+            for row in pending_day_ext_rows
+        ]
+
         # ============ Return Complete Dashboard Data ============
         dashboard_data = {
             'projectStatus': status_counts,
@@ -1321,7 +1334,9 @@ def get_td_dashboard_stats():
             'monthlyRevenue': monthly_revenue,
             'monthLabels': month_labels,
             'disposalStats': disposal_stats,
-            'activeProjects': active_projects
+            'activeProjects': active_projects,
+            'pendingDayExtensions': pending_day_extensions,
+            'pendingDayExtensionsCount': len(pending_day_extensions)
         }
 
         return jsonify({
@@ -1939,6 +1954,9 @@ def get_td_assign_boq():
                 Project.working_hours,
                 Project.user_id,
                 Project.extension_status,
+                Project.start_date,
+                Project.end_date,
+                Project.duration_days,
                 User.full_name.label('last_pm_name'),
                 BOQDetails
             )
@@ -2010,6 +2028,10 @@ def get_td_assign_boq():
                 "client_rejection_reason": boq_obj.client_rejection_reason,
                 "last_pm_user_id": boq_obj.last_pm_user_id,
                 "last_pm_name": row.last_pm_name,
+                # Project timeline fields for deadline badge
+                "start_date": row.start_date.isoformat() if row.start_date else None,
+                "end_date": row.end_date.isoformat() if row.end_date else None,
+                "duration_days": row.duration_days,
                 # Day extension status for TD clock indicator
                 "has_pending_day_extension": has_pending_ext,
                 "pending_day_extension_count": 1 if has_pending_ext else 0,

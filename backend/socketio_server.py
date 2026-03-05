@@ -31,12 +31,20 @@ SOCKET_CORS_ORIGINS = [
     "http://127.0.0.1:3001",
     "http://127.0.0.1:5173",
     "https://msq.kol.tel",
-    "http://msq.kol.tel"
+    "http://msq.kol.tel",
+    "https://msq.ath.cx",
+    "http://msq.ath.cx"
 ]
+
+# async_mode: Use 'gevent' when running under Gunicorn with gevent workers (production)
+# Falls back to 'threading' automatically in development (python app.py)
+import os
+_environment = os.getenv("ENVIRONMENT", "development")
+_async_mode = 'gevent' if _environment == 'production' else 'threading'
 
 socketio = SocketIO(
     cors_allowed_origins=SOCKET_CORS_ORIGINS,
-    async_mode='threading',
+    async_mode=_async_mode,
     logger=False,  # Disable Socket.IO internal logging (reduces noise)
     engineio_logger=False,  # Disable EngineIO logging (removes ping/pong spam)
     ping_timeout=60,

@@ -12,7 +12,13 @@ from controllers.admin_controller import (
     get_all_project_managers,
     get_all_site_engineers,
     get_user_login_history,
-    get_all_login_history
+    get_all_login_history,
+    get_online_users,
+    force_logout_user,
+    block_user,
+    unblock_user,
+    get_suspicious_alerts,
+    resolve_suspicious_alert,
 )
 
 admin_routes = Blueprint("admin_routes", __name__, url_prefix='/api/admin')
@@ -166,6 +172,31 @@ def get_all_login_history_route():
     return get_all_login_history()
 
 
+@admin_routes.route('/users/online', methods=['GET'])
+@jwt_required
+def get_online_users_route():
+    """Get all users with their online/offline status"""
+    return get_online_users()
+
+
+@admin_routes.route('/users/<int:user_id>/force-logout', methods=['POST'])
+@jwt_required
+def force_logout_user_route(user_id):
+    """Force logout a specific user"""
+    return force_logout_user(user_id)
+
+
+@admin_routes.route('/users/<int:user_id>/block', methods=['POST'])
+@jwt_required
+def block_user_route(user_id):
+    return block_user(user_id)
+
+@admin_routes.route('/users/<int:user_id>/unblock', methods=['POST'])
+@jwt_required
+def unblock_user_route(user_id):
+    return unblock_user(user_id)
+
+
 # ============================================
 # COMPREHENSIVE DASHBOARD ANALYTICS ROUTES
 # ============================================
@@ -192,3 +223,20 @@ def get_financial_summary_route():
     """Get financial summary for dashboard"""
     from controllers.admin_controller import get_financial_summary
     return get_financial_summary()
+
+# ============================================
+# SUSPICIOUS ACTIVITY ALERT ROUTES
+# ============================================
+
+@admin_routes.route('/security/alerts', methods=['GET'])
+@jwt_required
+def get_suspicious_alerts_route():
+    """Get all suspicious activity alerts (unresolved first)"""
+    return get_suspicious_alerts()
+
+
+@admin_routes.route('/security/alerts/<int:alert_id>/resolve', methods=['POST'])
+@jwt_required
+def resolve_suspicious_alert_route(alert_id):
+    """Mark a suspicious activity alert as resolved"""
+    return resolve_suspicious_alert(alert_id)

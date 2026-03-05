@@ -400,6 +400,17 @@ class TechnicalDirectorService {
         status: string;
         dueDate: string;
       }>;
+      pendingDayExtensions: Array<{
+        project_id: number;
+        project_name: string;
+        project_code: string;
+        extension_status: string;
+        requested_days: number;
+        edited_days: number | null;
+        reason: string;
+        is_edited: boolean;
+      }>;
+      pendingDayExtensionsCount: number;
     };
     message?: string;
   }> {

@@ -16,6 +16,10 @@ class User(db.Model):
     department = db.Column(db.String(100), nullable=True)  # Added department field
     is_active = db.Column(db.Boolean, default=True, nullable=True)
     is_deleted = db.Column(db.Boolean, default=False, nullable=False)
+    is_blocked = db.Column(db.Boolean, default=False, nullable=False)
+    blocked_reason = db.Column(db.String(255), nullable=True)
+    blocked_at = db.Column(db.DateTime, nullable=True)
+    blocked_by = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=True)
     last_login = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
@@ -71,7 +75,10 @@ class User(db.Model):
             "role_id": self.role_id,
             "user_status": self.user_status,
             "department": self.department,
-            "is_active": self.is_active
+            "is_active": self.is_active,
+            "is_blocked": self.is_blocked,
+            "blocked_reason": self.blocked_reason,
+            "blocked_at": self.blocked_at.isoformat() + 'Z' if self.blocked_at else None,
         }
 
         # ✅ In development OR if admin OR if viewing own profile: return all data
@@ -104,6 +111,9 @@ class User(db.Model):
             "department": self.department,
             "is_active": self.is_active,
             "is_deleted": self.is_deleted,
+            "is_blocked": self.is_blocked,
+            "blocked_reason": self.blocked_reason,
+            "blocked_at": self.blocked_at.isoformat() + 'Z' if self.blocked_at else None,
             "last_login": self.last_login.isoformat() if self.last_login else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "last_modified_at": self.last_modified_at.isoformat() if self.last_modified_at else None

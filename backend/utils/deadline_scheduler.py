@@ -80,51 +80,81 @@ def _get_deadline_level(end_date: date) -> dict | None:
 
 
 def _build_email_html(project_name: str, end_date: date, deadline_info: dict) -> str:
-    """Build the inner HTML body for the deadline email (before wrap_email_content)."""
-    formatted_date = end_date.strftime("%B %d, %Y")
+    """Build a clean, professional deadline warning email."""
     days_remaining = deadline_info["days_remaining"]
+    formatted_date = end_date.strftime("%d %B %Y")
+
     if days_remaining < 0:
-        days_line = f"<strong style='color:#dc2626'>{abs(days_remaining)} days overdue</strong>"
-        header_color = "#dc2626"
-        header_text = "🚨 Project Overdue"
+        n = abs(days_remaining)
+        status_text = f"{n} Day{'s' if n != 1 else ''} Overdue"
+        status_color = "#dc2626"
+        status_bg = "#fef2f2"
+        urgency_note = "This project has passed its deadline. Please take immediate action."
     elif days_remaining == 0:
-        days_line = "<strong style='color:#dc2626'>Due today</strong>"
-        header_color = "#dc2626"
-        header_text = "🔴 Deadline Is Today"
+        status_text = "Due Today"
+        status_color = "#dc2626"
+        status_bg = "#fef2f2"
+        urgency_note = "This project's deadline is today. Ensure all work is finalised."
     elif days_remaining <= 3:
-        days_line = f"<strong style='color:#dc2626'>{days_remaining} day{'s' if days_remaining != 1 else ''} remaining</strong>"
-        header_color = "#dc2626"
-        header_text = "🔴 Deadline Approaching"
+        status_text = f"{days_remaining} Day{'s' if days_remaining != 1 else ''} Remaining"
+        status_color = "#dc2626"
+        status_bg = "#fef2f2"
+        urgency_note = "The deadline is very close. Please review the project timeline immediately."
     else:
-        days_line = f"<strong style='color:#d97706'>{days_remaining} days remaining</strong>"
-        header_color = "#d97706"
-        header_text = "⚠️ Deadline Approaching"
+        status_text = f"{days_remaining} Days Remaining"
+        status_color = "#b45309"
+        status_bg = "#fffbeb"
+        urgency_note = "Please review the project timeline and ensure work is progressing on schedule."
 
     return f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: {header_color}; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
-            <h2 style="margin: 0; font-size: 18px;">{header_text}</h2>
+    <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+
+      <!-- Header -->
+      <div style="background:#111827;padding:28px 32px;">
+        <p style="margin:0 0 4px;color:#9ca3af;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;">MeterSquare ERP</p>
+        <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;">Project Deadline Alert</h1>
+      </div>
+
+      <!-- Status Banner -->
+      <div style="background:{status_bg};border-bottom:1px solid {status_color}33;padding:14px 32px;display:flex;align-items:center;gap:12px;">
+        <span style="display:inline-block;background:{status_color};color:#ffffff;font-size:12px;font-weight:700;letter-spacing:0.5px;padding:4px 14px;border-radius:20px;text-transform:uppercase;">{status_text}</span>
+        <span style="color:{status_color};font-size:13px;">{urgency_note}</span>
+      </div>
+
+      <!-- Body -->
+      <div style="padding:28px 32px;">
+        <table style="width:100%;border-collapse:collapse;font-size:14px;color:#111827;">
+          <tr style="border-bottom:1px solid #f3f4f6;">
+            <td style="padding:12px 0;color:#6b7280;width:38%;font-weight:500;">Project</td>
+            <td style="padding:12px 0;font-weight:600;">{project_name}</td>
+          </tr>
+          <tr style="border-bottom:1px solid #f3f4f6;">
+            <td style="padding:12px 0;color:#6b7280;font-weight:500;">Deadline</td>
+            <td style="padding:12px 0;font-weight:600;">{formatted_date}</td>
+          </tr>
+          <tr>
+            <td style="padding:12px 0;color:#6b7280;font-weight:500;">Status</td>
+            <td style="padding:12px 0;">
+              <span style="color:{status_color};font-weight:700;">{status_text}</span>
+            </td>
+          </tr>
+        </table>
+
+        <div style="margin-top:24px;padding:16px;background:#f9fafb;border-left:3px solid #111827;border-radius:0 4px 4px 0;">
+          <p style="margin:0;font-size:13px;color:#374151;">
+            If additional time is required, the Project Manager can submit a
+            <strong>Day Extension Request</strong> through MeterSquare ERP.
+          </p>
         </div>
-        <div style="background: #f9fafb; padding: 24px; border: 1px solid #e5e7eb; border-radius: 0 0 8px 8px;">
-            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                    <td style="padding: 10px 0; color: #6b7280; width: 40%;">Project</td>
-                    <td style="padding: 10px 0; font-weight: 600; color: #111827;">{project_name}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                    <td style="padding: 10px 0; color: #6b7280;">Deadline</td>
-                    <td style="padding: 10px 0; font-weight: 600; color: #111827;">{formatted_date}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px 0; color: #6b7280;">Status</td>
-                    <td style="padding: 10px 0;">{days_line}</td>
-                </tr>
-            </table>
-            <p style="margin-top: 20px; color: #374151; font-size: 14px;">
-                Please review the project timeline and take action if needed.
-                If additional time is required, the Project Manager can submit a Day Extension Request.
-            </p>
-        </div>
+      </div>
+
+      <!-- Footer -->
+      <div style="padding:16px 32px;border-top:1px solid #f3f4f6;background:#f9fafb;">
+        <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">
+          This is an automated notification from MeterSquare ERP &mdash; please do not reply to this email.
+        </p>
+      </div>
+
     </div>
     """
 
@@ -225,6 +255,15 @@ def run_deadline_check(app):
                         )
 
                     # --- Create in-app notifications (bulk) ---
+                    def _action_url_for_user(u):
+                        """Return role-appropriate URL for this deadline notification."""
+                        role = (u.role.role if u.role else '').lower().replace(' ', '').replace('_', '')
+                        if role in ('technicaldirector', 'td'):
+                            return f'/technical-director/project-approvals?tab=assigned&projectId={project.project_id}'
+                        if role in ('projectmanager', 'pm'):
+                            return f'/project-manager/my-projects?projectId={project.project_id}'
+                        return f'/projects/{project.project_id}'
+
                     notifications_data = [
                         {
                             'user_id': user.user_id,
@@ -233,7 +272,7 @@ def run_deadline_check(app):
                             'message': message,
                             'priority': deadline_info['priority'],
                             'category': 'project',
-                            'action_url': f'/projects/{project.project_id}',
+                            'action_url': _action_url_for_user(user),
                             'action_label': 'View Project',
                             'metadata': {
                                 'project_id': project.project_id,
@@ -250,14 +289,12 @@ def run_deadline_check(app):
                     email_html = _build_email_html(project_name, project.end_date, deadline_info)
                     email_subject = f"{deadline_info['email_subject_prefix']} — {project_name}"
 
+                    from utils.boq_email_service import BOQEmailService
+                    email_svc = BOQEmailService()
                     for user in recipients:
-                        if ComprehensiveNotificationService.is_user_offline(user.user_id):
-                            ComprehensiveNotificationService.send_email_notification(
-                                recipient=user.email,
-                                subject=email_subject,
-                                message=email_html,
-                                notification_type='deadline_warning'
-                            )
+                        if ComprehensiveNotificationService.is_user_offline(user.user_id, user=user):
+                            email_svc.send_email_async(user.email, email_subject, email_html)
+                            log.info(f"[DeadlineCheck] Email sent to {user.email}")
 
                     # --- Mark project as notified today ---
                     project.last_deadline_notified_at = today

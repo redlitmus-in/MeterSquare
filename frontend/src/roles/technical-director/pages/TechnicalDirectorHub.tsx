@@ -1,18 +1,25 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
 import {
   AlertCircle,
-  BarChart3
+  BarChart3,
+  Clock,
+  CalendarDays,
+  ArrowRight,
+  Edit3
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { technicalDirectorService } from '../services/technicalDirectorService';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import { DeadlineBadge } from '@/utils/deadlineBadge';
 
 const TechnicalDirectorDashboard: React.FC = () => {
   const { user } = useAuthStore();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<any>(null);
 
@@ -742,6 +749,97 @@ const TechnicalDirectorDashboard: React.FC = () => {
           </motion.div>
         )}
 
+        {/* Pending Day Extension Requests */}
+        {(() => {
+          const extensions = dashboardData.pendingDayExtensions || [];
+          const count = dashboardData.pendingDayExtensionsCount || 0;
+          if (count === 0) return null;
+          return (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.85 }}
+              className="mb-8"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+                  <div className="p-2 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg relative">
+                    <Clock className="w-6 h-6 text-orange-600" />
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                      {count}
+                    </span>
+                  </div>
+                  Pending Day Extension Requests
+                </h2>
+                <button
+                  onClick={() => navigate('/technical-director/project-approvals?tab=assigned')}
+                  className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors"
+                >
+                  View All <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                {extensions.map((ext: any, index: number) => (
+                  <motion.div
+                    key={ext.project_id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.05 * index }}
+                    className="bg-white rounded-xl border border-orange-100 shadow-sm hover:shadow-md transition-all p-4"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <p className="font-semibold text-gray-900 text-sm">{ext.project_name}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{ext.project_code}</p>
+                      </div>
+                      <span className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${
+                        ext.is_edited
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-orange-100 text-orange-700'
+                      }`}>
+                        {ext.is_edited ? (
+                          <><Edit3 className="w-3 h-3" /> Edited by TD</>
+                        ) : (
+                          <><Clock className="w-3 h-3" /> Awaiting Review</>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-4 mb-3">
+                      <div className="flex items-center gap-1.5 bg-orange-50 rounded-lg px-3 py-1.5">
+                        <CalendarDays className="w-4 h-4 text-orange-600" />
+                        <span className="text-sm font-bold text-orange-700">+{ext.requested_days} days</span>
+                        <span className="text-xs text-orange-500">requested</span>
+                      </div>
+                      {ext.is_edited && ext.edited_days !== null && (
+                        <div className="flex items-center gap-1.5 bg-blue-50 rounded-lg px-3 py-1.5">
+                          <Edit3 className="w-4 h-4 text-blue-600" />
+                          <span className="text-sm font-bold text-blue-700">+{ext.edited_days} days</span>
+                          <span className="text-xs text-blue-500">edited</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {ext.reason && ext.reason !== 'No reason provided' && (
+                      <p className="text-xs text-gray-600 bg-gray-50 rounded-lg p-2 line-clamp-2">
+                        {ext.reason}
+                      </p>
+                    )}
+
+                    <button
+                      onClick={() => navigate('/technical-director/project-approvals?tab=assigned')}
+                      className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 rounded-lg py-2 transition-colors"
+                    >
+                      Review Request <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+          );
+        })()}
+
         {/* Active Projects Grid */}
         {activeProjects.length > 0 && (
           <motion.div
@@ -766,7 +864,10 @@ const TechnicalDirectorDashboard: React.FC = () => {
                   className="bg-white rounded-2xl border border-blue-100 p-5 hover:shadow-lg transition-all"
                 >
                   <div className="flex justify-between items-start mb-4">
-                    <h3 className="font-bold text-gray-900">{project.name}</h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-gray-900">{project.name}</h3>
+                      <DeadlineBadge endDate={project.dueDate} status={project.status} size="compact" />
+                    </div>
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${
                       project.status === 'on-track'
                         ? 'bg-green-100 text-green-700'
