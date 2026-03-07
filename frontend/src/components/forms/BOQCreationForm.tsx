@@ -2957,54 +2957,63 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         return;
       }
 
-      // Validate material fields (all are mandatory)
+      // Validate material fields — skip fully empty rows
       const allMaterials = [
-        ...(item.materials || []),
-        ...(item.sub_items?.flatMap((si: any) => si.materials || []) || [])
+        ...(item.materials || []).map((m: any) => ({ mat: m, subItemName: null })),
+        ...(item.sub_items?.flatMap((si: any) => (si.materials || []).map((m: any) => ({ mat: m, subItemName: si.sub_item_name }))) || [])
       ];
-      for (const mat of allMaterials) {
+      for (const { mat, subItemName } of allMaterials) {
+        const hasAnyData = mat.material_name?.trim() || (mat.quantity && mat.quantity > 0) || (mat.unit_price && mat.unit_price > 0);
+        if (!hasAnyData) continue; // skip blank placeholder rows
+        const location = subItemName ? `sub-item "${subItemName}" in item "${item.item_name}"` : `item "${item.item_name}"`;
         if (!mat.material_name?.trim()) {
-          showError(`Material Name is required in item "${item.item_name}"`);
+          showError(`Material Name is required in ${location}`);
           return;
         }
         if (!mat.quantity || mat.quantity <= 0) {
-          showError(`Quantity is required for material "${mat.material_name}" in item "${item.item_name}"`);
+          showError(`Quantity is required for material "${mat.material_name}" in ${location}`);
           return;
         }
         if (!mat.unit_price || mat.unit_price <= 0) {
-          showError(`Rate is required for material "${mat.material_name}" in item "${item.item_name}"`);
+          showError(`Rate is required for material "${mat.material_name}" in ${location}`);
           return;
         }
-        if (!mat.brand?.trim()) {
-          showError(`Brand is required for material "${mat.material_name}" in item "${item.item_name}"`);
-          return;
-        }
-        if (!mat.size?.trim()) {
-          showError(`Size is required for material "${mat.material_name}" in item "${item.item_name}"`);
-          return;
-        }
-        if (!mat.specification?.trim()) {
-          showError(`Specification is required for material "${mat.material_name}" in item "${item.item_name}"`);
-          return;
+        if (!mat.is_from_master) {
+          if (!mat.brand?.trim()) {
+            showError(`Brand is required for material "${mat.material_name}" in ${location}`);
+            return;
+          }
+          if (!mat.size?.trim()) {
+            showError(`Size is required for material "${mat.material_name}" in ${location}`);
+            return;
+          }
+          if (!mat.specification?.trim()) {
+            showError(`Specification is required for material "${mat.material_name}" in ${location}`);
+            return;
+          }
         }
       }
 
-      // Validate labour fields (role, hours, rate are mandatory)
+      // Validate labour fields — skip fully empty rows
       const allLabours = [
-        ...(item.labour || []),
-        ...(item.sub_items?.flatMap((si: any) => si.labour || []) || [])
+        ...(item.labour || []).map((l: any) => ({ lab: l, subItemName: null })),
+        ...(item.sub_items?.flatMap((si: any) => (si.labour || []).map((l: any) => ({ lab: l, subItemName: si.sub_item_name }))) || [])
       ];
-      for (const lab of allLabours) {
+      for (const { lab, subItemName } of allLabours) {
+        // hours defaults to 8, so don't use it to detect if row has meaningful data
+        const hasAnyData = lab.labour_role?.trim() || (lab.rate_per_hour && lab.rate_per_hour > 0);
+        if (!hasAnyData) continue; // skip blank placeholder rows
+        const location = subItemName ? `sub-item "${subItemName}" in item "${item.item_name}"` : `item "${item.item_name}"`;
         if (!lab.labour_role?.trim()) {
-          showError(`Labour Role is required in item "${item.item_name}"`);
+          showError(`Labour Role is required in ${location}`);
           return;
         }
         if (!lab.hours || lab.hours <= 0) {
-          showError(`Hours is required for labour "${lab.labour_role}" in item "${item.item_name}"`);
+          showError(`Hours is required for labour "${lab.labour_role}" in ${location}`);
           return;
         }
         if (!lab.rate_per_hour || lab.rate_per_hour <= 0) {
-          showError(`Rate/hr is required for labour "${lab.labour_role}" in item "${item.item_name}"`);
+          showError(`Rate/hr is required for labour "${lab.labour_role}" in ${location}`);
           return;
         }
       }
@@ -5352,27 +5361,24 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   type="text"
                                                   value={materialSearchTerms[materialDropdownId] !== undefined ? materialSearchTerms[materialDropdownId] : material.material_name}
                                                   onChange={(e) => {
+                                                    if (material.is_from_master) return;
                                                     const newValue = e.target.value;
-                                                    // Always update search term for filtering dropdown
                                                     setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: newValue }));
-
-                                                    // Allow manual typing only if NOT from master (to allow searching for different material)
-                                                    if (!material.is_from_master && !checkIsDuplicate(newValue)) {
+                                                    if (!checkIsDuplicate(newValue)) {
                                                       updateSubItemMaterial(item.id, subItem.id, material.id, 'material_name', newValue);
                                                     }
-
-                                                    // Always open dropdown and trigger global search for master materials
                                                     setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
                                                     searchGlobalMaterials(materialDropdownId, newValue);
                                                   }}
                                                   onBlur={() => {
-                                                    // Delay to allow dropdown click to register
+                                                    if (material.is_from_master) return;
                                                     setTimeout(() => {
                                                       setMaterialSearchTerms(prev => ({ ...prev, [materialDropdownId]: undefined }));
                                                       setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: false }));
                                                     }, 200);
                                                   }}
                                                   onFocus={() => {
+                                                    if (material.is_from_master) return;
                                                     setMaterialDropdownOpen(prev => ({ ...prev, [materialDropdownId]: true }));
                                                     if (material.material_name.trim()) {
                                                       searchGlobalMaterials(materialDropdownId, material.material_name);
@@ -5383,14 +5389,15 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                     checkIsDuplicate(materialSearchTerms[materialDropdownId] || '')
                                                       ? 'border-red-500 bg-red-50 focus:ring-red-500 focus:border-red-500'
                                                       : material.is_from_master
-                                                        ? 'bg-blue-50 border-blue-300'
+                                                        ? 'bg-blue-50 border-blue-300 cursor-not-allowed'
                                                         : 'border-gray-300 bg-white focus:ring-blue-500 focus:border-blue-500'
                                                   }`}
                                                   placeholder={availableMaterials.length > 0 ? "Search from raw materials catalog" : "Loading catalog..."}
                                                   disabled={isSubmitting}
-                                                  title={material.is_from_master ? 'From catalog - Click to select different material' : ''}
+                                                  readOnly={material.is_from_master}
+                                                  title={material.is_from_master ? 'From catalog - cannot edit' : ''}
                                                 />
-                                                <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                                                {!material.is_from_master && <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />}
                                                 <div className="flex justify-between items-center mt-0.5">
                                                   {checkIsDuplicate(materialSearchTerms[materialDropdownId] || '') && (
                                                     <span className="text-xs text-red-600 font-medium">Material already exists - cannot add duplicate</span>
@@ -5696,16 +5703,16 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 }}
                                                 maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_DESCRIPTION}
                                                 className={`w-full px-3 py-1 text-xs border rounded-lg focus:outline-none focus:ring-1 resize-none overflow-hidden ${
-                                                  material.is_from_master
+                                                  material.is_from_master && material.description?.trim()
                                                     ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
                                                     : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
                                                 }`}
                                                 placeholder="Description"
                                                 disabled={isSubmitting}
-                                                readOnly={material.is_from_master}
+                                                readOnly={!!(material.is_from_master && material.description?.trim())}
                                                 rows={1}
                                                 style={{ minHeight: '30px' }}
-                                                title={material.is_from_master ? 'From catalog - cannot edit' : ''}
+                                                title={material.is_from_master && material.description?.trim() ? 'From catalog - cannot edit' : ''}
                                               />
                                               <div className="flex justify-end mt-0.5">
                                                 <span className={`text-xs ${(material.description || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_DESCRIPTION ? 'text-red-500' : 'text-gray-400'}`}>
@@ -5718,7 +5725,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             <div className="ml-0 grid grid-cols-2 gap-2 mt-2">
                                               <div>
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                  Brand <span className="text-red-500">*</span>
+                                                  Brand {!material.is_from_master && <span className="text-red-500">*</span>}
                                                   {material.is_from_master && (
                                                     <span className="ml-1 text-xs text-blue-600">(Catalog)</span>
                                                   )}
@@ -5727,20 +5734,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   type="text"
                                                   value={material.brand || ''}
                                                   onChange={(e) => {
-                                                    if (!material.is_from_master) {
+                                                    if (!(material.is_from_master && material.brand?.trim())) {
                                                       updateSubItemMaterial(item.id, subItem.id, material.id, 'brand', e.target.value);
                                                     }
                                                   }}
                                                   maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_BRAND}
                                                   className={`w-full px-3 py-1 text-xs border rounded-lg focus:outline-none focus:ring-1 ${
-                                                    material.is_from_master
+                                                    material.is_from_master && material.brand?.trim()
                                                       ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
                                                       : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
                                                   }`}
                                                   placeholder="Brand"
                                                   disabled={isSubmitting}
-                                                  readOnly={material.is_from_master}
-                                                  title={material.is_from_master ? 'From catalog - cannot edit' : ''}
+                                                  readOnly={!!(material.is_from_master && material.brand?.trim())}
+                                                  title={material.is_from_master && material.brand?.trim() ? 'From catalog - cannot edit' : ''}
                                                 />
                                                 <div className="flex justify-end mt-0.5">
                                                   <span className={`text-xs ${(material.brand || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_BRAND ? 'text-red-500' : 'text-gray-400'}`}>
@@ -5750,7 +5757,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               </div>
                                               <div>
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                  Size <span className="text-red-500">*</span>
+                                                  Size {!material.is_from_master && <span className="text-red-500">*</span>}
                                                   {material.is_from_master && (
                                                     <span className="ml-1 text-xs text-blue-600">(Catalog)</span>
                                                   )}
@@ -5759,20 +5766,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   type="text"
                                                   value={material.size || ''}
                                                   onChange={(e) => {
-                                                    if (!material.is_from_master) {
+                                                    if (!(material.is_from_master && material.size?.trim())) {
                                                       updateSubItemMaterial(item.id, subItem.id, material.id, 'size', e.target.value);
                                                     }
                                                   }}
                                                   maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SIZE}
                                                   className={`w-full px-3 py-1 text-xs border rounded-lg focus:outline-none focus:ring-1 ${
-                                                    material.is_from_master
+                                                    material.is_from_master && material.size?.trim()
                                                       ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
                                                       : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
                                                   }`}
                                                   placeholder="Size"
                                                   disabled={isSubmitting}
-                                                  readOnly={material.is_from_master}
-                                                  title={material.is_from_master ? 'From catalog - cannot edit' : ''}
+                                                  readOnly={!!(material.is_from_master && material.size?.trim())}
+                                                  title={material.is_from_master && material.size?.trim() ? 'From catalog - cannot edit' : ''}
                                                 />
                                                 <div className="flex justify-end mt-0.5">
                                                   <span className={`text-xs ${(material.size || '').length >= BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SIZE ? 'text-red-500' : 'text-gray-400'}`}>
@@ -5782,7 +5789,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               </div>
                                               <div className="col-span-2">
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                  Specification <span className="text-red-500">*</span>
+                                                  Specification {!material.is_from_master && <span className="text-red-500">*</span>}
                                                   {material.is_from_master && (
                                                     <span className="ml-1 text-xs text-blue-600">(From Catalog)</span>
                                                   )}
@@ -5790,7 +5797,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                 <textarea
                                                   value={material.specification || ''}
                                                   onChange={(e) => {
-                                                    if (!material.is_from_master) {
+                                                    if (!(material.is_from_master && material.specification?.trim())) {
                                                       updateSubItemMaterial(item.id, subItem.id, material.id, 'specification', e.target.value);
                                                       // Auto-resize textarea
                                                       e.target.style.height = 'auto';
@@ -5804,15 +5811,15 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                   }}
                                                   maxLength={BOQ_CONFIG.FIELD_LIMITS.MATERIAL_SPECIFICATION}
                                                   className={`w-full px-3 py-1 text-xs border rounded-lg focus:outline-none focus:ring-1 resize-none overflow-hidden ${
-                                                    material.is_from_master
+                                                    material.is_from_master && material.specification?.trim()
                                                       ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
                                                       : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
                                                   }`}
                                                   placeholder="Specification"
                                                   rows={1}
                                                   disabled={isSubmitting}
-                                                  readOnly={material.is_from_master}
-                                                  title={material.is_from_master ? 'From catalog - cannot edit' : ''}
+                                                  readOnly={!!(material.is_from_master && material.specification?.trim())}
+                                                  title={material.is_from_master && material.specification?.trim() ? 'From catalog - cannot edit' : ''}
                                                   style={{ minHeight: '30px' }}
                                                 />
                                                 <div className="flex justify-end mt-0.5">
