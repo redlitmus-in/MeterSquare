@@ -2985,9 +2985,8 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
           showError(`Rate is required for material "${mat.material_name}" in ${location}`);
           return;
         }
-        // Skip brand/size/spec validation if from master catalog OR if fields already have values (edit mode)
-        const skipDetailValidation = mat.is_from_master || (mat.brand?.trim() && mat.size?.trim() && mat.specification?.trim());
-        if (!skipDetailValidation) {
+        // Skip brand/size/spec validation in edit mode, or if from master catalog
+        if (!editMode && !mat.is_from_master) {
           if (!mat.brand?.trim()) {
             showError(`Brand is required for material "${mat.material_name}" in ${location}`);
             return;
@@ -5734,7 +5733,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             <div className="ml-0 grid grid-cols-2 gap-2 mt-2">
                                               <div>
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                  Brand {!material.is_from_master && !material.brand?.trim() && <span className="text-red-500">*</span>}
+                                                  Brand {!editMode && !material.is_from_master && <span className="text-red-500">*</span>}
                                                   {material.is_from_master && (
                                                     <span className="ml-1 text-xs text-blue-600">(Catalog)</span>
                                                   )}
@@ -5766,7 +5765,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               </div>
                                               <div>
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                  Size {!material.is_from_master && !material.size?.trim() && <span className="text-red-500">*</span>}
+                                                  Size {!editMode && !material.is_from_master && <span className="text-red-500">*</span>}
                                                   {material.is_from_master && (
                                                     <span className="ml-1 text-xs text-blue-600">(Catalog)</span>
                                                   )}
@@ -5798,7 +5797,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               </div>
                                               <div className="col-span-2">
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                  Specification {!material.is_from_master && !material.specification?.trim() && <span className="text-red-500">*</span>}
+                                                  Specification {!editMode && !material.is_from_master && <span className="text-red-500">*</span>}
                                                   {material.is_from_master && (
                                                     <span className="ml-1 text-xs text-blue-600">(From Catalog)</span>
                                                   )}
