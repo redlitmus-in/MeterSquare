@@ -2947,10 +2947,17 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
       }
 
       // Check if item has sub_items with materials/labour OR direct materials/labour
+      // Must check for actual data, not just array length (empty placeholder rows don't count)
+      const hasMeaningfulMaterial = (m: any) =>
+        m.material_name?.trim() || (m.quantity && m.quantity > 0) || (m.unit_price && m.unit_price > 0);
+      const hasMeaningfulLabour = (l: any) =>
+        l.labour_role?.trim() || (l.rate_per_hour && l.rate_per_hour > 0);
+
       const hasSubItemsWithData = item.sub_items?.some((si: any) =>
-        si.materials?.length > 0 || si.labour?.length > 0
+        si.materials?.some(hasMeaningfulMaterial) || si.labour?.some(hasMeaningfulLabour)
       );
-      const hasDirectData = item.materials.length > 0 || item.labour.length > 0;
+      const hasDirectData =
+        item.materials.some(hasMeaningfulMaterial) || item.labour.some(hasMeaningfulLabour);
 
       if (!hasSubItemsWithData && !hasDirectData) {
         showError('Each item must have at least one material or labour entry (either in sub-items or at item level)');
