@@ -2946,6 +2946,20 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         return;
       }
 
+      // Validate sub-items: each must have a name and a rate > 0
+      if (item.sub_items && item.sub_items.length > 0) {
+        for (const si of item.sub_items) {
+          if (!si.sub_item_name?.trim()) {
+            showError(`A sub-item in "${item.item_name}" is missing a name`);
+            return;
+          }
+          if (!si.rate || si.rate <= 0) {
+            showError(`Rate is required for sub-item "${si.sub_item_name}" in "${item.item_name}"`);
+            return;
+          }
+        }
+      }
+
       // Check if item has sub_items with materials/labour OR direct materials/labour
       // Must check for actual data, not just array length (empty placeholder rows don't count)
       const hasMeaningfulMaterial = (m: any) =>
