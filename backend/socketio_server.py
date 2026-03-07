@@ -37,10 +37,17 @@ SOCKET_CORS_ORIGINS = [
 ]
 
 # async_mode: Use 'gevent' when running under Gunicorn with gevent workers (production)
-# Falls back to 'threading' automatically in development (python app.py)
+# Falls back to 'threading' if gevent is not installed (e.g. local dev with ENVIRONMENT=production)
 import os
 _environment = os.getenv("ENVIRONMENT", "development")
-_async_mode = 'gevent' if _environment == 'production' else 'threading'
+if _environment == 'production':
+    try:
+        import gevent  # noqa: F401
+        _async_mode = 'gevent'
+    except ImportError:
+        _async_mode = 'threading'
+else:
+    _async_mode = 'threading'
 
 socketio = SocketIO(
     cors_allowed_origins=SOCKET_CORS_ORIGINS,

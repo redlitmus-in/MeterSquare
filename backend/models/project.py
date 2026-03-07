@@ -22,6 +22,7 @@ class Project(db.Model):
     floor_name = db.Column(db.String(255), nullable=True)  # Optional
     working_hours = db.Column(db.String(255), nullable=True)
     client = db.Column(db.String(255), nullable=True)  # Optional
+    client_email = db.Column(db.String(255), nullable=True)  # Client email for BOQ sending
     work_type = db.Column(db.String(255), nullable=True)  # Optional
     start_date = db.Column(db.Date, nullable=True)  # Optional - changed from required
     end_date = db.Column(db.Date, nullable=True)
@@ -73,6 +74,7 @@ class Project(db.Model):
             'floor_name': self.floor_name,
             'working_hours':self.working_hours,
             'client': self.client,
+            'client_email': self.client_email,
             'work_type': self.work_type,
             'start_date': self.start_date.isoformat() if self.start_date else None,
             'duration_days': self.duration_days,

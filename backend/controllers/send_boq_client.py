@@ -12,304 +12,192 @@ from utils.modern_boq_pdf_generator import ModernBOQPDFGenerator
 from utils.boq_calculation_helper import calculate_boq_values
 from sqlalchemy import text
 import os
+import time
+import threading
 
 log = get_logger()
 
-def send_boq_to_client():
-    """
-    Send BOQ to client with Excel and PDF attachments
-    Supports multiple email addresses (comma or semicolon separated)
-    """
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"success": False, "error": "No data provided"}), 400
 
-        boq_id = data.get('boq_id')
-        client_emails_raw = data.get('client_email') or data.get('client_emails')
-        message = data.get('message', 'Please review the attached BOQ for your project.')
-        formats = data.get('formats', ['excel', 'pdf'])
-        custom_email_body = data.get('custom_email_body')  # Custom email template from frontend
-        cover_page = data.get('cover_page')  # Cover page data for PDF
-        include_signature = data.get('include_signature', False)  # Boolean to include admin signature
-
-        # If include_signature is True, fetch both signatures and seal from admin settings
-        md_signature_image = None
-        authorized_signature_image = None
-        company_seal_image = None
-        if include_signature:
-            from controllers.settings_controller import get_signatures_for_pdf
-            signatures = get_signatures_for_pdf()
-            md_signature_image = signatures.get('md_signature')
-            authorized_signature_image = signatures.get('authorized_signature')
-            company_seal_image = signatures.get('company_seal')
-            log.info(f"[SEND_BOQ] include_signature={include_signature}, md_signature exists={md_signature_image is not None}, authorized_signature exists={authorized_signature_image is not None}, company_seal exists={company_seal_image is not None}")
-
-        if not boq_id or not client_emails_raw:
-            return jsonify({"success": False, "error": "boq_id and client_email are required"}), 400
-
-        # Parse multiple emails (support comma, semicolon, or list)
-        if isinstance(client_emails_raw, list):
-            client_emails = [email.strip() for email in client_emails_raw if email.strip()]
-        else:
-            # Split by comma or semicolon
-            client_emails = [email.strip() for email in client_emails_raw.replace(';', ',').split(',') if email.strip()]
-
-        if not client_emails:
-            return jsonify({"success": False, "error": "At least one valid email address is required"}), 400
-
-        # Validate email format (basic check)
-        import re
-        email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
-        invalid_emails = [email for email in client_emails if not email_pattern.match(email)]
-        if invalid_emails:
-            return jsonify({"success": False, "error": f"Invalid email format: {', '.join(invalid_emails)}"}), 400
-
-        # Fetch BOQ
-        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
-        if not boq:
-            return jsonify({"success": False, "error": "BOQ not found"}), 404
-
-        # Validate BOQ is approved by both PM and TD before sending to client
-        # Allow both "Approved", "Revision_Approved" and "Internal_Revision_Approved" statuses
-        if boq.status not in ["Approved", "Revision_Approved", "Internal_Revision_Approved"]:
-            return jsonify({
-                "success": False,
-                "error": f"BOQ must be approved by Project Manager and Technical Director before sending to client. Current status: {boq.status}"
-            }), 400
-
-        # Fetch BOQ Details (contains JSON structure)
-        boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
-        if not boq_details:
-            return jsonify({"success": False, "error": "BOQ details not found"}), 404
-
-        # Extract data from JSON
-        boq_json = boq_details.boq_details
-
-        # Handle both old and new data structures
-        # New structure: items are in existing_purchase.items
-        # Old structure: items are directly in boq_json.items
-        if 'existing_purchase' in boq_json and 'items' in boq_json['existing_purchase']:
-            items = boq_json['existing_purchase']['items']
-        else:
-            items = boq_json.get('items', [])
-
-        # Calculate all values (this populates selling_price, overhead_amount, etc.)
-        total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
-
-        # Fetch sub_item images from database (optimized for speed)
+def _send_boq_background(app, boq_id, client_emails, message, formats, custom_email_body,
+                          cover_page, md_signature_image, authorized_signature_image,
+                          company_seal_image, estimator_name, estimator_id):
+    """Background task: generate files, send emails, update history and notifications."""
+    with app.app_context():
         try:
-            # Get all sub_item_ids at once
-            sub_item_ids = []
-            for item in items:
-                if item.get('has_sub_items'):
-                    for sub_item in item.get('sub_items', []):
-                        if sub_item.get('sub_item_id'):
-                            sub_item_ids.append(sub_item.get('sub_item_id'))
+            boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+            if not boq:
+                log.error(f"[BG_SEND_BOQ] BOQ {boq_id} not found")
+                return
 
-            # Bulk fetch all images in ONE query
-            if sub_item_ids:
-                db_sub_items = MasterSubItem.query.filter(
-                    MasterSubItem.sub_item_id.in_(sub_item_ids),
-                    MasterSubItem.is_deleted == False
-                ).all()
+            project = boq.project
+            boq_details = BOQDetails.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+            if not boq_details:
+                log.error(f"[BG_SEND_BOQ] BOQ details not found for {boq_id}")
+                return
 
-                # Fast lookup dictionary
-                sub_items_map = {si.sub_item_id: si for si in db_sub_items}
+            boq_json = boq_details.boq_details
+            if 'existing_purchase' in boq_json and 'items' in boq_json['existing_purchase']:
+                items = boq_json['existing_purchase']['items']
+            else:
+                items = boq_json.get('items', [])
 
-                # Assign images and fields from DB
+            total_material_cost, total_labour_cost, items_subtotal, preliminary_amount, grand_total = calculate_boq_values(items, boq_json)
+
+            # Fetch sub_item images
+            try:
+                sub_item_ids = []
                 for item in items:
                     if item.get('has_sub_items'):
                         for sub_item in item.get('sub_items', []):
-                            sub_item_id = sub_item.get('sub_item_id')
-                            if sub_item_id and sub_item_id in sub_items_map:
-                                db_si = sub_items_map[sub_item_id]
-                                if db_si.sub_item_image:
-                                    sub_item['sub_item_image'] = db_si.sub_item_image
-                                if not sub_item.get('description') and db_si.description:
-                                    sub_item['description'] = db_si.description
-                                if not sub_item.get('brand') and db_si.brand:
-                                    sub_item['brand'] = db_si.brand
-                                if not sub_item.get('size') and db_si.size:
-                                    sub_item['size'] = db_si.size
-
-        except Exception as e:
-            log.error(f"Error fetching BOQ images: {str(e)}")
-
-        # Calculate CLIENT VERSION - Selling price (includes overhead/profit distributed)
-        client_total_value = grand_total  # Client sees same total as internal, just distributed differently
-
-        # Get project data from relationship
-        project = boq.project
-        if not project:
-            return jsonify({"success": False, "error": "Project not found for this BOQ"}), 404
-
-        # Prepare email data
-        boq_data = {
-            'boq_id': boq.boq_id,
-            'boq_name': boq.boq_name,
-            'status': boq.status
-        }
-
-        project_data = {
-            'project_name': project.project_name or 'N/A',
-            'client': project.client or 'Valued Client',
-            'location': project.location or 'N/A'
-        }
-
-        # Fetch selected Terms & Conditions from database
-        selected_terms = []
-        try:
-            # First get the term_ids array for this BOQ
-            term_ids_query = text("""
-                SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id
-            """)
-            term_ids_result = db.session.execute(term_ids_query, {'boq_id': boq_id}).fetchone()
-            term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
-
-            if term_ids:
-                # Fetch terms text for selected term IDs
-                query = text("""
-                    SELECT terms_text
-                    FROM boq_terms
-                    WHERE term_id = ANY(:term_ids)
-                    AND is_active = TRUE
-                    AND is_deleted = FALSE
-                    ORDER BY display_order, term_id
-                """)
-                terms_result = db.session.execute(query, {'term_ids': term_ids})
-                for row in terms_result:
-                    selected_terms.append({'terms_text': row[0]})
-            log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
-        except Exception as e:
-            log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
-
-        # Generate files - Pass CLIENT BASE COST (not selling price)
-        excel_file = None
-        pdf_file = None
-
-        if 'excel' in formats:
-            excel_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.xlsx"
-            excel_data = generate_client_excel(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms)
-            excel_file = (excel_filename, excel_data)
-
-        if 'pdf' in formats:
-            try:
-                pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
-                # Generate PDF WITH images, selected terms, cover page, and optional signatures
-                pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms=selected_terms, include_images=True, cover_page=cover_page, md_signature_image=md_signature_image, authorized_signature_image=authorized_signature_image, company_seal_image=company_seal_image)
-                pdf_file = (pdf_filename, pdf_data)
-            except Exception as pdf_err:
-                log.error(f"Error generating PDF: {str(pdf_err)}")
-                import traceback
-                log.error(f"PDF generation traceback: {traceback.format_exc()}")
-                return jsonify({"success": False, "error": f"Failed to generate PDF: {str(pdf_err)}"}), 500
-
-        # Send email to all recipients - Pass selling price (overhead/profit distributed)
-        email_service = BOQEmailService()
-
-        # Track successful and failed sends
-        successful_sends = []
-        failed_sends = []
-
-        for client_email in client_emails:
-            try:
-                email_sent = email_service.send_boq_to_client(
-                    boq_data=boq_data,
-                    project_data=project_data,
-                    client_email=client_email,
-                    message=message,
-                    total_value=client_total_value,  # CLIENT VERSION: Same total, distributed markup
-                    item_count=len(items),
-                    excel_file=excel_file,
-                    pdf_file=pdf_file,
-                    custom_email_body=custom_email_body
-                )
-
-                if email_sent:
-                    successful_sends.append(client_email)
-                else:
-                    failed_sends.append(client_email)
+                            if sub_item.get('sub_item_id'):
+                                sub_item_ids.append(sub_item.get('sub_item_id'))
+                if sub_item_ids:
+                    db_sub_items = MasterSubItem.query.filter(
+                        MasterSubItem.sub_item_id.in_(sub_item_ids),
+                        MasterSubItem.is_deleted == False
+                    ).all()
+                    sub_items_map = {si.sub_item_id: si for si in db_sub_items}
+                    for item in items:
+                        if item.get('has_sub_items'):
+                            for sub_item in item.get('sub_items', []):
+                                sub_item_id = sub_item.get('sub_item_id')
+                                if sub_item_id and sub_item_id in sub_items_map:
+                                    db_si = sub_items_map[sub_item_id]
+                                    if db_si.sub_item_image:
+                                        sub_item['sub_item_image'] = db_si.sub_item_image
+                                    if not sub_item.get('description') and db_si.description:
+                                        sub_item['description'] = db_si.description
+                                    if not sub_item.get('brand') and db_si.brand:
+                                        sub_item['brand'] = db_si.brand
+                                    if not sub_item.get('size') and db_si.size:
+                                        sub_item['size'] = db_si.size
             except Exception as e:
-                failed_sends.append(client_email)
-                log.error(f"Error sending BOQ to {client_email}: {str(e)}")
+                log.error(f"[BG_SEND_BOQ] Error fetching images: {e}")
 
-        # Check if at least one email was sent successfully
-        if successful_sends:
-            # Update BOQ flags: email_sent = TRUE, client_status = FALSE, status = Sent_for_Confirmation
-            boq.email_sent = True
-            boq.client_status = False  # Not yet confirmed by client
-            boq.status = "Sent_for_Confirmation"  # Waiting for client confirmation
-
-            # Get current user (estimator)
-            current_user = getattr(g, 'user', None)
-            estimator_name = current_user.get('full_name', 'Estimator') if current_user else 'Estimator'
-            estimator_id = current_user.get('user_id') if current_user else None
-            estimator_email = current_user.get('email', '') if current_user else ''
-
-            # Update last_modified fields
-            boq.last_modified_by = estimator_name
-            boq.last_modified_at = datetime.utcnow()
-
-            # Get existing BOQ history
-            existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
-
-            # Handle existing actions - ensure it's always a list
-            if existing_history:
-                if existing_history.action is None:
-                    current_actions = []
-                elif isinstance(existing_history.action, list):
-                    current_actions = existing_history.action
-                elif isinstance(existing_history.action, dict):
-                    current_actions = [existing_history.action]
-                else:
-                    current_actions = []
-            else:
-                current_actions = []
-
-            # Prepare new action for sending BOQ to client(s)
-            new_action = {
-                "role": "estimator",
-                "type": "sent_to_client",
-                "sender": "estimator",
-                "receiver": "client",
-                "status": "Sent_for_Confirmation",
-                "boq_name": boq.boq_name,
-                "comments": message or "BOQ sent to client for confirmation",
-                "timestamp": datetime.utcnow().isoformat(),
-                "sender_name": estimator_name,
-                "sender_user_id": estimator_id,
-                "total_value": grand_total,
-                "item_count": len(items),
-                "project_name": project.project_name,
-                "client_name": project.client,
-                "client_emails": successful_sends,  # List of all successful recipients
-                "failed_emails": failed_sends if failed_sends else None  # Track failures
+            boq_data = {'boq_id': boq.boq_id, 'boq_name': boq.boq_name, 'status': boq.status}
+            project_data = {
+                'project_name': project.project_name or 'N/A',
+                'client': project.client or 'Valued Client',
+                'location': project.location or 'N/A'
             }
 
-            # Append new action to existing list
-            current_actions.append(new_action)
+            # Fetch terms
+            selected_terms = []
+            try:
+                term_ids_result = db.session.execute(
+                    text("SELECT term_ids FROM boq_terms_selections WHERE boq_id = :boq_id"),
+                    {'boq_id': boq_id}
+                ).fetchone()
+                term_ids = term_ids_result[0] if term_ids_result and term_ids_result[0] else []
+                if term_ids:
+                    terms_result = db.session.execute(
+                        text("""SELECT terms_text FROM boq_terms
+                                WHERE term_id = ANY(:term_ids) AND is_active = TRUE AND is_deleted = FALSE
+                                ORDER BY display_order, term_id"""),
+                        {'term_ids': term_ids}
+                    )
+                    for row in terms_result:
+                        selected_terms.append({'terms_text': row[0]})
+            except Exception as e:
+                log.error(f"[BG_SEND_BOQ] Error fetching terms: {e}")
 
-            # Create or update history record
-            recipients_str = ', '.join(successful_sends)
-            if existing_history:
-                # Update existing history with new action added to list
-                existing_history.action = current_actions
-                existing_history.action_date = datetime.utcnow()
-                existing_history.comment = f"BOQ sent to {len(successful_sends)} client(s): {recipients_str}"
-            else:
-                # Create new history entry with action as list
-                new_history = BOQHistory(
-                    boq_id=boq_id,
-                    action=current_actions,  # Store as list
-                    action_date=datetime.utcnow(),
-                    comment=f"BOQ sent to {len(successful_sends)} client(s): {recipients_str}"
-                )
-                db.session.add(new_history)
+            # Generate files and upload each selected format to Supabase Storage
+            excel_file = None
+            pdf_file = None
+            client_excel_url = None
+            client_pdf_url = None
 
-            db.session.commit()
+            if 'excel' in formats:
+                try:
+                    excel_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.xlsx"
+                    excel_data = generate_client_excel(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms)
+                    excel_file = (excel_filename, excel_data)
+                    client_excel_url = _upload_client_boq_file(excel_data, boq_id, project.project_name, 'xlsx')
+                except Exception as e:
+                    log.error(f"[BG_SEND_BOQ] Excel generation/upload error: {e}")
 
-            # Send notification to TD about BOQ sent to client
+            if 'pdf' in formats:
+                try:
+                    pdf_filename = f"BOQ_{project.project_name.replace(' ', '_')}_Client_{date.today().isoformat()}.pdf"
+                    pdf_data = generate_client_pdf(project, items, total_material_cost, total_labour_cost, grand_total, boq_json, selected_terms=selected_terms, include_images=True, cover_page=cover_page, md_signature_image=md_signature_image, authorized_signature_image=authorized_signature_image, company_seal_image=company_seal_image)
+                    pdf_file = (pdf_filename, pdf_data)
+                    client_pdf_url = _upload_client_boq_file(pdf_data, boq_id, project.project_name, 'pdf')
+                except Exception as e:
+                    log.error(f"[BG_SEND_BOQ] PDF generation/upload error: {e}")
+
+            # Send emails
+            email_service = BOQEmailService()
+            successful_sends = []
+            failed_sends = []
+            for client_email in client_emails:
+                try:
+                    sent = email_service.send_boq_to_client(
+                        boq_data=boq_data,
+                        project_data=project_data,
+                        client_email=client_email,
+                        message=message,
+                        total_value=grand_total,
+                        item_count=len(items),
+                        excel_file=excel_file,
+                        pdf_file=pdf_file,
+                        custom_email_body=custom_email_body
+                    )
+                    (successful_sends if sent else failed_sends).append(client_email)
+                except Exception as e:
+                    failed_sends.append(client_email)
+                    log.error(f"[BG_SEND_BOQ] Error sending to {client_email}: {e}")
+
+            log.info(f"[BG_SEND_BOQ] Sent {len(successful_sends)}/{len(client_emails)} for BOQ {boq_id}")
+
+            # Update history
+            try:
+                existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
+                if existing_history:
+                    if isinstance(existing_history.action, list):
+                        current_actions = existing_history.action
+                    elif isinstance(existing_history.action, dict):
+                        current_actions = [existing_history.action]
+                    else:
+                        current_actions = []
+                else:
+                    current_actions = []
+
+                current_actions.append({
+                    "role": "estimator",
+                    "type": "sent_to_client",
+                    "sender": "estimator",
+                    "receiver": "client",
+                    "status": "Sent_for_Confirmation",
+                    "boq_name": boq.boq_name,
+                    "comments": message or "BOQ sent to client for confirmation",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "sender_name": estimator_name,
+                    "sender_user_id": estimator_id,
+                    "total_value": grand_total,
+                    "item_count": len(items),
+                    "project_name": project.project_name,
+                    "client_name": project.client,
+                    "client_emails": successful_sends,
+                    "failed_emails": failed_sends if failed_sends else None
+                })
+
+                recipients_str = ', '.join(successful_sends)
+                if existing_history:
+                    existing_history.action = current_actions
+                    existing_history.action_date = datetime.utcnow()
+                    existing_history.comment = f"BOQ sent to {len(successful_sends)} client(s): {recipients_str}"
+                else:
+                    db.session.add(BOQHistory(
+                        boq_id=boq_id,
+                        action=current_actions,
+                        action_date=datetime.utcnow(),
+                        comment=f"BOQ sent to {len(successful_sends)} client(s): {recipients_str}"
+                    ))
+                db.session.commit()
+            except Exception as e:
+                log.error(f"[BG_SEND_BOQ] Error updating history: {e}")
+
+            # Send notification to TD
             try:
                 from utils.comprehensive_notification_service import notification_service
                 from models.user import User, Role
@@ -326,37 +214,182 @@ def send_boq_to_client():
                             td_user_ids=td_user_ids,
                             client_email=', '.join(successful_sends)
                         )
-            except Exception as notif_error:
-                log.error(f"Failed to send BOQ to client notification: {notif_error}")
+            except Exception as e:
+                log.error(f"[BG_SEND_BOQ] Notification error: {e}")
 
-            # Prepare response message
-            response_message = f"BOQ sent successfully to {len(successful_sends)} recipient(s): {recipients_str}"
-            if failed_sends:
-                response_message += f". Failed to send to: {', '.join(failed_sends)}"
+        except Exception as e:
+            import traceback
+            log.error(f"[BG_SEND_BOQ] Background task failed: {e}")
+            log.error(traceback.format_exc())
 
-            response_data = {
-                "success": True,
-                "message": response_message,
-                "boq_id": boq_id,
-                "status": boq.status,
-                "successful_sends": successful_sends,
-                "failed_sends": failed_sends,
-                "total_sent": len(successful_sends),
-                "total_failed": len(failed_sends)
-            }
-            return jsonify(response_data), 200
-        else:
+
+def send_boq_to_client():
+    """
+    Send BOQ to client — returns immediately, heavy work runs in background thread.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        boq_id = data.get('boq_id')
+        client_emails_raw = data.get('client_email') or data.get('client_emails')
+        message = data.get('message', 'Please review the attached BOQ for your project.')
+        formats = data.get('formats', ['excel', 'pdf'])
+        custom_email_body = data.get('custom_email_body')
+        cover_page = data.get('cover_page')
+        include_signature = data.get('include_signature', False)
+
+        md_signature_image = None
+        authorized_signature_image = None
+        company_seal_image = None
+        if include_signature:
+            from controllers.settings_controller import get_signatures_for_pdf
+            signatures = get_signatures_for_pdf()
+            md_signature_image = signatures.get('md_signature')
+            authorized_signature_image = signatures.get('authorized_signature')
+            company_seal_image = signatures.get('company_seal')
+
+        if not boq_id:
+            return jsonify({"success": False, "error": "boq_id is required"}), 400
+
+        boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
+        if not boq:
+            return jsonify({"success": False, "error": "BOQ not found"}), 404
+
+        if boq.status not in ["Approved", "Revision_Approved", "Internal_Revision_Approved"]:
             return jsonify({
                 "success": False,
-                "error": f"Failed to send email to all recipients. Attempted: {', '.join(client_emails)}",
-                "failed_emails": failed_sends
-            }), 500
+                "error": f"BOQ must be approved before sending to client. Current status: {boq.status}"
+            }), 400
+
+        project = boq.project
+        if not project:
+            return jsonify({"success": False, "error": "Project not found for this BOQ"}), 404
+
+        # Use project.client_email as fallback
+        if not client_emails_raw and project.client_email:
+            client_emails_raw = project.client_email
+
+        if not client_emails_raw:
+            return jsonify({
+                "success": False,
+                "error": "No client email provided. Please enter a client email or add one to the project."
+            }), 400
+
+        # Parse emails
+        if isinstance(client_emails_raw, list):
+            client_emails = [e.strip() for e in client_emails_raw if e.strip()]
+        else:
+            client_emails = [e.strip() for e in client_emails_raw.replace(';', ',').split(',') if e.strip()]
+
+        if not client_emails:
+            return jsonify({"success": False, "error": "At least one valid email address is required"}), 400
+
+        import re
+        email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+        invalid_emails = [e for e in client_emails if not email_pattern.match(e)]
+        if invalid_emails:
+            return jsonify({"success": False, "error": f"Invalid email format: {', '.join(invalid_emails)}"}), 400
+
+        current_user = getattr(g, 'user', None)
+        estimator_name = current_user.get('full_name', 'Estimator') if current_user else 'Estimator'
+        estimator_id = current_user.get('user_id') if current_user else None
+
+        # Immediately update BOQ status and save client email — commit before returning
+        boq.email_sent = True
+        boq.client_status = False
+        boq.status = "Sent_for_Confirmation"
+        boq.last_modified_by = estimator_name
+        boq.last_modified_at = datetime.utcnow()
+        project.client_email = ', '.join(client_emails)
+        db.session.commit()
+
+        # Fire background thread for PDF generation, email sending, history, notifications
+        from flask import current_app
+        app = current_app._get_current_object()
+        thread = threading.Thread(
+            target=_send_boq_background,
+            args=(app, boq_id, client_emails, message, formats, custom_email_body,
+                  cover_page, md_signature_image, authorized_signature_image,
+                  company_seal_image, estimator_name, estimator_id),
+            daemon=True
+        )
+        thread.start()
+
+        return jsonify({
+            "success": True,
+            "message": f"BOQ is being sent to {len(client_emails)} recipient(s). The email will arrive shortly.",
+            "boq_id": boq_id,
+            "status": "Sent_for_Confirmation",
+            "client_emails": client_emails,
+        }), 200
 
     except Exception as e:
         import traceback
         log.error(f"Error sending BOQ to client: {str(e)}")
         log.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _upload_client_boq_file(file_bytes, boq_id, project_name, file_ext):
+    """Upload a client BOQ file (pdf or xlsx) to Supabase Storage boq_file/client_boq/ and return public URL."""
+    try:
+        from supabase import create_client as create_supabase_client
+
+        SUPABASE_BUCKET = "boq_file"
+        environment = os.environ.get('ENVIRONMENT', 'production')
+
+        if environment == 'development':
+            supabase_url = os.environ.get('DEV_SUPABASE_URL')
+            upload_key = os.environ.get('DEV_SUPABASE_KEY')
+            anon_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
+        else:
+            supabase_url = os.environ.get('SUPABASE_URL')
+            upload_key = os.environ.get('SUPABASE_KEY')
+            anon_key = os.environ.get('SUPABASE_ANON_KEY')
+
+        if not supabase_url or not upload_key:
+            log.error(f"[SEND_BOQ] Upload: Missing Supabase credentials")
+            return None
+
+        content_types = {
+            'pdf': 'application/pdf',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }
+
+        upload_client = create_supabase_client(supabase_url, upload_key)
+        timestamp = int(time.time())
+        safe_project_name = project_name.replace(' ', '_').replace('/', '-')[:40]
+        filename = f"BOQ_{safe_project_name}_{timestamp}.{file_ext}"
+        file_path = f"client_boq/boq_{boq_id}/{filename}"
+
+        upload_client.storage.from_(SUPABASE_BUCKET).upload(
+            file_path,
+            file_bytes,
+            {
+                "content-type": content_types.get(file_ext, 'application/octet-stream'),
+                "content-disposition": f'inline; filename="{filename}"',
+                "x-upsert": "true",
+            }
+        )
+
+        anon_client = create_supabase_client(supabase_url, anon_key or upload_key)
+        file_url = anon_client.storage.from_(SUPABASE_BUCKET).get_public_url(file_path)
+
+        log.info(f"[SEND_BOQ] Uploaded {file_ext} to: {file_path}")
+        return file_url
+
+    except Exception as e:
+        log.error(f"[SEND_BOQ] Upload error ({file_ext}): {e}")
+        import traceback
+        log.error(traceback.format_exc())
+        return None
+
+
+# Keep backward-compatible alias
+def _upload_client_boq_pdf(pdf_bytes, boq_id, project_name):
+    return _upload_client_boq_file(pdf_bytes, boq_id, project_name, 'pdf')
 
 
 def generate_client_excel(project, items, total_material_cost, total_labour_cost, client_base_cost, boq_json=None, selected_terms=None):

@@ -21,6 +21,7 @@ interface SendBOQEmailModalProps {
   projectName: string;
   onEmailSent: () => void;
   mode?: 'td' | 'client'; // 'td' = send to TD, 'client' = send to client
+  clientEmail?: string; // Pre-populated from project table
 }
 
 const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
@@ -30,7 +31,8 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
   boqName,
   projectName,
   onEmailSent,
-  mode = 'td' // Default to TD mode for backward compatibility
+  mode = 'td', // Default to TD mode for backward compatibility
+  clientEmail = ''
 }) => {
   const [recipientEmail, setRecipientEmail] = useState('');
   const [recipientName, setRecipientName] = useState('');
@@ -99,12 +101,18 @@ Technical Director
 MeterSquare Interiors LLC`;
   };
 
-  // Initialize email template when modal opens
+  // Initialize email template and pre-populate client email when modal opens
   React.useEffect(() => {
-    if (isOpen && isClientMode && !emailTemplate) {
-      setEmailTemplate(getDefaultTemplate());
+    if (isOpen && isClientMode) {
+      if (!emailTemplate) {
+        setEmailTemplate(getDefaultTemplate());
+      }
+      // Auto-populate client email from project if not already set by user
+      if (clientEmail && !recipientEmail) {
+        setRecipientEmail(clientEmail);
+      }
     }
-  }, [isOpen, isClientMode]);
+  }, [isOpen, isClientMode, clientEmail]);
 
   // Initialize cover page data when BOQ data is loaded
   React.useEffect(() => {
@@ -238,6 +246,12 @@ MeterSquare Interiors LLC`;
             };
 
             setBoqData(transformedData);
+
+            // Auto-populate client email from project_details if not already set
+            const fetchedClientEmail = (boq as any).project_details?.client_email;
+            if (fetchedClientEmail && !recipientEmail) {
+              setRecipientEmail(fetchedClientEmail);
+            }
           }
         } catch (error) {
           console.error('Error fetching BOQ data:', error);

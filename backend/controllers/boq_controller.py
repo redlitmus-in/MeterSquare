@@ -441,6 +441,14 @@ def create_boq():
         db.session.add(boq)
         db.session.flush()  # Get boq_id
 
+        # Validate items exist before processing
+        if not data.get("items"):
+            db.session.rollback()
+            return jsonify({
+                "success": False,
+                "error": "BOQ must contain at least one item"
+            }), 400
+
         # Process items and create JSON structure
         boq_items = []
         total_boq_cost = 0
@@ -5202,8 +5210,8 @@ def get_sub_item(item_id):
         return jsonify({
             "item_id": boq_item.item_id,
             "item_name": boq_item.item_name,
-            "scope" : sub_item.description,
-            "size" : sub_item.size,
+            "scope" : boq_item.description,
+            "size" : None,
             "item_description": boq_item.description,
             "sub_items_count": len(sub_item_details),
             "sub_items": sub_item_details,
@@ -5353,6 +5361,7 @@ def get_pending_boq():
                 Project.project_code,
                 Project.work_type,
                 Project.client,
+                Project.client_email,
                 Project.location,
                 Project.floor_name,
                 Project.working_hours,
@@ -5416,6 +5425,7 @@ def get_pending_boq():
                 "project_code": row.project_code,
                 "work_type": row.work_type,
                 "client": row.client,
+                "client_email": row.client_email if hasattr(row, 'client_email') else None,
                 "location": row.location,
                 "floor": row.floor_name,
                 "floor_name": row.floor_name,
@@ -5500,6 +5510,7 @@ def get_approved_boq():
                 Project.project_name,
                 Project.project_code,
                 Project.client,
+                Project.client_email,
                 Project.location,
                 Project.floor_name,
                 Project.working_hours,
@@ -5558,6 +5569,7 @@ def get_approved_boq():
                 "project_name": row.project_name,
                 "project_code": row.project_code,
                 "client": row.client,
+                "client_email": row.client_email if hasattr(row, 'client_email') else None,
                 "location": row.location,
                 "floor": row.floor_name,
                 "hours": row.working_hours,
@@ -5634,6 +5646,7 @@ def get_rejected_boq():
                 Project.project_name,
                 Project.project_code,
                 Project.client,
+                Project.client_email,
                 Project.location,
                 Project.floor_name,
                 Project.working_hours,
@@ -5688,6 +5701,7 @@ def get_rejected_boq():
                 "project_name": row.project_name,
                 "project_code": row.project_code,
                 "client": row.client,
+                "client_email": row.client_email if hasattr(row, 'client_email') else None,
                 "location": row.location,
                 "floor": row.floor_name,
                 "hours": row.working_hours,
@@ -5768,6 +5782,7 @@ def get_completed_boq():
                 Project.project_name,
                 Project.project_code,
                 Project.client,
+                Project.client_email,
                 Project.location,
                 Project.floor_name,
                 Project.working_hours,
@@ -5821,6 +5836,7 @@ def get_completed_boq():
                 "project_name": row.project_name,
                 "project_code": row.project_code,
                 "client": row.client,
+                "client_email": row.client_email if hasattr(row, 'client_email') else None,
                 "location": row.location,
                 "floor": row.floor_name,
                 "hours": row.working_hours,
@@ -5902,6 +5918,7 @@ def get_send_to_client_boq():
                 Project.project_name,
                 Project.project_code,
                 Project.client,
+                Project.client_email,
                 Project.location,
                 Project.floor_name,
                 Project.working_hours,
@@ -5956,6 +5973,7 @@ def get_send_to_client_boq():
                 "project_name": row.project_name,
                 "project_code": row.project_code,
                 "client": row.client,
+                "client_email": row.client_email if hasattr(row, 'client_email') else None,
                 "location": row.location,
                 "floor": row.floor_name,
                 "hours": row.working_hours,
@@ -6035,6 +6053,7 @@ def get_cancelled_boq():
                 Project.project_name,
                 Project.project_code,
                 Project.client,
+                Project.client_email,
                 Project.location,
                 Project.floor_name,
                 Project.working_hours,
@@ -6088,6 +6107,7 @@ def get_cancelled_boq():
                 "project_name": row.project_name,
                 "project_code": row.project_code,
                 "client": row.client,
+                "client_email": row.client_email if hasattr(row, 'client_email') else None,
                 "location": row.location,
                 "floor": row.floor_name,
                 "hours": row.working_hours,
@@ -6170,6 +6190,7 @@ def get_revisions_boq():
                 Project.project_name,
                 Project.project_code,
                 Project.client,
+                Project.client_email,
                 Project.location,
                 Project.floor_name,
                 Project.working_hours,
@@ -6228,6 +6249,7 @@ def get_revisions_boq():
                 "project_name": row.project_name,
                 "project_code": row.project_code,
                 "client": row.client,
+                "client_email": row.client_email if hasattr(row, 'client_email') else None,
                 "location": row.location,
                 "floor": row.floor_name,
                 "hours": row.working_hours,

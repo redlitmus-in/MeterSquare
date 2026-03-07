@@ -84,6 +84,7 @@ const ProjectCreationForm: React.FC<{
     description: initialData?.description || '',
     location: initialData?.location || '',
     client: initialData?.client || '',
+    client_email: initialData?.client_email || '',
     work_type: initialData?.work_type || '',
     working_hours: initialData?.working_hours || initialData?.hours || '',
     floor_name: initialData?.floor_name || initialData?.floor || '',
@@ -103,6 +104,7 @@ const ProjectCreationForm: React.FC<{
         description: initialData.description || '',
         location: initialData.location || '',
         client: initialData.client || '',
+        client_email: initialData.client_email || '',
         work_type: initialData.work_type || '',
         working_hours: initialData.working_hours || initialData.hours || '',
         floor_name: initialData.floor_name || initialData.floor || '',
@@ -119,6 +121,7 @@ const ProjectCreationForm: React.FC<{
         description: '',
         location: '',
         client: '',
+        client_email: '',
         work_type: '',
         working_hours: '',
         floor_name: '',
@@ -225,6 +228,18 @@ const ProjectCreationForm: React.FC<{
 
         <div className="space-y-2">
           <Label htmlFor="location">Location *</Label>
+          <Label htmlFor="client_email">Client Email</Label>
+          <Input
+            id="client_email"
+            type="email"
+            value={formData.client_email}
+            onChange={(e) => handleChange('client_email', e.target.value)}
+            placeholder="Enter client email address"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="location">Location</Label>
           <Input
             id="location"
             value={formData.location}
@@ -5013,6 +5028,7 @@ const EstimatorHub: React.FC = () => {
           boqId={boqToEmail.boq_id!}
           boqName={boqToEmail.boq_name || boqToEmail.title || ''}
           projectName={boqToEmail.project?.name || ''}
+          clientEmail={(boqToEmail as any).client_email || (boqToEmail as any).project_details?.client_email || ''}
           mode={emailMode}
           onEmailSent={() => {
             loadBOQs(); // Refresh to get updated email_sent status
