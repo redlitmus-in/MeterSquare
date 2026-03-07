@@ -2956,6 +2956,58 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
         showError('Each item must have at least one material or labour entry (either in sub-items or at item level)');
         return;
       }
+
+      // Validate material fields (all are mandatory)
+      const allMaterials = [
+        ...(item.materials || []),
+        ...(item.sub_items?.flatMap((si: any) => si.materials || []) || [])
+      ];
+      for (const mat of allMaterials) {
+        if (!mat.material_name?.trim()) {
+          showError(`Material Name is required in item "${item.item_name}"`);
+          return;
+        }
+        if (!mat.quantity || mat.quantity <= 0) {
+          showError(`Quantity is required for material "${mat.material_name}" in item "${item.item_name}"`);
+          return;
+        }
+        if (!mat.unit_price || mat.unit_price <= 0) {
+          showError(`Rate is required for material "${mat.material_name}" in item "${item.item_name}"`);
+          return;
+        }
+        if (!mat.brand?.trim()) {
+          showError(`Brand is required for material "${mat.material_name}" in item "${item.item_name}"`);
+          return;
+        }
+        if (!mat.size?.trim()) {
+          showError(`Size is required for material "${mat.material_name}" in item "${item.item_name}"`);
+          return;
+        }
+        if (!mat.specification?.trim()) {
+          showError(`Specification is required for material "${mat.material_name}" in item "${item.item_name}"`);
+          return;
+        }
+      }
+
+      // Validate labour fields (role, hours, rate are mandatory)
+      const allLabours = [
+        ...(item.labour || []),
+        ...(item.sub_items?.flatMap((si: any) => si.labour || []) || [])
+      ];
+      for (const lab of allLabours) {
+        if (!lab.labour_role?.trim()) {
+          showError(`Labour Role is required in item "${item.item_name}"`);
+          return;
+        }
+        if (!lab.hours || lab.hours <= 0) {
+          showError(`Hours is required for labour "${lab.labour_role}" in item "${item.item_name}"`);
+          return;
+        }
+        if (!lab.rate_per_hour || lab.rate_per_hour <= 0) {
+          showError(`Rate/hr is required for labour "${lab.labour_role}" in item "${item.item_name}"`);
+          return;
+        }
+      }
     }
 
     // Save custom preliminaries to master table before submitting BOQ
@@ -5254,10 +5306,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       {subItem.materials.length > 0 && (
                                         <div className="flex items-center gap-2 pb-2 border-b border-blue-200">
                                           <div className="w-10 text-xs font-semibold text-gray-700">S.No</div>
-                                          <div className="flex-1 text-xs font-semibold text-gray-700">Material Name</div>
-                                          <div className="w-20 text-xs font-semibold text-gray-700">Qty</div>
+                                          <div className="flex-1 text-xs font-semibold text-gray-700">Material Name <span className="text-red-500">*</span></div>
+                                          <div className="w-20 text-xs font-semibold text-gray-700">Qty <span className="text-red-500">*</span></div>
                                           <div className="w-24 text-xs font-semibold text-gray-700">Unit</div>
-                                          <div className="w-24 text-xs font-semibold text-gray-700">Rate (AED)</div>
+                                          <div className="w-24 text-xs font-semibold text-gray-700">Rate (AED) <span className="text-red-500">*</span></div>
                                           <div className="w-24 text-xs font-semibold text-gray-700">Total (AED)</div>
                                           <div className="w-4"></div>
                                         </div>
@@ -5648,7 +5700,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                     ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
                                                     : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
                                                 }`}
-                                                placeholder="Description (optional)"
+                                                placeholder="Description"
                                                 disabled={isSubmitting}
                                                 readOnly={material.is_from_master}
                                                 rows={1}
@@ -5666,7 +5718,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                             <div className="ml-0 grid grid-cols-2 gap-2 mt-2">
                                               <div>
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                  Brand
+                                                  Brand <span className="text-red-500">*</span>
                                                   {material.is_from_master && (
                                                     <span className="ml-1 text-xs text-blue-600">(Catalog)</span>
                                                   )}
@@ -5685,7 +5737,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                       ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
                                                       : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
                                                   }`}
-                                                  placeholder="Brand (optional)"
+                                                  placeholder="Brand"
                                                   disabled={isSubmitting}
                                                   readOnly={material.is_from_master}
                                                   title={material.is_from_master ? 'From catalog - cannot edit' : ''}
@@ -5698,7 +5750,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               </div>
                                               <div>
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                  Size
+                                                  Size <span className="text-red-500">*</span>
                                                   {material.is_from_master && (
                                                     <span className="ml-1 text-xs text-blue-600">(Catalog)</span>
                                                   )}
@@ -5717,7 +5769,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                       ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
                                                       : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
                                                   }`}
-                                                  placeholder="Size (optional)"
+                                                  placeholder="Size"
                                                   disabled={isSubmitting}
                                                   readOnly={material.is_from_master}
                                                   title={material.is_from_master ? 'From catalog - cannot edit' : ''}
@@ -5730,7 +5782,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                               </div>
                                               <div className="col-span-2">
                                                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                  Specification
+                                                  Specification <span className="text-red-500">*</span>
                                                   {material.is_from_master && (
                                                     <span className="ml-1 text-xs text-blue-600">(From Catalog)</span>
                                                   )}
@@ -5756,7 +5808,7 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                                       ? 'bg-blue-50 border-blue-200 text-gray-700 cursor-not-allowed'
                                                       : 'bg-gray-50 border-gray-200 focus:ring-blue-500'
                                                   }`}
-                                                  placeholder="Specification (optional)"
+                                                  placeholder="Specification"
                                                   rows={1}
                                                   disabled={isSubmitting}
                                                   readOnly={material.is_from_master}
@@ -5820,10 +5872,10 @@ const BOQCreationForm: React.FC<BOQCreationFormProps> = ({
                                       {subItem.labour.length > 0 && (
                                         <div className="flex items-center gap-2 pb-2 border-b border-orange-200">
                                           <div className="w-10 text-xs font-semibold text-gray-700">S.No</div>
-                                          <div className="flex-1 text-xs font-semibold text-gray-700">Labour Role</div>
+                                          <div className="flex-1 text-xs font-semibold text-gray-700">Labour Role <span className="text-red-500">*</span></div>
                                           <div className="w-[100px] text-xs font-semibold text-gray-700">Work Type</div>
-                                          <div className="w-20 text-xs font-semibold text-gray-700">Hours</div>
-                                          <div className="w-24 text-xs font-semibold text-gray-700">Rate/hr (AED)</div>
+                                          <div className="w-20 text-xs font-semibold text-gray-700">Hours <span className="text-red-500">*</span></div>
+                                          <div className="w-24 text-xs font-semibold text-gray-700">Rate/hr (AED) <span className="text-red-500">*</span></div>
                                           <div className="w-24 text-xs font-semibold text-gray-700">Total (AED)</div>
                                           <div className="w-4"></div>
                                         </div>

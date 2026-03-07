@@ -159,6 +159,38 @@ const ProjectCreationForm: React.FC<{
       showError('Project name is required');
       return;
     }
+    if (!formData.client.trim()) {
+      showError('Client is required');
+      return;
+    }
+    if (!formData.location.trim()) {
+      showError('Location is required');
+      return;
+    }
+    if (!formData.work_type.trim()) {
+      showError('Work Type is required');
+      return;
+    }
+    if (!formData.working_hours.trim()) {
+      showError('Working Hours is required');
+      return;
+    }
+    if (!formData.floor_name.trim()) {
+      showError('Floor Name is required');
+      return;
+    }
+    if (!formData.area.trim()) {
+      showError('Area is required');
+      return;
+    }
+    if (!formData.start_date) {
+      showError('Start Date is required');
+      return;
+    }
+    if (!formData.duration_days || parseInt(formData.duration_days) <= 0) {
+      showError('Number of Days is required');
+      return;
+    }
     onSubmit(formData);
   };
 
@@ -181,67 +213,73 @@ const ProjectCreationForm: React.FC<{
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="client">Client</Label>
+          <Label htmlFor="client">Client *</Label>
           <Input
             id="client"
             value={formData.client}
             onChange={(e) => handleChange('client', e.target.value)}
             placeholder="Enter client name"
+            required
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="location">Location</Label>
+          <Label htmlFor="location">Location *</Label>
           <Input
             id="location"
             value={formData.location}
             onChange={(e) => handleChange('location', e.target.value)}
             placeholder="Enter project location"
+            required
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="work_type">Work Type</Label>
+          <Label htmlFor="work_type">Work Type *</Label>
           <Input
             id="work_type"
             value={formData.work_type}
             onChange={(e) => handleChange('work_type', e.target.value)}
             placeholder="e.g., Construction, Renovation"
+            required
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="working_hours">Working Hours</Label>
+          <Label htmlFor="working_hours">Working Hours *</Label>
           <Input
             id="working_hours"
             value={formData.working_hours}
             onChange={(e) => handleChange('working_hours', e.target.value)}
             placeholder="e.g., 8 hours/day"
+            required
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="floor_name">Floor Name</Label>
+          <Label htmlFor="floor_name">Floor Name *</Label>
           <Input
             id="floor_name"
             value={formData.floor_name}
             onChange={(e) => handleChange('floor_name', e.target.value)}
             placeholder="e.g., Ground Floor, 1st Floor"
+            required
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="area">Area</Label>
+          <Label htmlFor="area">Area *</Label>
           <Input
             id="area"
             value={formData.area}
             onChange={(e) => handleChange('area', e.target.value)}
             placeholder="e.g., 1000 sq.ft."
+            required
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="start_date">Start Date</Label>
+          <Label htmlFor="start_date">Start Date *</Label>
           <DatePicker
             id="start_date"
             selected={formData.start_date ? new Date(formData.start_date) : null}
@@ -264,7 +302,7 @@ const ProjectCreationForm: React.FC<{
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="duration_days">Number of Days</Label>
+          <Label htmlFor="duration_days">Number of Days *</Label>
           <Input
             id="duration_days"
             type="number"
@@ -272,6 +310,7 @@ const ProjectCreationForm: React.FC<{
             onChange={(e) => handleChange('duration_days', e.target.value)}
             placeholder="e.g., 80 days"
             min="1"
+            required
           />
         </div>
 
