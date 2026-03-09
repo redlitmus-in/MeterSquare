@@ -20,6 +20,7 @@ from datetime import date
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from sqlalchemy import update as sql_update
 
 log = logging.getLogger(__name__)
 
@@ -205,8 +206,24 @@ def run_deadline_check(app):
                     if deadline_info is None:
                         continue  # > 7 days away, skip
 
-                    # Deduplication: skip if already notified today
-                    if project.last_deadline_notified_at == today:
+                    # Atomic deduplication: attempt to claim this project for today's notification.
+                    # The UPDATE only succeeds (rowcount > 0) if no other process has already
+                    # set last_deadline_notified_at = today, eliminating the race condition when
+                    # multiple workers/scheduler instances run simultaneously.
+                    
+                    claimed = db.session.execute(
+                        sql_update(Project)
+                        .where(Project.project_id == project.project_id)
+                        .where(
+                            db.or_(
+                                Project.last_deadline_notified_at.is_(None),
+                                Project.last_deadline_notified_at < today,
+                            )
+                        )
+                        .values(last_deadline_notified_at=today)
+                    )
+                    db.session.flush()
+                    if claimed.rowcount == 0:
                         log.debug(f"[DeadlineCheck] Project {project.project_id} already notified today, skipping")
                         continue
 
@@ -216,16 +233,32 @@ def run_deadline_check(app):
                     # --- Collect all users to notify ---
                     recipient_user_ids = set()
 
-                    # PM(s): stored as JSONB array [1, 2, 3]
+                    # PM(s): stored as JSONB array [1, 2, 3] or single int
                     if project.user_id:
-                        pm_ids = project.user_id if isinstance(project.user_id, list) else []
+                        raw = project.user_id
+                        if isinstance(raw, list):
+                            pm_ids = raw
+                        elif isinstance(raw, (int, float)):
+                            pm_ids = [int(raw)]
+                        else:
+                            pm_ids = []
                         for pm_id in pm_ids:
                             if pm_id:
                                 recipient_user_ids.add(int(pm_id))
 
-                    # SE: single integer
-                    if project.site_supervisor_id:
-                        recipient_user_ids.add(int(project.site_supervisor_id))
+                    # SE (site supervisor): fetch from pm_assign_ss table
+                    from models.pm_assign_ss import PMAssignSS
+                    ss_assignments = PMAssignSS.query.filter_by(
+                        project_id=project.project_id,
+                        is_deleted=False
+                    ).all()
+                    for assignment in ss_assignments:
+                        if assignment.assigned_to_se_id:
+                            recipient_user_ids.add(int(assignment.assigned_to_se_id))
+                        if assignment.ss_ids:
+                            for ss_id in assignment.ss_ids:
+                                if ss_id:
+                                    recipient_user_ids.add(int(ss_id))
 
                     # TD: all TD users system-wide
                     for td in td_users:
@@ -283,21 +316,42 @@ def run_deadline_check(app):
                         }
                         for user in recipients
                     ]
-                    NotificationManager.create_bulk_notifications(notifications_data)
+                    created_notifications = NotificationManager.create_bulk_notifications(notifications_data)
+
+                    # Push real-time bell + desktop notification via Socket.IO for each recipient
+                    from socketio_server import send_notification_to_user
+                    for notif_data in notifications_data:
+                        try:
+                            send_notification_to_user(notif_data['user_id'], {
+                                'userId': notif_data['user_id'],
+                                'targetUserId': notif_data['user_id'],
+                                'title': notif_data['title'],
+                                'message': notif_data['message'],
+                                'type': notif_data['type'],
+                                'priority': notif_data['priority'],
+                                'category': notif_data['category'],
+                                'actionUrl': notif_data.get('action_url'),
+                                'actionLabel': notif_data.get('action_label'),
+                                'metadata': notif_data.get('metadata'),
+                            })
+                            log.info(f"[DeadlineCheck] Socket.IO pushed to user {notif_data['user_id']}")
+                        except Exception as sio_err:
+                            log.warning(f"[DeadlineCheck] Socket.IO push failed for user {notif_data['user_id']}: {sio_err}")
 
                     # --- Send emails to offline users only ---
                     email_html = _build_email_html(project_name, project.end_date, deadline_info)
                     email_subject = f"{deadline_info['email_subject_prefix']} — {project_name}"
 
+                    # Send email to ALL recipients (PM, SE, TD) regardless of online/offline status.
                     from utils.boq_email_service import BOQEmailService
                     email_svc = BOQEmailService()
                     for user in recipients:
-                        if ComprehensiveNotificationService.is_user_offline(user.user_id, user=user):
+                        if user.email:
                             email_svc.send_email_async(user.email, email_subject, email_html)
-                            log.info(f"[DeadlineCheck] Email sent to {user.email}")
+                            log.info(f"[DeadlineCheck] Email queued for {user.email} (role: {user.role.role if user.role else 'unknown'})")
+                        else:
+                            log.warning(f"[DeadlineCheck] Skipping email for user_id={user.user_id} — email is NULL")
 
-                    # --- Mark project as notified today ---
-                    project.last_deadline_notified_at = today
                     db.session.commit()
                     notified_count += 1
 
@@ -323,12 +377,14 @@ def init_deadline_scheduler(app):
     automatically when Flask exits.
     """
     scheduler = BackgroundScheduler(daemon=True)
+    # from apscheduler.triggers.interval import IntervalTrigger
 
     # Run every day at 08:00 AM server time
     scheduler.add_job(
         func=run_deadline_check,
         args=[app],
-        trigger=CronTrigger(hour=8, minute=0),
+        # trigger=IntervalTrigger(minutes=5),
+        trigger=CronTrigger(hour=10, minute=0),
         id='deadline_check',
         name='Daily Project Deadline Warning',
         replace_existing=True,
@@ -336,5 +392,5 @@ def init_deadline_scheduler(app):
     )
 
     scheduler.start()
-    log.info("[DeadlineScheduler] Started — daily deadline check at 08:00 AM")
+    log.info("[DeadlineScheduler] Started — daily deadline check at 10:00 AM")
     return scheduler
