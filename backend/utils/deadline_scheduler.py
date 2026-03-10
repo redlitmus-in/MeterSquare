@@ -23,7 +23,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import update as sql_update
 
-NOTIFY_HOUR = 10  # Send notifications at this hour in each user's local timezone
+NOTIFY_HOUR = 10
+NOTIFY_MINUTE = 0
 
 log = logging.getLogger(__name__)
 
@@ -174,7 +175,7 @@ def _is_notify_hour_for_user(user) -> bool:
     except pytz.UnknownTimeZoneError:
         tz = pytz.utc
     user_now = datetime.now(dt_timezone.utc).astimezone(tz)
-    return user_now.hour == NOTIFY_HOUR
+    return user_now.hour == NOTIFY_HOUR and user_now.minute == NOTIFY_MINUTE
 
 
 def run_deadline_check(app):
