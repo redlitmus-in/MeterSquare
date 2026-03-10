@@ -820,6 +820,25 @@ def get_all_inventory_transactions():
                 if _dn.delivery_batch_ref not in _batch_dn_by_ref:
                     _batch_dn_by_ref[_dn.delivery_batch_ref] = _dn
 
+        # Batch pre-fetch delivery notes for unlinked transactions (Method 2 fallback)
+        # Collects all vehicle_numbers from transactions with no batch_ref match, fetches in one query
+        _unlinked_txns = [t for t in transactions if not t.delivery_batch_ref and t.vehicle_number]
+        _vehicle_numbers = list({t.vehicle_number for t in _unlinked_txns})
+        _dn_by_vehicle = {}  # vehicle_number -> best matching DeliveryNote
+        if _vehicle_numbers:
+            from datetime import timedelta
+            _all_dates = [t.created_at for t in _unlinked_txns if t.created_at]
+            if _all_dates:
+                _date_min = min(_all_dates) - timedelta(days=7)
+                _date_max = max(_all_dates) + timedelta(days=7)
+                for _dn in MaterialDeliveryNote.query.filter(
+                    MaterialDeliveryNote.vehicle_number.in_(_vehicle_numbers),
+                    MaterialDeliveryNote.created_at >= _date_min,
+                    MaterialDeliveryNote.created_at <= _date_max
+                ).all():
+                    if _dn.vehicle_number not in _dn_by_vehicle:
+                        _dn_by_vehicle[_dn.vehicle_number] = _dn
+
         # Batch pre-fetch delivery_note_url per batch_ref from other transactions in the same batch
         # This eliminates an N+1 that fires when a transaction lacks a URL but its batch-mate has one
         _batch_ref_to_url = {}
@@ -855,35 +874,9 @@ def get_all_inventory_transactions():
             if txn.delivery_batch_ref:
                 delivery_note = _batch_dn_by_ref.get(txn.delivery_batch_ref)
 
-            # Method 2: If no batch ref match, try matching by transaction details
-            # This handles cases where transactions were created before proper batch ref linking
-            if not delivery_note and txn.reference_number:
-                # Try to find a delivery note where the reference matches or transport details align
-                from datetime import timedelta
-                date_range_start = txn.created_at - timedelta(days=7) if txn.created_at else None
-                date_range_end = txn.created_at + timedelta(days=7) if txn.created_at else None
-
-                query = MaterialDeliveryNote.query
-
-                # Filter by date range if available
-                if date_range_start and date_range_end:
-                    query = query.filter(
-                        MaterialDeliveryNote.created_at >= date_range_start,
-                        MaterialDeliveryNote.created_at <= date_range_end
-                    )
-
-                # Try matching by driver AND vehicle (strong correlation)
-                if txn.driver_name and txn.vehicle_number:
-                    delivery_note = query.filter_by(
-                        driver_name=txn.driver_name,
-                        vehicle_number=txn.vehicle_number
-                    ).first()
-
-                # If still no match, try just vehicle number (vehicles are more unique than driver names)
-                if not delivery_note and txn.vehicle_number:
-                    delivery_note = query.filter_by(
-                        vehicle_number=txn.vehicle_number
-                    ).first()
+            # Method 2: If no batch ref match, use pre-fetched vehicle lookup (no DB call per row)
+            if not delivery_note and txn.vehicle_number:
+                delivery_note = _dn_by_vehicle.get(txn.vehicle_number)
 
             # Add delivery note details if found
             if delivery_note:

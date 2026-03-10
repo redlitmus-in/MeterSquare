@@ -161,23 +161,18 @@ class BOQEmailService:
 
     def send_email_async(self, recipient_email, subject, email_html, attachments=None, cc_emails=None):
         """
-        Send email asynchronously in a background thread (non-blocking).
+        Queue email on the shared background worker thread (non-blocking).
+        Uses the centralised async_email queue — no raw thread spawned per email.
 
         Returns:
-            bool: True if the email thread was started successfully
+            bool: True if successfully queued
         """
         try:
-            import threading
-            thread = threading.Thread(
-                target=self.send_email,
-                args=(recipient_email, subject, email_html, attachments, cc_emails),
-                daemon=True
-            )
-            thread.start()
-            log.info(f"Email queued for async sending to {recipient_email}")
+            from utils.async_email import queue_generic_email
+            queue_generic_email(recipient_email, subject, email_html, attachments, cc_emails)
             return True
         except Exception as e:
-            log.error(f"Failed to start async email thread: {e}")
+            log.error(f"Failed to queue async email for {recipient_email}: {e}")
             return False
 
     def generate_boq_approval_email(self, boq_data, project_data, items_summary, comments, estimator_name=None, pm_name=None):

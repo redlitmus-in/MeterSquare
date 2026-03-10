@@ -1668,6 +1668,14 @@ def complete_purchase():
                         db.session.add(new_material)
                         new_materials_added.append(material_name)
 
+        # Bust master catalog cache if new materials were added to MasterMaterial
+        if new_materials_added:
+            try:
+                from controllers.boq_controller import clear_master_catalog_cache
+                clear_master_catalog_cache()
+            except Exception:
+                pass
+
         # ========================================
         # NEW FEATURE: Auto-create Internal Material Requests
         # These requests go to Production Manager so they know

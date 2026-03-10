@@ -833,9 +833,8 @@ function App() {
         Notification.requestPermission();
       }
 
-      // Fetch missed notifications immediately on app mount/login
-      // No delay needed — polling fallback handles delivery even if Socket.IO isn't ready
-      realtimeNotificationHub.fetchMissedNotifications();
+      // Note: fetchMissedNotifications() is called inside reconnect() via startPollingFallback()
+      // Removed duplicate explicit call here to avoid 3x API hits on every page load
 
       // ONLY cleanup on actual logout (isAuthenticated changes to false)
       return () => {

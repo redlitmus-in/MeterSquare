@@ -54,6 +54,8 @@ def email_worker_thread():
                     _send_account_deactivated_sync(email_data)
                 elif email_type == 'account_activated':
                     _send_account_activated_sync(email_data)
+                elif email_type == 'generic_html':
+                    _send_generic_html_sync(email_data)
                 else:
                     send_email_sync(email_data)
             except Exception as e:
@@ -718,6 +720,50 @@ def _dispatch_simple_email(email_id, subject, body):
         with smtplib.SMTP_SSL(EMAIL_HOST, EMAIL_PORT) as server:
             server.login(SENDER_EMAIL, SENDER_EMAIL_PASSWORD)
             server.sendmail(SENDER_EMAIL, email_id, message.as_string())
+
+
+def _ensure_worker_running():
+    """Start the background email worker thread if not already running."""
+    global email_worker
+    if email_worker is None or not email_worker.is_alive():
+        email_worker = threading.Thread(target=email_worker_thread, daemon=True)
+        email_worker.start()
+        log.info("Started email worker thread")
+
+
+def queue_generic_email(recipient_email, subject, email_html, attachments=None, cc_emails=None):
+    """
+    Queue an HTML notification email on the shared worker thread — non-blocking.
+    Used by BOQEmailService.send_email_async() to avoid spawning a new thread per email.
+    """
+    try:
+        _ensure_worker_running()
+        email_queue.put({
+            'type': 'generic_html',
+            'email': recipient_email,
+            'subject': subject,
+            'html': email_html,
+            'attachments': attachments,
+            'cc_emails': cc_emails,
+        })
+        log.info(f"Generic email queued for {recipient_email}")
+    except Exception as e:
+        log.error(f"Error queuing generic email for {recipient_email}: {e}")
+
+
+def _send_generic_html_sync(email_data):
+    """Synchronously send a pre-built HTML email (called by the worker thread)."""
+    from utils.boq_email_service import BOQEmailService
+    email_id = email_data['email']
+    subject = email_data['subject']
+    email_html = email_data['html']
+    attachments = email_data.get('attachments')
+    cc_emails = email_data.get('cc_emails')
+    try:
+        service = BOQEmailService()
+        service.send_email(email_id, subject, email_html, attachments, cc_emails)
+    except Exception as e:
+        log.error(f"Failed to send generic HTML email to {email_id}: {e}")
 
 
 def shutdown_email_worker():

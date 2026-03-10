@@ -149,6 +149,13 @@ def add_to_master_tables_bulk(item_name, description, work_type, materials_data,
 
             master_labour_ids.append(master_labour.labour_id)
 
+    # Bust the master catalog cache so the next read reflects new data
+    try:
+        from controllers.boq_controller import clear_master_catalog_cache
+        clear_master_catalog_cache()
+    except Exception:
+        pass
+
     return master_item_id, master_material_ids, master_labour_ids
 
 
@@ -417,8 +424,6 @@ def bulk_upload_boq():
                 max_retries = 5
                 for attempt in range(max_retries):
                     try:
-                        # Wait a bit for file handles to be released
-                        time.sleep(0.2 * (attempt + 1))
                         os.remove(temp_path)
                         log.info(f"Successfully deleted temp file: {temp_path}")
                         break
@@ -426,6 +431,7 @@ def bulk_upload_boq():
                         if attempt < max_retries - 1:
                             log.debug(f"Attempt {attempt + 1}/{max_retries} to delete {temp_path} failed, retrying...")
                             gc.collect()  # Force another GC
+                            time.sleep(0.1)  # Short fixed wait, not exponential
                         else:
                             log.warning(f"Could not delete temp file after {max_retries} attempts: {temp_path}. Error: {e}")
                     except Exception as cleanup_error:

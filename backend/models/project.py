@@ -5,7 +5,16 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 class Project(db.Model):
     __tablename__ = 'project'
-    # __table_args__ = {'schema': 'public'}  # Explicitly set schema
+    __table_args__ = (
+        # B-tree indexes for equality filters used on every BOQ/CR query
+        db.Index('idx_project_estimator_id', 'estimator_id'),
+        db.Index('idx_project_is_deleted', 'is_deleted'),
+        db.Index('idx_project_site_supervisor_id', 'site_supervisor_id'),
+        db.Index('idx_project_buyer_id', 'buyer_id'),
+        # GIN indexes for JSONB array contains() operations
+        db.Index('idx_project_user_id_gin', 'user_id', postgresql_using='gin'),
+        db.Index('idx_project_mep_supervisor_id_gin', 'mep_supervisor_id', postgresql_using='gin'),
+    )
 
     project_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     project_code = db.Column(db.String(50), unique=True, nullable=False)  # Auto-generated unique code like Proj01

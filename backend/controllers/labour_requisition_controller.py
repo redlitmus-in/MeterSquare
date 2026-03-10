@@ -426,9 +426,7 @@ def create_requisition():
                 if 'labour_requisitions_requisition_code_key' in str(commit_error):
                     if attempt < max_retries - 1:
                         log.warning(f"Requisition code collision on attempt {attempt + 1}, retrying...")
-                        import time
-                        time.sleep(0.1)  # Wait 100ms before retry
-                        continue  # Retry with new code
+                        continue  # Retry with new code immediately — no sleep needed
                     else:
                         log.error(f"Failed to generate unique requisition code after {max_retries} attempts")
                         return jsonify({"error": "Failed to generate unique requisition code. Please try again."}), 500

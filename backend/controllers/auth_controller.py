@@ -345,31 +345,32 @@ def logout():
                     db.session.commit()
                     log.info(f"User {user_id} logged out and set to offline")
             except jwt.ExpiredSignatureError:
-                # Token expired, still try to set offline from request body
-                pass
+                # Token expired — decode without expiry check to still get user_id
+                # from the signed token (never trust user_id from request body)
+                try:
+                    payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
+                    user_id = payload.get('user_id')
+                    if user_id:
+                        user = User.query.filter_by(user_id=user_id).first()
+                        if user:
+                            user.user_status = 'offline'
+                        try:
+                            active_session = LoginHistory.query.filter_by(
+                                user_id=user_id, status='active'
+                            ).order_by(LoginHistory.login_at.desc()).first()
+                            if active_session:
+                                active_session.mark_logged_out()
+                                log.info(f"Marked login session {active_session.id} as logged out for user {user_id} (expired token path)")
+                        except Exception as e:
+                            log.error(f"Error marking login session as logged out (expired token path): {str(e)}")
+                        db.session.commit()
+                        log.info(f"User {user_id} logged out via expired token")
+                except Exception as e:
+                    log.error(f"Error decoding expired token during logout: {str(e)}")
             except jwt.InvalidTokenError:
                 pass
             except Exception as e:
                 log.error(f"Error setting user offline during logout: {str(e)}")
-
-        # Also check request body for user_id (frontend may send it)
-        data = request.get_json(silent=True)
-        if data and data.get('user_id'):
-            user_id = data.get('user_id')
-            user = User.query.filter_by(user_id=user_id).first()
-            if user:
-                user.user_status = 'offline'
-            try:
-                active_session = LoginHistory.query.filter_by(
-                    user_id=user_id, status='active'
-                ).order_by(LoginHistory.login_at.desc()).first()
-                if active_session:
-                    active_session.mark_logged_out()
-                    log.info(f"Marked login session {active_session.id} as logged out for user {user_id} (body path)")
-            except Exception as e:
-                log.error(f"Error marking login session as logged out (body path): {str(e)}")
-            db.session.commit()
-            log.info(f"User {user_id} set to offline via request body")
     except Exception as e:
         log.error(f"Error during logout status update: {str(e)}")
         # Don't fail logout if status update fails
@@ -381,10 +382,19 @@ def logout():
 
 def user_status():
     try:
+        current_user = g.get("user")
+        if not current_user:
+            return jsonify({"error": "Not authenticated"}), 401
+
         data = request.get_json(silent=True)
 
         user_id = data.get("user_id")
-        status = data.get("status")  # list of project IDs
+        status = data.get("status")
+
+        # Ownership check: users may only update their own status
+        if str(user_id) != str(current_user["user_id"]):
+            return jsonify({"error": "Cannot update another user's status"}), 403
+
         # Validate user
         user = User.query.filter_by(user_id=user_id).first()
         if user:
@@ -606,9 +616,15 @@ def verify_sms_otp_login():
             on_login_failed(user_email)  # Security audit log
             return jsonify({"error": "User not found or inactive"}), 404
 
-        # Update last login and set user status to online
+        # Update last login, status, and timezone
         user.last_login = current_time
         user.user_status = 'online'  # Auto-set online on login
+
+        # Save user's browser timezone if provided
+        tz = data.get('timezone')
+        if tz and isinstance(tz, str) and len(tz) <= 100:
+            user.timezone = tz
+
         db.session.commit()
 
         # Record login history for SMS OTP login

@@ -717,6 +717,13 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
 
         master_labour_ids.append(master_labour.labour_id)
 
+    # Bust the master catalog cache so the next read reflects new data
+    try:
+        from controllers.boq_controller import clear_master_catalog_cache
+        clear_master_catalog_cache()
+    except Exception:
+        pass
+
     return master_item_id, master_material_ids, master_labour_ids
 
 def process_extracted_items_to_boq(extracted_items, project_id, boq_name, created_by, file_info=None):

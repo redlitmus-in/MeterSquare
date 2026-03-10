@@ -12,9 +12,44 @@ from models.role import Role
 from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
 from sqlalchemy import func, and_, or_
 from config.change_request_config import CR_CONFIG
+import time as _time
 
 
 log = get_logger()
+
+# ─── Module-level TTL caches for read-heavy master catalog endpoints ──────────
+# These endpoints return static catalog data (materials, sub-items) that almost
+# never changes. Caching for 10 minutes eliminates repeated DB round trips.
+# Same pattern as _profit_report_cache in boq_tracking_controller.py.
+_materials_cache = {}    # {'data': list, 'ts': float}
+_sub_items_cache = {}    # {'data': list, 'ts': float}
+_MASTER_CACHE_TTL = 600  # 10 minutes
+
+# Shared file-based invalidation flag — all Gunicorn workers read the same file.
+# When one worker writes a new timestamp, ALL workers detect the cache is stale.
+_CACHE_BUST_FLAG = '/tmp/msq_catalog_cache_bust'
+
+
+def _get_bust_ts():
+    """Read the shared bust timestamp from disk (0 if file missing)."""
+    try:
+        with open(_CACHE_BUST_FLAG, 'r') as f:
+            return float(f.read().strip())
+    except Exception:
+        return 0.0
+
+
+def clear_master_catalog_cache():
+    """Bust both master catalog caches across ALL Gunicorn workers.
+    Writes a shared timestamp file so every worker detects the invalidation.
+    """
+    _materials_cache.clear()
+    _sub_items_cache.clear()
+    try:
+        with open(_CACHE_BUST_FLAG, 'w') as f:
+            f.write(str(_time.time()))
+    except Exception:
+        pass
 
 
 def validate_negotiable_margin_formula(client_amount, materials, labour, misc, overhead_profit, transport, calculated_margin):
@@ -211,6 +246,8 @@ def add_to_master_tables(item_name, description, work_type, materials_data, labo
             db.session.flush()
         master_labour_ids.append(master_labour.labour_id)
 
+    # New materials may have been added — bust the cache so next read is fresh
+    clear_master_catalog_cache()
     return master_item_id, master_material_ids, master_labour_ids
 
 def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
@@ -377,6 +414,8 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     # Labour already exists globally - just log it, don't create duplicate
                     log.info(f"Labour '{labour_role}' already exists in master table (ID: {master_labour.labour_id})")
 
+    # New sub-items / materials may have been added — bust the cache
+    clear_master_catalog_cache()
     return master_sub_item_ids
 
 def clean_numeric_value(value):
@@ -4951,18 +4990,22 @@ def get_estimator_tab_counts():
                 BOQ.project_id.in_(project_ids_subquery)
             )
 
-        # Single query to get all status counts
+        # Single query to get all status counts AND revision count simultaneously.
+        # func.count(case(...)) counts only rows where revision_number > 0, per group.
         status_counts = db.session.query(
             BOQ.status,
-            func.count(BOQ.boq_id).label('count')
+            func.count(BOQ.boq_id).label('count'),
+            func.count(case((BOQ.revision_number > 0, BOQ.boq_id))).label('revision_count')
         ).filter(base_filter).group_by(BOQ.status).all()
 
-        # Normalize status keys to lowercase to avoid double counting
+        # Normalize status keys to lowercase to avoid double counting; tally revision total
         counts_dict = {}
+        revisions_count = 0
         for row in status_counts:
             if row.status:
                 key = row.status.lower()
                 counts_dict[key] = counts_dict.get(key, 0) + row.count
+                revisions_count += row.revision_count
 
         # ============ PENDING TAB COUNT ============
         # Use same logic as get_pending_boq: Projects with Draft BOQ OR Projects without any BOQ
@@ -5020,12 +5063,6 @@ def get_estimator_tab_counts():
             counts_dict.get('cancelled', 0) +
             counts_dict.get('client_cancelled', 0)
         )
-
-        # Revisions count: BOQs with revision_number > 0
-        revisions_count = db.session.query(func.count(BOQ.boq_id)).filter(
-            base_filter,
-            BOQ.revision_number > 0
-        ).scalar() or 0
 
         return jsonify({
             "success": True,
@@ -6358,8 +6395,17 @@ def search_all_materials():
 def get_all_master_materials():
     """Get all distinct master materials for dropdown/autocomplete (no search required).
     Returns up to 500 distinct materials with their latest details.
+    Cached for 10 minutes — catalog data rarely changes.
     """
     try:
+        # Cache hit — serve without touching the DB
+        # Also check shared bust flag so all workers invalidate together
+        _now = _time.time()
+        _cached = _materials_cache.get('data')
+        _cache_ts = _materials_cache.get('ts', 0)
+        if _cached and (_now - _cache_ts) < _MASTER_CACHE_TTL and _cache_ts > _get_bust_ts():
+            return jsonify({"success": True, "materials": _cached}), 200
+
         latest_material = db.session.query(
             func.max(MasterMaterial.material_id).label('max_id')
         ).filter(
@@ -6387,6 +6433,10 @@ def get_all_master_materials():
                 "current_market_price": mat.current_market_price or 0
             })
 
+        # Store in cache before returning
+        _materials_cache['data'] = results
+        _materials_cache['ts'] = _time.time()
+
         return jsonify({"success": True, "materials": results}), 200
 
     except Exception as e:
@@ -6397,8 +6447,17 @@ def get_all_master_materials():
 def get_all_master_sub_items():
     """Get all distinct master sub-items for dropdown/autocomplete (no search required).
     Returns up to 500 distinct sub-items with their latest details.
+    Cached for 10 minutes — catalog data rarely changes.
     """
     try:
+        # Cache hit — serve without touching the DB
+        # Also check shared bust flag so all workers invalidate together
+        _now = _time.time()
+        _cached = _sub_items_cache.get('data')
+        _cache_ts = _sub_items_cache.get('ts', 0)
+        if _cached and (_now - _cache_ts) < _MASTER_CACHE_TTL and _cache_ts > _get_bust_ts():
+            return jsonify({"success": True, "sub_items": _cached}), 200
+
         latest_sub_item = db.session.query(
             func.max(MasterSubItem.sub_item_id).label('max_id')
         ).filter(
@@ -6425,6 +6484,10 @@ def get_all_master_sub_items():
                 "brand": si.brand or '',
                 "unit": si.unit or '',
             })
+
+        # Store in cache before returning
+        _sub_items_cache['data'] = results
+        _sub_items_cache['ts'] = _time.time()
 
         return jsonify({"success": True, "sub_items": results}), 200
 

@@ -7,7 +7,7 @@ from flask import Blueprint, jsonify, request, current_app
 from functools import wraps
 import jwt
 from datetime import datetime
-from sqlalchemy import and_
+from sqlalchemy import and_, func, case
 from models.notification import Notification
 from config.db import db
 from config.logging import get_logger
@@ -73,38 +73,35 @@ def get_notifications(current_user_id, current_user_role):
         limit = min(int(request.args.get('limit', 100)), 500)  # Max 500
         offset = int(request.args.get('offset', 0))
 
-        # Build query - only show notifications for this specific user
-        query = Notification.query.filter(
-            and_(
-                Notification.user_id == current_user_id,
-                Notification.deleted_at.is_(None)
-            )
+        # Single aggregation query — get total count + unread count together
+        # Uses SQL CASE to count unread in the same pass as total, avoiding a second round-trip
+        base_filter = and_(
+            Notification.user_id == current_user_id,
+            Notification.deleted_at.is_(None)
         )
+        counts = db.session.query(
+            func.count().label('total'),
+            func.count(case((Notification.read == False, 1))).label('unread')
+        ).filter(base_filter).one()
+        unread_count = counts.unread
+
+        # Build paginated data query (separate, but now no extra count round-trip)
+        query = Notification.query.filter(base_filter)
 
         # Apply filters
         if unread_only:
             query = query.filter(Notification.read == False)
+            total_count = unread_count  # already have it from aggregation above
+        else:
+            total_count = counts.total
 
         if category:
             query = query.filter(Notification.category == category)
+            # Re-count only when category filter narrows results
+            total_count = query.count()
 
-        # Order by created_at descending
-        query = query.order_by(Notification.created_at.desc())
-
-        # Get total count before pagination
-        total_count = query.count()
-
-        # Apply pagination
-        notifications = query.limit(limit).offset(offset).all()
-
-        # Get unread count - only for this specific user
-        unread_count = Notification.query.filter(
-            and_(
-                Notification.user_id == current_user_id,
-                Notification.read == False,
-                Notification.deleted_at.is_(None)
-            )
-        ).count()
+        # Order by created_at descending and paginate
+        notifications = query.order_by(Notification.created_at.desc()).limit(limit).offset(offset).all()
 
         return jsonify({
             'success': True,

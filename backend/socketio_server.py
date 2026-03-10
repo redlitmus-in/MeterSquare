@@ -49,13 +49,20 @@ if _environment == 'production':
 else:
     _async_mode = 'threading'
 
+# In threading mode (Werkzeug dev server), restrict to polling transport only.
+# Werkzeug doesn't support WebSocket upgrades, causing "write() before start_response" errors.
+# Polling still delivers real-time notifications — just via HTTP long-poll instead of WebSocket.
+# In gevent mode (production Gunicorn), allow all transports including WebSocket.
+_allowed_transports = ['polling'] if _async_mode == 'threading' else ['polling', 'websocket']
+
 socketio = SocketIO(
     cors_allowed_origins=SOCKET_CORS_ORIGINS,
     async_mode=_async_mode,
     logger=False,  # Disable Socket.IO internal logging (reduces noise)
     engineio_logger=False,  # Disable EngineIO logging (removes ping/pong spam)
     ping_timeout=60,
-    ping_interval=25
+    ping_interval=25,
+    transports=_allowed_transports
 )
 
 # JWT Secret Key

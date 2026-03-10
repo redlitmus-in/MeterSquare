@@ -84,6 +84,8 @@ const ChangeRequestsPage: React.FC = () => {
 
   // Track if we've already auto-opened modal from URL (to prevent reopening on close)
   const hasAutoOpenedRef = useRef<string | null>(null);
+  // Tracks whether the realtime-update effect has already run once (to skip the initial mount call)
+  const isFirstRealtimeRender = useRef(true);
 
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
@@ -100,8 +102,13 @@ const ChangeRequestsPage: React.FC = () => {
 
   // ✅ RELOAD change requests when real-time update is received
   useEffect(() => {
-    // Skip initial mount
-    if (changeRequestUpdateTimestamp === 0) return;
+    // Skip the first render — the initial load useEffect above already handles it.
+    // The store initialises changeRequestUpdateTimestamp to Date.now() (non-zero),
+    // so the old `=== 0` guard never worked and caused a double fetch on every mount.
+    if (isFirstRealtimeRender.current) {
+      isFirstRealtimeRender.current = false;
+      return;
+    }
 
     loadChangeRequests(false); // Silent reload without toasts
   }, [changeRequestUpdateTimestamp]); // Reload whenever timestamp changes

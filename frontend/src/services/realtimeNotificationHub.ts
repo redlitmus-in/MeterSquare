@@ -46,6 +46,7 @@ class RealtimeNotificationHub {
   private shownToastIds: Set<string> = new Set(); // Track shown toasts to prevent duplicates
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private authPollInterval: ReturnType<typeof setInterval> | null = null;
+  private fetchMissedCooldown = false; // Prevents duplicate API calls within 3s window
 
   private constructor() {
     this.initialize();
@@ -735,6 +736,12 @@ class RealtimeNotificationHub {
    */
   async fetchMissedNotifications() {
     if (!this.authToken) return;
+
+    // Deduplicate: if called multiple times within 3s (e.g. reconnect + disconnect + App.tsx),
+    // only the first call goes through. This prevents 3x API hits on every page load.
+    if (this.fetchMissedCooldown) return;
+    this.fetchMissedCooldown = true;
+    setTimeout(() => { this.fetchMissedCooldown = false; }, 3000);
 
     try {
       const client = await getApiClient();

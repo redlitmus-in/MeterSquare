@@ -11,6 +11,22 @@ from models.lpo_customization import LPOCustomization
 
 log = get_logger()
 
+# Simple TTL cache for expensive read-only endpoints
+import time as _time
+_profit_report_cache = {}  # {boq_id: (timestamp, data)}
+_PROFIT_REPORT_TTL = 120  # 2 minutes
+
+# Shared file-based bust flag — same as boq_controller.py
+# All Gunicorn workers read the same file, so one worker's bust invalidates all.
+_CACHE_BUST_FLAG = '/tmp/msq_catalog_cache_bust'
+
+def _get_bust_ts():
+    try:
+        with open(_CACHE_BUST_FLAG, 'r') as f:
+            return float(f.read().strip())
+    except Exception:
+        return 0.0
+
 
 def get_boq_planned_vs_actual(boq_id):
     """
@@ -267,25 +283,15 @@ def get_boq_planned_vs_actual(boq_id):
         ).all()
 
         # If no requisitions found, check labour_id pattern: lab_{boq_id}_...
+        # Cast JSONB to text and use LIKE — much faster than loading all rows into Python
         if not requisitions:
-            all_requisitions = LabourRequisition.query.filter(
+            from sqlalchemy import Text
+            _pattern = f'%"lab_{boq_id}\\_%'  # matches "lab_843_..." inside the JSONB text
+            requisitions = LabourRequisition.query.filter(
                 LabourRequisition.is_deleted == False,
-                LabourRequisition.labour_items.isnot(None)
+                LabourRequisition.labour_items.isnot(None),
+                cast(LabourRequisition.labour_items, Text).like(_pattern)
             ).all()
-
-            # Filter requisitions that have labour_id matching pattern lab_{boq_id}_
-            matching_requisitions = []
-            for req in all_requisitions:
-                if req.labour_items:
-                    for item in req.labour_items:
-                        labour_id = item.get('labour_id', '')
-                        # Pattern: lab_{boq_id}_... (e.g., lab_843_1_2_1)
-                        match = re.match(r'^lab_(\d+)_', labour_id)
-                        if match and int(match.group(1)) == boq_id:
-                            matching_requisitions.append(req)
-                            break
-
-            requisitions = matching_requisitions
 
         # Aggregate actual labour by labour_role (skill_required)
         # Group attendance records by labour role
@@ -655,70 +661,50 @@ def get_boq_planned_vs_actual(boq_id):
         from models.inventory import MaterialDeliveryNote, ReturnDeliveryNote
         from models.returnable_assets import AssetDeliveryNote, AssetReturnDeliveryNote
         from models.labour_requisition import LabourRequisition
-        _total_actual_project_transport = Decimal('0')
+        from sqlalchemy import func as _func
 
-        # Material Delivery Notes (Store → Site)
-        _mdn_transport_records = MaterialDeliveryNote.query.filter(
+        # Use aggregation queries (SUM at DB level) instead of loading all rows into Python
+        _mdn_sum = db.session.query(_func.coalesce(_func.sum(MaterialDeliveryNote.transport_fee), 0)).filter(
             MaterialDeliveryNote.project_id == boq.project_id,
             MaterialDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
-        ).all()
-        for _mdn in _mdn_transport_records:
-            _total_actual_project_transport += Decimal(str(_mdn.transport_fee or 0))
+        ).scalar() or 0
 
-        # Return Delivery Notes (Site → Store)
-        _rdn_transport_records = ReturnDeliveryNote.query.filter(
+        _rdn_sum = db.session.query(_func.coalesce(_func.sum(ReturnDeliveryNote.transport_fee), 0)).filter(
             ReturnDeliveryNote.project_id == boq.project_id,
             ReturnDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
-        ).all()
-        for _rdn in _rdn_transport_records:
-            _total_actual_project_transport += Decimal(str(_rdn.transport_fee or 0))
+        ).scalar() or 0
 
-        # Inventory Transactions (Vendor → Store) — only PURCHASE transactions with a
-        # properly auto-generated delivery_batch_ref (MSQ-IN-XX format set by ManualStockInForm).
-        # Transactions with NULL or non-MSQ-IN delivery_batch_ref are old/unlinked stock-ins
-        # with garbage reference_numbers and are excluded.
-        _seen_inv_batches_total = set()
-        _seen_inv_refs_total = set()
-        _inv_transport_records = InventoryTransaction.query.filter(
+        # Inventory Transactions — deduplicate by delivery_batch_ref before summing
+        # Use subquery to get one transport_fee per unique batch ref
+        _inv_sum_rows = db.session.query(
+            InventoryTransaction.delivery_batch_ref,
+            _func.max(InventoryTransaction.transport_fee).label('fee')
+        ).filter(
             InventoryTransaction.project_id == boq.project_id,
             InventoryTransaction.transaction_type == 'PURCHASE',
-            InventoryTransaction.delivery_batch_ref.like('MSQ-IN-%')
-        ).order_by(InventoryTransaction.created_at.desc()).all()
-        for _txn in _inv_transport_records:
-            _fee = Decimal(str(_txn.transport_fee or 0))
-            if _fee <= 0:
-                continue
-            if _txn.delivery_batch_ref:
-                if _txn.delivery_batch_ref in _seen_inv_batches_total:
-                    continue
-                _seen_inv_batches_total.add(_txn.delivery_batch_ref)
-            if _txn.reference_number:
-                _seen_inv_refs_total.add(_txn.reference_number)
-            _total_actual_project_transport += _fee
+            InventoryTransaction.delivery_batch_ref.like('MSQ-IN-%'),
+            InventoryTransaction.transport_fee > 0
+        ).group_by(InventoryTransaction.delivery_batch_ref).all()
+        _inv_sum = sum(row.fee or 0 for row in _inv_sum_rows)
 
-        # Labour Requisitions (Labour Transport)
-        _lab_transport_records = LabourRequisition.query.filter(
+        _lab_sum = db.session.query(_func.coalesce(_func.sum(LabourRequisition.transport_fee), 0)).filter(
             LabourRequisition.project_id == boq.project_id,
             LabourRequisition.is_deleted == False
-        ).all()
-        for _lr in _lab_transport_records:
-            _total_actual_project_transport += Decimal(str(_lr.transport_fee or 0))
+        ).scalar() or 0
 
-        # Asset Delivery Notes
-        _adn_transport_records = AssetDeliveryNote.query.filter(
+        _adn_sum = db.session.query(_func.coalesce(_func.sum(AssetDeliveryNote.transport_fee), 0)).filter(
             AssetDeliveryNote.project_id == boq.project_id,
             AssetDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
-        ).all()
-        for _adn in _adn_transport_records:
-            _total_actual_project_transport += Decimal(str(_adn.transport_fee or 0))
+        ).scalar() or 0
 
-        # Asset Return Delivery Notes
-        _ardn_transport_records = AssetReturnDeliveryNote.query.filter(
+        _ardn_sum = db.session.query(_func.coalesce(_func.sum(AssetReturnDeliveryNote.transport_fee), 0)).filter(
             AssetReturnDeliveryNote.project_id == boq.project_id,
             AssetReturnDeliveryNote.status.notin_(['DRAFT', 'CANCELLED'])
-        ).all()
-        for _ardn in _ardn_transport_records:
-            _total_actual_project_transport += Decimal(str(_ardn.transport_fee or 0))
+        ).scalar() or 0
+
+        _total_actual_project_transport = Decimal(str(_mdn_sum)) + Decimal(str(_rdn_sum)) + \
+            Decimal(str(_inv_sum)) + Decimal(str(_lab_sum)) + \
+            Decimal(str(_adn_sum)) + Decimal(str(_ardn_sum))
 
         # Reset per-item attribution: VDI _stock_in_reference_number values are unreliable
         # (PMs type arbitrary strings). Using them for per-item attribution causes partial
@@ -790,12 +776,15 @@ def get_boq_planned_vs_actual(boq_id):
             actual_materials_total = Decimal('0')
 
             # First, collect original materials and CR materials separately
-            original_materials = []  # List of original (non-CR) materials
+            # Use dicts for O(1) lookup instead of O(n) list scan
+            original_materials = []  # List of original (non-CR) materials (for display)
+            _orig_mat_ids = set()    # Set of master_material_ids for fast lookup
+            _orig_mat_names = set()  # Set of lowercased names for fast lookup
             cr_materials_map = {}  # Map material_id/name to CR material data (for updates)
             cr_materials_name_map = {}  # Map material_name to the CR that's updating it
             cr_new_materials = []  # List of CR materials that are truly new additions
 
-            # Step 1: Collect all original materials first
+            # Step 1: Collect all original materials first, build lookup sets
             for sub_item in planned_item.get('sub_items', []):
                 for mat in sub_item.get('materials', []):
                     if not mat.get('is_from_change_request'):
@@ -804,8 +793,14 @@ def get_boq_planned_vs_actual(boq_id):
                             'sub_item_name': sub_item.get('sub_item_name'),
                             'master_sub_item_id': sub_item.get('master_sub_item_id')
                         })
+                        if mat.get('master_material_id'):
+                            _orig_mat_ids.add(mat['master_material_id'])
+                        name = mat.get('material_name', '').lower().strip()
+                        if name:
+                            _orig_mat_names.add(name)
 
             # Step 2: Process CR materials and determine if they're updates or new
+            # O(1) lookup via sets instead of O(n) loop through original_materials
             for sub_item in planned_item.get('sub_items', []):
                 for mat in sub_item.get('materials', []):
                     if mat.get('is_from_change_request'):
@@ -813,20 +808,11 @@ def get_boq_planned_vs_actual(boq_id):
                         mat_name = mat.get('material_name', '').lower().strip()
                         cr_id = mat.get('change_request_id')
 
-                        # Check if this CR material is updating an existing material or is new
-                        is_updating_existing = False
-
-                        # Check against collected original materials
-                        for orig_mat_info in original_materials:
-                            orig_mat = orig_mat_info['data']
-                            check_mat_id = orig_mat.get('master_material_id')
-                            check_mat_name = orig_mat.get('material_name', '').lower().strip()
-
-                            # Match by ID or by name
-                            if (mat_id and check_mat_id and mat_id == check_mat_id) or \
-                               (mat_name and check_mat_name and mat_name == check_mat_name):
-                                is_updating_existing = True
-                                break
+                        # O(1) set lookup — replaces O(n) inner loop
+                        is_updating_existing = (
+                            (mat_id and mat_id in _orig_mat_ids) or
+                            (mat_name and mat_name in _orig_mat_names)
+                        )
 
                         if is_updating_existing:
                             # This CR is updating an existing material
@@ -3091,48 +3077,41 @@ def get_all_purchase_comparision_projects():
     The comparison view will show planned materials vs actual purchases (actual may be 0 if no purchases yet).
     """
     try:
-        # Get all BOQs that are not deleted
-        boqs = BOQ.query.filter_by(is_deleted=False).all()
+        from sqlalchemy import func as _func, and_ as _and
 
-        if not boqs:
-            return jsonify({
-                "success": True,
-                "data": [],
-                "count": 0
-            }), 200
+        # Single JOIN query: subquery picks the first (lowest) BOQ per project,
+        # then we join Project + BOQ in one round trip (was 3 separate queries).
+        _min_boq_subq = db.session.query(
+            BOQ.project_id,
+            _func.min(BOQ.boq_id).label('min_boq_id')
+        ).filter(BOQ.is_deleted == False).group_by(BOQ.project_id).subquery()
 
-        # Collect project_ids from BOQs
-        project_ids = list({boq.project_id for boq in boqs if boq.project_id})
-
-        # Get all those projects
-        projects = Project.query.filter(
-            Project.project_id.in_(project_ids),
+        rows = db.session.query(
+            Project.project_id,
+            Project.project_name,
+            Project.status.label('project_status'),
+            Project.end_date,
+            BOQ.boq_id,
+            BOQ.status.label('boq_status')
+        ).join(
+            _min_boq_subq, Project.project_id == _min_boq_subq.c.project_id
+        ).join(
+            BOQ, BOQ.boq_id == _min_boq_subq.c.min_boq_id
+        ).filter(
             Project.is_deleted == False
         ).all()
 
-        # Batch pre-fetch BOQs for all projects in one query
-        _bt_proj_ids = [p.project_id for p in projects]
-        _bt_first_boq_by_proj = {}
-        if _bt_proj_ids:
-            for _b in BOQ.query.filter(
-                BOQ.project_id.in_(_bt_proj_ids),
-                BOQ.is_deleted == False
-            ).all():
-                if _b.project_id not in _bt_first_boq_by_proj:
-                    _bt_first_boq_by_proj[_b.project_id] = _b
+        if not rows:
+            return jsonify({"success": True, "data": [], "count": 0}), 200
 
-        project_list = []
-        for project in projects:
-            boq = _bt_first_boq_by_proj.get(project.project_id)  # dict lookup — no DB call
-
-            project_list.append({
-                'project_id': project.project_id,
-                'project_name': project.project_name,
-                'project_status': project.status,
-                'boq_id': boq.boq_id,
-                'boq_status': boq.status,
-                'end_date': project.end_date.isoformat() if project.end_date else None
-            })
+        project_list = [{
+            'project_id': row.project_id,
+            'project_name': row.project_name,
+            'project_status': row.project_status,
+            'boq_id': row.boq_id,
+            'boq_status': row.boq_status,
+            'end_date': row.end_date.isoformat() if row.end_date else None
+        } for row in rows]
 
         return jsonify({
             "success": True,
@@ -3447,6 +3426,13 @@ def get_profit_report(boq_id):
     - items: planned vs actual per item
     """
     try:
+        # Cache check — profit reports are historical, 2-min TTL is safe
+        # Also check shared bust flag so all workers invalidate together
+        _now = _time.time()
+        _cached = _profit_report_cache.get(boq_id)
+        if _cached and (_now - _cached[0]) < _PROFIT_REPORT_TTL and _cached[0] > _get_bust_ts():
+            return jsonify(_cached[1]), 200
+
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq:
             return jsonify({"error": "BOQ not found"}), 404
@@ -4096,7 +4082,7 @@ def get_profit_report(boq_id):
 
         transport_variance = float(planned_transport) - float(actual_transport_total)
 
-        return jsonify({
+        _result = {
             'success': True,
             'boq_id': boq_id,
             'project_id': project_id,
@@ -4134,7 +4120,10 @@ def get_profit_report(boq_id):
                 'workers': workers_list,
                 'requisitions': requisitions_list,
             },
-        }), 200
+        }
+        # Store in TTL cache (2 min) — profit data is historical, safe to cache briefly
+        _profit_report_cache[boq_id] = (_time.time(), _result)
+        return jsonify(_result), 200
 
     except Exception as e:
         log.error(f"Error in get_profit_report: {str(e)}")

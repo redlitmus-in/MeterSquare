@@ -1,4 +1,5 @@
 import os
+import threading
 from flask import g, jsonify, make_response, request, session, url_for
 import smtplib
 import random
@@ -44,6 +45,7 @@ EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
 SECRET_KEY = os.getenv('SECRET_KEY')
 
 otp_storage = {}
+_otp_lock = threading.Lock()
 
 
 def parse_user_agent(user_agent_string):
@@ -420,8 +422,11 @@ def verification_otp():
     except ValueError:
         return jsonify({"error": "OTP must be a number"}), 400
     
-    # Get OTP data from storage first to check if role was specified
-    otp_data = otp_storage.get(email_id)
+    # Atomically pop OTP data so only one request can ever consume it.
+    # Using pop() under a lock prevents TOCTOU race conditions where two
+    # concurrent requests both pass OTP validation before either deletes it.
+    with _otp_lock:
+        otp_data = otp_storage.pop(email_id, None)
     if not otp_data:
         on_login_failed(email_id)  # Audit log - potential brute force attempt
         return jsonify({"error": "OTP not found or expired"}), 400
@@ -471,21 +476,23 @@ def verification_otp():
     # Check expiry
     current_time = datetime.utcnow()
     if current_time > expires_at:
-        del otp_storage[email_id]
         on_login_failed(email_id)  # Audit log expired OTP attempt
         return jsonify({"error": "OTP expired"}), 400
     
-    # Update last login and set user status to online
+    # Update last login, status, and timezone
     user.last_login = current_time
     user.user_status = 'online'  # Auto-set online on login
+
+    # Save user's browser timezone (IANA string e.g. 'Asia/Dubai') if provided
+    tz = data.get('timezone')
+    if tz and isinstance(tz, str) and len(tz) <= 100:
+        user.timezone = tz
+
     db.session.commit()
 
     # Audit log successful login for security tracking
     on_login_success(user.user_id)
 
-    # OTP verified, remove from storage
-    del otp_storage[email_id]
-    
     # Get role information safely
     role_permissions = []
     role_name = "user"

@@ -897,13 +897,23 @@ def get_td_dashboard_stats():
         user_role = current_user.get('role', '').lower()
 
         # ============ Use EXACT same query as Project Approvals page ============
-        boqs_query = db.session.query(BOQ).options(
-            selectinload(BOQ.project),
-            selectinload(BOQ.details)
+        # Lean column-only JOIN (avoids loading full BOQ JSON + selectinload round trips)
+        boqs_query = db.session.query(
+            BOQ.boq_id,
+            BOQ.status,
+            BOQ.revision_number,
+            Project.work_type,
+            Project.project_name,
+            BOQDetails.total_cost
+        ).join(
+            Project, BOQ.project_id == Project.project_id
+        ).outerjoin(
+            BOQDetails, and_(BOQDetails.boq_id == BOQ.boq_id, BOQDetails.is_deleted == False)
         ).filter(
             BOQ.is_deleted == False,
             BOQ.email_sent == True,
-            BOQ.status != 'Pending_PM_Approval'
+            BOQ.status != 'Pending_PM_Approval',
+            Project.is_deleted == False
         ).all()
 
         # Single aggregated query for all BOQ status counts (was 4 separate COUNT queries)
@@ -948,18 +958,12 @@ def get_td_dashboard_stats():
         budget_distribution = {}
         total_budget = 0
 
-        for boq in boqs_query:
-            project = boq.project
-            if not project or project.is_deleted:
+        for row in boqs_query:
+            if not row.total_cost:
                 continue
 
-            # Get BOQ cost
-            boq_details = next((bd for bd in boq.details if not bd.is_deleted), None)
-            if not boq_details or not boq_details.total_cost:
-                continue
-
-            work_type = project.work_type if project.work_type else 'Uncategorized'
-            cost = float(boq_details.total_cost)
+            work_type = row.work_type if row.work_type else 'Uncategorized'
+            cost = float(row.total_cost)
 
             budget_distribution[work_type] = budget_distribution.get(work_type, 0) + cost
             total_budget += cost
@@ -1009,8 +1013,8 @@ def get_td_dashboard_stats():
         # Batch approach: fetch approved BOQ revenue for 2-year range, aggregate in Python
         _rev_start = datetime(current_year - 1, 1, 1)
         _rev_end = datetime(current_year + 1, 1, 1)
-        _all_rev_rows = db.session.query(BOQ.created_at, BOQDetails.total_cost).join(
-            BOQ, BOQ.boq_id == BOQDetails.boq_id
+        _all_rev_rows = db.session.query(BOQ.created_at, BOQDetails.total_cost).select_from(BOQ).join(
+            BOQDetails, BOQ.boq_id == BOQDetails.boq_id
         ).filter(
             BOQ.is_deleted == False,
             BOQDetails.is_deleted == False,
@@ -1039,25 +1043,18 @@ def get_td_dashboard_stats():
 
         # ============ BOQ Status Distribution (from same BOQs) ============
         boq_status_counts = {}
-        for boq in boqs_query:
-            status = boq.status if boq.status else 'Unknown'
+        for row in boqs_query:
+            status = row.status if row.status else 'Unknown'
             # Normalize status names for better display
             display_status = status.replace('_', ' ').title()
             boq_status_counts[display_status] = boq_status_counts.get(display_status, 0) + 1
 
         # ============ Top 5 Projects by Budget (from same BOQs) ============
         project_budgets = {}
-        for boq in boqs_query:
-            project = boq.project
-            if not project or project.is_deleted:
+        for row in boqs_query:
+            if not row.total_cost or not row.project_name:
                 continue
-
-            boq_details = next((bd for bd in boq.details if not bd.is_deleted), None)
-            if not boq_details or not boq_details.total_cost:
-                continue
-
-            project_name = project.project_name
-            project_budgets[project_name] = project_budgets.get(project_name, 0) + float(boq_details.total_cost)
+            project_budgets[row.project_name] = project_budgets.get(row.project_name, 0) + float(row.total_cost)
 
         # Sort and get top 5
         top_projects = [
@@ -1072,8 +1069,8 @@ def get_td_dashboard_stats():
 
         # Batch approach: fetch all approved BOQ revenue in last 6 months, aggregate in Python
         _rev6_start = (datetime.now().replace(day=1) - timedelta(days=30 * 5)).replace(hour=0, minute=0, second=0, microsecond=0)
-        _all_rev6_rows = db.session.query(BOQ.created_at, BOQDetails.total_cost).join(
-            BOQ, BOQ.boq_id == BOQDetails.boq_id
+        _all_rev6_rows = db.session.query(BOQ.created_at, BOQDetails.total_cost).select_from(BOQ).join(
+            BOQDetails, BOQ.boq_id == BOQDetails.boq_id
         ).filter(
             BOQ.is_deleted == False,
             BOQDetails.is_deleted == False,
