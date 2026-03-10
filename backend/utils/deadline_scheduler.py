@@ -412,7 +412,7 @@ def init_deadline_scheduler(app):
     scheduler.add_job(
         func=run_deadline_check,
         args=[app],
-        trigger=CronTrigger(minute=0),  # top of every hour
+        trigger=CronTrigger(minute=NOTIFY_MINUTE),
         id='deadline_check',
         name='Hourly Project Deadline Warning Sweep',
         replace_existing=True,
