@@ -105,7 +105,8 @@ export const authApi = {
     try {
       const response = await apiClient.post<VerifyOTPResponse>('/verification_otp', {
         email,
-        otp
+        otp,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone // e.g. 'Asia/Dubai'
       });
       
       // Store token and user data
@@ -249,7 +250,8 @@ export const authApi = {
       const payload: SiteSupervisorVerifyRequest = {
         login_method: loginMethod,
         otp,
-        ...(loginMethod === 'phone' ? { phone: value } : { email: value })
+        ...(loginMethod === 'phone' ? { phone: value } : { email: value }),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       };
       const response = await apiClient.post<VerifyOTPResponse>(
         '/site-supervisor/verify-otp',

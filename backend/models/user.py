@@ -21,6 +21,7 @@ class User(db.Model):
     blocked_at = db.Column(db.DateTime, nullable=True)
     blocked_by = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=True)
     last_login = db.Column(db.DateTime, nullable=True)
+    timezone = db.Column(db.String(100), nullable=True)  # IANA timezone e.g. 'Asia/Dubai'
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     

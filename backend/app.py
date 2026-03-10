@@ -517,8 +517,19 @@ def create_app():
 
 
     # Initialize deadline reminder scheduler (APScheduler)
-    from utils.deadline_scheduler import init_deadline_scheduler
-    init_deadline_scheduler(app)
+    # Use a file-based lock so only ONE Gunicorn worker starts the scheduler.
+    # Without this, all 5 workers start their own scheduler → 5x duplicate notifications.
+    import fcntl
+    scheduler_lock_path = '/tmp/msq_scheduler.lock'
+    try:
+        lock_file = open(scheduler_lock_path, 'w')
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Only the worker that acquired the lock reaches here
+        from utils.deadline_scheduler import init_deadline_scheduler
+        init_deadline_scheduler(app)
+        app._scheduler_lock = lock_file  # Keep reference so lock is held for process lifetime
+    except BlockingIOError:
+        pass  # Another worker already holds the lock — skip scheduler in this worker
 
     return app
 

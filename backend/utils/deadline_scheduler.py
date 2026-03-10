@@ -1,8 +1,8 @@
 """
 Deadline Scheduler
 ==================
-Runs a daily job at 08:00 AM to check project deadlines and send
-warnings to PM, TD, and SE users via in-app notifications + email.
+Runs an hourly sweep. Each user receives the notification at 10:00 AM
+in their own local timezone (saved to users.timezone on login).
 
 Thresholds:
   <= 7 days  → "warning"   (medium priority)
@@ -10,17 +10,20 @@ Thresholds:
   overdue    → "overdue"   (urgent priority)
 
 Deduplication:
-  last_deadline_notified_at is set to today after notifying.
-  The job skips a project if it was already notified today.
-  This field is reset to NULL when a deadline extension is approved.
+  Per-user, per-project, per-day — checked against existing notifications.
+  A user is skipped if they already received this project's reminder today.
+  Users without a saved timezone default to UTC.
 """
 
 import logging
-from datetime import date
+from datetime import date, datetime, timezone as dt_timezone
 
+import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import update as sql_update
+
+NOTIFY_HOUR = 10  # Send notifications at this hour in each user's local timezone
 
 log = logging.getLogger(__name__)
 
@@ -160,16 +163,32 @@ def _build_email_html(project_name: str, end_date: date, deadline_info: dict) ->
     """
 
 
+def _is_notify_hour_for_user(user) -> bool:
+    """
+    Return True if the current UTC time corresponds to NOTIFY_HOUR in the user's timezone.
+    Falls back to UTC if the user has no timezone set.
+    """
+    tz_name = getattr(user, 'timezone', None) or 'UTC'
+    try:
+        tz = pytz.timezone(tz_name)
+    except pytz.UnknownTimeZoneError:
+        tz = pytz.utc
+    user_now = datetime.now(dt_timezone.utc).astimezone(tz)
+    return user_now.hour == NOTIFY_HOUR
+
+
 def run_deadline_check(app):
     """
-    Main job function. Runs daily at 08:00 AM.
+    Runs every hour. For each active project, notifies only the users
+    for whom it is currently 10:00 AM in their local timezone.
 
     For each active project with a valid end_date:
       1. Calculate days_remaining
-      2. Skip if already notified today
-      3. Create in-app notifications for PM, TD, SE
-      4. Send emails to offline users
-      5. Mark project as notified today
+      2. Collect recipients — filter to only those at their 10 AM
+      3. Skip if already notified today
+      4. Create in-app notifications for PM, TD, SE
+      5. Send emails
+      6. Mark project as notified today (after ALL eligible users notified)
     """
     with app.app_context():
         try:
@@ -181,7 +200,7 @@ def run_deadline_check(app):
             from utils.comprehensive_notification_service import ComprehensiveNotificationService
 
             today = date.today()
-            log.info(f"[DeadlineCheck] Running for {today}")
+            log.info(f"[DeadlineCheck] Running hourly sweep for {today} (UTC now: {datetime.now(dt_timezone.utc).strftime('%H:%M')})")
 
             # Fetch all active projects with a valid end_date
             active_statuses = ["active", "in_progress", "in progress", "planning", "on_hold"]
@@ -206,29 +225,8 @@ def run_deadline_check(app):
                     if deadline_info is None:
                         continue  # > 7 days away, skip
 
-                    # Atomic deduplication: attempt to claim this project for today's notification.
-                    # The UPDATE only succeeds (rowcount > 0) if no other process has already
-                    # set last_deadline_notified_at = today, eliminating the race condition when
-                    # multiple workers/scheduler instances run simultaneously.
-                    
-                    claimed = db.session.execute(
-                        sql_update(Project)
-                        .where(Project.project_id == project.project_id)
-                        .where(
-                            db.or_(
-                                Project.last_deadline_notified_at.is_(None),
-                                Project.last_deadline_notified_at < today,
-                            )
-                        )
-                        .values(last_deadline_notified_at=today)
-                    )
-                    db.session.flush()
-                    if claimed.rowcount == 0:
-                        log.debug(f"[DeadlineCheck] Project {project.project_id} already notified today, skipping")
-                        continue
-
                     project_name = project.project_name or f"Project #{project.project_id}"
-                    log.info(f"[DeadlineCheck] Notifying for project '{project_name}' ({deadline_info['level']}, {deadline_info['days_remaining']} days)")
+                    log.info(f"[DeadlineCheck] Checking project '{project_name}' ({deadline_info['level']}, {deadline_info['days_remaining']} days)")
 
                     # --- Collect all users to notify ---
                     recipient_user_ids = set()
@@ -268,8 +266,37 @@ def run_deadline_check(app):
                         log.warning(f"[DeadlineCheck] No recipients found for project {project.project_id}")
                         continue
 
-                    # Fetch recipient users
-                    recipients = User.query.filter(User.user_id.in_(recipient_user_ids)).all()
+                    # Fetch all candidate recipients
+                    all_recipients = User.query.filter(User.user_id.in_(recipient_user_ids)).all()
+
+                    # Filter 1: only users for whom it is currently NOTIFY_HOUR in their timezone
+                    tz_eligible = [u for u in all_recipients if _is_notify_hour_for_user(u)]
+
+                    if not tz_eligible:
+                        log.debug(f"[DeadlineCheck] No recipients at {NOTIFY_HOUR}:00 their time yet for project {project.project_id}")
+                        continue
+
+                    # Filter 2: per-user deduplication — skip users already notified today for this project
+                    from models.notification import Notification
+                    today_start = datetime.combine(today, datetime.min.time())
+                    todays_notifs = db.session.query(
+                        Notification.user_id, Notification.meta_data
+                    ).filter(
+                        Notification.user_id.in_([u.user_id for u in tz_eligible]),
+                        Notification.type == 'reminder',
+                        Notification.category == 'project',
+                        Notification.created_at >= today_start,
+                    ).all()
+                    already_notified_ids = {
+                        uid for uid, meta in todays_notifs
+                        if meta and str(meta.get('project_id')) == str(project.project_id)
+                    }
+
+                    recipients = [u for u in tz_eligible if u.user_id not in already_notified_ids]
+
+                    if not recipients:
+                        log.debug(f"[DeadlineCheck] All eligible users already notified today for project {project.project_id}")
+                        continue
 
                     # --- Build notification message ---
                     formatted_date = project.end_date.strftime("%B %d, %Y")
@@ -378,17 +405,19 @@ def init_deadline_scheduler(app):
     """
     scheduler = BackgroundScheduler(daemon=True)
 
-    # Run every day at 10:00 AM IST (server is UTC, IST = UTC+5:30)
+    # Run every hour at minute 0.
+    # Each run checks per-user: is it 10 AM in their timezone?
+    # Users without a saved timezone fall back to UTC.
     scheduler.add_job(
         func=run_deadline_check,
         args=[app],
-        trigger=CronTrigger(hour=10, minute=0, timezone='Asia/Kolkata'),
+        trigger=CronTrigger(minute=0),  # top of every hour
         id='deadline_check',
-        name='Daily Project Deadline Warning',
+        name='Hourly Project Deadline Warning Sweep',
         replace_existing=True,
-        misfire_grace_time=3600  # Allow up to 1 hour late start
+        misfire_grace_time=3600
     )
 
     scheduler.start()
-    log.info("[DeadlineScheduler] Started — daily deadline check at 10:00 AM IST")
+    log.info(f"[DeadlineScheduler] Started — hourly sweep, notifies each user at {NOTIFY_HOUR}:00 their local time")
     return scheduler
