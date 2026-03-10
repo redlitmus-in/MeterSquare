@@ -4,7 +4,7 @@ import sys
 
 def get_logger():
     logger = logging.getLogger("example_logger")
-    logger.setLevel(logging.WARNING)
+    logger.setLevel(logging.INFO)
 
     # Clear existing handlers
     logger.handlers = []
@@ -47,6 +47,13 @@ def configure_quiet_logging():
     Suppress verbose logging from third-party libraries.
     Call this early in app startup to reduce log noise.
     """
+    # Configure root logger so module-level loggers (e.g. deadline_scheduler) emit INFO+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s: %(message)s",
+        stream=sys.stdout,
+    )
+
     # Suppress werkzeug HTTP request logs (only show errors)
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
 

@@ -164,16 +164,28 @@ def _build_email_html(project_name: str, end_date: date, deadline_info: dict) ->
     """
 
 
-def _is_notify_hour_for_user(user) -> bool:
+def _get_company_timezone() -> str:
+    """Return the company timezone from system settings, fallback to UTC."""
+    try:
+        from models.system_settings import SystemSettings
+        settings = SystemSettings.query.first()
+        if settings and settings.timezone:
+            return settings.timezone
+    except Exception:
+        pass
+    return 'UTC'
+
+
+def _is_notify_hour_for_user(user, company_tz: str = 'UTC') -> bool:
     """
     Return True if the current UTC time corresponds to NOTIFY_HOUR in the user's timezone.
-    Falls back to UTC if the user has no timezone set.
+    Falls back to company timezone if the user has no timezone set.
     """
-    tz_name = getattr(user, 'timezone', None) or 'UTC'
+    tz_name = getattr(user, 'timezone', None) or company_tz
     try:
         tz = pytz.timezone(tz_name)
     except pytz.UnknownTimeZoneError:
-        tz = pytz.utc
+        tz = pytz.timezone(company_tz) if company_tz != 'UTC' else pytz.utc
     user_now = datetime.now(dt_timezone.utc).astimezone(tz)
     return user_now.hour == NOTIFY_HOUR and user_now.minute == NOTIFY_MINUTE
 
@@ -201,7 +213,8 @@ def run_deadline_check(app):
             from utils.comprehensive_notification_service import ComprehensiveNotificationService
 
             today = date.today()
-            log.info(f"[DeadlineCheck] Running hourly sweep for {today} (UTC now: {datetime.now(dt_timezone.utc).strftime('%H:%M')})")
+            company_tz = _get_company_timezone()
+            log.info(f"[DeadlineCheck] Running hourly sweep for {today} (UTC now: {datetime.now(dt_timezone.utc).strftime('%H:%M')}, company_tz: {company_tz})")
 
             # Fetch all active projects with a valid end_date
             active_statuses = ["active", "in_progress", "in progress", "planning", "on_hold"]
@@ -271,10 +284,10 @@ def run_deadline_check(app):
                     all_recipients = User.query.filter(User.user_id.in_(recipient_user_ids)).all()
 
                     # Filter 1: only users for whom it is currently NOTIFY_HOUR in their timezone
-                    tz_eligible = [u for u in all_recipients if _is_notify_hour_for_user(u)]
+                    tz_eligible = [u for u in all_recipients if _is_notify_hour_for_user(u, company_tz)]
 
                     if not tz_eligible:
-                        log.debug(f"[DeadlineCheck] No recipients at {NOTIFY_HOUR}:00 their time yet for project {project.project_id}")
+                        log.info(f"[DeadlineCheck] SKIPPED project {project.project_id} — no recipients at {NOTIFY_HOUR}:{NOTIFY_MINUTE:02d} their time. Candidates: {[(u.user_id, getattr(u, 'timezone', None) or f'NULL→{company_tz}') for u in all_recipients]}")
                         continue
 
                     # Filter 2: per-user deduplication — skip users already notified today for this project
@@ -296,7 +309,7 @@ def run_deadline_check(app):
                     recipients = [u for u in tz_eligible if u.user_id not in already_notified_ids]
 
                     if not recipients:
-                        log.debug(f"[DeadlineCheck] All eligible users already notified today for project {project.project_id}")
+                        log.info(f"[DeadlineCheck] SKIPPED project {project.project_id} — all eligible users already notified today")
                         continue
 
                     # --- Build notification message ---
@@ -315,7 +328,6 @@ def run_deadline_check(app):
                             f"({formatted_date})."
                         )
 
-                    # --- Create in-app notifications (bulk) ---
                     def _action_url_for_user(u):
                         """Return role-appropriate URL for this deadline notification."""
                         role = (u.role.role if u.role else '').lower().replace(' ', '').replace('_', '')
@@ -344,9 +356,24 @@ def run_deadline_check(app):
                         }
                         for user in recipients
                     ]
-                    created_notifications = NotificationManager.create_bulk_notifications(notifications_data)
 
-                    # Push real-time bell + desktop notification via Socket.IO for each recipient
+                    # --- Step 1: Send emails FIRST (before committing notifications) ---
+                    # This ensures dedup only blocks if emails were actually sent.
+                    email_html = _build_email_html(project_name, project.end_date, deadline_info)
+                    email_subject = f"{deadline_info['email_subject_prefix']} — {project_name}"
+                    from utils.boq_email_service import BOQEmailService
+                    email_svc = BOQEmailService()
+                    for user in recipients:
+                        if user.email:
+                            email_svc.send_email_async(user.email, email_subject, email_html)
+                            log.info(f"[DeadlineCheck] Email queued for {user.email} (role: {user.role.role if user.role else 'unknown'})")
+                        else:
+                            log.warning(f"[DeadlineCheck] Skipping email for user_id={user.user_id} — email is NULL")
+
+                    # --- Step 2: Create in-app notifications AFTER emails queued ---
+                    NotificationManager.create_bulk_notifications(notifications_data)
+
+                    # --- Step 3: Push real-time Socket.IO notifications ---
                     from socketio_server import send_notification_to_user
                     for notif_data in notifications_data:
                         try:
@@ -366,21 +393,6 @@ def run_deadline_check(app):
                         except Exception as sio_err:
                             log.warning(f"[DeadlineCheck] Socket.IO push failed for user {notif_data['user_id']}: {sio_err}")
 
-                    # --- Send emails to offline users only ---
-                    email_html = _build_email_html(project_name, project.end_date, deadline_info)
-                    email_subject = f"{deadline_info['email_subject_prefix']} — {project_name}"
-
-                    # Send email to ALL recipients (PM, SE, TD) regardless of online/offline status.
-                    from utils.boq_email_service import BOQEmailService
-                    email_svc = BOQEmailService()
-                    for user in recipients:
-                        if user.email:
-                            email_svc.send_email_async(user.email, email_subject, email_html)
-                            log.info(f"[DeadlineCheck] Email queued for {user.email} (role: {user.role.role if user.role else 'unknown'})")
-                        else:
-                            log.warning(f"[DeadlineCheck] Skipping email for user_id={user.user_id} — email is NULL")
-
-                    db.session.commit()
                     notified_count += 1
 
                 except Exception as proj_error:
