@@ -377,20 +377,18 @@ def init_deadline_scheduler(app):
     automatically when Flask exits.
     """
     scheduler = BackgroundScheduler(daemon=True)
-    # from apscheduler.triggers.interval import IntervalTrigger
 
-    # Run every day at 08:00 AM server time
+    # Run every day at 10:00 AM IST (server is UTC, IST = UTC+5:30)
     scheduler.add_job(
         func=run_deadline_check,
         args=[app],
-        # trigger=IntervalTrigger(minutes=5),
-        trigger=CronTrigger(hour=10, minute=0),
+        trigger=CronTrigger(hour=10, minute=0, timezone='Asia/Kolkata'),
         id='deadline_check',
         name='Daily Project Deadline Warning',
         replace_existing=True,
-        misfire_grace_time=3600  # Allow up to 1 hour late start (server restart, etc.)
+        misfire_grace_time=3600  # Allow up to 1 hour late start
     )
 
     scheduler.start()
-    log.info("[DeadlineScheduler] Started — daily deadline check at 10:00 AM")
+    log.info("[DeadlineScheduler] Started — daily deadline check at 10:00 AM IST")
     return scheduler
