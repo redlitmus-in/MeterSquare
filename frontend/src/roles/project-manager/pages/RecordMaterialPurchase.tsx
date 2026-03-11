@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
-import { DocumentTextIcon, ShoppingCartIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
+import { DocumentTextIcon, ShoppingCartIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { PAGINATION } from '@/lib/constants';
 import { boqTrackingService } from '../services/boqTrackingService';
@@ -18,6 +18,8 @@ export default function RecordMaterialPurchase() {
   const [selectedBOQ, setSelectedBOQ] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState('live');
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [reportSearchQuery, setReportSearchQuery] = useState('');
   const [reportSelectedBOQ, setReportSelectedBOQ] = useState<any | null>(null);
 
   // Real-time auto-sync for BOQ list
@@ -54,27 +56,44 @@ export default function RecordMaterialPurchase() {
 
   const boqList = useMemo(() => boqData || [], [boqData]);
 
-  // Filter BOQs based on active tab
+  // Filter BOQs based on active tab and search query
   const filteredBOQList = useMemo(() => {
-    if (activeTab === 'live') {
-      // Live projects: All projects except those with project_status 'completed' or 'closed'
-      return boqList.filter((boq: any) => {
-        const projectStatus = (boq.project_status || '').toLowerCase();
-        return projectStatus !== 'completed' && projectStatus !== 'closed';
-      });
-    } else {
-      // Completed projects: ONLY projects with project_status 'completed' or 'closed'
-      return boqList.filter((boq: any) => {
-        const projectStatus = (boq.project_status || '').toLowerCase();
-        return projectStatus === 'completed' || projectStatus === 'closed';
-      });
-    }
-  }, [boqList, activeTab]);
+    const q = searchQuery.trim().toLowerCase();
 
-  // Reset page when tab changes
+    const tabFiltered = activeTab === 'live'
+      ? boqList.filter((boq: any) => {
+          const projectStatus = (boq.project_status || '').toLowerCase();
+          return projectStatus !== 'completed' && projectStatus !== 'closed';
+        })
+      : boqList.filter((boq: any) => {
+          const projectStatus = (boq.project_status || '').toLowerCase();
+          return projectStatus === 'completed' || projectStatus === 'closed';
+        });
+
+    if (!q) return tabFiltered;
+
+    return tabFiltered.filter((boq: any) => {
+      const name = (boq.project_name || '').toLowerCase();
+      const code = (boq.project_code || '').toLowerCase();
+      return name.includes(q) || code.includes(q);
+    });
+  }, [boqList, activeTab, searchQuery]);
+
+  // Filtered list for Report tab
+  const filteredReportList = useMemo(() => {
+    const q = reportSearchQuery.trim().toLowerCase();
+    if (!q) return boqList;
+    return boqList.filter((boq: any) => {
+      const name = (boq.project_name || '').toLowerCase();
+      const code = (boq.project_code || '').toLowerCase();
+      return name.includes(q) || code.includes(q);
+    });
+  }, [boqList, reportSearchQuery]);
+
+  // Reset page when tab or search changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab]);
+  }, [activeTab, searchQuery]);
 
   // Pagination calculations
   const totalRecords = filteredBOQList.length;
@@ -264,7 +283,7 @@ export default function RecordMaterialPurchase() {
                   <TabsTrigger
                     value="report"
                     className="px-6 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm transition-all"
-                    onClick={() => setReportSelectedBOQ(null)}
+                    onClick={() => { setReportSelectedBOQ(null); setSearchQuery(''); setReportSearchQuery(''); }}
                   >
                     <BarChart3 className="w-4 h-4 mr-2 inline-block" />
                     <span className="font-semibold">Report</span>
@@ -272,13 +291,29 @@ export default function RecordMaterialPurchase() {
                 </TabsList>
               </div>
 
+              {/* Search Bar - shown on live & completed tabs only */}
+              {activeTab !== 'report' && (
+                <div className="px-6 py-3 border-b border-gray-200 bg-white">
+                  <div className="relative max-w-md">
+                    <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by project name or code..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Live Projects Tab Content */}
               <TabsContent value="live" className="p-6 m-0">
                 {filteredBOQList.length === 0 ? (
                   <div className="text-center py-12">
                     <DocumentTextIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 font-medium">No live projects found</p>
-                    <p className="text-sm text-gray-400 mt-1">All projects are completed</p>
+                    <p className="text-gray-500 font-medium">{searchQuery ? 'No projects match your search' : 'No live projects found'}</p>
+                    <p className="text-sm text-gray-400 mt-1">{searchQuery ? 'Try a different name or BOQ ID' : 'All projects are completed'}</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -451,8 +486,8 @@ export default function RecordMaterialPurchase() {
                 {filteredBOQList.length === 0 ? (
                   <div className="text-center py-12">
                     <DocumentTextIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 font-medium">No completed projects found</p>
-                    <p className="text-sm text-gray-400 mt-1">Completed projects will appear here</p>
+                    <p className="text-gray-500 font-medium">{searchQuery ? 'No projects match your search' : 'No completed projects found'}</p>
+                    <p className="text-sm text-gray-400 mt-1">{searchQuery ? 'Try a different name or BOQ ID' : 'Completed projects will appear here'}</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -629,15 +664,36 @@ export default function RecordMaterialPurchase() {
                   />
                 ) : (
                   <div className="p-6">
-                    <p className="text-sm text-gray-500 mb-5">Select a project to view its detailed profit report with Transport, Material, and Item filters.</p>
-                    {boqList.length === 0 ? (
+                    <p className="text-sm text-gray-500 mb-4">Select a project to view its detailed profit report with Transport, Material, and Item filters.</p>
+
+                    {/* Search bar for Report tab */}
+                    <div className="relative max-w-md mb-5">
+                      <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Search by project name or code..."
+                        value={reportSearchQuery}
+                        onChange={(e) => setReportSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-9 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      {reportSearchQuery && (
+                        <button
+                          onClick={() => setReportSearchQuery('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+
+                    {filteredReportList.length === 0 ? (
                       <div className="text-center py-12">
                         <DocumentTextIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                        <p className="text-gray-500 font-medium">No projects found</p>
+                        <p className="text-gray-500 font-medium">{reportSearchQuery ? 'No projects match your search' : 'No projects found'}</p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {boqList.map((boq: any) => (
+                        {filteredReportList.map((boq: any) => (
                           <motion.div
                             key={boq.boq_id}
                             initial={{ opacity: 0, y: 20 }}

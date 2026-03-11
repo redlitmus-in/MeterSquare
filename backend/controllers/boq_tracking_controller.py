@@ -3089,6 +3089,7 @@ def get_all_purchase_comparision_projects():
         rows = db.session.query(
             Project.project_id,
             Project.project_name,
+            Project.project_code,
             Project.status.label('project_status'),
             Project.end_date,
             BOQ.boq_id,
@@ -3107,6 +3108,7 @@ def get_all_purchase_comparision_projects():
         project_list = [{
             'project_id': row.project_id,
             'project_name': row.project_name,
+            'project_code': row.project_code,
             'project_status': row.project_status,
             'boq_id': row.boq_id,
             'boq_status': row.boq_status,

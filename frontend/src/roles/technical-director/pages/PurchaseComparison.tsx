@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
-import { DocumentChartBarIcon, ArrowLeftIcon, ArrowDownTrayIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
+import { DocumentChartBarIcon, ArrowLeftIcon, ArrowDownTrayIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { showError, showInfo, showSuccess } from '@/utils/toastHelper';
 import { useAutoSync } from '@/hooks/useAutoSync';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
@@ -116,6 +116,7 @@ export default function PurchaseComparison() {
   const [loadingComparison, setLoadingComparison] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Real-time auto-sync for BOQ list - use dedicated purchase comparison projects endpoint
   // Uses a unique query key to avoid cache conflicts with other pages using ['projects']
@@ -154,32 +155,39 @@ export default function PurchaseComparison() {
 
   const boqList = useMemo(() => boqData || [], [boqData]);
 
-  // Filter BOQs based on active tab
+  // Filter BOQs based on active tab and search query (tab-scoped search)
   const filteredBOQList = useMemo(() => {
-    if (activeTab === 'live') {
-      return boqList.filter((boq: any) => {
-        // Check multiple status fields for completed/closed status
-        const projectStatus = (boq.project_status || '').toLowerCase();
-        const boqStatus = (boq.status || boq.boq_status || '').toLowerCase();
-        const isCompleted = projectStatus === 'completed' || projectStatus === 'closed' ||
-                          boqStatus === 'completed' || boqStatus === 'closed';
-        return !isCompleted;
-      });
-    } else {
-      return boqList.filter((boq: any) => {
-        // Check multiple status fields for completed/closed status
-        const projectStatus = (boq.project_status || '').toLowerCase();
-        const boqStatus = (boq.status || boq.boq_status || '').toLowerCase();
-        return projectStatus === 'completed' || projectStatus === 'closed' ||
-               boqStatus === 'completed' || boqStatus === 'closed';
-      });
-    }
-  }, [boqList, activeTab]);
+    const q = searchQuery.trim().toLowerCase();
 
-  // Reset page when tab changes
+    // First filter by active tab
+    const tabFiltered = activeTab === 'live'
+      ? boqList.filter((boq: any) => {
+          const projectStatus = (boq.project_status || '').toLowerCase();
+          const boqStatus = (boq.status || boq.boq_status || '').toLowerCase();
+          const isCompleted = projectStatus === 'completed' || projectStatus === 'closed' ||
+                            boqStatus === 'completed' || boqStatus === 'closed';
+          return !isCompleted;
+        })
+      : boqList.filter((boq: any) => {
+          const projectStatus = (boq.project_status || '').toLowerCase();
+          const boqStatus = (boq.status || boq.boq_status || '').toLowerCase();
+          return projectStatus === 'completed' || projectStatus === 'closed' ||
+                 boqStatus === 'completed' || boqStatus === 'closed';
+        });
+
+    // Then apply search within the tab
+    if (!q) return tabFiltered;
+    return tabFiltered.filter((boq: any) => {
+      const name = (boq.project_name || boq.project?.name || '').toLowerCase();
+      const code = (boq.project_code || '').toLowerCase();
+      return name.includes(q) || code.includes(q);
+    });
+  }, [boqList, activeTab, searchQuery]);
+
+  // Reset page when tab or search changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab]);
+  }, [activeTab, searchQuery]);
 
   // Pagination calculations
   const totalRecords = filteredBOQList.length;
@@ -1111,8 +1119,29 @@ export default function PurchaseComparison() {
         {/* Project Selection */}
         {!loading && !selectedProject && (
           <div className="bg-white rounded-xl shadow-md overflow-hidden">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              {/* Tab Headers */}
+            {/* Search Bar */}
+            <div className="px-6 py-4 border-b border-gray-200 bg-white">
+              <div className="relative max-w-md">
+                <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search by project name or code..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-9 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setSearchQuery(''); }} className="w-full">
               <div className="border-b border-gray-200 bg-gray-50 px-6">
                 <TabsList className="w-full justify-start bg-transparent h-auto p-0">
                   <TabsTrigger
@@ -1152,7 +1181,7 @@ export default function PurchaseComparison() {
                 {filteredBOQList.length === 0 ? (
                   <div className="text-center py-12">
                     <DocumentChartBarIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">No live projects available</p>
+                    <p className="text-gray-500">{searchQuery ? 'No projects match your search' : 'No live projects available'}</p>
                   </div>
                 ) : (
                   <>
@@ -1171,6 +1200,9 @@ export default function PurchaseComparison() {
                           <h3 className="font-semibold text-gray-800 mb-2 line-clamp-2">
                             {boq.project_name || boq.project?.name || 'Unnamed Project'}
                           </h3>
+                          {boq.project_code && (
+                            <p className="text-xs font-medium text-green-700 mb-1">{boq.project_code}</p>
+                          )}
                           <p className="text-sm text-gray-500 mb-3 line-clamp-1">
                             {boq.boq_description || `BOQ for ${boq.project_name || 'project'}`}
                           </p>
@@ -1247,7 +1279,7 @@ export default function PurchaseComparison() {
                 {filteredBOQList.length === 0 ? (
                   <div className="text-center py-12">
                     <DocumentChartBarIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">No completed projects available</p>
+                    <p className="text-gray-500">{searchQuery ? 'No projects match your search' : 'No completed projects available'}</p>
                   </div>
                 ) : (
                   <>
@@ -1266,6 +1298,9 @@ export default function PurchaseComparison() {
                           <h3 className="font-semibold text-gray-800 mb-2 line-clamp-2">
                             {boq.project_name || boq.project?.name || 'Unnamed Project'}
                           </h3>
+                          {boq.project_code && (
+                            <p className="text-xs font-medium text-green-700 mb-1">{boq.project_code}</p>
+                          )}
                           <p className="text-sm text-gray-500 mb-3 line-clamp-1">
                             {boq.boq_description || `BOQ for ${boq.project_name || 'project'}`}
                           </p>
