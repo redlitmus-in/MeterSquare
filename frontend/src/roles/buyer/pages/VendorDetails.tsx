@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -10,7 +10,9 @@ import {
   EnvelopeIcon,
   PhoneIcon,
   MapPinIcon,
-  CubeIcon
+  CubeIcon,
+  MagnifyingGlassIcon,
+  XMarkIcon
 } from '@heroicons/react/24/outline';
 import { buyerVendorService, Vendor, VendorProduct } from '@/roles/buyer/services/buyerVendorService';
 import AddVendorModal from '@/components/buyer/AddVendorModal';
@@ -73,6 +75,32 @@ const VendorDetails: React.FC = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<VendorProduct | null>(null);
+
+  // Filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+
+  // Derived: filtered products
+  const filteredProducts = useMemo(() => {
+    return products.filter((product) => {
+      const matchesSearch =
+        !searchQuery ||
+        product.product_name.toLowerCase().includes(searchQuery.toLowerCase());
+      const price = product.unit_price ?? 0;
+      const matchesMin = !minPrice || price >= parseFloat(minPrice);
+      const matchesMax = !maxPrice || price <= parseFloat(maxPrice);
+      return matchesSearch && matchesMin && matchesMax;
+    });
+  }, [products, searchQuery, minPrice, maxPrice]);
+
+  const hasActiveFilters = !!(searchQuery || minPrice || maxPrice);
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setMinPrice('');
+    setMaxPrice('');
+  };
 
   useEffect(() => {
     if (vendorId) {
@@ -328,7 +356,9 @@ const VendorDetails: React.FC = () => {
               <div>
                 <h2 className="text-base font-bold text-gray-800">Products & Services</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {products.length} {products.length === 1 ? 'item' : 'items'}
+                  {hasActiveFilters
+                    ? `${filteredProducts.length} of ${products.length} ${products.length === 1 ? 'item' : 'items'}`
+                    : `${products.length} ${products.length === 1 ? 'item' : 'items'}`}
                 </p>
               </div>
               <button
@@ -339,6 +369,57 @@ const VendorDetails: React.FC = () => {
                 Add Product
               </button>
             </div>
+
+            {/* Filter Bar */}
+            {products.length > 0 && (
+              <div className="mb-4 space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  {/* Search by name */}
+                  <div className="relative flex-1 min-w-[160px]">
+                    <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by name..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+                    />
+                  </div>
+
+                  {/* Price range */}
+                  <div className="flex items-center gap-1.5 min-w-[180px]">
+                    <input
+                      type="number"
+                      placeholder="Min AED"
+                      value={minPrice}
+                      onChange={(e) => setMinPrice(e.target.value)}
+                      min="0"
+                      className="w-20 px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+                    />
+                    <span className="text-xs text-gray-400">–</span>
+                    <input
+                      type="number"
+                      placeholder="Max AED"
+                      value={maxPrice}
+                      onChange={(e) => setMaxPrice(e.target.value)}
+                      min="0"
+                      className="w-20 px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+                    />
+                  </div>
+
+                  {/* Clear filters */}
+                  {hasActiveFilters && (
+                    <button
+                      onClick={clearFilters}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                    >
+                      <XMarkIcon className="w-3.5 h-3.5" />
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {products.length === 0 ? (
               <div className="text-center py-12">
@@ -355,9 +436,21 @@ const VendorDetails: React.FC = () => {
                   Add Your First Product
                 </button>
               </div>
+            ) : filteredProducts.length === 0 ? (
+              <div className="text-center py-10">
+                <MagnifyingGlassIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <h3 className="text-sm font-semibold text-gray-600 mb-1">No products match your filters</h3>
+                <p className="text-xs text-gray-400 mb-3">Try adjusting your search or filter criteria</p>
+                <button
+                  onClick={clearFilters}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Clear filters
+                </button>
+              </div>
             ) : (
               <div className="space-y-2">
-                {products.map((product, index) => (
+                {filteredProducts.map((product, index) => (
                   <motion.div
                     key={product.product_id}
                     initial={{ opacity: 0, y: 10 }}
