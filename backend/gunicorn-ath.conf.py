@@ -7,7 +7,7 @@ Leave headroom for OS + Nginx + DB connections.
 """
 
 # Worker type: geventwebsocket required for Flask-SocketIO WebSocket support
-worker_class = "geventwebsocket.gunicorn.workers.GeventWebsocketWorker"
+worker_class = "geventwebsocket.gunicorn.workers.GeventWebSocketWorker"
 
 # Fewer workers for secondary domain
 workers = 5
