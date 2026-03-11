@@ -11,7 +11,7 @@ import multiprocessing
 # Worker type: geventwebsocket is required for Flask-SocketIO
 # Regular sync/gthread workers will break WebSocket connections
 # ---------------------------------------------------------------
-worker_class = "geventwebsocket.gunicorn.workers.GeventWebsocketWorker"
+worker_class = "geventwebsocket.gunicorn.workers.GeventWebSocketWorker"
 
 # Number of worker processes
 # 9 workers on 8-core machine = good concurrency without over-saturating CPU
