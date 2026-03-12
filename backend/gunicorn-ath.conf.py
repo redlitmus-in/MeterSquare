@@ -9,7 +9,7 @@ Leave headroom for OS + Nginx + DB connections.
 # Worker type: geventwebsocket required for Flask-SocketIO WebSocket support
 worker_class = "geventwebsocket.gunicorn.workers.GeventWebSocketWorker"
 
-# Fewer workers for secondary domain
+# Workers for secondary domain
 workers = 5
 
 # Concurrent greenlet connections per worker
@@ -19,9 +19,9 @@ worker_connections = 1000
 bind = "127.0.0.1:5050"
 
 # Timeouts
-timeout = 120
+timeout = 60            # Reduced from 120s — kills stuck workers faster, frees slots sooner
 graceful_timeout = 30
-keepalive = 5
+keepalive = 10          # Increased from 5s — reuses TCP connections longer (faster repeat requests)
 
 # Logging — systemd captures stdout/stderr
 accesslog = "-"

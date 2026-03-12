@@ -47,6 +47,46 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 otp_storage = {}
 _otp_lock = threading.Lock()
 
+# Redis for shared OTP storage across multiple workers
+try:
+    import redis as _redis
+    _redis_client = _redis.Redis(host='127.0.0.1', port=6379, db=0, decode_responses=True)
+    _redis_client.ping()
+    _USE_REDIS = True
+    _redis_client.close()
+    _redis_client = _redis.Redis(host='127.0.0.1', port=6379, db=0, decode_responses=True)
+except Exception:
+    _USE_REDIS = False
+
+def _otp_set(email_id, otp, role=None, ttl=300):
+    if _USE_REDIS:
+        import json
+        _redis_client.setex(f"otp:{email_id}", ttl, json.dumps({"otp": otp, "role": role}))
+    else:
+        with _otp_lock:
+            otp_storage[email_id] = {
+                "otp": otp,
+                "role": role,
+                "expires_at": (datetime.utcnow() + timedelta(seconds=ttl)).timestamp()
+            }
+
+def _otp_pop(email_id):
+    if _USE_REDIS:
+        import json
+        pipe = _redis_client.pipeline()
+        pipe.get(f"otp:{email_id}")
+        pipe.delete(f"otp:{email_id}")
+        val, _ = pipe.execute()
+        if not val:
+            return None
+        return json.loads(val)
+    else:
+        with _otp_lock:
+            data = otp_storage.pop(email_id, None)
+        if data and data.get("expires_at") and datetime.utcnow().timestamp() > data["expires_at"]:
+            return None
+        return data
+
 
 def parse_user_agent(user_agent_string):
     """
@@ -208,10 +248,7 @@ def get_logo_base64():
 def send_otp(email_id):
     try:
         otp = random.randint(100000, 999999)
-        otp_storage[email_id] = {
-            "otp": otp,
-            "expires_at": (datetime.utcnow() + timedelta(seconds=300)).timestamp()
-        }
+        _otp_set(email_id, otp)
         
         sender_email = SENDER_EMAIL
         password = SENDER_EMAIL_PASSWORD
@@ -423,10 +460,7 @@ def verification_otp():
         return jsonify({"error": "OTP must be a number"}), 400
     
     # Atomically pop OTP data so only one request can ever consume it.
-    # Using pop() under a lock prevents TOCTOU race conditions where two
-    # concurrent requests both pass OTP validation before either deletes it.
-    with _otp_lock:
-        otp_data = otp_storage.pop(email_id, None)
+    otp_data = _otp_pop(email_id)
     if not otp_data:
         on_login_failed(email_id)  # Audit log - potential brute force attempt
         return jsonify({"error": "OTP not found or expired"}), 400

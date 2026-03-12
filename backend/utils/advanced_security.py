@@ -209,7 +209,7 @@ class IPBlocker:
     """
     IP blocking and suspicious activity detection
     Thread-safe with automatic block expiration
-    Uses database for persistence + memory cache for fast checks
+    Uses Redis (if available) for shared cache across workers, DB for persistence
     """
 
     def __init__(self):
@@ -224,6 +224,24 @@ class IPBlocker:
         })
         self._lock = threading.Lock()
         self._db_synced = False
+
+        # Redis client (shared cache across all workers)
+        self._redis = None
+        self._init_redis()
+
+    def _init_redis(self):
+        """Connect to Redis if REDIS_URL is configured"""
+        redis_url = os.getenv('REDIS_URL')
+        if not redis_url:
+            return
+        try:
+            import redis
+            self._redis = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+            self._redis.ping()
+            logger.info("IPBlocker: Redis connected — using shared cache across workers")
+        except Exception as e:
+            self._redis = None
+            logger.warning(f"IPBlocker: Redis unavailable, falling back to DB queries — {e}")
 
         # Thresholds
         self.FAILED_LOGIN_THRESHOLD = 10  # Block after 10 failed logins
@@ -305,42 +323,55 @@ class IPBlocker:
                 # Don't set _db_synced so we can retry on next request
 
     def is_blocked(self, ip: str) -> bool:
-        """Check if IP is blocked (thread-safe with expiration check)"""
+        """
+        Check if IP is blocked.
+        - Redis available: checks Redis cache (10s TTL) — fast, shared across all workers
+        - Redis unavailable: queries DB directly — accurate but slower
+        - Both fail: falls back to memory cache
+        """
         if ip in self._whitelist:
             return False
 
-        # Sync from database on first check
-        self._sync_from_database()
+        # Fast path: check Redis cache first
+        if self._redis:
+            try:
+                redis_key = f"ip_blocked:{ip}"
+                cached = self._redis.get(redis_key)
+                if cached is not None:
+                    return cached == b"1"
+            except Exception:
+                pass  # Redis failed, fall through to DB check
 
-        with self._lock:
-            block_info = self._blocked_ips.get(ip)
-            if not block_info:
-                return False
+        # DB check (source of truth)
+        try:
+            from models.security import BlockedIP
 
-            # Permanent blocks never expire
-            if block_info.get('is_permanent', False):
-                return True
+            now = datetime.utcnow()
+            block = BlockedIP.query.filter(
+                BlockedIP.ip_address == ip,
+                BlockedIP.unblocked_at.is_(None),
+                db.or_(
+                    BlockedIP.expires_at.is_(None),
+                    BlockedIP.expires_at > now,
+                    BlockedIP.is_permanent == True
+                )
+            ).first()
 
-            # Check if block has expired using the stored expiry or calculate from block count
-            blocked_at = block_info.get('blocked_at', datetime.utcnow())
-            block_count = block_info.get('block_count', 1)
+            result = block is not None
 
-            # Get duration for this block count
-            duration_key = min(block_count, 5)
-            duration_hours = self.BLOCK_DURATIONS.get(duration_key, 24)
+            # Write result to Redis cache (TTL: 10s — unblock reflects within 10s max)
+            if self._redis:
+                try:
+                    self._redis.setex(f"ip_blocked:{ip}", 10, b"1" if result else b"0")
+                except Exception:
+                    pass
 
-            if duration_hours is None:
-                # Permanent block
-                return True
-
-            if datetime.utcnow() - blocked_at > timedelta(hours=duration_hours):
-                # Block has expired, auto-unblock
-                del self._blocked_ips[ip]
-                self._unblock_in_database(ip)
-                logger.info(f"IP BLOCK EXPIRED: {ip} (was block #{block_count})")
-                return False
-
-            return True
+            return result
+        except Exception as e:
+            logger.error(f"Failed to check IP block from DB: {e}")
+            # Fallback to memory cache if DB fails
+            with self._lock:
+                return ip in self._blocked_ips
 
     def block_ip(self, ip: str, reason: str = ""):
         """
@@ -369,6 +400,14 @@ class IPBlocker:
 
         # Save to database
         self._save_block_to_database(ip, reason, expires_at, block_count, is_permanent)
+
+        # Write to Redis cache immediately so all workers know right away
+        if self._redis:
+            try:
+                ttl = int((expires_at - datetime.utcnow()).total_seconds()) if expires_at else 86400 * 30
+                self._redis.setex(f"ip_blocked:{ip}", ttl, b"1")
+            except Exception:
+                pass
 
         # Log with severity based on block count
         severity = "CRITICAL" if is_permanent else "WARNING"
@@ -460,6 +499,15 @@ class IPBlocker:
         """Unblock an IP address"""
         with self._lock:
             self._blocked_ips.pop(ip, None)
+            self._suspicious_ips.pop(ip, None)  # Also clear failed login counter
+            self._db_synced = False  # Force re-sync from DB on next request
+
+        # Delete from Redis immediately — all workers see unblock instantly
+        if self._redis:
+            try:
+                self._redis.delete(f"ip_blocked:{ip}")
+            except Exception:
+                pass
 
         # Update database
         self._unblock_in_database(ip, user_id)
