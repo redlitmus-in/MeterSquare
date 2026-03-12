@@ -38,6 +38,7 @@ def create_app():
         if not _secret_key or _secret_key == "default-secret-key" or len(_secret_key) < 32:
             raise RuntimeError("SECRET_KEY is not set or too short. Refusing to start in production.")
     app.config['SECRET_KEY'] = _secret_key
+    app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB — allows large base64 signature images
 
     # Trust the reverse proxy (Nginx) to forward the real client IP via X-Forwarded-For.
     # x_for=1 means trust 1 proxy hop — increase if you have multiple proxies.

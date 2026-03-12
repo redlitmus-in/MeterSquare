@@ -3133,8 +3133,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                 setShowLpoEditor(!showLpoEditor);
                               }}
                               className="text-xs"
-                              disabled={isLoadingLpo || hasMultipleVendors}
-                              title={hasMultipleVendors ? "Edit LPO separately for each vendor in their confirmation dialog" : "Edit LPO details"}
+                              disabled={isLoadingLpo}
+                              title="Edit LPO details"
                             >
                               {isLoadingLpo ? (
                                 <ModernLoadingSpinners size="xxs" className="mr-1" />
@@ -3149,8 +3149,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                               size="sm"
                               onClick={handleDownloadLpoPdf}
                               className="text-xs"
-                              disabled={!lpoData || isLoadingLpo || hasMultipleVendors}
-                              title={hasMultipleVendors ? "Preview LPO separately for each vendor in their confirmation dialog" : "Preview LPO PDF"}
+                              disabled={!lpoData || isLoadingLpo}
+                              title="Preview LPO PDF"
                             >
                               <Download className="w-3 h-3 mr-1" />
                               Preview

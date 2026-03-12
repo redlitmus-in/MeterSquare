@@ -11,8 +11,38 @@ from utils.authentication import jwt_required
 import logging
 from datetime import datetime
 import base64
+from io import BytesIO
 
 log = logging.getLogger(__name__)
+
+
+def _compress_signature_image(data_url, max_width=400, max_height=200):
+    """
+    Compress and resize a base64 signature image before storing in DB.
+    Reduces storage from ~2MB+ to ~20-50KB while keeping PDF quality.
+    Saves as PNG with transparency preserved (RGBA kept as-is for PDF rendering).
+    Returns a compressed base64 data URL, or original if compression fails.
+    """
+    try:
+        from PIL import Image as PILImage
+        if not data_url or not data_url.startswith('data:image/'):
+            return data_url
+        header, encoded = data_url.split(',', 1)
+        img_bytes = base64.b64decode(encoded)
+        img = PILImage.open(BytesIO(img_bytes))
+        # Preserve original mode — only convert opaque images to RGBA for consistency
+        if img.mode not in ('RGBA', 'LA'):
+            img = img.convert('RGBA')
+        img.thumbnail((max_width, max_height), PILImage.LANCZOS)
+        # Save as PNG — ReportLab handles RGBA PNGs correctly when using ImageReader
+        out = BytesIO()
+        img.save(out, format='PNG', optimize=True)
+        out.seek(0)
+        compressed_b64 = base64.b64encode(out.read()).decode('utf-8')
+        return f"data:image/png;base64,{compressed_b64}"
+    except Exception as e:
+        log.warning(f"Image compression failed, storing original: {e}")
+        return data_url
 
 
 @jwt_required
@@ -201,23 +231,23 @@ def update_settings():
         if "budgetAlertThreshold" in data:
             settings.budget_alert_threshold = data["budgetAlertThreshold"]
 
-        # Signature Settings (for BOQ PDFs)
+        # Signature Settings (for BOQ PDFs) — compress images before storing
         if "signatureImage" in data:
-            settings.signature_image = data["signatureImage"]
+            settings.signature_image = _compress_signature_image(data["signatureImage"])
         if "signatureEnabled" in data:
             settings.signature_enabled = data["signatureEnabled"]
 
-        # LPO Signature Settings
+        # LPO Signature Settings — compress images before storing
         if "mdSignatureImage" in data:
-            settings.md_signature_image = data["mdSignatureImage"]
+            settings.md_signature_image = _compress_signature_image(data["mdSignatureImage"])
         if "mdName" in data:
             settings.md_name = data["mdName"]
         if "tdSignatureImage" in data:
-            settings.td_signature_image = data["tdSignatureImage"]
+            settings.td_signature_image = _compress_signature_image(data["tdSignatureImage"])
         if "tdName" in data:
             settings.td_name = data["tdName"]
         if "companyStampImage" in data:
-            settings.company_stamp_image = data["companyStampImage"]
+            settings.company_stamp_image = _compress_signature_image(data["companyStampImage"], max_width=300, max_height=300)
         if "companyTrn" in data:
             settings.company_trn = data["companyTrn"]
         if "companyFax" in data:
@@ -286,7 +316,7 @@ def update_settings():
 
     except Exception as e:
         db.session.rollback()
-        log.error(f"Error updating settings: {str(e)}")
+        log.error(f"Error updating settings: {str(e)}", exc_info=True)
         return jsonify({"error": f"Failed to update settings: {str(e)}"}), 500
 
 
@@ -342,8 +372,8 @@ def upload_signature():
             if not signature_data or not signature_data.startswith('data:image/'):
                 return jsonify({"error": "Invalid image format. Expected base64 data URL"}), 400
 
-        # Save signature to database
-        settings.signature_image = signature_data
+        # Save signature to database — compress before storing
+        settings.signature_image = _compress_signature_image(signature_data)
         settings.signature_enabled = True  # Auto-enable when uploading
         settings.updated_at = datetime.utcnow()
         db.session.commit()
@@ -421,14 +451,12 @@ def get_signature_for_pdf():
 def get_signatures_for_pdf():
     """
     Get both MD and authorized signature images for PDF generation (internal use)
-    Returns dict with md_signature, authorized_signature, and company_seal if enabled, None values otherwise
+    Returns dict with md_signature, authorized_signature, and company_seal.
+    Note: inclusion is controlled by the caller's include_signature flag, not a DB gate.
     """
     try:
         settings = SystemSettings.query.first()
         if not settings:
-            return {'md_signature': None, 'authorized_signature': None, 'company_seal': None}
-
-        if not getattr(settings, 'signature_enabled', False):
             return {'md_signature': None, 'authorized_signature': None, 'company_seal': None}
 
         return {

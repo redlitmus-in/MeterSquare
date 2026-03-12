@@ -66,7 +66,7 @@ export const downloadInternalBOQPDF = async (boqId: number): Promise<void> => {
  * @param coverPage - Optional cover page data
  * @param includeSignature - Whether to include admin signature from settings
  */
-export const downloadClientBOQPDF = async (boqId: number, termsText?: string, coverPage?: any, includeSignature?: boolean): Promise<void> => {
+export const downloadClientBOQPDF = async (boqId: number, termsText?: string, coverPage?: any, includeSignature: boolean = true): Promise<void> => {
   try {
     const token = localStorage.getItem('access_token');
 
@@ -146,7 +146,7 @@ export const downloadClientBOQPDF = async (boqId: number, termsText?: string, co
  * @param coverPage - Optional cover page data
  * @param includeSignature - Whether to include admin signature from settings
  */
-export const previewClientBOQPDF = async (boqId: number, termsText?: string, coverPage?: any, includeSignature?: boolean): Promise<string> => {
+export const previewClientBOQPDF = async (boqId: number, termsText?: string, coverPage?: any, includeSignature: boolean = true): Promise<string> => {
   try {
     const token = localStorage.getItem('access_token');
 

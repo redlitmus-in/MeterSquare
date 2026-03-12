@@ -14,6 +14,13 @@ from datetime import datetime
 import os
 import base64
 
+# Allow Pillow to load images that ReportLab reports as truncated
+try:
+    from PIL import ImageFile as _PILImageFile
+    _PILImageFile.LOAD_TRUNCATED_IMAGES = True
+except ImportError:
+    pass
+
 
 class LPOPDFGenerator:
     """Local Purchase Order PDF Generator - Professional corporate design"""
@@ -99,12 +106,19 @@ class LPOPDFGenerator:
             image_data = base64.b64decode(base64_string)
             image_buffer = BytesIO(image_data)
 
-            if width and height:
-                return Image(image_buffer, width=width, height=height)
-            elif width:
-                return Image(image_buffer, width=width)
-            else:
-                return Image(image_buffer)
+            try:
+                if width and height:
+                    img = Image(image_buffer, width=width, height=height)
+                elif width:
+                    img = Image(image_buffer, width=width)
+                else:
+                    img = Image(image_buffer)
+                # Force ReportLab to load/verify the image now so any error is caught here
+                img.drawWidth  # triggers internal image load
+                return img
+            except Exception as img_err:
+                print(f"Warning: image could not be loaded (skipped): {img_err}")
+                return None
         except Exception as e:
             print(f"Error loading image from base64: {e}")
             return None

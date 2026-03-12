@@ -8,6 +8,7 @@ from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from io import BytesIO
 from datetime import date
@@ -42,6 +43,30 @@ class ModernBOQPDFGenerator:
             fontName='Helvetica-Bold',
             textColor=colors.HexColor('#1a1a1a')
         ))
+
+    def _base64_to_image(self, data_url, width, height):
+        """
+        Convert a base64 data URL to a ReportLab Image element.
+        Uses ImageReader to avoid the BytesIO double-read bug with kind='proportional'.
+        Returns None if conversion fails.
+        """
+        try:
+            if not data_url or not data_url.startswith('data:image/'):
+                return None
+            _, encoded = data_url.split(',', 1)
+            img_bytes = base64.b64decode(encoded)
+            buf = BytesIO(img_bytes)
+            reader = ImageReader(buf)
+            nat_w, nat_h = reader.getSize()
+            # Proportional scaling: fit within (width x height) box
+            scale = min(width / nat_w, height / nat_h)
+            final_w = nat_w * scale
+            final_h = nat_h * scale
+            buf.seek(0)
+            return Image(buf, width=final_w, height=final_h)
+        except Exception as e:
+            print(f"[PDF] _base64_to_image failed: {e}")
+            return None
 
     def _add_watermark(self, canvas_obj, doc):
         """Add subtle watermark"""
@@ -120,6 +145,16 @@ class ModernBOQPDFGenerator:
                               leftMargin=30, rightMargin=30)
         elements = []
 
+        # Fetch signatures from admin settings for the signature section
+        try:
+            from controllers.settings_controller import get_signatures_for_pdf
+            signatures = get_signatures_for_pdf()
+            self.signature_image = signatures.get('authorized_signature')
+            self.company_seal_image = signatures.get('company_seal')
+        except Exception:
+            self.signature_image = None
+            self.company_seal_image = None
+
         # Prefetch all images in parallel for performance
         self._prefetch_all_images(items)
 
@@ -159,7 +194,7 @@ class ModernBOQPDFGenerator:
         """
         elements = []
         logo_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'logo.png')
-        stamp_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'company_stamp.png')
+        stamp_path = None  # Stamp is fetched from DB only, not from static files
 
         # Use the signature image passed directly
         signature_image_data = signature_image
@@ -327,30 +362,20 @@ class ModernBOQPDFGenerator:
         signatory_name = cover_page.get('signatory_name', 'Amjath K Aboobacker')
         signatory_title = cover_page.get('signatory_title', 'Managing Director')
 
-        # Stamp image (if exists)
+        # Stamp image — only from DB (company_seal_image), never from static files
         stamp_cell = ''
         stamp_exists = False
-        if os.path.exists(stamp_path):
-            try:
-                stamp_cell = Image(stamp_path, width=1.2*inch, height=1.2*inch, kind='proportional')
+        seal_data = getattr(self, 'company_seal_image', None)
+        if seal_data and seal_data.startswith('data:image/'):
+            img = self._base64_to_image(seal_data, 1.2*inch, 1.2*inch)
+            if img:
+                stamp_cell = img
                 stamp_exists = True
-            except:
-                stamp_cell = ''
 
         # Signature image from system settings (if enabled)
         signature_cell = None
         if signature_image_data:
-            try:
-                # Parse base64 data URL
-                if signature_image_data.startswith('data:image/'):
-                    # Extract base64 content after the data URL prefix
-                    header, encoded = signature_image_data.split(',', 1)
-                    signature_bytes = base64.b64decode(encoded)
-                    signature_buffer = BytesIO(signature_bytes)
-                    signature_cell = Image(signature_buffer, width=1.5*inch, height=0.6*inch, kind='proportional')
-            except Exception as e:
-                print(f"[PDF] Error rendering signature image: {e}")
-                signature_cell = None
+            signature_cell = self._base64_to_image(signature_image_data, 1.5*inch, 0.6*inch)
 
         sig_name_style = ParagraphStyle('SigName', fontSize=11, fontName='Helvetica-Bold', textColor=primary_color)
 
@@ -1590,29 +1615,16 @@ class ModernBOQPDFGenerator:
         # Build signature image or space
         sig_img_element = Spacer(1, 25)  # Default space for manual signature
         if hasattr(self, 'signature_image') and self.signature_image:
-            try:
-                # Parse base64 data URL
-                if self.signature_image.startswith('data:image/'):
-                    header, encoded = self.signature_image.split(',', 1)
-                    sig_bytes = base64.b64decode(encoded)
-                    sig_buffer = BytesIO(sig_bytes)
-                    sig_img_element = Image(sig_buffer, width=1.2*inch, height=0.5*inch, kind='proportional')
-            except Exception as e:
-                print(f"[PDF] Error rendering signature in BOQ: {e}")
+            img = self._base64_to_image(self.signature_image, 1.2*inch, 0.5*inch)
+            if img:
+                sig_img_element = img
 
         # Build seal image or empty space
         seal_img_element = Spacer(1, 25)  # Default empty space if no seal
         if hasattr(self, 'company_seal_image') and self.company_seal_image:
-            try:
-                # Parse base64 data URL
-                seal_data = self.company_seal_image
-                if seal_data.startswith('data:image/'):
-                    header, encoded = seal_data.split(',', 1)
-                    seal_bytes = base64.b64decode(encoded)
-                    seal_buffer = BytesIO(seal_bytes)
-                    seal_img_element = Image(seal_buffer, width=0.8*inch, height=0.8*inch, kind='proportional')
-            except Exception as e:
-                print(f"[PDF] Error rendering seal in BOQ: {e}")
+            img = self._base64_to_image(self.company_seal_image, 0.8*inch, 0.8*inch)
+            if img:
+                seal_img_element = img
 
         # MeterSquare signature with label "Technical Director"
         ms_line = Paragraph('_____________________<br/><b>Technical Director</b><br/><font size="6">Authorized Signature</font>',

@@ -56,8 +56,8 @@ const SendBOQEmailModal: React.FC<SendBOQEmailModalProps> = ({
 
   // Cover page state
   const [showCoverPageEditor, setShowCoverPageEditor] = useState(false);
-  // Signature state - estimator can choose to include admin signature from settings
-  const [includeSignature, setIncludeSignature] = useState(false);
+  // Signature state - default to true so uploaded signatures appear automatically
+  const [includeSignature, setIncludeSignature] = useState(true);
   const [coverPageData, setCoverPageData] = useState({
     reference_number: '',
     date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
@@ -1269,7 +1269,7 @@ MeterSquare Interiors LLC`;
                   <button
                     onClick={async () => {
                       try {
-                        await downloadClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined);
+                        await downloadClientBOQPDF(boqId, undefined, coverPageData.reference_number ? coverPageData : undefined, includeSignature);
                         showSuccess('PDF downloaded successfully');
                       } catch (error) {
                         showError('Failed to download PDF');

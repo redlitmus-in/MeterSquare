@@ -553,25 +553,27 @@ def send_vendor_email(cr_id, po_child_id=None):
                 project_name_clean = project.project_name.replace(' ', '_')[:20] if project else 'Project'
                 lpo_filename = f"LPO-{formatted_id.replace('PO-', '')}-{project_name_clean}.pdf"
 
-                # Try pre-saved PDF from Supabase (generated at TD approval)
-                pdf_url = getattr(email_record, 'lpo_pdf_url', None)
-                if pdf_url:
-                    import requests as http_requests
-                    resp = http_requests.get(pdf_url, timeout=15)
-                    if resp.status_code == 200 and len(resp.content) > 0:
-                        attachments.append((lpo_filename, resp.content, 'application/pdf'))
-                        log.info(f"✅ LPO PDF attached from storage: {lpo_filename} ({len(resp.content)} bytes)")
-                    else:
-                        raise Exception(f"Download failed: HTTP {resp.status_code}, size={len(resp.content)}")
-                elif lpo_data:
-                    # Fallback: generate on-the-fly (for old CRs without pre-saved PDF)
+                # Always generate fresh PDF on-the-fly so current signatures are included
+                if lpo_data:
                     from utils.lpo_pdf_generator import LPOPDFGenerator
+                    from models.system_settings import SystemSettings as _SysSettings
+                    # Inject fresh signatures from DB so uploaded signatures always appear
+                    _settings = _SysSettings.query.first()
+                    if _settings:
+                        lpo_data['signatures'] = {
+                            'md_name': getattr(_settings, 'md_name', 'Managing Director') or 'Managing Director',
+                            'md_signature': getattr(_settings, 'md_signature_image', None),
+                            'td_name': getattr(_settings, 'td_name', 'Technical Director') or 'Technical Director',
+                            'td_signature': getattr(_settings, 'td_signature_image', None),
+                            'stamp_image': getattr(_settings, 'company_stamp_image', None),
+                            'is_system_signature': True,
+                        }
                     generator = LPOPDFGenerator()
                     pdf_bytes = generator.generate_lpo_pdf(lpo_data)
                     attachments.append((lpo_filename, pdf_bytes, 'application/pdf'))
-                    log.info(f"✅ LPO PDF generated on-the-fly (fallback): {lpo_filename}")
+                    log.info(f"✅ LPO PDF generated on-the-fly: {lpo_filename} ({len(pdf_bytes)} bytes)")
                 else:
-                    log.warning(f" No pre-saved PDF and no lpo_data for {formatted_id}")
+                    log.warning(f" No lpo_data available for {formatted_id}, skipping LPO PDF attachment")
             except Exception as e:
                 log.error(f" Error attaching LPO PDF for {formatted_id}: {str(e)}")
                 # Continue sending email even if LPO PDF attachment fails
