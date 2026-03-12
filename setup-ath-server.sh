@@ -34,6 +34,21 @@ echo "================================================"
 # STEP 1: Install gunicorn + gevent (system Python)
 # ---------------------------------------------------------------
 echo ""
+echo "[0/6] Installing Redis server (required for OTP storage & rate limiting)..."
+if ! command -v redis-server &>/dev/null; then
+    apt-get install -y redis-server
+    systemctl enable redis-server
+    systemctl start redis-server
+    echo "  Redis installed and started."
+else
+    systemctl enable redis-server
+    systemctl start redis-server 2>/dev/null || true
+    echo "  Redis already installed. Ensured running."
+fi
+redis-cli ping && echo "  Redis: PONG (OK)" || echo "  WARNING: Redis not responding"
+echo "Done."
+
+echo ""
 echo "[1/6] Installing gunicorn + gevent..."
 pip3 install gunicorn gevent gevent-websocket --quiet
 echo "  gunicorn: $(gunicorn --version)"

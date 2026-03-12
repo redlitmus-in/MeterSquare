@@ -2,7 +2,7 @@
 SMS service for sending OTP via tuitone.com API
 """
 import requests
-import random
+import secrets
 from datetime import datetime, timedelta
 from config.logging import get_logger
 import os
@@ -19,8 +19,7 @@ if not SMS_ACCESS_TOKEN:
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
 
-# OTP storage for phone (shared with authentication.py)
-from utils.authentication import otp_storage
+# OTP storage is managed by controllers via authentication._otp_set / _otp_pop
 
 
 def send_sms_otp(phone_number):
@@ -35,19 +34,12 @@ def send_sms_otp(phone_number):
     """
     try:
         # Generate 6-digit OTP
-        otp = random.randint(100000, 999999)
+        otp = 100000 + secrets.randbelow(900000)
 
-        # Clean phone number for consistent storage key
-        clean_phone = ''.join(filter(str.isdigit, str(phone_number)))
-
-        # Store OTP in memory with cleaned phone number as key
-        # Prefix phone with 'phone:' to distinguish from email
-        storage_key = f"phone:{clean_phone}"
-        otp_storage[storage_key] = {
-            "otp": otp,
-            "expires_at": (datetime.utcnow() + timedelta(seconds=300)).timestamp()
-        }
-        log.info(f"OTP stored with key: {storage_key}")
+        # If SMS token is not configured, skip API call and return OTP for local testing
+        if not SMS_ACCESS_TOKEN:
+            log.warning(f"SMS_ACCESS_TOKEN not configured — SMS skipped for {phone_number}. OTP returned to caller.")
+            return otp
 
         # Prepare SMS message
         message = f"Your MeterSquare verification code is: {otp}. Valid for 5 minutes. Do not share this code."
@@ -76,7 +68,7 @@ def send_sms_otp(phone_number):
             log.error(f"SMS API error: {response_data['error']}")
             # Still return OTP for dev testing even if SMS fails
             if ENVIRONMENT != 'production':
-                log.warning(f"SMS send failed but returning OTP for dev environment: {otp}")
+                log.warning(f"SMS send failed but returning OTP for dev environment")
                 return otp
             return None
 
@@ -95,43 +87,6 @@ def send_sms_otp(phone_number):
         return None
 
 
-def verify_sms_otp(phone_number, otp_input):
-    """
-    Verify OTP sent via SMS
 
-    Args:
-        phone_number: The phone number OTP was sent to
-        otp_input: The OTP entered by user
-
-    Returns:
-        tuple: (success: bool, error_message: str or None)
-    """
-    try:
-        storage_key = f"phone:{phone_number}"
-
-        # Get OTP data from storage
-        otp_data = otp_storage.get(storage_key)
-        if not otp_data:
-            return False, "OTP not found or expired"
-
-        stored_otp = otp_data.get("otp")
-        expires_at = datetime.fromtimestamp(otp_data.get("expires_at"))
-
-        # Check expiry
-        if datetime.utcnow() > expires_at:
-            del otp_storage[storage_key]
-            return False, "OTP expired"
-
-        # Check if OTP matches
-        if int(otp_input) != stored_otp:
-            return False, "Invalid OTP"
-
-        # OTP verified, remove from storage
-        del otp_storage[storage_key]
-        return True, None
-
-    except ValueError:
-        return False, "OTP must be a number"
-    except Exception as e:
-        log.error(f"Error verifying SMS OTP: {e}")
-        return False, "Verification failed"
+# Note: OTP verification for SMS login is handled directly in
+# auth_controller.py verify_sms_otp_login() using _otp_pop().

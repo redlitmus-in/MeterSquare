@@ -432,5 +432,5 @@ def init_deadline_scheduler(app):
     )
 
     scheduler.start()
-    log.info(f"[DeadlineScheduler] Started — hourly sweep, notifies each user at {NOTIFY_HOUR}:00 their local time")
+    log.debug(f"[DeadlineScheduler] Started — hourly sweep, notifies each user at {NOTIFY_HOUR}:00 their local time")
     return scheduler

@@ -66,5 +66,10 @@ def configure_quiet_logging():
     # Suppress SQLAlchemy engine logs (only show warnings+)
     logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
+    # Suppress apscheduler job scheduler verbose logs
+    logging.getLogger('apscheduler').setLevel(logging.WARNING)
+    logging.getLogger('apscheduler.scheduler').setLevel(logging.WARNING)
+    logging.getLogger('apscheduler.executors').setLevel(logging.WARNING)
+
 
 logger = get_logger()

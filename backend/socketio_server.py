@@ -65,8 +65,10 @@ socketio = SocketIO(
     transports=_allowed_transports
 )
 
-# JWT Secret Key
+# JWT Secret Key — fail fast in production if missing or weak
 SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-here')
+if _environment == 'production' and (not SECRET_KEY or len(SECRET_KEY) < 32 or SECRET_KEY == 'your-secret-key-here'):
+    raise RuntimeError("SECRET_KEY is missing or too weak for production. Set a strong SECRET_KEY in .env.")
 
 # Store active connections
 active_connections = {}
@@ -75,8 +77,11 @@ def authenticate_socket(f):
     """Decorator to authenticate socket connections"""
     @wraps(f)
     def decorated(*args, **kwargs):
-        # Get token from handshake query
-        token = request.args.get('token')
+        # Get token from Authorization header (preferred) or query string (dev fallback)
+        # In production, query-string tokens appear in server access logs — avoid them
+        token = request.headers.get('Authorization', '').replace('Bearer ', '').strip() or None
+        if not token and _environment != 'production':
+            token = request.args.get('token')
 
         if not token:
             log.warning("[Socket.IO] Connection rejected: no token provided")

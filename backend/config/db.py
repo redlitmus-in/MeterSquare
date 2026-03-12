@@ -1,9 +1,12 @@
 import os
 import time
+import logging
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
+
+_log = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -41,18 +44,19 @@ def initialize_db(app):
     """
     # Get environment
     environment = os.getenv("ENVIRONMENT", "development")
-    print("Environment: ", environment)
+    _log.info("Initializing database for environment: %s", environment)
 
     # Set DATABASE_URL based on ENVIRONMENT
     if environment == "production":
         database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            raise ValueError("DATABASE_URL environment variable is required in production but is not set.")
     else:
         database_url = os.getenv("DEV_DATABASE_URL")
 
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
-    print("app.config['SQLALCHEMY_DATABASE_URI']:",app.config['SQLALCHEMY_DATABASE_URI'])
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default-secret-key")
+    # SECRET_KEY is set in create_app() in app.py — do not set it here to avoid silent overwrites
 
     # ✅ OPTIMIZED connection pool settings
     pool_config = {

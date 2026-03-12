@@ -1,6 +1,10 @@
 """
 Authentication Service - Runs on Port 5001
 Handles all authentication-related endpoints
+
+DEPRECATED: This is a legacy standalone entry point.
+The main application (app.py) handles all authentication via the main Flask app.
+This file should NOT be used as the primary entry point in production.
 """
 import os
 from flask import Flask
@@ -13,10 +17,14 @@ load_dotenv(os.path.join(basedir, '.env'))
 
 def create_auth_app():
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default-secret-key")
 
-    # Get environment
+    # Get environment first — needed for secret key validation
     environment = os.getenv("ENVIRONMENT", "development")
+
+    _secret_key = os.getenv("SECRET_KEY", "default-secret-key")
+    if environment == 'production' and (not _secret_key or len(_secret_key) < 32 or _secret_key in ('default-secret-key', 'your-secret-key-here')):
+        raise RuntimeError("SECRET_KEY is missing or too weak for production. Set a strong SECRET_KEY in .env.")
+    app.config['SECRET_KEY'] = _secret_key
 
     # Database configuration
     database_url = os.getenv("DATABASE_URL")

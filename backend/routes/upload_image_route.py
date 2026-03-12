@@ -1,5 +1,7 @@
+import os
 from flask import Blueprint, g, jsonify, current_app
 from controllers.upload_image_controller import *
+from utils.authentication import jwt_required
 
 image_routes = Blueprint('image_routes', __name__, url_prefix='/api')
 
@@ -18,20 +20,24 @@ def rate_limit(limit_string):
         return decorated_function
     return decorator
 
-# Image Management routes - Rate limited to prevent abuse
+# Image Management routes — JWT required in production, open in development
 @image_routes.route('/upload_image/<int:id>', methods=['POST'])
+@jwt_required
 @rate_limit("50 per hour")  # Image upload with compression is resource-intensive
 def item_upload_image_route(id):
     return item_upload_image(id)
 
 @image_routes.route('/images/<int:id>', methods=['GET'])
+@jwt_required
 def get_item_images_route(id):
     return get_item_images(id)
 
 @image_routes.route('/images/<int:id>', methods=['DELETE'])
+@jwt_required
 def delete_item_images_route(id):
     return delete_item_images(id)
 
 @image_routes.route('/images/all/<int:id>', methods=['DELETE'])
+@jwt_required
 def delete_all_item_images_route(id):
     return delete_all_item_images(id)

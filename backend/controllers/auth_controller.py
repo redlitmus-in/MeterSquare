@@ -118,7 +118,7 @@ def user_register():
     except Exception as e:
         db.session.rollback()
         log.error(f"Registration error: {str(e)}")
-        return jsonify({"error": f"Registration failed: {str(e)}"}), 500
+        return jsonify({"error": "Registration failed" if ENVIRONMENT == 'production' else f"Registration failed: {str(e)}"}), 500
 
 def user_login():
     """
@@ -167,21 +167,17 @@ def user_login():
         otp = send_otp_async(email)
 
         if otp:
-            # Store user_id and role for verification step
-            from utils.authentication import otp_storage
-            if email in otp_storage:
-                otp_storage[email]['user_id'] = user.user_id
-                if db_role_name:
-                    # Store the DB role name for verification
-                    otp_storage[email]['role'] = db_role_name
-            
+            # Update OTP record with user_id and role (works for both Redis and in-memory)
+            from utils.authentication import _otp_set
+            _otp_set(email, otp, role=db_role_name, user_id=user.user_id, ttl=300)
+
             response_data = {
                 "message": "OTP sent successfully to your email",
                 "email": email,
                 "otp_expiry": "5 minutes"
             }
             # Only include OTP in non-production environments (for testing/debugging)
-            if ENVIRONMENT != 'production':
+            if ENVIRONMENT in ('development', 'testing'):
                 response_data["otp"] = otp
             
             return jsonify(response_data), 200
@@ -190,7 +186,7 @@ def user_login():
 
     except Exception as e:
         log.error(f"Login error: {str(e)}")
-        return jsonify({"error": f"Login failed: {str(e)}"}), 500
+        return jsonify({"error": "Login failed" if ENVIRONMENT == 'production' else f"Login failed: {str(e)}"}), 500
 
 def handle_get_logged_in_user():
     try:
@@ -477,13 +473,10 @@ def site_supervisor_login_sms():
         if login_method == "phone":
             otp = send_sms_otp(phone)
             if otp:
-                # Store user_id and role for verification step
-                from utils.authentication import otp_storage
-                # Use clean_phone for consistent storage key
+                # Update OTP record with user_id and email (works for both Redis and in-memory)
+                from utils.authentication import _otp_set
                 storage_key = f"phone:{clean_phone}"
-                if storage_key in otp_storage:
-                    otp_storage[storage_key]['user_id'] = user.user_id
-                    otp_storage[storage_key]['email'] = user.email
+                _otp_set(storage_key, otp, user_id=user.user_id, email=user.email, ttl=300)
 
                 response_data = {
                     "message": "OTP sent successfully to your phone",
@@ -491,7 +484,7 @@ def site_supervisor_login_sms():
                     "login_method": "phone",
                     "otp_expiry": "5 minutes"
                 }
-                if ENVIRONMENT != 'production':
+                if ENVIRONMENT in ('development', 'testing'):
                     response_data["otp"] = otp
 
                 return jsonify(response_data), 200
@@ -501,10 +494,8 @@ def site_supervisor_login_sms():
             # Email fallback
             otp = send_otp_async(email)
             if otp:
-                from utils.authentication import otp_storage
-                if email in otp_storage:
-                    otp_storage[email]['user_id'] = user.user_id
-                    otp_storage[email]['role'] = 'siteengineer'
+                from utils.authentication import _otp_set
+                _otp_set(email, otp, role='siteengineer', user_id=user.user_id, ttl=300)
 
                 response_data = {
                     "message": "OTP sent successfully to your email",
@@ -512,7 +503,7 @@ def site_supervisor_login_sms():
                     "login_method": "email",
                     "otp_expiry": "5 minutes"
                 }
-                if ENVIRONMENT != 'production':
+                if ENVIRONMENT in ('development', 'testing'):
                     response_data["otp"] = otp
 
                 return jsonify(response_data), 200
@@ -521,7 +512,7 @@ def site_supervisor_login_sms():
 
     except Exception as e:
         log.error(f"Site supervisor SMS login error: {str(e)}")
-        return jsonify({"error": f"Login failed: {str(e)}"}), 500
+        return jsonify({"error": "Login failed" if ENVIRONMENT == 'production' else f"Login failed: {str(e)}"}), 500
 
 
 def verify_sms_otp_login():
@@ -549,55 +540,52 @@ def verify_sms_otp_login():
         except ValueError:
             return jsonify({"error": "OTP must be a number"}), 400
 
-        from utils.authentication import otp_storage
+        from utils.authentication import _otp_pop
 
-        # Get OTP data based on login method
+        # Get and consume OTP data (works for both Redis and in-memory)
         otp_data = None
         storage_key = None
         if login_method == "phone":
-            # Try multiple storage key formats (handle phone with/without country code)
             clean_phone = ''.join(filter(str.isdigit, str(phone)))
-            possible_keys = [
-                f"phone:{phone}",
-                f"phone:{clean_phone}",
-            ]
-            for key in possible_keys:
-                if key in otp_storage:
+            # Try both key formats for backward compatibility
+            for key in [f"phone:{clean_phone}", f"phone:{phone}"]:
+                otp_data = _otp_pop(key)
+                if otp_data:
                     storage_key = key
-                    otp_data = otp_storage.get(key)
                     break
         else:
             storage_key = email
-            otp_data = otp_storage.get(storage_key)
+            otp_data = _otp_pop(storage_key)
+
         if not otp_data:
             on_login_failed(email or phone)  # Security audit log
             return jsonify({"error": "OTP not found or expired"}), 400
 
         stored_otp = otp_data.get("otp")
-        expires_at = datetime.fromtimestamp(otp_data.get("expires_at"))
 
-        # Check OTP expiry
-        current_time = datetime.utcnow()
-        if current_time > expires_at:
-            del otp_storage[storage_key]
-            on_login_failed(email or phone)  # Security audit log
-            return jsonify({"error": "OTP expired"}), 400
+        # Check OTP expiry (in-memory path includes expires_at; Redis TTL handles it natively)
+        expires_at_ts = otp_data.get("expires_at")
+        if expires_at_ts:
+            current_time = datetime.utcnow()
+            if current_time > datetime.fromtimestamp(expires_at_ts):
+                on_login_failed(email or phone)  # Security audit log
+                return jsonify({"error": "OTP expired"}), 400
 
-        # Check if OTP matches
-        if otp_input != stored_otp:
+        # Constant-time OTP comparison
+        import hmac
+        if not hmac.compare_digest(str(otp_input), str(stored_otp)):
             on_login_failed(email or phone)  # Security audit log
             return jsonify({"error": "Invalid OTP"}), 400
 
-        # Find user - for phone login, get email from storage or query
+        # Find user - for phone login, get email from OTP data or query
+        current_time = datetime.utcnow()
         if login_method == "phone":
             user_email = otp_data.get('email')
             if not user_email:
-                # Query user by phone
                 user = User.query.filter_by(phone=phone, is_deleted=False, is_active=True).first()
                 if user:
                     user_email = user.email
                 else:
-                    del otp_storage[storage_key]
                     return jsonify({"error": "User not found"}), 404
         else:
             user_email = email
@@ -612,7 +600,6 @@ def verify_sms_otp_login():
         ).first()
 
         if not user:
-            del otp_storage[storage_key]
             on_login_failed(user_email)  # Security audit log
             return jsonify({"error": "User not found or inactive"}), 404
 
@@ -627,18 +614,11 @@ def verify_sms_otp_login():
 
         db.session.commit()
 
-        # Record login history for SMS OTP login
-        from utils.authentication import record_login_history
-        record_login_history(user.user_id, login_method='sms_otp')
-
         # Security audit log - successful login
         on_login_success(user.user_id)
-
-        # Remove OTP from storage
-        del otp_storage[storage_key]
+        # OTP already consumed by _otp_pop() above — no manual deletion needed
 
         # Get role information — use the already-joined Role from the query above
-        # (User was fetched with JOIN Role at line 596, so user.role_id is available)
         role_permissions = []
         role_name = "user"
         if user.role_id and user.role:
@@ -648,6 +628,7 @@ def verify_sms_otp_login():
 
         # Create JWT token
         import os
+        import uuid as _uuid
         SECRET_KEY = os.getenv('SECRET_KEY')
         expiration_time = current_time + timedelta(hours=10)
         payload = {
@@ -659,11 +640,16 @@ def verify_sms_otp_login():
             'permissions': role_permissions,
             'full_name': user.full_name,
             'creation_time': current_time.isoformat(),
+            'jti': str(_uuid.uuid4()),
             'exp': expiration_time
         }
         session_token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
         if isinstance(session_token, bytes):
             session_token = session_token.decode('utf-8')
+
+        # Record login history (after payload is created so jti is available)
+        from utils.authentication import record_login_history
+        record_login_history(user.user_id, login_method='sms_otp', jti=payload.get('jti'))
 
         response_data = {
             "message": "Login successful",
@@ -689,10 +675,10 @@ def verify_sms_otp_login():
             expires=expiration_time,
             httponly=True,
             secure=True,
-            samesite='Lax'
+            samesite='Strict' if ENVIRONMENT == 'production' else 'Lax'
         )
         return response
 
     except Exception as e:
         log.error(f"SMS OTP verification error: {str(e)}")
-        return jsonify({"error": f"Verification failed: {str(e)}"}), 500
+        return jsonify({"error": "Verification failed" if ENVIRONMENT == 'production' else f"Verification failed: {str(e)}"}), 500

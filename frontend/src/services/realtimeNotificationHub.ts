@@ -156,6 +156,9 @@ class RealtimeNotificationHub {
 
     try {
       this.socket = io(socketUrl, {
+        // Send token via Authorization header (production-safe — not logged in access logs)
+        // Also include in query for dev/legacy compatibility
+        extraHeaders: { Authorization: `Bearer ${this.authToken}` },
         query: { token: this.authToken },
         reconnection: true,
         reconnectionDelay: 1000,

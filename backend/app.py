@@ -32,7 +32,12 @@ configure_quiet_logging()
 
 def create_app():
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default-secret-key")
+    _secret_key = os.getenv("SECRET_KEY", "default-secret-key")
+    # In production, refuse to start with a weak or missing secret key
+    if os.getenv("ENVIRONMENT") == "production":
+        if not _secret_key or _secret_key == "default-secret-key" or len(_secret_key) < 32:
+            raise RuntimeError("SECRET_KEY is not set or too short. Refusing to start in production.")
+    app.config['SECRET_KEY'] = _secret_key
 
     # Trust the reverse proxy (Nginx) to forward the real client IP via X-Forwarded-For.
     # x_for=1 means trust 1 proxy hop — increase if you have multiple proxies.
@@ -42,35 +47,51 @@ def create_app():
     environment = os.getenv("ENVIRONMENT", "development")
     
     # ✅ OPTIMIZED CORS Configuration
-    # Removed redundant after_request handler (was adding 5-10ms overhead to EVERY request)
-    # Flask-CORS already handles all CORS headers properly
+    # Origins from environment, with sensible defaults per environment
+    _cors_headers = ["Content-Type", "Authorization", "X-Request-ID", "X-Viewing-As-Role",
+                     "X-Viewing-As-Role-Id", "X-Viewing-As-User-Id", "X-User-Name",
+                     "X-User-Id", "Cache-Control", "Pragma", "X-Skip-Cache", "Expires"]
+    _cors_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+
     if environment == "production":
-        # Production: Allow specific origins
-        allowed_origins = [
-            "https://msq.kol.tel",
-            "http://msq.kol.tel",
-            "https://msq.ath.cx",
-            "http://msq.ath.cx",
-            "https://148.72.174.7",
-            "http://148.72.174.7",
-            "http://localhost:3000",  # For local development testing
-            "http://localhost:5173"   # Vite dev server
-        ]
-        CORS(app,
-             origins=allowed_origins,
-             allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Viewing-As-Role", "X-Viewing-As-Role-Id", "X-Viewing-As-User-Id", "X-User-Name", "X-User-Id", "Cache-Control", "Pragma", "X-Skip-Cache", "Expires"],
-             methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-             supports_credentials=True,
-             max_age=3600)  # ✅ NEW: Cache preflight requests for 1 hour
+        # Production origins from env — CORS_ALLOWED_ORIGINS or PRODUCTION_DOMAIN
+        _prod_origins_env = os.getenv("CORS_ALLOWED_ORIGINS") or os.getenv("PRODUCTION_DOMAIN", "")
+        allowed_origins = [o.strip() for o in _prod_origins_env.split(",") if o.strip()]
+        # Also add http:// variants for any https:// origin
+        _http_variants = []
+        for o in allowed_origins:
+            if o.startswith("https://"):
+                _http_variants.append(o.replace("https://", "http://", 1))
+        allowed_origins += _http_variants
+        # Server IP from env
+        _server_ip = os.getenv("SERVER_IP")
+        if _server_ip:
+            allowed_origins += [f"https://{_server_ip}", f"http://{_server_ip}"]
+        # Dev origins (localhost) from env — always included so local production testing works
+        _dev_port = os.getenv("DEV_FRONTEND_PORT", "5173")
+        _dev_origins = os.getenv("DEV_CORS_ORIGINS", "")
+        if _dev_origins:
+            allowed_origins += [o.strip() for o in _dev_origins.split(",") if o.strip()]
+        else:
+            allowed_origins += [
+                f"http://localhost:{_dev_port}", f"http://127.0.0.1:{_dev_port}",
+                "http://localhost:3000", "http://127.0.0.1:3000",
+            ]
+        CORS(app, origins=allowed_origins, allow_headers=_cors_headers,
+             methods=_cors_methods, supports_credentials=True, max_age=3600)
     else:
-        # Development: Allow specific local origins only (SECURITY FIX)
-        # ⚠️ IMPORTANT: Never use origins="*" with supports_credentials=True in production!
-        CORS(app,
-             origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:3001", "http://127.0.0.1:5173"],
-             allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-Viewing-As-Role", "X-Viewing-As-Role-Id", "X-Viewing-As-User-Id", "X-User-Name", "X-User-Id", "Cache-Control", "Pragma", "X-Skip-Cache", "Expires"],
-             methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-             supports_credentials=True,
-             max_age=3600)  # ✅ Cache preflight requests for 1 hour
+        # Development: local origins from env or defaults
+        _dev_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
+        if _dev_origins_env:
+            dev_origins = [o.strip() for o in _dev_origins_env.split(",") if o.strip()]
+        else:
+            _dev_port = os.getenv("DEV_FRONTEND_PORT", "5173")
+            dev_origins = [
+                f"http://localhost:{_dev_port}", f"http://127.0.0.1:{_dev_port}",
+                "http://localhost:3000", "http://127.0.0.1:3000",
+            ]
+        CORS(app, origins=dev_origins, allow_headers=_cors_headers,
+             methods=_cors_methods, supports_credentials=True, max_age=3600)
 
     # ❌ REMOVED: Redundant after_request handler
     # Flask-CORS extension already handles ALL CORS headers automatically
@@ -95,28 +116,39 @@ def create_app():
     app.config['COMPRESS_MIN_SIZE'] = 500  # Only compress responses > 500 bytes
     Compress(app)
 
-    # ✅ PERFORMANCE: Caching Layer (Redis or in-memory)
+    # ✅ PERFORMANCE: Caching Layer (Redis or in-memory fallback)
     redis_url = os.getenv('REDIS_URL', None)
+    _redis_reachable = False
     if redis_url:
-        # Production: Use Redis for distributed caching
-        app.config['CACHE_TYPE'] = 'redis'
-        app.config['CACHE_REDIS_URL'] = redis_url
-        app.config['CACHE_DEFAULT_TIMEOUT'] = 300  # 5 minutes
+        try:
+            import redis as _redis_test
+            _r = _redis_test.Redis.from_url(redis_url, socket_connect_timeout=2)
+            _r.ping()
+            _r.close()
+            _redis_reachable = True
+            app.config['CACHE_TYPE'] = 'redis'
+            app.config['CACHE_REDIS_URL'] = redis_url
+            app.config['CACHE_DEFAULT_TIMEOUT'] = 300
+        except Exception:
+            # Redis not reachable — fall back to in-memory cache
+            app.config['CACHE_TYPE'] = 'SimpleCache'
+            app.config['CACHE_DEFAULT_TIMEOUT'] = 300
     else:
-        # Development: Use simple in-memory cache
-        app.config['CACHE_TYPE'] = 'simple'
+        app.config['CACHE_TYPE'] = 'SimpleCache'
         app.config['CACHE_DEFAULT_TIMEOUT'] = 300
 
     cache = Cache(app)
     app.cache = cache  # Make cache accessible to routes
 
     # ✅ SECURITY: Rate Limiting (prevents brute force, DoS)
-    # Increased production limits to handle polling, auto-refresh, and multiple users
+    # Use Redis only if it's confirmed reachable — otherwise fall back to memory://
+    # This prevents ConnectionError crashes on every request when Redis is unavailable
+    limiter_storage = redis_url if _redis_reachable else "memory://"
     limiter = Limiter(
         app=app,
         key_func=get_remote_address,
         default_limits=["10000 per day", "1000 per hour"] if environment == "production" else ["10000 per hour"],
-        storage_uri=redis_url if redis_url else "memory://",
+        storage_uri=limiter_storage,
         strategy="fixed-window"
     )
     app.limiter = limiter  # Make limiter accessible to routes
@@ -139,7 +171,23 @@ def create_app():
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
 
         # Content Security Policy — environment-based (mirrors CORS config pattern)
+        # CSP connect-src domains from environment
+        _csp_connect_extra = os.getenv("CSP_CONNECT_EXTRA", "")  # e.g. "https://custom.api.com wss://custom.api.com"
+        _supabase_url = os.getenv("SUPABASE_URL", "")
+
         if environment == "production":
+            # Build production connect-src from allowed CORS origins
+            _prod_connect = " ".join(allowed_origins) if allowed_origins else ""
+            # Add wss:// variants for WebSocket
+            _prod_ws = " ".join(o.replace("https://", "wss://").replace("http://", "ws://") for o in allowed_origins if "://" in o)
+            # Detect localhost for local production testing
+            _host = request.host.split(':')[0] if request else ''
+            _is_local = _host in ('localhost', '127.0.0.1')
+            _backend_port = os.getenv("PORT", "5000")
+            _local_connect = (
+                f" http://localhost:{_backend_port} http://127.0.0.1:{_backend_port}"
+                f" ws://localhost:{_backend_port} ws://127.0.0.1:{_backend_port}"
+            ) if _is_local else ""
             response.headers['Content-Security-Policy'] = (
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
@@ -147,9 +195,11 @@ def create_app():
                 "img-src 'self' data: https:; "
                 "font-src 'self' data:; "
                 "media-src 'self' https: blob:; "
-                "connect-src 'self' https://msq.kol.tel wss://msq.kol.tel https://msq.ath.cx wss://msq.ath.cx https://wgddnoiakkoskbbkbygw.supabase.co"
+                f"connect-src 'self' {_prod_connect} {_prod_ws} {_supabase_url} {_csp_connect_extra}{_local_connect}"
             )
         else:
+            _backend_port = os.getenv("PORT", "5000")
+            _frontend_port = os.getenv("DEV_FRONTEND_PORT", "5173")
             response.headers['Content-Security-Policy'] = (
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
@@ -157,7 +207,12 @@ def create_app():
                 "img-src 'self' data: https:; "
                 "font-src 'self' data:; "
                 "media-src 'self' https: blob:; "
-                "connect-src 'self' http://localhost:5173 ws://localhost:5173 http://127.0.0.1:5173 ws://127.0.0.1:5173 https://nbzpvqoeolqejmplmgus.supabase.co"
+                f"connect-src 'self' "
+                f"http://localhost:{_backend_port} http://127.0.0.1:{_backend_port} "
+                f"ws://localhost:{_backend_port} ws://127.0.0.1:{_backend_port} "
+                f"http://localhost:{_frontend_port} ws://localhost:{_frontend_port} "
+                f"http://127.0.0.1:{_frontend_port} ws://127.0.0.1:{_frontend_port} "
+                f"{_supabase_url} {_csp_connect_extra}"
             )
 
         # Referrer Policy
@@ -478,14 +533,28 @@ def create_app():
             return jsonify({"status": "ok", "message": "Webhook verified"}), 200
 
         # POST - Incoming message or status update
+        # In production, verify the shared webhook secret to reject forged requests
+        if is_production():
+            import hmac as _hmac
+            webhook_secret = os.environ.get('WHATSAPP_WEBHOOK_SECRET', '')
+            if webhook_secret:
+                provided = request.headers.get('X-Webhook-Secret', '')
+                if not _hmac.compare_digest(provided, webhook_secret):
+                    logger.warning("WhatsApp webhook: invalid secret, request rejected")
+                    return jsonify({"status": "unauthorized"}), 401
+
         data = request.get_json() or {}
-        logger.info(f"WhatsApp webhook received: {data}")
+        logger.info("WhatsApp webhook received")
         return jsonify({"status": "ok"}), 200
 
-    # ✅ Health Check Endpoint - Shows system and security status
+    # ✅ Health Check Endpoint
     @app.route('/api/health', methods=['GET'])
     def health_check():
-        """Health check endpoint - shows system status"""
+        """Health check endpoint - liveness probe only in production"""
+        if is_production():
+            # Production: minimal response — no internal config exposed
+            return jsonify({"status": "healthy", "timestamp": time.time()}), 200
+        # Development: full details for debugging
         return jsonify({
             "status": "healthy",
             "environment": environment,
@@ -543,4 +612,6 @@ if __name__ == "__main__":
     logger = get_logger()
     logger.info(f"Starting MeterSquare ERP Server - Environment: {environment}, Port: {port}, Debug: {debug}")
 
-    app.socketio.run(app, host="0.0.0.0", port=port, debug=debug, allow_unsafe_werkzeug=True, use_reloader=False)
+    # allow_unsafe_werkzeug only in development — production should use gunicorn
+    app.socketio.run(app, host="0.0.0.0", port=port, debug=debug,
+                     allow_unsafe_werkzeug=(environment != "production"), use_reloader=False)

@@ -12,7 +12,7 @@ from email.mime.image import MIMEImage
 from email.header import Header
 from email.utils import formataddr
 import os
-import random
+import secrets
 from config.logging import get_logger
 
 log = get_logger()
@@ -209,14 +209,9 @@ def send_otp_async(email_id):
     global email_worker
 
     try:
-        # Generate OTP
-        otp = random.randint(100000, 999999)
-
-        # Store OTP in memory (immediate)
-        otp_storage[email_id] = {
-            "otp": otp,
-            "expires_at": (datetime.utcnow() + timedelta(seconds=300)).timestamp()
-        }
+        # Generate OTP — caller (controller) is responsible for storing via _otp_set
+        # so it can attach role, user_id, and other metadata.
+        otp = 100000 + secrets.randbelow(900000)
 
         # Start email worker thread if not running
         if email_worker is None or not email_worker.is_alive():
@@ -231,7 +226,7 @@ def send_otp_async(email_id):
             'subject': 'Your OTP Code'
         })
 
-        log.info(f"OTP {otp} queued for async sending to {email_id}")
+        log.info(f"OTP email queued for async sending to {email_id}")
         return otp
 
     except Exception as e:

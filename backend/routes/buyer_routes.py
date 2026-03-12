@@ -294,6 +294,9 @@ def get_buyer_pending_po_children_route():
 @jwt_required
 def get_approved_po_children_route():
     """Get all POChild records with approved vendor (Buyer, TD, or Admin)"""
+    access_check = check_buyer_td_or_admin_access()
+    if access_check:
+        return access_check
     return get_approved_po_children()
 
 

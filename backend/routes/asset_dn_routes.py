@@ -22,6 +22,7 @@ def create_stock_in_route():
 
 
 @asset_dn_routes.route('/api/assets/stock-in', methods=['GET'])
+@jwt_required
 def get_stock_in_list_route():
     """Get list of stock in records"""
     return get_stock_in_list()
@@ -37,12 +38,14 @@ def create_delivery_note_route():
 
 
 @asset_dn_routes.route('/api/assets/delivery-notes', methods=['GET'])
+@jwt_required
 def get_delivery_notes_route():
     """Get list of Asset Delivery Notes"""
     return get_delivery_notes()
 
 
 @asset_dn_routes.route('/api/assets/delivery-notes/<int:adn_id>', methods=['GET'])
+@jwt_required
 def get_delivery_note_route(adn_id):
     """Get single Asset Delivery Note with details"""
     return get_delivery_note(adn_id)
@@ -72,12 +75,14 @@ def create_return_note_route():
 
 
 @asset_dn_routes.route('/api/assets/return-notes', methods=['GET'])
+@jwt_required
 def get_return_notes_route():
     """Get list of Asset Return Delivery Notes"""
     return get_return_notes()
 
 
 @asset_dn_routes.route('/api/assets/return-notes/<int:ardn_id>', methods=['GET'])
+@jwt_required
 def get_return_note_route(ardn_id):
     """Get single Asset Return Delivery Note with details"""
     return get_return_note(ardn_id)
@@ -119,6 +124,7 @@ def process_return_note_route(ardn_id):
 
 
 @asset_dn_routes.route('/api/assets/return-notes/upload-delivery-note', methods=['POST'])
+@jwt_required
 def upload_return_note_delivery_note_route():
     """Upload delivery note document for ARDN (from vendor/transporter)"""
     return upload_return_note_delivery_note()
@@ -127,18 +133,21 @@ def upload_return_note_delivery_note_route():
 # ==================== DASHBOARD & UTILITY ROUTES ====================
 
 @asset_dn_routes.route('/api/assets/dn-dashboard', methods=['GET'])
+@jwt_required
 def get_dn_dashboard_route():
     """Get dashboard stats for asset DN/RDN flow"""
     return get_dn_dashboard()
 
 
 @asset_dn_routes.route('/api/assets/available-for-dispatch', methods=['GET'])
+@jwt_required
 def get_available_for_dispatch_route():
     """Get assets available for dispatch"""
     return get_available_for_dispatch()
 
 
 @asset_dn_routes.route('/api/assets/project/<int:project_id>/dispatched', methods=['GET'])
+@jwt_required
 def get_project_dispatched_assets_route(project_id):
     """Get assets dispatched to a specific project (for creating return notes)"""
     return get_project_dispatched_assets(project_id)
@@ -147,18 +156,21 @@ def get_project_dispatched_assets_route(project_id):
 # ==================== STOCK IN DOCUMENT UPLOAD ROUTES ====================
 
 @asset_dn_routes.route('/api/assets/stock-in/<int:stock_in_id>/upload', methods=['POST'])
+@jwt_required
 def upload_stock_in_document_route(stock_in_id):
     """Upload a document (DN/invoice/receipt) for a stock in record to inventory-files bucket"""
     return upload_stock_in_document(stock_in_id)
 
 
 @asset_dn_routes.route('/api/assets/stock-in/<int:stock_in_id>/document', methods=['GET'])
+@jwt_required
 def get_stock_in_document_route(stock_in_id):
     """Get document URL for a stock in record"""
     return get_stock_in_document(stock_in_id)
 
 
 @asset_dn_routes.route('/api/assets/stock-in/<int:stock_in_id>/document', methods=['DELETE'])
+@jwt_required
 def delete_stock_in_document_route(stock_in_id):
     """Delete document for a stock in record"""
     return delete_stock_in_document(stock_in_id)
@@ -167,12 +179,14 @@ def delete_stock_in_document_route(stock_in_id):
 # ==================== PDF DOWNLOAD ROUTES ====================
 
 @asset_dn_routes.route('/api/assets/delivery-notes/<int:adn_id>/download', methods=['GET'])
+@jwt_required
 def download_asset_delivery_note_route(adn_id):
     """Generate and download Asset Delivery Note PDF"""
     return download_asset_delivery_note(adn_id)
 
 
 @asset_dn_routes.route('/api/assets/return-notes/<int:ardn_id>/download', methods=['GET'])
+@jwt_required
 def download_asset_return_note_route(ardn_id):
     """Generate and download Asset Return Delivery Note (ARDN) PDF"""
     return download_asset_return_note(ardn_id)

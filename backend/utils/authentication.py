@@ -2,7 +2,7 @@ import os
 import threading
 from flask import g, jsonify, make_response, request, session, url_for
 import smtplib
-import random
+import secrets
 import base64
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -48,27 +48,34 @@ otp_storage = {}
 _otp_lock = threading.Lock()
 
 # Redis for shared OTP storage across multiple workers
+_REDIS_URL = os.getenv('REDIS_URL')
 try:
     import redis as _redis
-    _redis_client = _redis.Redis(host='127.0.0.1', port=6379, db=0, decode_responses=True)
+    if _REDIS_URL:
+        _redis_client = _redis.Redis.from_url(_REDIS_URL, decode_responses=True, socket_connect_timeout=2)
+    else:
+        _redis_client = None
+        raise ConnectionError("REDIS_URL not configured")
     _redis_client.ping()
     _USE_REDIS = True
-    _redis_client.close()
-    _redis_client = _redis.Redis(host='127.0.0.1', port=6379, db=0, decode_responses=True)
 except Exception:
     _USE_REDIS = False
+    _redis_client = None
 
-def _otp_set(email_id, otp, role=None, ttl=300):
+def _otp_set(email_id, otp, role=None, user_id=None, email=None, ttl=300):
+    """Store OTP data in Redis (shared across workers) or in-memory fallback."""
+    expires_at = (datetime.utcnow() + timedelta(seconds=ttl)).timestamp()
+    payload = {"otp": otp, "role": role, "expires_at": expires_at}
+    if user_id is not None:
+        payload["user_id"] = user_id
+    if email is not None:
+        payload["email"] = email
     if _USE_REDIS:
         import json
-        _redis_client.setex(f"otp:{email_id}", ttl, json.dumps({"otp": otp, "role": role}))
+        _redis_client.setex(f"otp:{email_id}", ttl, json.dumps(payload))
     else:
         with _otp_lock:
-            otp_storage[email_id] = {
-                "otp": otp,
-                "role": role,
-                "expires_at": (datetime.utcnow() + timedelta(seconds=ttl)).timestamp()
-            }
+            otp_storage[email_id] = payload
 
 def _otp_pop(email_id):
     if _USE_REDIS:
@@ -247,7 +254,7 @@ def get_logo_base64():
 
 def send_otp(email_id):
     try:
-        otp = random.randint(100000, 999999)
+        otp = 100000 + secrets.randbelow(900000)
         _otp_set(email_id, otp)
         
         sender_email = SENDER_EMAIL
@@ -498,20 +505,23 @@ def verification_otp():
 
     # OTP data already retrieved above
     stored_otp = otp_data.get("otp")
-    expires_at = datetime.fromtimestamp(otp_data.get("expires_at"))
+    raw_expires = otp_data.get("expires_at")
+    # If expires_at missing (old OTP before fix), trust Redis TTL — treat as valid
+    expires_at = datetime.fromtimestamp(raw_expires) if raw_expires else (datetime.utcnow() + timedelta(minutes=5))
     
-    log.info(f"Stored OTP for {email_id}: {stored_otp}, Input OTP: {otp_input}")
+    # OTP values are never logged — prevents credential exposure in log aggregators
 
-    # Check if OTP matches
-    if otp_input != stored_otp:
-        on_login_failed(email_id)  # Audit log failed attempt
-        return jsonify({"error": "Invalid OTP"}), 400
-
-    # Check expiry
+    # Check expiry first (before value comparison to avoid timing oracle)
     current_time = datetime.utcnow()
     if current_time > expires_at:
         on_login_failed(email_id)  # Audit log expired OTP attempt
         return jsonify({"error": "OTP expired"}), 400
+
+    # Constant-time comparison prevents timing-based enumeration of OTP values
+    import hmac
+    if not hmac.compare_digest(str(otp_input), str(stored_otp)):
+        on_login_failed(email_id)  # Audit log failed attempt
+        return jsonify({"error": "Invalid OTP"}), 400
     
     # Update last login, status, and timezone
     user.last_login = current_time
@@ -586,10 +596,10 @@ def verification_otp():
         expires=expiration_time,
         httponly=True,
         secure=True,
-        samesite='Lax'
+        samesite='Strict' if ENVIRONMENT == 'production' else 'Lax'
     )
     return response
-   
+
 # JWT Required Decorator
 from functools import wraps
 
@@ -616,8 +626,8 @@ def jwt_required(f):
         if not token:
             token = request.cookies.get('access_token')
         
-        # Check for token in request args (for backward compatibility)
-        if not token:
+        # Check for token in request args — development only (tokens in URLs leak into logs/history)
+        if not token and ENVIRONMENT != 'production':
             token = request.args.get('token')
         
         if not token:

@@ -29,6 +29,17 @@ echo "====================================="
 # STEP 1: Pull latest code (kol uses git, ath uses zip — skip git for ath)
 # ---------------------------------------------------------------
 echo ""
+echo "[0/5] Ensuring Redis is running (required for OTP & rate limiting)..."
+if ! command -v redis-server &>/dev/null; then
+    echo "  Redis not installed — installing..."
+    apt-get install -y redis-server
+    systemctl enable redis-server
+fi
+systemctl start redis-server 2>/dev/null || true
+redis-cli ping && echo "  Redis: PONG (OK)" || echo "  WARNING: Redis not responding"
+echo "Done."
+
+echo ""
 echo "[1/5] Pulling latest code..."
 if [[ "$TARGET" == "both" || "$TARGET" == "kol" ]]; then
     echo "  Pulling /root/msq (git)..."

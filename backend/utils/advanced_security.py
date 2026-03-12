@@ -89,7 +89,7 @@ def init_rate_limiter(app: Flask) -> Limiter:
             "retry_after": e.description
         }), 429
 
-    logger.info(f"Rate limiter initialized (production={is_production()})")
+    logger.debug(f"Rate limiter initialized (production={is_production()})")
     return limiter
 
 
@@ -241,7 +241,7 @@ class IPBlocker:
             logger.info("IPBlocker: Redis connected — using shared cache across workers")
         except Exception as e:
             self._redis = None
-            logger.warning(f"IPBlocker: Redis unavailable, falling back to DB queries — {e}")
+            logger.debug(f"IPBlocker: Redis unavailable, falling back to DB queries — {e}")
 
         # Thresholds
         self.FAILED_LOGIN_THRESHOLD = 10  # Block after 10 failed logins
@@ -1010,7 +1010,7 @@ def init_advanced_security(app: Flask):
         app = Flask(__name__)
         init_advanced_security(app)
     """
-    logger.info("Initializing advanced security features...")
+    logger.debug("Initializing advanced security features...")
 
     # Initialize rate limiter
     init_rate_limiter(app)
@@ -1018,6 +1018,10 @@ def init_advanced_security(app: Flask):
     # Register before_request hooks
     @app.before_request
     def security_checks():
+        # Skip security checks for CORS preflight requests
+        if request.method == 'OPTIONS':
+            return None
+
         # Check if IP is blocked
         blocked_response = check_ip_blocked()
         if blocked_response:
@@ -1031,10 +1035,11 @@ def init_advanced_security(app: Flask):
     # Log all requests in production
     @app.after_request
     def log_request(response):
-        if is_production() and response.status_code >= 400:
+        # Skip OPTIONS preflight and non-error responses
+        if is_production() and response.status_code >= 500 and request.method != 'OPTIONS':
             audit_log(
                 "REQUEST_ERROR",
-                severity="WARNING" if response.status_code < 500 else "CRITICAL",
+                severity="CRITICAL",
                 details={
                     "status_code": response.status_code,
                     "path": request.path,
@@ -1043,7 +1048,7 @@ def init_advanced_security(app: Flask):
             )
         return response
 
-    logger.info(f"Advanced security initialized (production={is_production()})")
+    logger.debug(f"Advanced security initialized (production={is_production()})")
 
     return {
         'limiter': limiter,
@@ -1116,12 +1121,19 @@ def register_security_routes(app: Flask):
                 secret_key = os.getenv('SECRET_KEY')
                 payload = jwt.decode(token, secret_key, algorithms=['HS256'])
 
-                # Get user from database
+                # Get user from database and verify active status
                 user_id = payload.get('user_id')
                 if not user_id:
                     return jsonify({
                         "success": False,
                         "error": "Invalid token"
+                    }), 401
+
+                user = User.query.filter_by(user_id=user_id).first()
+                if not user or not getattr(user, 'is_active', True):
+                    return jsonify({
+                        "success": False,
+                        "error": "Account is inactive or not found"
                     }), 401
 
                 # Set g.user for the request
@@ -1212,4 +1224,4 @@ def register_security_routes(app: Flask):
         return jsonify({"success": False, "error": "IP required"}), 400
 
     app.register_blueprint(security_bp)
-    logger.info("Security routes registered at /api/security/* (admin-protected)")
+    logger.debug("Security routes registered at /api/security/* (admin-protected)")
