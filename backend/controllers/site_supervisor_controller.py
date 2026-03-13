@@ -2840,11 +2840,12 @@ def get_se_dashboard_analytics():
             # Admin mode - sees all SE data
             item_assignments = PMAssignSS.query.filter(PMAssignSS.is_deleted == False).all()
             all_project_ids = {a.project_id for a in item_assignments if a.project_id}
-            projects_from_table = Project.query.filter(
+            # OPTIMIZED: Only fetch project IDs, not full objects (was loading full Project rows)
+            project_ids_from_table = db.session.query(Project.project_id).filter(
                 Project.site_supervisor_id.isnot(None),
                 Project.is_deleted == False
             ).all()
-            all_project_ids.update(p.project_id for p in projects_from_table)
+            all_project_ids.update(pid[0] for pid in project_ids_from_table)
         else:
             # Regular SE - targeted queries for their assignments
             item_assignments = PMAssignSS.query.filter(
@@ -2852,11 +2853,12 @@ def get_se_dashboard_analytics():
                 PMAssignSS.is_deleted == False
             ).all()
             all_project_ids = {a.project_id for a in item_assignments if a.project_id}
-            projects_from_table = Project.query.filter(
+            # OPTIMIZED: Only fetch project IDs, not full objects (was loading full Project rows)
+            project_ids_from_table = db.session.query(Project.project_id).filter(
                 Project.site_supervisor_id == target_user_id,
                 Project.is_deleted == False
             ).all()
-            all_project_ids.update(p.project_id for p in projects_from_table)
+            all_project_ids.update(pid[0] for pid in project_ids_from_table)
 
         project_ids_list = list(all_project_ids)
 
@@ -2950,69 +2952,69 @@ def get_se_dashboard_analytics():
             item_stats['completion_rate'] = round((item_stats['completed'] / item_stats['total_assigned']) * 100, 1)
 
         # ========== CHANGE REQUEST STATISTICS ==========
-        cr_query = ChangeRequest.query.filter(
-            ChangeRequest.requested_by_user_id == target_user_id,
-            ChangeRequest.is_deleted == False
-        ) if not (user_role == 'admin' and not is_admin_viewing) else ChangeRequest.query.filter(
-            ChangeRequest.project_id.in_(project_ids_list),
-            ChangeRequest.is_deleted == False
-        )
+        # OPTIMIZED: SQL aggregation instead of loading all CRs into Python (was fetching every CR row)
+        cr_base_filters = [ChangeRequest.is_deleted == False]
+        if not (user_role == 'admin' and not is_admin_viewing):
+            cr_base_filters.append(ChangeRequest.requested_by_user_id == target_user_id)
+        else:
+            cr_base_filters.append(ChangeRequest.project_id.in_(project_ids_list))
 
-        change_requests = cr_query.all()
+        cr_agg = db.session.query(
+            func.count(ChangeRequest.cr_id).label('total'),
+            # Pending PM: pending, under_review, send_to_pm, send_to_mep
+            func.sum(case(
+                (ChangeRequest.status.in_(['pending', 'under_review', 'send_to_pm', 'send_to_mep']), 1), else_=0
+            )).label('pending_pm_approval'),
+            # Pending TD
+            func.sum(case(
+                (ChangeRequest.status == 'pending_td_approval', 1), else_=0
+            )).label('pending_td_approval'),
+            # Approved
+            func.sum(case(
+                (ChangeRequest.status.in_(['approved', 'approved_by_pm', 'approved_by_td', 'send_to_est', 'send_to_buyer', 'assigned_to_buyer']), 1), else_=0
+            )).label('approved'),
+            # Rejected
+            func.sum(case(
+                (ChangeRequest.status == 'rejected', 1), else_=0
+            )).label('rejected'),
+            # Vendor approved
+            func.sum(case(
+                (ChangeRequest.status == 'vendor_approved', 1), else_=0
+            )).label('vendor_approved'),
+            # Purchase completed
+            func.sum(case(
+                (ChangeRequest.status.in_(['purchase_completed', 'routed_to_store']), 1), else_=0
+            )).label('purchase_completed'),
+            # New in period
+            func.sum(case(
+                (ChangeRequest.created_at >= period_start, 1), else_=0
+            )).label('new_in_period'),
+            # Cost aggregation
+            func.coalesce(func.sum(ChangeRequest.materials_total_cost), 0).label('total_cost'),
+            func.count(case(
+                (ChangeRequest.materials_total_cost.isnot(None), 1), else_=None
+            )).label('cost_count')
+        ).filter(*cr_base_filters).first()
+
+        # Status breakdown (dynamic list of all statuses)
+        cr_status_breakdown = db.session.query(
+            ChangeRequest.status,
+            func.count(ChangeRequest.cr_id).label('count')
+        ).filter(*cr_base_filters).group_by(ChangeRequest.status).all()
 
         cr_stats = {
-            'total': len(change_requests),
-            'pending_pm_approval': 0,
-            'pending_td_approval': 0,
-            'approved': 0,
-            'rejected': 0,
-            'vendor_approved': 0,
-            'purchase_completed': 0,
-            'new_in_period': 0,
-            'status_breakdown': [],
-            'total_cost': 0,
-            'avg_cost': 0
+            'total': int(cr_agg.total or 0),
+            'pending_pm_approval': int(cr_agg.pending_pm_approval or 0),
+            'pending_td_approval': int(cr_agg.pending_td_approval or 0),
+            'approved': int(cr_agg.approved or 0),
+            'rejected': int(cr_agg.rejected or 0),
+            'vendor_approved': int(cr_agg.vendor_approved or 0),
+            'purchase_completed': int(cr_agg.purchase_completed or 0),
+            'new_in_period': int(cr_agg.new_in_period or 0),
+            'status_breakdown': [{'status': row.status or 'pending', 'count': row.count} for row in cr_status_breakdown],
+            'total_cost': round(float(cr_agg.total_cost or 0), 2),
+            'avg_cost': round(float(cr_agg.total_cost or 0) / int(cr_agg.cost_count), 2) if int(cr_agg.cost_count or 0) > 0 else 0
         }
-
-        cr_status_counts = {}
-        total_cost = 0
-        cost_count = 0
-
-        for cr in change_requests:
-            status = (cr.status or 'pending').lower()
-            cr_status_counts[status] = cr_status_counts.get(status, 0) + 1
-
-            # Map to dashboard categories based on actual CR status values
-            # Pending PM: pending, under_review, send_to_pm
-            if status in ['pending', 'under_review', 'send_to_pm', 'send_to_mep']:
-                cr_stats['pending_pm_approval'] += 1
-            # Pending TD: pending_td_approval
-            elif status in ['pending_td_approval']:
-                cr_stats['pending_td_approval'] += 1
-            # Approved: approved_by_pm, approved_by_td, send_to_est, send_to_buyer, assigned_to_buyer
-            elif status in ['approved', 'approved_by_pm', 'approved_by_td', 'send_to_est', 'send_to_buyer', 'assigned_to_buyer']:
-                cr_stats['approved'] += 1
-            # Rejected
-            elif status == 'rejected':
-                cr_stats['rejected'] += 1
-            # Vendor approved
-            elif status == 'vendor_approved':
-                cr_stats['vendor_approved'] += 1
-            # Purchase completed / routed to store
-            elif status in ['purchase_completed', 'routed_to_store']:
-                cr_stats['purchase_completed'] += 1
-
-            if cr.created_at and cr.created_at >= period_start:
-                cr_stats['new_in_period'] += 1
-
-            # Cost tracking - use materials_total_cost field
-            if cr.materials_total_cost:
-                total_cost += float(cr.materials_total_cost)
-                cost_count += 1
-
-        cr_stats['status_breakdown'] = [{'status': k, 'count': v} for k, v in cr_status_counts.items()]
-        cr_stats['total_cost'] = round(total_cost, 2)
-        cr_stats['avg_cost'] = round(total_cost / cost_count, 2) if cost_count > 0 else 0
 
         # ========== MATERIAL RECEIPT STATISTICS ==========
         # Tracks material delivery notes sent TO Site Engineer's projects
@@ -3028,34 +3030,39 @@ def get_se_dashboard_analytics():
         }
 
         try:
-            delivery_query = MaterialDeliveryNote.query.filter(
-                MaterialDeliveryNote.project_id.in_(project_ids_list)
-            ) if project_ids_list else None
+            # OPTIMIZED: SQL aggregation instead of loading all delivery notes into Python
+            if project_ids_list:
+                dn_agg = db.session.query(
+                    func.count(MaterialDeliveryNote.id).label('total'),
+                    func.sum(case((func.upper(MaterialDeliveryNote.status) == 'DRAFT', 1), else_=0)).label('draft'),
+                    func.sum(case((func.upper(MaterialDeliveryNote.status) == 'ISSUED', 1), else_=0)).label('issued'),
+                    func.sum(case((func.upper(MaterialDeliveryNote.status) == 'IN_TRANSIT', 1), else_=0)).label('in_transit'),
+                    func.sum(case((func.upper(MaterialDeliveryNote.status).in_(['DELIVERED', 'PARTIAL']), 1), else_=0)).label('delivered'),
+                    func.sum(case((and_(
+                        func.upper(MaterialDeliveryNote.status).in_(['DELIVERED', 'PARTIAL']),
+                        MaterialDeliveryNote.received_at >= period_start
+                    ), 1), else_=0)).label('received_in_period')
+                ).filter(
+                    MaterialDeliveryNote.project_id.in_(project_ids_list)
+                ).first()
 
-            if delivery_query:
-                deliveries = delivery_query.all()
-                delivery_stats['total'] = len(deliveries)
+                if dn_agg:
+                    delivery_stats['total'] = int(dn_agg.total or 0)
+                    delivery_stats['draft'] = int(dn_agg.draft or 0)
+                    delivery_stats['issued'] = int(dn_agg.issued or 0)
+                    delivery_stats['in_transit'] = int(dn_agg.in_transit or 0)
+                    delivery_stats['delivered'] = int(dn_agg.delivered or 0)
+                    delivery_stats['received_in_period'] = int(dn_agg.received_in_period or 0)
+                    delivery_stats['pending_receipt'] = delivery_stats['issued'] + delivery_stats['in_transit']
 
-                dn_status_counts = {}
-                for dn in deliveries:
-                    status = (dn.status or 'draft').upper()
-                    dn_status_counts[status] = dn_status_counts.get(status, 0) + 1
-
-                    if status == 'DRAFT':
-                        delivery_stats['draft'] += 1
-                    elif status == 'ISSUED':
-                        delivery_stats['issued'] += 1
-                        delivery_stats['pending_receipt'] += 1
-                    elif status == 'IN_TRANSIT':
-                        delivery_stats['in_transit'] += 1
-                        delivery_stats['pending_receipt'] += 1
-                    elif status in ['DELIVERED', 'PARTIAL']:
-                        delivery_stats['delivered'] += 1
-                        # Check if received within period
-                        if dn.received_at and dn.received_at >= start_date:
-                            delivery_stats['received_in_period'] += 1
-
-                delivery_stats['status_breakdown'] = [{'status': k, 'count': v} for k, v in dn_status_counts.items()]
+                # Status breakdown
+                dn_breakdown = db.session.query(
+                    func.upper(MaterialDeliveryNote.status).label('status'),
+                    func.count(MaterialDeliveryNote.id).label('count')
+                ).filter(
+                    MaterialDeliveryNote.project_id.in_(project_ids_list)
+                ).group_by(func.upper(MaterialDeliveryNote.status)).all()
+                delivery_stats['status_breakdown'] = [{'status': row.status or 'DRAFT', 'count': row.count} for row in dn_breakdown]
         except Exception as e:
             log.warning(f"Could not fetch delivery stats: {e}")
 

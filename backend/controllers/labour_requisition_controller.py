@@ -381,13 +381,9 @@ def create_requisition():
                     except ValueError:
                         return jsonify({"error": "Invalid time format for end_time. Use HH:MM"}), 400
 
-                # Validate times: End time must be after start time
-                if start_time and end_time:
-                    # Convert to minutes for comparison
-                    start_minutes = start_time.hour * 60 + start_time.minute
-                    end_minutes = end_time.hour * 60 + end_time.minute
-                    if end_minutes <= start_minutes:
-                        return jsonify({"error": "End time must be after start time"}), 400
+                # Validate times: only block if start and end are identical (night shifts allowed)
+                if start_time and end_time and start_time == end_time:
+                    return jsonify({"error": "Start time and end time cannot be the same"}), 400
 
                 requisition = LabourRequisition(
                     requisition_code=requisition_code,
@@ -712,12 +708,9 @@ def update_requisition(requisition_id):
             # Force flush to ensure the change is written
             db.session.flush()
 
-        # Validate time: end_time must be after start_time
-        if requisition.start_time and requisition.end_time:
-            start_minutes = requisition.start_time.hour * 60 + requisition.start_time.minute
-            end_minutes = requisition.end_time.hour * 60 + requisition.end_time.minute
-            if end_minutes <= start_minutes:
-                return jsonify({"error": "End time must be after start time"}), 400
+        # Validate time: only block if start and end are identical (night shifts allowed)
+        if requisition.start_time and requisition.end_time and requisition.start_time == requisition.end_time:
+            return jsonify({"error": "Start time and end time cannot be the same"}), 400
 
         requisition.last_modified_by = current_user.get('full_name', 'System')
 
@@ -792,13 +785,9 @@ def resubmit_requisition(requisition_id):
             else:
                 requisition.end_time = None
 
-        # Validate times: End time must be after start time
-        if requisition.start_time and requisition.end_time:
-            # Convert to minutes for comparison
-            start_minutes = requisition.start_time.hour * 60 + requisition.start_time.minute
-            end_minutes = requisition.end_time.hour * 60 + requisition.end_time.minute
-            if end_minutes <= start_minutes:
-                return jsonify({"error": "End time must be after start time"}), 400
+        # Validate times: only block if start and end are identical (night shifts allowed)
+        if requisition.start_time and requisition.end_time and requisition.start_time == requisition.end_time:
+            return jsonify({"error": "Start time and end time cannot be the same"}), 400
 
         # Update preferred_workers_notes if provided
         # Update preferred_worker_ids if provided

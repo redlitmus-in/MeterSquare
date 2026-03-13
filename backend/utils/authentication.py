@@ -652,28 +652,26 @@ def jwt_required(f):
                 pass  # Never fail auth due to blacklist check errors
             log.debug(f"Token decoded successfully for user_id: {data.get('user_id')}")
 
-            # Get the user from the database
-            current_user = User.query.filter_by(
-                user_id=data['user_id'],
-                is_deleted=False,
-                is_active=True
+            # OPTIMIZED: Single JOIN query for User + Role (was 2 separate queries)
+            from config.db import db
+            result = db.session.query(User, Role.role).outerjoin(
+                Role, db.and_(User.role_id == Role.role_id, Role.is_deleted == False)
+            ).filter(
+                User.user_id == data['user_id'],
+                User.is_deleted == False,
+                User.is_active == True
             ).first()
 
-            if not current_user:
+            if not result:
                 log.warning(f"User not found or inactive for user_id: {data.get('user_id')}")
                 return jsonify({'message': 'User not found or inactive'}), 401
+
+            current_user, role_name = result[0], (result[1] or "user")
 
             # Check if user has been blocked by an administrator
             if getattr(current_user, 'is_blocked', False):
                 log.warning(f"Blocked user attempted access: user_id={current_user.user_id}")
                 return jsonify({'error': 'Account blocked', 'message': 'Your account has been blocked by an administrator.'}), 403
-
-            # Get role name safely
-            role_name = "user"
-            if current_user.role_id:
-                role = Role.query.filter_by(role_id=current_user.role_id, is_deleted=False).first()
-                if role:
-                    role_name = role.role
 
             # Store user in g object for access in route
             g.current_user = current_user

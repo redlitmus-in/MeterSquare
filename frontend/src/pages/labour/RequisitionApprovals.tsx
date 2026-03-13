@@ -695,16 +695,10 @@ const RequisitionApprovals: React.FC = () => {
       return;
     }
 
-    // Validate that end_time is after start_time
-    if (formData.start_time && formData.end_time) {
-      const [startHour, startMin] = formData.start_time.split(':').map(Number);
-      const [endHour, endMin] = formData.end_time.split(':').map(Number);
-      const startMinutes = startHour * 60 + startMin;
-      const endMinutes = endHour * 60 + endMin;
-      if (endMinutes <= startMinutes) {
-        showError('End Time must be after Start Time');
-        return;
-      }
+    // Validate time range: start and end must not be equal
+    if (formData.start_time && formData.end_time && formData.start_time === formData.end_time) {
+      showError('Start Time and End Time cannot be the same');
+      return;
     }
 
     setSubmitting(true);
@@ -755,16 +749,10 @@ const RequisitionApprovals: React.FC = () => {
       return;
     }
 
-    // Validate that end_time is after start_time
-    if (editFormData.start_time && editFormData.end_time) {
-      const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
-      const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
-      const startMinutes = startHour * 60 + startMin;
-      const endMinutes = endHour * 60 + endMin;
-      if (endMinutes <= startMinutes) {
-        showError('End Time must be after Start Time');
-        return;
-      }
+    // Validate time range: start and end must not be equal
+    if (editFormData.start_time && editFormData.end_time && editFormData.start_time === editFormData.end_time) {
+      showError('Start Time and End Time cannot be the same');
+      return;
     }
 
     // Calculate total workers from labour items
@@ -1468,36 +1456,68 @@ const RequisitionApprovals: React.FC = () => {
                 </div>
 
                 {/* Work Shift Times */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
-                    <TimePicker
-                      value={formData.start_time || ''}
-                      onChange={(value) => setFormData({ ...formData, start_time: value })}
-                      placeholder="HH:MM"
-                      className="w-full"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
-                    <TimePicker
-                      value={formData.end_time || ''}
-                      onChange={(value) => setFormData({ ...formData, end_time: value })}
-                      placeholder="HH:MM"
-                      className="w-full"
-                      minTime={formData.start_time || undefined}
-                    />
-                    {formData.start_time && formData.end_time && (() => {
-                      const [startHour, startMin] = formData.start_time.split(':').map(Number);
-                      const [endHour, endMin] = formData.end_time.split(':').map(Number);
-                      const startMinutes = startHour * 60 + startMin;
-                      const endMinutes = endHour * 60 + endMin;
-                      return endMinutes <= startMinutes ? (
-                        <p className="text-red-600 text-xs mt-1">End time must be after start time</p>
-                      ) : null;
-                    })()}
-                  </div>
-                </div>
+                {(() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  const isToday = formData.required_date === today;
+                  let minStartTime: string | undefined;
+                  if (isToday) {
+                    const now = new Date();
+                    now.setMinutes(now.getMinutes() + 5);
+                    minStartTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                  }
+                  return (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                        <TimePicker
+                          value={formData.start_time || ''}
+                          onChange={(value) => setFormData({ ...formData, start_time: value })}
+                          placeholder="HH:MM"
+                          className="w-full"
+                          minTime={minStartTime}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                        <TimePicker
+                          value={formData.end_time || ''}
+                          onChange={(value) => setFormData({ ...formData, end_time: value })}
+                          placeholder="HH:MM"
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Shift duration indicator */}
+                {formData.start_time && formData.end_time && (() => {
+                  const [startHour, startMin] = formData.start_time.split(':').map(Number);
+                  const [endHour, endMin] = formData.end_time.split(':').map(Number);
+                  const startMinutes = startHour * 60 + startMin;
+                  const endMinutes = endHour * 60 + endMin;
+                  const isNight = endMinutes <= startMinutes;
+                  const totalMin = isNight ? (1440 - startMinutes + endMinutes) : (endMinutes - startMinutes);
+                  const hours = Math.floor(totalMin / 60);
+                  const mins = totalMin % 60;
+                  const duration = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+                  return (
+                    <div className={`flex items-center gap-2 p-2.5 rounded-lg ${isNight ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50 border border-gray-200'}`}>
+                      {isNight ? (
+                        <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      )}
+                      <p className={`text-sm ${isNight ? 'text-blue-700' : 'text-gray-600'}`}>
+                        {isNight ? 'Night shift — ends next day' : 'Day shift'} ({duration})
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {/* Preferred Workers Selection */}
                 <div>
@@ -2016,6 +2036,16 @@ const RequisitionApprovals: React.FC = () => {
                 </div>
 
                 {/* Time Fields */}
+                {(() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  const isToday = editFormData.required_date === today;
+                  let minStartTime: string | undefined;
+                  if (isToday) {
+                    const now = new Date();
+                    now.setMinutes(now.getMinutes() + 5);
+                    minStartTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                  }
+                  return (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -2026,6 +2056,7 @@ const RequisitionApprovals: React.FC = () => {
                       onChange={(value) => setEditFormData({ ...editFormData, start_time: value })}
                       placeholder="HH:MM"
                       className="w-full"
+                      minTime={minStartTime}
                     />
                   </div>
                   <div>
@@ -2037,23 +2068,40 @@ const RequisitionApprovals: React.FC = () => {
                       onChange={(value) => setEditFormData({ ...editFormData, end_time: value })}
                       placeholder="HH:MM"
                       className="w-full"
-                      minTime={editFormData.start_time || undefined}
                     />
                   </div>
                 </div>
+                  );
+                })()}
 
-                {/* Time Validation Error */}
+                {/* Shift duration indicator */}
                 {editFormData.start_time && editFormData.end_time && (() => {
                   const [startHour, startMin] = editFormData.start_time.split(':').map(Number);
                   const [endHour, endMin] = editFormData.end_time.split(':').map(Number);
                   const startMinutes = startHour * 60 + startMin;
                   const endMinutes = endHour * 60 + endMin;
-                  return endMinutes <= startMinutes;
-                })() && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                    <p className="text-sm text-red-700">End Time must be after Start Time</p>
-                  </div>
-                )}
+                  const isNight = endMinutes <= startMinutes;
+                  const totalMin = isNight ? (1440 - startMinutes + endMinutes) : (endMinutes - startMinutes);
+                  const hours = Math.floor(totalMin / 60);
+                  const mins = totalMin % 60;
+                  const duration = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+                  return (
+                    <div className={`flex items-center gap-2 p-2.5 rounded-lg ${isNight ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50 border border-gray-200'}`}>
+                      {isNight ? (
+                        <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      )}
+                      <p className={`text-sm ${isNight ? 'text-blue-700' : 'text-gray-600'}`}>
+                        {isNight ? 'Night shift — ends next day' : 'Day shift'} ({duration})
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {/* Labour Items Breakdown */}
                 <div>

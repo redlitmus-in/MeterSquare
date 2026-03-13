@@ -162,10 +162,47 @@ export default defineConfig(({ mode }) => {
             }
           },
 
-          // ⚠️ CRITICAL: DISABLE chunk splitting completely
-          // Manual chunk splitting causes React dependency issues
-          // Let Vite handle chunking automatically or use ONE big vendor bundle
-          manualChunks: undefined
+          // ✅ PERFORMANCE: Smart chunk splitting for faster initial load
+          // Groups React ecosystem together to prevent dependency issues
+          // Heavy libraries (charts, PDF, Excel) load on-demand only
+          manualChunks: (id) => {
+            // Core React - must stay together to prevent createContext errors
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router') || id.includes('scheduler')) {
+              return 'react-core';
+            }
+            // UI framework
+            if (id.includes('framer-motion') || id.includes('@radix-ui')) {
+              return 'ui-core';
+            }
+            // Form handling - loaded when forms are used
+            if (id.includes('react-hook-form') || id.includes('zod') || id.includes('@hookform')) {
+              return 'forms';
+            }
+            // Authentication
+            if (id.includes('@supabase')) {
+              return 'auth';
+            }
+            // Heavy export utilities - lazy loaded only when exporting
+            if (id.includes('jspdf') || id.includes('xlsx') || id.includes('file-saver') || id.includes('html2canvas')) {
+              return 'export-lazy';
+            }
+            // Charts - lazy loaded only on dashboard
+            if (id.includes('recharts') || id.includes('highcharts')) {
+              return 'charts-lazy';
+            }
+            // Icons
+            if (id.includes('lucide-react') || id.includes('@heroicons')) {
+              return 'icons';
+            }
+            // Utilities
+            if (id.includes('axios') || id.includes('date-fns') || id.includes('clsx') || id.includes('tailwind-merge')) {
+              return 'utils';
+            }
+            // Remaining vendor deps
+            if (id.includes('node_modules')) {
+              return 'vendor';
+            }
+          }
         },
 
         // Tree-shaking and side-effects optimization

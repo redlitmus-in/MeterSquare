@@ -192,9 +192,8 @@ def handle_get_logged_in_user():
         if not current_user:
             return jsonify({"error": "Not logged in"}), 401
 
-        # Proceed to fetch role info from database
-        role = Role.query.filter_by(role_id=current_user["role_id"], is_deleted=False).first()
-        role_name = role.role if role else "user"
+        # OPTIMIZED: Use role from JWT middleware (g.user) instead of re-querying DB
+        role_name = current_user.get("role", "user")
 
         # Prepare response
         user_data = {

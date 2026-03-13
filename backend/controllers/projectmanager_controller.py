@@ -3101,6 +3101,7 @@ def get_pm_dashboard():
 
         # Get projects with progress calculation
         projects_data = []
+        projects_query = []
         if project_ids:
             projects_query = Project.query.filter(
                 Project.project_id.in_(project_ids),
@@ -3299,35 +3300,29 @@ def get_pm_dashboard():
                 LabourRequisition.is_deleted == False
             ).first()
         else:
-            # Regular PM or admin viewing as specific PM - filter by PM's context
-            # Pending: Requisitions awaiting this PM's action (send_to_pm status in their projects)
-            req_pending_count = db.session.query(func.count(LabourRequisition.requisition_id)).filter(
-                LabourRequisition.project_id.in_(project_ids) if project_ids else LabourRequisition.project_id == -1,
-                LabourRequisition.status == 'send_to_pm',
+            # OPTIMIZED: Single query with CASE expressions (was 3 separate queries)
+            labour_req_counts = db.session.query(
+                func.sum(case(
+                    (and_(
+                        LabourRequisition.project_id.in_(project_ids) if project_ids else LabourRequisition.project_id == -1,
+                        LabourRequisition.status == 'send_to_pm'
+                    ), 1), else_=0
+                )).label('req_pending'),
+                func.sum(case(
+                    (and_(
+                        LabourRequisition.approved_by_user_id == filter_user_id,
+                        LabourRequisition.status == 'approved'
+                    ), 1), else_=0
+                )).label('req_approved'),
+                func.sum(case(
+                    (and_(
+                        LabourRequisition.approved_by_user_id == filter_user_id,
+                        LabourRequisition.status == 'rejected'
+                    ), 1), else_=0
+                )).label('req_rejected')
+            ).filter(
                 LabourRequisition.is_deleted == False
-            ).scalar() or 0
-
-            # Approved/Rejected: Only requisitions actioned BY this PM
-            req_approved_count = db.session.query(func.count(LabourRequisition.requisition_id)).filter(
-                LabourRequisition.approved_by_user_id == filter_user_id,
-                LabourRequisition.status == 'approved',
-                LabourRequisition.is_deleted == False
-            ).scalar() or 0
-
-            req_rejected_count = db.session.query(func.count(LabourRequisition.requisition_id)).filter(
-                LabourRequisition.approved_by_user_id == filter_user_id,
-                LabourRequisition.status == 'rejected',
-                LabourRequisition.is_deleted == False
-            ).scalar() or 0
-
-            # Create a named tuple-like object for consistency
-            class LabourReqCounts:
-                def __init__(self, pending, approved, rejected):
-                    self.req_pending = pending
-                    self.req_approved = approved
-                    self.req_rejected = rejected
-
-            labour_req_counts = LabourReqCounts(req_pending_count, req_approved_count, req_rejected_count)
+            ).first()
 
         # Attendance Lock status counts (Pending = 'pending', Locked = 'locked')
         # Must match the Attendance Lock page logic: only attendance from requisitions approved BY this PM
@@ -3339,42 +3334,29 @@ def get_pm_dashboard():
                 func.sum(case((DailyAttendance.approval_status == 'locked', 1), else_=0)).label('locked')
             ).first()
         else:
-            # Regular PM or admin viewing as specific PM
-            # Join with LabourRequisition to filter by requisitions approved BY this PM
-            pending_lock_count = db.session.query(func.count(DailyAttendance.attendance_id)).join(
+            # OPTIMIZED: Single query with CASE expressions (was 2 separate queries)
+            attendance_lock_counts = db.session.query(
+                func.sum(case(
+                    (or_(
+                        DailyAttendance.approval_status == 'pending',
+                        and_(
+                            DailyAttendance.approval_status.is_(None),
+                            DailyAttendance.attendance_status == 'completed',
+                            DailyAttendance.clock_out_time.isnot(None)
+                        )
+                    ), 1), else_=0
+                )).label('pending_lock'),
+                func.sum(case(
+                    (DailyAttendance.approval_status == 'locked', 1), else_=0
+                )).label('locked')
+            ).join(
                 LabourRequisition,
                 DailyAttendance.requisition_id == LabourRequisition.requisition_id
             ).filter(
                 DailyAttendance.project_id.in_(project_ids) if project_ids else DailyAttendance.project_id == -1,
                 DailyAttendance.is_deleted == False,
-                LabourRequisition.approved_by_user_id == filter_user_id,
-                or_(
-                    DailyAttendance.approval_status == 'pending',
-                    and_(
-                        DailyAttendance.approval_status.is_(None),
-                        DailyAttendance.attendance_status == 'completed',
-                        DailyAttendance.clock_out_time.isnot(None)
-                    )
-                )
-            ).scalar() or 0
-
-            locked_count = db.session.query(func.count(DailyAttendance.attendance_id)).join(
-                LabourRequisition,
-                DailyAttendance.requisition_id == LabourRequisition.requisition_id
-            ).filter(
-                DailyAttendance.project_id.in_(project_ids) if project_ids else DailyAttendance.project_id == -1,
-                DailyAttendance.is_deleted == False,
-                LabourRequisition.approved_by_user_id == filter_user_id,
-                DailyAttendance.approval_status == 'locked'
-            ).scalar() or 0
-
-            # Create a named tuple-like object for consistency
-            class AttendanceLockCounts:
-                def __init__(self, pending, locked):
-                    self.pending_lock = pending
-                    self.locked = locked
-
-            attendance_lock_counts = AttendanceLockCounts(pending_lock_count, locked_count)
+                LabourRequisition.approved_by_user_id == filter_user_id
+            ).first()
 
         # Combine into labour data array for chart
         labour_data = [
@@ -3457,17 +3439,7 @@ def get_pm_dashboard():
                 project_budgets[project_id] = 0
             project_budgets[project_id] += float(grand_total or 0)
 
-        # Get project details and sort by budget
-        top_projects_query = db.session.query(
-            Project.project_id,
-            Project.project_name,
-            Project.location,
-            Project.client
-        ).filter(
-            Project.project_id.in_(project_ids),
-            Project.is_deleted == False
-        ).all()
-
+        # OPTIMIZED: Reuse projects_query data instead of a separate DB query
         top_budget_projects = [
             {
                 "project_id": p.project_id,
@@ -3476,7 +3448,7 @@ def get_pm_dashboard():
                 "client": p.client,
                 "budget": round(project_budgets.get(p.project_id, 0), 2)
             }
-            for p in top_projects_query
+            for p in projects_query
         ]
 
         # Sort by budget descending and take top 5
@@ -3568,37 +3540,13 @@ def get_pm_dashboard():
             "completed": int(cr_stats.completed) if cr_stats.completed else 0
         }
 
-        # Project Progress Stats - count projects by status
-        project_status_counts = db.session.query(
-            func.count(func.distinct(case(
-                (Project.status == 'active', Project.project_id),
-                else_=None
-            ))).label('active'),
-            func.count(func.distinct(case(
-                (Project.status == 'in_progress', Project.project_id),
-                else_=None
-            ))).label('in_progress'),
-            func.count(func.distinct(case(
-                (Project.status == 'completed', Project.project_id),
-                else_=None
-            ))).label('completed'),
-            func.count(func.distinct(case(
-                (Project.status == 'on_hold', Project.project_id),
-                else_=None
-            ))).label('on_hold'),
-            func.count(func.distinct(Project.project_id)).label('total')
-        ).filter(
-            Project.project_id.in_(project_ids),
-            Project.is_deleted == False
-        ).first()
-
-        project_stats = {
-            "total": int(project_status_counts.total) if project_status_counts.total else 0,
-            "active": int(project_status_counts.active) if project_status_counts.active else 0,
-            "in_progress": int(project_status_counts.in_progress) if project_status_counts.in_progress else 0,
-            "completed": int(project_status_counts.completed) if project_status_counts.completed else 0,
-            "on_hold": int(project_status_counts.on_hold) if project_status_counts.on_hold else 0
-        }
+        # OPTIMIZED: Calculate project status counts from already-fetched projects_query (was a separate DB query)
+        project_stats = {"total": 0, "active": 0, "in_progress": 0, "completed": 0, "on_hold": 0}
+        for p in projects_query:
+            project_stats["total"] += 1
+            status = (p.status or '').lower()
+            if status in project_stats:
+                project_stats[status] += 1
 
         # Recent SE Requests - Latest 5 requests from Site Engineers needing PM attention
         recent_se_requests = []
