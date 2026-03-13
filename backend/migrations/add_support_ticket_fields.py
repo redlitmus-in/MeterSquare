@@ -32,9 +32,8 @@ def run_migration():
                     ALTER TABLE support_tickets
                     ADD COLUMN current_concern TEXT
                 """))
-                print("Added column: current_concern")
             else:
-                print("Column current_concern already exists")
+                pass
 
             # Add proposed_changes if not exists
             if 'proposed_changes' not in existing_columns:
@@ -42,16 +41,13 @@ def run_migration():
                     ALTER TABLE support_tickets
                     ADD COLUMN proposed_changes TEXT
                 """))
-                print("Added column: proposed_changes")
             else:
-                print("Column proposed_changes already exists")
+                pass
 
             db.session.commit()
-            print("Migration completed successfully!")
 
         except Exception as e:
             db.session.rollback()
-            print(f"Migration failed: {str(e)}")
             raise
 
 if __name__ == "__main__":

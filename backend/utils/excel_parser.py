@@ -2,6 +2,10 @@
 Excel Parser for BOQ Bulk Import
 Parses Excel files matching the actual BOQ template format
 """
+import logging
+
+log = logging.getLogger(__name__)
+
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Tuple
@@ -181,7 +185,7 @@ class BOQExcelParser:
                             if len(parts) > 1:
                                 self.project_info['area'] = parts[1].strip()
         except Exception as e:
-            print(f"Error extracting project info: {e}")
+            log.error(f"Error extracting project info: {str(e)}")
 
     def _find_header_row(self) -> int:
         """Find the row containing headers - must match exact template format"""

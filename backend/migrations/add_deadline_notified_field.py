@@ -37,10 +37,8 @@ def upgrade():
             ADD COLUMN IF NOT EXISTS last_deadline_notified_at DATE NULL;
         """)
         conn.commit()
-        print("Added last_deadline_notified_at column to project table")
     except Exception as e:
         conn.rollback()
-        print(f"Migration failed: {e}")
         raise
     finally:
         cur.close()
@@ -57,10 +55,8 @@ def downgrade():
             DROP COLUMN IF EXISTS last_deadline_notified_at;
         """)
         conn.commit()
-        print("Removed last_deadline_notified_at column from project table")
     except Exception as e:
         conn.rollback()
-        print(f"Rollback failed: {e}")
         raise
     finally:
         cur.close()

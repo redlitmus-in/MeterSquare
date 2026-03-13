@@ -27,7 +27,6 @@ def add_store_name_column():
             """))
 
             if result.fetchone():
-                print("Column 'store_name' already exists in system_settings table. Skipping.")
                 return
 
             # Add the column
@@ -36,11 +35,9 @@ def add_store_name_column():
                 ADD COLUMN store_name VARCHAR(255) DEFAULT 'M2 Store'
             """))
             db.session.commit()
-            print("Successfully added 'store_name' column to system_settings table!")
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error adding store_name column: {e}")
             raise
 
 

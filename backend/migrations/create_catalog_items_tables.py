@@ -60,15 +60,13 @@ def create_catalog_items_tables():
             try:
                 db.session.execute(db.text(create_catalog_items_sql))
                 db.session.commit()
-                print("[SUCCESS] Created 'catalog_items' table with indexes")
             except Exception as e:
                 db.session.rollback()
-                print(f"[ERROR] Error creating catalog_items table: {e}")
                 import traceback
                 traceback.print_exc()
                 raise
         else:
-            print("[WARNING] Table 'catalog_items' already exists. Skipping.")
+            pass
 
         # ============================================================
         # TABLE 2: catalog_sub_items
@@ -101,15 +99,13 @@ def create_catalog_items_tables():
             try:
                 db.session.execute(db.text(create_catalog_sub_items_sql))
                 db.session.commit()
-                print("[SUCCESS] Created 'catalog_sub_items' table with indexes")
             except Exception as e:
                 db.session.rollback()
-                print(f"[ERROR] Error creating catalog_sub_items table: {e}")
                 import traceback
                 traceback.print_exc()
                 raise
         else:
-            print("[WARNING] Table 'catalog_sub_items' already exists. Skipping.")
+            pass
 
         # ============================================================
         # TABLE 3: catalog_sub_item_materials
@@ -135,18 +131,14 @@ def create_catalog_items_tables():
             try:
                 db.session.execute(db.text(create_link_table_sql))
                 db.session.commit()
-                print("[SUCCESS] Created 'catalog_sub_item_materials' table with indexes")
             except Exception as e:
                 db.session.rollback()
-                print(f"[ERROR] Error creating catalog_sub_item_materials table: {e}")
                 import traceback
                 traceback.print_exc()
                 raise
         else:
-            print("[WARNING] Table 'catalog_sub_item_materials' already exists. Skipping.")
+            pass
 
-        print()
-        print("[DONE] All catalog tables created successfully!")
 
 
 def drop_catalog_items_tables():
@@ -162,10 +154,8 @@ def drop_catalog_items_tables():
         try:
             db.session.execute(db.text(drop_sql))
             db.session.commit()
-            print("[SUCCESS] Dropped all catalog tables (catalog_items, catalog_sub_items, catalog_sub_item_materials)")
         except Exception as e:
             db.session.rollback()
-            print(f"[ERROR] Error dropping catalog tables: {e}")
             import traceback
             traceback.print_exc()
             raise
@@ -174,25 +164,13 @@ def drop_catalog_items_tables():
 if __name__ == "__main__":
     import argparse
 
-    print("=" * 80)
-    print("CATALOG ITEMS TABLES MIGRATION")
-    print("=" * 80)
-    print()
 
     parser = argparse.ArgumentParser(description='Catalog Items Tables Migration')
     parser.add_argument('--rollback', action='store_true', help='Rollback the migration (drop tables)')
     args = parser.parse_args()
 
     if args.rollback:
-        print("ROLLBACK MODE: Dropping catalog tables...")
-        print()
         drop_catalog_items_tables()
     else:
-        print("Creating catalog tables...")
-        print()
         create_catalog_items_tables()
 
-    print()
-    print("=" * 80)
-    print("MIGRATION COMPLETED")
-    print("=" * 80)

@@ -20,23 +20,19 @@ def run_migration():
     with app.app_context():
         try:
             # Drop the old constraint
-            print("Dropping old constraint...")
             db.session.execute(text("""
                 ALTER TABLE material_returns
                 DROP CONSTRAINT IF EXISTS material_returns_disposal_status_check;
             """))
 
             # Fix any existing invalid status values before adding constraint
-            print("Fixing existing 'backup_added' status to 'sent_for_repair'...")
             result = db.session.execute(text("""
                 UPDATE material_returns
                 SET disposal_status = 'sent_for_repair'
                 WHERE disposal_status = 'backup_added'
             """))
-            print(f"Updated {result.rowcount} rows with 'backup_added' status")
 
             # Add the new constraint with all valid statuses
-            print("Adding new constraint with updated statuses...")
             db.session.execute(text("""
                 ALTER TABLE material_returns
                 ADD CONSTRAINT material_returns_disposal_status_check
@@ -53,20 +49,9 @@ def run_migration():
             """))
 
             db.session.commit()
-            print("Migration completed successfully!")
-            print("\nNew valid disposal_status values:")
-            print("  - pending_approval (Good condition returns awaiting PM approval)")
-            print("  - approved (Good returns approved and added to stock)")
-            print("  - pending_review (Damaged/Defective awaiting PM review)")
-            print("  - approved_disposal (PM approved for disposal)")
-            print("  - disposed (Physically disposed)")
-            print("  - sent_for_repair (In backup stock, awaiting repair)")
-            print("  - repaired (Repair completed, added to main stock)")
-            print("  - rejected (PM rejected the return)")
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error during migration: {str(e)}")
             raise
 
 if __name__ == '__main__':

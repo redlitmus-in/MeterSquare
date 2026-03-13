@@ -61,14 +61,6 @@ def upgrade():
 
             conn.commit()
 
-        print("✅ Migration completed: Added change request tracking columns to material_purchase_tracking")
-        print("\nColumns added:")
-        print("  - is_from_change_request (BOOLEAN, default: FALSE)")
-        print("  - change_request_id (INTEGER, FK to change_requests.cr_id)")
-        print("\nForeign key constraint created:")
-        print("  - fk_material_purchase_change_request")
-        print("\nData fix applied:")
-        print("  - Updated master_item_id for existing change request materials")
 
 def downgrade():
     """Remove change request tracking columns"""
@@ -95,26 +87,11 @@ def downgrade():
 
             conn.commit()
 
-        print("✅ Migration rolled back: Removed change request tracking columns")
 
 if __name__ == "__main__":
-    print("=" * 70)
-    print("MIGRATION: Add Change Request Tracking to Material Purchase Tracking")
-    print("=" * 70)
-    print("\nThis migration adds the following columns:")
-    print("  1. is_from_change_request - Flags materials from change requests")
-    print("  2. change_request_id - Links to the originating change request")
-    print("\nRunning migration...\n")
 
     try:
         upgrade()
-        print("\n" + "=" * 70)
-        print("✅ MIGRATION SUCCESSFUL")
-        print("=" * 70)
     except Exception as e:
-        print("\n" + "=" * 70)
-        print("❌ MIGRATION FAILED")
-        print("=" * 70)
-        print(f"Error: {str(e)}")
         import traceback
         traceback.print_exc()

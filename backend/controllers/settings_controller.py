@@ -258,7 +258,6 @@ def update_settings():
         settings.updated_at = datetime.utcnow()
         db.session.commit()
 
-        log.info(f"Settings updated by admin user {current_user.get('user_id')}")
 
         return jsonify({
             "message": "Settings updated successfully",
@@ -378,7 +377,6 @@ def upload_signature():
         settings.updated_at = datetime.utcnow()
         db.session.commit()
 
-        log.info(f"Signature uploaded by admin user {current_user.get('user_id')}")
 
         return jsonify({
             "success": True,
@@ -415,7 +413,6 @@ def delete_signature():
         settings.updated_at = datetime.utcnow()
         db.session.commit()
 
-        log.info(f"Signature deleted by admin user {current_user.get('user_id')}")
 
         return jsonify({
             "success": True,

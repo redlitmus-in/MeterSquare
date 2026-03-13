@@ -25,7 +25,6 @@ load_dotenv()
 try:
     import psycopg2
 except ImportError:
-    print("ERROR: psycopg2 not installed. Run: pip install psycopg2-binary")
     sys.exit(1)
 
 
@@ -45,9 +44,6 @@ def create_indexes():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    print("\n" + "=" * 70)
-    print("PROJECT TABLE PERFORMANCE INDEXES")
-    print("=" * 70)
 
     indexes = [
         # Regular B-tree indexes for equality/range filters
@@ -90,34 +86,24 @@ def create_indexes():
 
     for idx in indexes:
         if index_exists(cursor, idx['name']):
-            print(f"  ⏭  SKIP   {idx['name']} (already exists)")
             skipped.append(idx['name'])
             continue
 
         try:
-            print(f"  🔨 CREATE {idx['name']} — {idx['description']}")
             # CONCURRENTLY requires autocommit
             conn.set_isolation_level(0)
             cursor.execute(idx['sql'])
             conn.set_isolation_level(1)
-            print(f"  ✅ DONE   {idx['name']}")
             created.append(idx['name'])
         except Exception as e:
-            print(f"  ❌ FAIL   {idx['name']}: {e}")
             failed.append(idx['name'])
             conn.rollback()
 
-    print("\n" + "=" * 70)
-    print(f"Created : {len(created)}")
-    print(f"Skipped : {len(skipped)} (already existed)")
-    print(f"Failed  : {len(failed)}")
-    print("=" * 70)
 
     if failed:
-        print(f"\n❌ Some indexes failed: {', '.join(failed)}")
-        print("   Check database permissions and try again.")
+        pass
     else:
-        print("\n✅ All indexes ready. Expect 3-5x speed improvement on BOQ and change-request endpoints.")
+        pass
 
     cursor.close()
     conn.close()
@@ -137,14 +123,11 @@ def rollback_indexes():
         'idx_project_mep_supervisor_id_gin',
     ]
 
-    print("\nRolling back project performance indexes...")
     for name in index_names:
         try:
             cursor.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
             conn.commit()
-            print(f"  ✅ Dropped {name}")
         except Exception as e:
-            print(f"  ❌ Failed to drop {name}: {e}")
             conn.rollback()
 
     cursor.close()

@@ -19,10 +19,8 @@ log = get_logger()
 def run_migration():
     """Create boq_internal_revisions table and add columns to boq table"""
     try:
-        log.info("Starting migration: Create Internal Revisions Table")
 
         # Step 1: Create boq_internal_revisions table
-        log.info("Creating boq_internal_revisions table...")
         db.session.execute(text("""
             CREATE TABLE IF NOT EXISTS boq_internal_revisions (
                 id SERIAL PRIMARY KEY,
@@ -42,10 +40,8 @@ def run_migration():
                 is_deleted BOOLEAN DEFAULT FALSE
             )
         """))
-        log.info("✓ Table boq_internal_revisions created")
 
         # Step 2: Create indexes
-        log.info("Creating indexes...")
         db.session.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_internal_rev_boq
             ON boq_internal_revisions(boq_id)
@@ -58,10 +54,8 @@ def run_migration():
             CREATE INDEX IF NOT EXISTS idx_internal_rev_action
             ON boq_internal_revisions(action_type)
         """))
-        log.info("✓ Indexes created")
 
         # Step 3: Add columns to boq table
-        log.info("Adding columns to boq table...")
 
         # Check if columns already exist
         result = db.session.execute(text("""
@@ -77,28 +71,20 @@ def run_migration():
                 ALTER TABLE boq
                 ADD COLUMN internal_revision_number INTEGER DEFAULT 0
             """))
-            log.info("✓ Added internal_revision_number column")
         else:
-            log.info("→ Column internal_revision_number already exists")
+            pass
 
         if 'has_internal_revisions' not in existing_columns:
             db.session.execute(text("""
                 ALTER TABLE boq
                 ADD COLUMN has_internal_revisions BOOLEAN DEFAULT FALSE
             """))
-            log.info("✓ Added has_internal_revisions column")
         else:
-            log.info("→ Column has_internal_revisions already exists")
+            pass
 
         # Commit transaction
         db.session.commit()
 
-        log.info("\n✅ Migration completed successfully!")
-        log.info("Summary:")
-        log.info("  - Created boq_internal_revisions table")
-        log.info("  - Created 3 indexes for performance")
-        log.info("  - Added internal_revision_number to boq table")
-        log.info("  - Added has_internal_revisions to boq table")
 
         return True
 
@@ -110,7 +96,6 @@ def run_migration():
 def rollback_migration():
     """Rollback: Drop table and remove columns"""
     try:
-        log.info("Rolling back migration...")
 
         # Drop indexes first
         db.session.execute(text("DROP INDEX IF EXISTS idx_internal_rev_boq"))
@@ -125,7 +110,6 @@ def rollback_migration():
         db.session.execute(text("ALTER TABLE boq DROP COLUMN IF EXISTS has_internal_revisions"))
 
         db.session.commit()
-        log.info("✅ Rollback completed")
         return True
 
     except Exception as e:
@@ -145,6 +129,6 @@ if __name__ == "__main__":
             success = run_migration()
 
         if success:
-            print("[SUCCESS] Migration completed successfully!")
+            pass
         else:
-            print("[ERROR] Migration failed. Check logs for details.")
+            pass

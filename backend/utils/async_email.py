@@ -175,7 +175,6 @@ def send_email_sync(email_data):
                         logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
                         message.attach(logo_image)
                         logo_attached = True
-                        log.info(f"Logo attached successfully from: {logo_path}")
                         break
 
             if not logo_attached:
@@ -197,7 +196,6 @@ def send_email_sync(email_data):
                 server.login(SENDER_EMAIL, SENDER_EMAIL_PASSWORD)
                 server.sendmail(SENDER_EMAIL, email_id, message.as_string())
 
-        log.info(f"OTP email sent successfully to {email_id}")
 
     except Exception as e:
         log.error(f"Failed to send email to {email_data.get('email', 'unknown')}: {e}")
@@ -217,7 +215,6 @@ def send_otp_async(email_id):
         if email_worker is None or not email_worker.is_alive():
             email_worker = threading.Thread(target=email_worker_thread, daemon=True)
             email_worker.start()
-            log.info("Started email worker thread")
 
         # Queue email for async sending
         email_queue.put({
@@ -226,7 +223,6 @@ def send_otp_async(email_id):
             'subject': 'Your OTP Code'
         })
 
-        log.info(f"OTP email queued for async sending to {email_id}")
         return otp
 
     except Exception as e:
@@ -251,7 +247,6 @@ def send_account_blocked_email(email_id, full_name, reason=None):
             'full_name': full_name,
             'reason': reason or 'No reason provided',
         })
-        log.info(f"Account-blocked email queued for {email_id}")
     except Exception as e:
         log.error(f"Error queuing account-blocked email: {e}")
 
@@ -374,7 +369,6 @@ def _send_account_blocked_sync(email_data):
             server.login(SENDER_EMAIL, SENDER_EMAIL_PASSWORD)
             server.sendmail(SENDER_EMAIL, email_id, message.as_string())
 
-    log.info(f"Account-blocked email sent to {email_id}")
 
 
 def send_account_unblocked_email(email_id, full_name):
@@ -394,7 +388,6 @@ def send_account_unblocked_email(email_id, full_name):
             'type': 'account_unblocked',
             'full_name': full_name,
         })
-        log.info(f"Account-unblocked email queued for {email_id}")
     except Exception as e:
         log.error(f"Error queuing account-unblocked email: {e}")
 
@@ -513,7 +506,6 @@ def _send_account_unblocked_sync(email_data):
             server.login(SENDER_EMAIL, SENDER_EMAIL_PASSWORD)
             server.sendmail(SENDER_EMAIL, email_id, message.as_string())
 
-    log.info(f"Account-unblocked email sent to {email_id}")
 
 
 def send_account_deactivated_email(email_id, full_name):
@@ -524,7 +516,6 @@ def send_account_deactivated_email(email_id, full_name):
             email_worker = threading.Thread(target=email_worker_thread, daemon=True)
             email_worker.start()
         email_queue.put({'email': email_id, 'type': 'account_deactivated', 'full_name': full_name})
-        log.info(f"Account-deactivated email queued for {email_id}")
     except Exception as e:
         log.error(f"Error queuing account-deactivated email: {e}")
 
@@ -596,7 +587,6 @@ def _send_account_deactivated_sync(email_data):
 </html>"""
 
     _dispatch_simple_email(email_id, "Account Deactivated – MeterSquare", body)
-    log.info(f"Account-deactivated email sent to {email_id}")
 
 
 def send_account_activated_email(email_id, full_name):
@@ -607,7 +597,6 @@ def send_account_activated_email(email_id, full_name):
             email_worker = threading.Thread(target=email_worker_thread, daemon=True)
             email_worker.start()
         email_queue.put({'email': email_id, 'type': 'account_activated', 'full_name': full_name})
-        log.info(f"Account-activated email queued for {email_id}")
     except Exception as e:
         log.error(f"Error queuing account-activated email: {e}")
 
@@ -678,7 +667,6 @@ def _send_account_activated_sync(email_data):
 </html>"""
 
     _dispatch_simple_email(email_id, "Account Activated – MeterSquare", body)
-    log.info(f"Account-activated email sent to {email_id}")
 
 
 def _dispatch_simple_email(email_id, subject, body):
@@ -723,7 +711,6 @@ def _ensure_worker_running():
     if email_worker is None or not email_worker.is_alive():
         email_worker = threading.Thread(target=email_worker_thread, daemon=True)
         email_worker.start()
-        log.info("Started email worker thread")
 
 
 def queue_generic_email(recipient_email, subject, email_html, attachments=None, cc_emails=None):
@@ -741,7 +728,6 @@ def queue_generic_email(recipient_email, subject, email_html, attachments=None, 
             'attachments': attachments,
             'cc_emails': cc_emails,
         })
-        log.info(f"Generic email queued for {recipient_email}")
     except Exception as e:
         log.error(f"Error queuing generic email for {recipient_email}: {e}")
 

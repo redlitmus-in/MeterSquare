@@ -65,13 +65,11 @@ def create_delivery_notes_tables():
             try:
                 db.session.execute(db.text(create_delivery_notes_sql))
                 db.session.commit()
-                print("Successfully created 'material_delivery_notes' table with indexes!")
             except Exception as e:
                 db.session.rollback()
-                print(f"Error creating material_delivery_notes table: {e}")
                 raise
         else:
-            print("Table 'material_delivery_notes' already exists. Skipping creation.")
+            pass
 
         # Create delivery_note_items table
         if 'delivery_note_items' not in existing_tables:
@@ -97,13 +95,11 @@ def create_delivery_notes_tables():
             try:
                 db.session.execute(db.text(create_items_sql))
                 db.session.commit()
-                print("Successfully created 'delivery_note_items' table with indexes!")
             except Exception as e:
                 db.session.rollback()
-                print(f"Error creating delivery_note_items table: {e}")
                 raise
         else:
-            print("Table 'delivery_note_items' already exists. Skipping creation.")
+            pass
 
 
 def drop_delivery_notes_tables():
@@ -118,10 +114,8 @@ def drop_delivery_notes_tables():
             db.session.execute(db.text(drop_items_sql))
             db.session.execute(db.text(drop_notes_sql))
             db.session.commit()
-            print("Successfully dropped delivery notes tables!")
         except Exception as e:
             db.session.rollback()
-            print(f"Error dropping tables: {e}")
             raise
 
 

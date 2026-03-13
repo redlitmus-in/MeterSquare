@@ -17,9 +17,7 @@ def migrate():
                 'ALTER TABLE internal_inventory_material_requests ADD COLUMN IF NOT EXISTS cr_id INTEGER'
             ))
             db.session.commit()
-            print("✓ Successfully added cr_id column to internal_inventory_material_requests table")
         except Exception as e:
-            print(f"✗ Error adding cr_id column: {str(e)}")
             db.session.rollback()
 
 if __name__ == '__main__':

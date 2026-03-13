@@ -23,12 +23,8 @@ def create_lpo_terms_selections_table():
         )
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
-        print("\n" + "="*80)
-        print("CREATE LPO_TERMS_SELECTIONS TABLE MIGRATION")
-        print("="*80)
         
         # Create lpo_terms_selections table
-        print("\n[1/2] Creating lpo_terms_selections table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS lpo_terms_selections (
                 id SERIAL PRIMARY KEY,
@@ -40,29 +36,21 @@ def create_lpo_terms_selections_table():
                 UNIQUE(cr_id, po_child_id)
             );
         """)
-        print("  ✓ Created lpo_terms_selections table")
         
         # Create indexes
-        print("\n[2/2] Creating indexes...")
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_lpo_terms_selections_cr_id
             ON lpo_terms_selections(cr_id);
         """)
-        print("  ✓ Created index: idx_lpo_terms_selections_cr_id")
         
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_lpo_terms_selections_po_child_id
             ON lpo_terms_selections(po_child_id);
         """)
-        print("  ✓ Created index: idx_lpo_terms_selections_po_child_id")
         
         conn.commit()
-        print("\n" + "="*80)
-        print("✅ LPO_TERMS_SELECTIONS TABLE MIGRATION COMPLETED SUCCESSFULLY")
-        print("="*80)
         
     except Exception as e:
-        print(f"\n❌ Error during migration: {str(e)}")
         import traceback
         traceback.print_exc()
         if conn:

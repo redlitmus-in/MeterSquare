@@ -32,7 +32,6 @@ def run_migration():
         )
         cursor = conn.cursor()
 
-        print("Creating preliminaries_master table...")
 
         # Create preliminaries_master table
         cursor.execute("""
@@ -52,7 +51,6 @@ def run_migration():
             );
         """)
 
-        print("Creating boq_preliminaries junction table...")
 
         # Create boq_preliminaries junction table
         cursor.execute("""
@@ -67,7 +65,6 @@ def run_migration():
             );
         """)
 
-        print("Creating indexes...")
 
         # Create indexes for better performance
         cursor.execute("""
@@ -90,7 +87,6 @@ def run_migration():
             ON preliminaries_master(is_active, is_deleted);
         """)
 
-        print("Inserting default preliminary items...")
 
         # Insert default preliminary items
         default_preliminaries = [
@@ -116,15 +112,10 @@ def run_migration():
 
         # Commit changes
         conn.commit()
-        print("[SUCCESS] Migration completed successfully!")
-        print(f"   - Created preliminaries_master table with {len(default_preliminaries)} default items")
-        print("   - Created boq_preliminaries junction table")
-        print("   - Created necessary indexes")
 
     except Exception as e:
         if conn:
             conn.rollback()
-        print(f"[ERROR] Migration failed: {str(e)}")
         raise
 
     finally:
@@ -135,5 +126,4 @@ def run_migration():
 
 
 if __name__ == "__main__":
-    print("Starting preliminary master tables migration...")
     run_migration()

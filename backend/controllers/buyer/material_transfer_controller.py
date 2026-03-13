@@ -382,7 +382,6 @@ def create_buyer_material_transfer():
 
                 if destination_type == 'store':
                     # Smart matching for M2 Store transfers: check by material name (case-insensitive)
-                    log.info(f"Checking if material '{material_name}' already exists in M2 Store inventory")
 
                     # Try exact case-insensitive match on material_name
                     existing_material = InventoryMaterial.query.filter(
@@ -394,10 +393,8 @@ def create_buyer_material_transfer():
                         # Material already exists - use it and Production Manager will update stock later
                         inv_material = existing_material
                         inventory_material_id = existing_material.inventory_material_id
-                        log.info(f"✓ Found existing material in inventory: '{existing_material.material_name}' (ID: {inventory_material_id})")
                     else:
                         # Material doesn't exist - create new inventory entry for M2 Store
-                        log.info(f"✗ Material '{material_name}' not found in inventory - creating new entry")
 
                         # Use provided category or default to 'General'
                         material_category = category if category else 'General'
@@ -421,10 +418,8 @@ def create_buyer_material_transfer():
                         db.session.add(inv_material)
                         db.session.flush()
                         inventory_material_id = inv_material.inventory_material_id
-                        log.info(f"✓ Created new inventory material ID: {inventory_material_id} for '{material_name}'")
                 else:
                     # Site transfer - create custom material entry (not added to M2 Store inventory)
-                    log.info(f"Creating custom material entry for site transfer: {material_name}")
 
                     # Use provided category or default to 'Custom Materials'
                     material_category = category if category else 'Custom Materials'
@@ -448,7 +443,6 @@ def create_buyer_material_transfer():
                     db.session.add(inv_material)
                     db.session.flush()
                     inventory_material_id = inv_material.inventory_material_id
-                    log.info(f"Created custom material ID: {inventory_material_id} for '{material_name}'")
 
             # Create DN item
             dn_item = DeliveryNoteItem(
@@ -462,14 +456,12 @@ def create_buyer_material_transfer():
             db.session.add(dn_item)
             total_quantity += quantity
 
-            log.info(f"Added DN item: {material_name} x {quantity} {unit} (inventory ID: {inventory_material_id})")
 
             # NOTE: Stock deduction happens when DN is ISSUED by Production Manager, not at creation
             # Buyer creates DRAFT DN, PM issues it and deducts stock
 
         db.session.commit()
 
-        log.info(f"Buyer {buyer_name} created manual material transfer DN {dn_number} to {destination_type}")
 
         return jsonify({
             "success": True,
@@ -521,7 +513,6 @@ def get_site_engineers_for_transfer():
             is_active=True
         ).all()
 
-        log.info(f"Found {len(site_engineers)} Site Engineers with role_id={se_role.role_id}")
 
         se_list = []
         from models.pm_assign_ss import PMAssignSS
@@ -563,7 +554,6 @@ def get_site_engineers_for_transfer():
             }
             se_list.append(se_data)
 
-        log.info(f"Returning {len(se_list)} Site Engineers to frontend")
         return jsonify(se_list), 200
 
     except Exception as e:
@@ -621,7 +611,6 @@ def get_projects_for_site_engineer(site_engineer_id):
             .all()
         )
 
-        log.info(f"Found {len(assignments)} projects for Site Engineer {se.full_name} (ID: {site_engineer_id}) via PMAssignSS")
 
         project_list = []
         for proj in assignments:
@@ -637,7 +626,6 @@ def get_projects_for_site_engineer(site_engineer_id):
                 'pm_email': proj.pm_email
             }
             project_list.append(project_data)
-            log.info(f"  - {proj.project_name} (ID: {proj.project_id}), PM: {proj.pm_name}")
 
         return jsonify(project_list), 200
 

@@ -34,11 +34,9 @@ def run_migration():
         result = db.session.execute(check_column_query).fetchone()
 
         if result:
-            log.info("Column 'revision_number' already exists in 'boq' table. Skipping migration.")
             return True
 
         # Add revision_number column
-        log.info("Adding 'revision_number' column to 'boq' table...")
 
         add_column_query = text("""
             ALTER TABLE boq
@@ -48,10 +46,8 @@ def run_migration():
         db.session.execute(add_column_query)
         db.session.commit()
 
-        log.info("Successfully added 'revision_number' column to 'boq' table.")
 
         # Update existing BOQs: Set revision_number based on status
-        log.info("Updating existing BOQs with revision_number...")
 
         update_query = text("""
             UPDATE boq
@@ -63,7 +59,6 @@ def run_migration():
         db.session.execute(update_query)
         db.session.commit()
 
-        log.info("Migration completed successfully!")
         return True
 
     except Exception as e:
@@ -79,6 +74,6 @@ if __name__ == "__main__":
     with app.app_context():
         success = run_migration()
         if success:
-            print("[SUCCESS] Migration completed successfully!")
+            pass
         else:
-            print("[ERROR] Migration failed. Check logs for details.")
+            pass

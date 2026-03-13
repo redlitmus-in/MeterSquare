@@ -22,9 +22,6 @@ def run_migration():
     app = create_app()
     with app.app_context():
         try:
-            print("\n" + "="*60)
-            print("Migration: Fix NULL completion flags in pm_assign_ss")
-            print("="*60)
 
             # Count NULL values before fix
             count_se_null = db.session.execute("""
@@ -37,12 +34,8 @@ def run_migration():
                 WHERE pm_confirmed_completion IS NULL AND is_deleted = FALSE
             """).scalar()
 
-            print(f"\nBefore fix:")
-            print(f"  - Records with NULL se_completion_requested: {count_se_null}")
-            print(f"  - Records with NULL pm_confirmed_completion: {count_pm_null}")
 
             if count_se_null == 0 and count_pm_null == 0:
-                print("\n✓ No NULL values found. Migration not needed.")
                 return
 
             # Fix NULL se_completion_requested values
@@ -54,7 +47,6 @@ def run_migration():
                         last_modified_by = 'migration_fix_null_flags'
                     WHERE se_completion_requested IS NULL
                 """)
-                print(f"  ✓ Updated {count_se_null} records: se_completion_requested NULL -> FALSE")
 
             # Fix NULL pm_confirmed_completion values
             if count_pm_null > 0:
@@ -65,7 +57,6 @@ def run_migration():
                         last_modified_by = 'migration_fix_null_flags'
                     WHERE pm_confirmed_completion IS NULL
                 """)
-                print(f"  ✓ Updated {count_pm_null} records: pm_confirmed_completion NULL -> FALSE")
 
             db.session.commit()
 
@@ -80,20 +71,15 @@ def run_migration():
                 WHERE pm_confirmed_completion IS NULL AND is_deleted = FALSE
             """).scalar()
 
-            print(f"\nAfter fix:")
-            print(f"  - Records with NULL se_completion_requested: {verify_se}")
-            print(f"  - Records with NULL pm_confirmed_completion: {verify_pm}")
 
             if verify_se == 0 and verify_pm == 0:
-                print("\n✓ Migration completed successfully!")
+                pass
             else:
-                print("\n⚠ Warning: Some NULL values may remain. Check the data.")
+                pass
 
-            print("="*60 + "\n")
 
         except Exception as e:
             db.session.rollback()
-            print(f"\n✗ Migration failed: {e}")
             import traceback
             traceback.print_exc()
             raise

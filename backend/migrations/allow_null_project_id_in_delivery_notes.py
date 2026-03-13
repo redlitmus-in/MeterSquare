@@ -14,9 +14,6 @@ from sqlalchemy.orm import sessionmaker
 # Get database URL from environment
 DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
-    print("\n❌ ERROR: DATABASE_URL environment variable not set")
-    print("Please set it before running this migration:")
-    print('export DATABASE_URL="postgresql://user:password@host:port/database"')
     exit(1)
 
 
@@ -37,28 +34,21 @@ def run_migration():
         session.execute(alter_query)
         session.commit()
 
-        print("✅ Successfully altered material_delivery_notes.project_id to allow NULL")
-        print("   Store transfers can now be created without a project_id")
 
         return True
 
     except Exception as e:
         session.rollback()
-        print(f"❌ Error during migration: {str(e)}")
         return False
     finally:
         session.close()
 
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Migration: Allow NULL project_id in material_delivery_notes")
-    print("=" * 60)
 
     success = run_migration()
 
     if success:
-        print("\n✅ Migration completed successfully!")
+        pass
     else:
-        print("\n❌ Migration failed. Check the error above.")
         exit(1)

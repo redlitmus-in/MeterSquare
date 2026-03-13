@@ -1692,7 +1692,7 @@ def complete_purchase():
         existing_imr_count = InternalMaterialRequest.query.filter_by(cr_id=cr.cr_id).count()
 
         if po_children_exist:
-            log.info(f"CR-{cr_id} has POChildren - skipping individual request creation (handled by POChild completion)")
+            pass
         elif existing_imr_count > 0:
             log.warning(f" CR-{cr_id} already has {existing_imr_count} Internal Material Request(s) - skipping creation to prevent duplicates")
             created_imr_count = existing_imr_count  # Use existing count for notification
@@ -1777,7 +1777,6 @@ def complete_purchase():
                     db.session.add(imr)
                     created_imr_count = 1
 
-                    log.info(f"✅ Created 1 grouped Internal Material Request for CR-{cr_id} with {len(grouped_materials)} materials")
 
                     # ✅ FIX: Mark all materials as routed to vendor (via production manager)
                     routed_materials_to_add = {}
@@ -1834,7 +1833,6 @@ def complete_purchase():
                         metadata={'reference_type': 'change_request', 'reference_id': cr_id}
                     )
                     send_notification_to_user(pm.user_id, notification.to_dict())
-                    log.info(f"✅ Notified PM {pm.full_name} about incoming vendor delivery for CR-{cr_id}")
 
                     # Send email notification
                     try:

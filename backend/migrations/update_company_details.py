@@ -24,11 +24,9 @@ def run_migration():
                         ADD COLUMN company_contact_person VARCHAR(255) DEFAULT 'Mr. Mohammed Sabir'
                     """))
                     db.session.commit()
-                    print("Added 'company_contact_person' column")
                 else:
-                    print("Column 'company_contact_person' already exists")
+                    pass
             except Exception as e:
-                print(f"Error adding column: {e}")
                 db.session.rollback()
 
             # Update all company details
@@ -41,15 +39,8 @@ def run_migration():
                     company_fax = '06-5398289'
             """))
             db.session.commit()
-            print("Updated company details:")
-            print("  - company_name: Meter Square Interiors LLC")
-            print("  - company_contact_person: Mr. Mohammed Sabir")
-            print("  - company_phone: 06-5398189/050-1080853")
-            print("  - company_fax: 06-5398289")
-            print("\nMigration completed successfully!")
 
         except Exception as e:
-            print(f"Error running migration: {e}")
             db.session.rollback()
             raise
 

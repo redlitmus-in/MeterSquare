@@ -2,6 +2,10 @@
 Notification Utility Functions
 Helper functions to create and send notifications
 """
+import logging
+
+log = logging.getLogger(__name__)
+
 
 from models.notification import Notification
 from config.db import db
@@ -71,7 +75,7 @@ class NotificationManager:
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error creating notification: {e}")
+            log.error(f"Error creating notification: {str(e)}")
             raise
 
     @staticmethod
@@ -113,7 +117,7 @@ class NotificationManager:
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error creating bulk notifications: {e}")
+            log.error(f"Error creating bulk notifications: {str(e)}")
             raise
 
     @staticmethod

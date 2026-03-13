@@ -28,28 +28,18 @@ def add_pm_assignment_fields():
             for statement in alter_statements:
                 try:
                     db.session.execute(text(statement))
-                    print(f"+ Executed: {statement[:60]}...")
                 except Exception as e:
                     # Column might already exist
                     if "already exists" in str(e).lower() or "duplicate column" in str(e).lower():
-                        print(f"= Skipped (already exists): {statement[:60]}...")
+                        pass
                     else:
                         raise e
 
             db.session.commit()
 
-            print("\n+ Successfully updated change_requests table with PM assignment fields")
-            print("\nNew fields added:")
-            print("  - assigned_to_pm_user_id (INTEGER) - The specific PM who should handle this request")
-            print("  - assigned_to_pm_name (VARCHAR) - Name of the assigned PM")
-            print("  - assigned_to_pm_date (TIMESTAMP) - When the PM was assigned")
-            print("\nIndex created:")
-            print("  - idx_cr_assigned_pm - For efficient PM-based filtering")
-            print("\n+ Migration completed successfully!")
 
     except Exception as e:
         db.session.rollback()
-        print(f"X Error updating change_requests table: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -57,28 +47,10 @@ def add_pm_assignment_fields():
     return True
 
 if __name__ == "__main__":
-    print("=" * 70)
-    print("Adding PM Assignment Fields to Change Requests Table")
-    print("=" * 70)
-    print()
-    print("Purpose: Enable proper routing of SE-created change requests")
-    print("         to the specific PM who assigned them (via pm_assign_ss)")
-    print()
 
     success = add_pm_assignment_fields()
 
     if success:
-        print("\n" + "=" * 70)
-        print("Migration Complete! What this fixes:")
-        print("=" * 70)
-        print("1. + SE sends request -> Only assigned PM sees it (not all PMs)")
-        print("2. + Uses pm_assign_ss table to determine the correct PM")
-        print("3. + Stores PM assignment in change_requests table for filtering")
-        print()
-        print("Next Steps:")
-        print("1. Restart backend server")
-        print("2. Test: SE creates request -> Send to PM")
-        print("3. Verify: Only the assigned PM sees the request")
-        print()
+        pass
     else:
-        print("\nX Migration failed. Please check the error above.")
+        pass

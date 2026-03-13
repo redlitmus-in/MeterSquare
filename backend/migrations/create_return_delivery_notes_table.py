@@ -125,7 +125,6 @@ def create_return_delivery_notes_tables():
         db.session.execute(create_return_delivery_notes_sql)
         db.session.execute(create_return_note_items_sql)
         db.session.commit()
-        print("✓ Return delivery notes tables created successfully")
 
         # Add foreign key to material_returns table to link with RDN
         add_rdn_to_returns_sql = text("""
@@ -150,7 +149,6 @@ def create_return_delivery_notes_tables():
 
         db.session.execute(add_rdn_to_returns_sql)
         db.session.commit()
-        print("✓ Added return_delivery_note_id to material_returns table")
 
         # Create sequence for RDN numbering
         create_sequence_sql = text("""
@@ -166,13 +164,11 @@ def create_return_delivery_notes_tables():
 
         db.session.execute(create_sequence_sql)
         db.session.commit()
-        print("✓ Created sequence for RDN numbering")
 
         return True
 
     except Exception as e:
         db.session.rollback()
-        print(f"✗ Error creating return delivery notes tables: {str(e)}")
         return False
 
 
@@ -194,11 +190,9 @@ def rollback_return_delivery_notes_tables():
     try:
         db.session.execute(rollback_sql)
         db.session.commit()
-        print("✓ Return delivery notes tables rolled back successfully")
         return True
     except Exception as e:
         db.session.rollback()
-        print(f"✗ Error rolling back return delivery notes tables: {str(e)}")
         return False
 
 
@@ -207,15 +201,9 @@ if __name__ == "__main__":
 
     app = create_app()
     with app.app_context():
-        print("=== Creating Return Delivery Notes Tables ===")
         success = create_return_delivery_notes_tables()
 
         if success:
-            print("\n✓ Migration completed successfully!")
-            print("\nTables created:")
-            print("  - return_delivery_notes")
-            print("  - return_delivery_note_items")
-            print("\nIndexes created for optimal query performance")
-            print("Added return_delivery_note_id column to material_returns table")
+            pass
         else:
-            print("\n✗ Migration failed!")
+            pass

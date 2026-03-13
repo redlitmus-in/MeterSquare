@@ -27,7 +27,6 @@ def create_asset_return_requests_table():
         exists = result.scalar()
 
         if exists:
-            print("Table 'asset_return_requests' already exists. Skipping creation.")
             return True
 
         # Create the table
@@ -69,7 +68,6 @@ def create_asset_return_requests_table():
         try:
             db.session.execute(db.text(create_table_sql))
             db.session.commit()
-            print("Created table 'asset_return_requests' successfully!")
 
             # Create indexes for better query performance
             indexes = [
@@ -84,41 +82,21 @@ def create_asset_return_requests_table():
                 try:
                     db.session.execute(db.text(idx_sql))
                 except Exception as e:
-                    print(f"Index creation warning: {e}")
+                    pass
 
             db.session.commit()
-            print("Created indexes successfully!")
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error creating table: {e}")
             return False
 
 
 if __name__ == "__main__":
-    print("=" * 70)
-    print("Migration: Create asset_return_requests table")
-    print("=" * 70)
-    print()
 
     success = create_asset_return_requests_table()
 
     if success:
-        print()
-        print("=" * 70)
-        print("Migration Complete!")
-        print("=" * 70)
-        print()
-        print("New table: asset_return_requests")
-        print()
-        print("Flow:")
-        print("1. SE requests return with condition assessment")
-        print("2. PM receives notification of pending return request")
-        print("3. PM reviews, does quality check, and processes return")
-        print("4. If damaged: sends to maintenance queue")
-        print("5. Tracking code generated for history")
+        pass
     else:
-        print()
-        print("Migration Failed! Please check the error above.")
         sys.exit(1)

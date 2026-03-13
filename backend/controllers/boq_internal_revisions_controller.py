@@ -481,7 +481,7 @@ def get_internal_revisions(boq_id):
                     changes_summary['total_cost'] = combined_subtotal - discount_amount
                 else:
                     # No items, use existing total_cost
-                    log.info(f"📊 Revision {rev.id}: No items, using stored total_cost")
+                    pass
 
             revision_data = {
                 "id": rev.id,

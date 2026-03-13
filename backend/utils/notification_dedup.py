@@ -35,14 +35,12 @@ def check_duplicate_notification(user_id, title_pattern, metadata_key, metadata_
                 if existing.meta_data:
                     stored_value = existing.meta_data.get(metadata_key)
                     if str(stored_value) == str(metadata_value):
-                        log.info(f"[DuplicateCheck] Found duplicate notification for user {user_id}, {metadata_key}={metadata_value}")
                         return True
                 # Old notification has no metadata or metadata doesn't match – not a dup
                 log.debug(f"[DuplicateCheck] Title matched but metadata didn't for user {user_id}, title: {title_pattern}")
                 return False
             else:
                 # Caller didn't supply metadata criteria – title match alone is enough
-                log.info(f"[DuplicateCheck] Found duplicate notification by title for user {user_id}, title pattern: {title_pattern}")
                 return True
         return False
     except Exception as e:

@@ -30,7 +30,6 @@ def backfill_labour_roles():
     """
     with app.app_context():
         try:
-            print("Starting labour_role backfill for existing attendance records...")
 
             # Get all attendance records without labour_role
             attendance_records = DailyAttendance.query.filter(
@@ -38,7 +37,6 @@ def backfill_labour_roles():
                 DailyAttendance.is_deleted == False
             ).all()
 
-            print(f"Found {len(attendance_records)} attendance records without labour_role")
 
             updated_count = 0
             skipped_count = 0
@@ -108,28 +106,18 @@ def backfill_labour_roles():
                     updated_count += 1
 
                     if updated_count % 10 == 0:
-                        print(f"  Updated {updated_count} records... (last: {source})")
+                        pass
                 else:
                     skipped_count += 1
-                    print(f"  ⚠ Could not determine role for attendance_id={attendance.attendance_id} "
-                          f"(worker_id={attendance.worker_id}, project_id={attendance.project_id}, "
-                          f"date={attendance.attendance_date})")
 
             # Commit all changes
             db.session.commit()
 
-            print("\n" + "="*60)
-            print(f"✓ Backfill completed successfully!")
-            print(f"  - Updated: {updated_count} records")
-            print(f"  - Skipped: {skipped_count} records (could not determine role)")
-            print(f"  - Total processed: {len(attendance_records)} records")
-            print("="*60)
 
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"\n✗ Backfill failed: {str(e)}")
             import traceback
             traceback.print_exc()
             return False

@@ -116,7 +116,6 @@ def create_preliminary_purchase_request():
         db.session.add(ppr)
         db.session.commit()
 
-        log.info(f"Created preliminary purchase request PPR-{ppr.ppr_id} for BOQ {boq_id} by user {user_id}")
 
         return jsonify({
             "success": True,
@@ -281,7 +280,6 @@ def complete_preliminary_purchase(ppr_id):
 
         db.session.commit()
 
-        log.info(f"Preliminary purchase PPR-{ppr_id} marked as completed by buyer {user_id}")
 
         return jsonify({
             "success": True,
@@ -339,7 +337,6 @@ def reject_preliminary_purchase(ppr_id):
 
         db.session.commit()
 
-        log.info(f"Preliminary purchase PPR-{ppr_id} rejected by user {user_id}")
 
         return jsonify({
             "success": True,
@@ -378,7 +375,6 @@ def get_boq_selected_preliminaries_for_purchase(boq_id):
         stored_preliminaries = boq_details_json.get('preliminaries', {})
         total_preliminary_amount = float(stored_preliminaries.get('cost_details', {}).get('amount', 0) or 0)
 
-        log.info(f"BOQ {boq_id}: Total preliminary amount from cost_details: {total_preliminary_amount}")
 
         result = []
 
@@ -387,7 +383,6 @@ def get_boq_selected_preliminaries_for_purchase(boq_id):
         boq_prelim = BOQPreliminary.query.filter_by(boq_id=boq_id).first()
         selected_ids = (boq_prelim.prelim_id or []) if boq_prelim else []
 
-        log.info(f"BOQ {boq_id}: Found {len(selected_ids)} selected preliminary IDs in JSONB")
 
         # Calculate per-item amount if we have a total
         num_items = len(selected_ids)
@@ -413,7 +408,6 @@ def get_boq_selected_preliminaries_for_purchase(boq_id):
 
         # If JSONB is empty, try getting from BOQ details JSON items as fallback
         if not result:
-            log.info(f"BOQ {boq_id}: No items in JSONB, checking BOQ details JSON items")
             prelim_items_from_boq = stored_preliminaries.get('items', [])
 
             for idx, item in enumerate(prelim_items_from_boq):
@@ -445,7 +439,6 @@ def get_boq_selected_preliminaries_for_purchase(boq_id):
                     'display_order': idx
                 })
 
-        log.info(f"BOQ {boq_id}: Returning {len(result)} preliminaries for purchase")
 
         return jsonify({
             "success": True,
@@ -484,7 +477,6 @@ def delete_preliminary_purchase_request(ppr_id):
 
         db.session.commit()
 
-        log.info(f"Preliminary purchase request PPR-{ppr_id} deleted")
 
         return jsonify({
             "success": True,

@@ -2,6 +2,10 @@
 Modern BOQ PDF Generator - Corporate Professional Design
 Clean, compact, and accurate calculations
 """
+import logging
+
+log = logging.getLogger(__name__)
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
@@ -65,7 +69,7 @@ class ModernBOQPDFGenerator:
             buf.seek(0)
             return Image(buf, width=final_w, height=final_h)
         except Exception as e:
-            print(f"[PDF] _base64_to_image failed: {e}")
+            log.error(f"[PDF] _base64_to_image failed: {str(e)}")
             return None
 
     def _add_watermark(self, canvas_obj, doc):
@@ -1039,7 +1043,7 @@ class ModernBOQPDFGenerator:
                                     if img:
                                         loaded_images.append(img)
                                     else:
-                                        print(f"[INTERNAL_PDF] ✗ Image not in cache: {image_url[:50]}...")
+                                        pass
 
                         # If we loaded multiple images, create a mini table to display them
                         if len(loaded_images) > 0:

@@ -238,7 +238,6 @@ def get_logo_base64():
                 return None
             
             base64_logo = base64.b64encode(logo_data).decode('utf-8')
-            log.info(f"Successfully loaded logo from: {logo_path} (size: {len(logo_data)} bytes, base64 length: {len(base64_logo)})")
             
             # Validate base64 encoding
             try:
@@ -412,7 +411,6 @@ def send_otp(email_id):
                         logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
                         message.attach(logo_image)
                         logo_attached = True
-                        log.info(f"Logo attached successfully from: {logo_path}")
                         break
             
             if not logo_attached:
@@ -434,14 +432,13 @@ def send_otp(email_id):
                 server.login(sender_email, password)
                 server.sendmail(sender_email, email_id, message.as_string())
 
-        log.info(f"OTP email sent successfully to {email_id}")
         return otp
 
     except smtplib.SMTPException as e:
-        log.info(f"SMTP error occurred: {e}")
+        log.error(f"SMTP error occurred: {str(e)}")
         return None
     except Exception as e:
-        log.info(f"An error occurred: {e}")
+        log.error(f"An error occurred: {str(e)}")
         return None
 
 def verification_otp():

@@ -27,7 +27,6 @@ def fix_multiple_skills():
     """
     with app.app_context():
         try:
-            print("Starting fix for 'Multiple Skills' labour_role...")
 
             # Get all attendance records with "Multiple Skills"
             attendance_records = DailyAttendance.query.filter(
@@ -35,7 +34,6 @@ def fix_multiple_skills():
                 DailyAttendance.is_deleted == False
             ).all()
 
-            print(f"Found {len(attendance_records)} attendance records with 'Multiple Skills'")
 
             updated_count = 0
             skipped_count = 0
@@ -102,22 +100,12 @@ def fix_multiple_skills():
                     attendance.labour_role = determined_role
                     updated_count += 1
 
-                    print(f"  ✓ Updated attendance_id={attendance.attendance_id}: "
-                          f"'{attendance.labour_role}' → '{determined_role}' (source: {source})")
                 else:
                     skipped_count += 1
-                    print(f"  ⚠ Could not determine specific role for attendance_id={attendance.attendance_id} "
-                          f"(keeping 'Multiple Skills')")
 
             # Commit all changes
             db.session.commit()
 
-            print("\n" + "="*60)
-            print(f"✓ Fix completed successfully!")
-            print(f"  - Updated: {updated_count} records")
-            print(f"  - Skipped: {skipped_count} records")
-            print(f"  - Total processed: {len(attendance_records)} records")
-            print("="*60)
 
             # Show updated distribution
             result = db.session.execute(text('''
@@ -128,18 +116,13 @@ def fix_multiple_skills():
                 ORDER BY count DESC
             ''')).fetchall()
 
-            print("\n📊 Updated Labour Role Distribution:")
-            print("="*60)
             for row in result:
                 role = row[0] if row[0] else '(NULL)'
-                print(f"  {role}: {row[1]} records")
-            print("="*60)
 
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"\n✗ Fix failed: {str(e)}")
             import traceback
             traceback.print_exc()
             return False

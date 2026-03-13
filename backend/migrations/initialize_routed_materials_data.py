@@ -19,13 +19,9 @@ app = create_app()
 def run_migration():
     """Initialize routed_materials for existing CRs"""
 
-    print("=" * 70)
-    print("MIGRATION: Initialize routed_materials data")
-    print("=" * 70)
 
     with app.app_context():
         try:
-            print("\n1. Initializing routed_materials for CRs with store requests...")
 
             # Mark materials as routed for CRs that have store requests
             db.session.execute(text("""
@@ -57,9 +53,7 @@ def run_migration():
                 WHERE routed_materials IS NOT NULL AND routed_materials != '{}'::jsonb
             """)).scalar()
 
-            print(f"✓ Initialized {updated_store} CRs with store-routed materials")
 
-            print("\n2. Checking for PO children table...")
 
             # Check if po_children table exists
             table_exists = db.session.execute(text("""
@@ -70,7 +64,6 @@ def run_migration():
             """)).scalar()
 
             if table_exists:
-                print("✓ PO children table found. Initializing vendor-routed materials...")
 
                 # Mark materials as routed for CRs that have PO children
                 db.session.execute(text("""
@@ -108,12 +101,10 @@ def run_migration():
                     AND routed_materials::text LIKE '%vendor%'
                 """)).scalar()
 
-                print(f"✓ Initialized {updated_vendor} CRs with vendor-routed materials")
             else:
-                print("⚠ PO children table not found. Skipping vendor-routed materials initialization.")
+                pass
 
             # Show sample
-            print("\n3. Sample routed_materials data:")
             result = db.session.execute(text("""
                 SELECT cr_id, routed_materials
                 FROM change_requests
@@ -123,15 +114,11 @@ def run_migration():
             """))
 
             for row in result:
-                print(f"   CR-{row[0]}: {row[1]}")
+                pass
 
-            print("\n" + "=" * 70)
-            print("✓ MIGRATION COMPLETED SUCCESSFULLY")
-            print("=" * 70)
 
         except Exception as e:
             db.session.rollback()
-            print(f"\n✗ MIGRATION FAILED: {str(e)}")
             import traceback
             traceback.print_exc()
             raise

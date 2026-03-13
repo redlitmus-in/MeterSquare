@@ -130,7 +130,6 @@ def save_boq_preliminary_selections(boq_id):
 
         db.session.commit()
 
-        log.info(f"Saved {len(checked_prelim_ids)} selected preliminary IDs for BOQ {boq_id}")
 
         return jsonify({
             "success": True,
@@ -246,7 +245,6 @@ def create_preliminary_master():
         db.session.add(new_prelim)
         db.session.commit()
 
-        log.info(f"Created new preliminary master: {new_prelim.prelim_id} - {description}")
 
         return jsonify({
             "success": True,
@@ -296,7 +294,6 @@ def delete_preliminary_master(prelim_id):
 
         db.session.commit()
 
-        log.info(f"Deleted preliminary master: {prelim_id} - {prelim.description}")
 
         return jsonify({
             "success": True,

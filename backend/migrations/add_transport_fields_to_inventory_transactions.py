@@ -26,13 +26,7 @@ def upgrade():
                 ADD COLUMN IF NOT EXISTS transport_notes TEXT;
             """))
             conn.commit()
-            print("✓ Successfully added transport fields to inventory_transactions")
-            print("  - driver_name (VARCHAR 255)")
-            print("  - vehicle_number (VARCHAR 100)")
-            print("  - transport_fee (FLOAT, default 0.0)")
-            print("  - transport_notes (TEXT)")
     except Exception as e:
-        print(f"✗ Error adding transport fields: {e}")
         raise
 
 def downgrade():
@@ -47,26 +41,10 @@ def downgrade():
                 DROP COLUMN IF EXISTS transport_notes;
             """))
             conn.commit()
-            print("✓ Successfully removed transport fields from inventory_transactions")
     except Exception as e:
-        print(f"✗ Error removing transport fields: {e}")
         raise
 
 if __name__ == '__main__':
-    print("=" * 60)
-    print("Migration: Add transport fields to inventory_transactions")
-    print("=" * 60)
-    print("\nThis migration adds 4 new columns for tracking vendor delivery transport details:")
-    print("  1. driver_name - Name of the delivery driver")
-    print("  2. vehicle_number - Vehicle registration number")
-    print("  3. transport_fee - Manually entered transport cost (AED)")
-    print("  4. transport_notes - Additional delivery notes")
-    print("\nTarget: DEVELOP database only")
-    print("Role: Production Manager")
-    print("\nStarting migration...\n")
 
     upgrade()
 
-    print("\n" + "=" * 60)
-    print("Migration complete!")
-    print("=" * 60)

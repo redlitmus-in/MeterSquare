@@ -126,10 +126,8 @@ def migrate_boq(boq_details: BOQDetails) -> bool:
             from sqlalchemy.orm.attributes import flag_modified
             flag_modified(boq_details, "boq_details")
             db.session.add(boq_details)
-            log.info(f"BOQ {boq_details.boq_id}: Updated {updated_count}/{total_sub_items} sub-items with negotiable margin")
             return True
         else:
-            log.info(f"BOQ {boq_details.boq_id}: All {total_sub_items} sub-items already have negotiable margin")
             return False
 
     except Exception as e:
@@ -144,13 +142,9 @@ def run_migration():
     Main migration function
     """
     with app.app_context():
-        log.info("=" * 80)
-        log.info("Starting BOQ Negotiable Margin Migration")
-        log.info("=" * 80)
 
         # Get all BOQs
         all_boqs = BOQDetails.query.filter_by(is_deleted=False).all()
-        log.info(f"Found {len(all_boqs)} BOQs to process")
 
         migrated_count = 0
         skipped_count = 0
@@ -169,14 +163,6 @@ def run_migration():
         # Commit all changes
         try:
             db.session.commit()
-            log.info("=" * 80)
-            log.info("Migration Summary:")
-            log.info(f"  Total BOQs: {len(all_boqs)}")
-            log.info(f"  Migrated: {migrated_count}")
-            log.info(f"  Skipped (already migrated): {skipped_count}")
-            log.info(f"  Errors: {error_count}")
-            log.info("Migration completed successfully!")
-            log.info("=" * 80)
         except Exception as e:
             db.session.rollback()
             log.error(f"Failed to commit changes: {str(e)}")
@@ -188,21 +174,14 @@ def run_migration():
 
 
 if __name__ == "__main__":
-    print("\n" + "=" * 80)
-    print("BOQ Negotiable Margin Migration Script")
-    print("=" * 80)
-    print("\nThis script will add negotiable_margin calculations to all existing BOQs.")
-    print("\nFormula:")
-    print("  negotiable_margin = client_amount - (materials + labour + misc + O&P + transport)")
-    print("\n" + "=" * 80)
 
     response = input("\nDo you want to proceed? (yes/no): ").strip().lower()
 
     if response == 'yes':
         success = run_migration()
         if success:
-            print("\n✅ Migration completed successfully!")
+            pass
         else:
-            print("\n❌ Migration failed. Check logs for details.")
+            pass
     else:
-        print("\n❌ Migration cancelled by user.")
+        pass

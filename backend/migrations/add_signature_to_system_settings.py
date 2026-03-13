@@ -47,9 +47,8 @@ def run_migration():
                     ADD COLUMN signature_image TEXT
                 """)
                 db.session.execute(add_signature_image)
-                print("[OK] Added signature_image column")
             else:
-                print("[EXISTS] signature_image column already exists")
+                pass
 
             # Add signature_enabled column if not exists
             if 'signature_enabled' not in existing_columns:
@@ -58,21 +57,15 @@ def run_migration():
                     ADD COLUMN signature_enabled BOOLEAN DEFAULT FALSE
                 """)
                 db.session.execute(add_signature_enabled)
-                print("[OK] Added signature_enabled column")
             else:
-                print("[EXISTS] signature_enabled column already exists")
+                pass
 
             db.session.commit()
-            print("\n[SUCCESS] Migration completed successfully!")
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"\n[ERROR] Migration failed: {str(e)}")
             return False
 
 if __name__ == '__main__':
-    print("=" * 50)
-    print("System Settings Signature Migration")
-    print("=" * 50)
     run_migration()

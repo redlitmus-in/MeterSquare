@@ -57,7 +57,6 @@ def send_sms_otp(phone_number):
             "message": message
         }
 
-        log.info(f"Sending SMS OTP to {phone_number}")
 
         # Send SMS via API
         response = requests.post(SMS_API_URL, json=payload, headers=headers, timeout=30)
@@ -72,7 +71,6 @@ def send_sms_otp(phone_number):
                 return otp
             return None
 
-        log.info(f"SMS OTP sent successfully to {phone_number}")
         return otp
 
     except requests.exceptions.RequestException as e:

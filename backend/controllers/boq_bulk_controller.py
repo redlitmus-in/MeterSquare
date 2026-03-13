@@ -164,9 +164,6 @@ def bulk_upload_boq():
     Handle bulk BOQ upload from Excel file
     """
     try:
-        log.info("=== Bulk BOQ Upload Request Started ===")
-        log.info(f"Files: {list(request.files.keys())}")
-        log.info(f"Form: {dict(request.form)}")
 
         # Check if file is present
         if 'file' not in request.files:
@@ -179,7 +176,6 @@ def bulk_upload_boq():
             log.error("Empty filename")
             return jsonify({'success': False, 'error': 'No file selected'}), 400
 
-        log.info(f"Received file: {file.filename}, size: {file.content_length}")
 
         if not allowed_file(file.filename):
             log.error(f"Invalid file extension: {file.filename}")
@@ -192,7 +188,6 @@ def bulk_upload_boq():
         project_id = request.form.get('project_id')
         boq_name = request.form.get('boq_name')
 
-        log.info(f"Project ID: {project_id}, BOQ Name: {boq_name}")
 
         if not project_id:
             return jsonify({'success': False, 'error': 'Project ID is required'}), 400
@@ -425,7 +420,6 @@ def bulk_upload_boq():
                 for attempt in range(max_retries):
                     try:
                         os.remove(temp_path)
-                        log.info(f"Successfully deleted temp file: {temp_path}")
                         break
                     except PermissionError as e:
                         if attempt < max_retries - 1:

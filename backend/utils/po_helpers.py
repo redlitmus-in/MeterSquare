@@ -75,10 +75,6 @@ def are_all_cr_materials_covered(cr, po_children):
     uncovered = all_parent_names - covered
 
     if uncovered:
-        log.info(
-            f"CR-{cr.cr_id}: {len(uncovered)} materials NOT covered by PO children: {uncovered} "
-            f"(parent has {len(all_parent_names)}, children cover {len(materials_in_children)}, "
-            f"store-routed {len(store_routed)})"
-        )
+        pass
 
     return len(uncovered) == 0, uncovered

@@ -20,7 +20,6 @@ def run_migration():
     database_url = os.getenv('DATABASE_URL')
 
     if not database_url:
-        print("❌ ERROR: DATABASE_URL not found in environment variables")
         return False
 
     try:
@@ -29,16 +28,12 @@ def run_migration():
         with open(migration_file, 'r') as f:
             migration_sql = f.read()
 
-        print("📦 Connecting to database...")
         conn = psycopg2.connect(database_url)
         conn.autocommit = True  # Run in autocommit mode for ALTER TABLE
         cursor = conn.cursor()
 
-        print("🔄 Running migration...")
         cursor.execute(migration_sql)
 
-        print("✅ Migration completed successfully!")
-        print("\n📊 Verifying new columns...")
 
         # Verify the columns were added
         cursor.execute("""
@@ -62,32 +57,23 @@ def run_migration():
 
         columns = cursor.fetchall()
         if columns:
-            print(f"\n✅ Successfully added {len(columns)} columns:")
             for col_name, col_type in columns:
-                print(f"   - {col_name} ({col_type})")
+                pass
         else:
-            print("⚠️  Warning: Could not verify columns")
+            pass
 
         cursor.close()
         conn.close()
 
-        print("\n🎉 Migration complete! You can now:")
-        print("   1. Restart your backend server")
-        print("   2. Test the vendor approval workflow")
 
         return True
 
     except Exception as e:
-        print(f"❌ ERROR running migration: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
 
 if __name__ == '__main__':
-    print("=" * 60)
-    print("Vendor Selection Migration for Change Requests")
-    print("=" * 60)
-    print()
 
     success = run_migration()
 

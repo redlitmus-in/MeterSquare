@@ -751,17 +751,13 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                             item_name=item_name
                         )
                         if sent:
-                            log.info(
-                                f"[CR REJECT EMAIL] Email sent to offline user {creator_user.email} for CR {cr_id}"
-                            )
+                            pass
                         else:
                             log.warning(
                                 f"[CR REJECT EMAIL] Email sending failed for user {creator_user.email}, CR {cr_id}"
                             )
                     else:
-                        log.info(
-                            f"[CR REJECT EMAIL] Skipping email – creator (user_id={creator_user_id}) is ONLINE"
-                        )
+                        pass
                 else:
                     log.warning(f"[CR REJECT EMAIL] Creator user_id={creator_user_id} not found, skipping email")
             except Exception as email_err:
@@ -2387,7 +2383,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             for se_id in (site_engineer_ids or []):
                 # Guard: skip if SE was already notified about this delivery note within 10 minutes
                 if check_duplicate_notification(se_id, 'Materials In Transit to Your Site', 'delivery_note_number', delivery_note_number, minutes=10):
-                    log.info(f"Skipping duplicate dispatch notification for SE {se_id}, DN {delivery_note_number}")
                     continue
                 notification = NotificationManager.create_notification(
                     user_id=se_id,
@@ -3170,7 +3165,7 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
                     )
                     send_notification_to_user(actual_user_id, notification.to_dict())
                 else:
-                    log.info(f"Skipped duplicate comment notification for ticket #{ticket_number}")
+                    pass
             else:
                 log.warning(f"Cannot send comment notification for ticket #{ticket_number}: No user_id found (email: {client_email})")
         except Exception as e:
@@ -3242,7 +3237,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             )
 
             send_notification_to_user(user_id, notification.to_dict())
-            log.info(f"Sent simple notification to user {user_id}: {title}")
         except Exception as e:
             log.error(f"Error sending simple notification to user {user_id}: {e}")
 
@@ -3833,7 +3827,6 @@ class ComprehensiveNotificationService(LabourNotificationMixin):
             email_html = wrap_email_content(message)
             email_service = BOQEmailService()
             email_service.send_email_async(recipient, subject, email_html)
-            log.info(f"📧 Email queued: {notification_type or subject} → {recipient}")
         except Exception as e:
             log.error(f"Failed to send email notification to {recipient}: {e}")
 

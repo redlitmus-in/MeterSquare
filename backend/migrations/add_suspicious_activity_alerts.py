@@ -46,9 +46,6 @@ def up():
 
     with app.app_context():
         try:
-            log.info("=" * 70)
-            log.info("MIGRATION: Create suspicious_activity_alerts table")
-            log.info("=" * 70)
 
             db.session.execute(text("""
                 CREATE TABLE IF NOT EXISTS suspicious_activity_alerts (
@@ -83,12 +80,6 @@ def up():
 
             db.session.commit()
 
-            print("Migration applied successfully.")
-            log.info("=" * 70)
-            log.info("MIGRATION COMPLETED SUCCESSFULLY")
-            log.info("  Table  : suspicious_activity_alerts")
-            log.info("  Indexes: idx_saa_user_id, idx_saa_is_resolved, idx_saa_created_at")
-            log.info("=" * 70)
             return True
 
         except Exception as e:
@@ -107,9 +98,6 @@ def down():
 
     with app.app_context():
         try:
-            log.info("=" * 70)
-            log.info("ROLLBACK: Drop suspicious_activity_alerts table")
-            log.info("=" * 70)
 
             db.session.execute(text("""
                 DROP TABLE IF EXISTS suspicious_activity_alerts
@@ -117,8 +105,6 @@ def down():
 
             db.session.commit()
 
-            print("Rollback applied successfully.")
-            log.info("ROLLBACK COMPLETED SUCCESSFULLY")
             return True
 
         except Exception as e:

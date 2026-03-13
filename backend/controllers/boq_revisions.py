@@ -362,7 +362,7 @@ def client_revision_td_mail_send():
         if not estimator or not estimator_user_id:
             log.error(f"BOQ {boq_id} - CRITICAL: Could not find estimator. project.estimator_id={project.estimator_id}, boq.created_by={boq.created_by}")
         else:
-            log.info(f"BOQ {boq_id} - Estimator resolved: user_id={estimator_user_id}, name={estimator_name}, email={estimator_email}")
+            pass
 
         # Get existing BOQ history
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -438,11 +438,11 @@ def client_revision_td_mail_send():
                 )
 
                 if email_sent:
-                    log.info(f"📧 ✅ TD approval email sent successfully to {estimator_name} ({estimator_email})")
+                    pass
                 else:
                     log.error(f" Failed to send TD approval email to {estimator_name}")
             else:
-                log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped (in-app notification only)")
+                pass
 
             # Prepare new action for APPROVED
             action_type = "internal_revision_approved" if is_internal_revision else "client_revision_approved"
@@ -505,11 +505,11 @@ def client_revision_td_mail_send():
                 )
 
                 if email_sent:
-                    log.info(f"📧 ✅ TD rejection email sent successfully to {estimator_name} ({estimator_email})")
+                    pass
                 else:
                     log.error(f" Failed to send TD rejection email to {estimator_name}")
             else:
-                log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped (in-app notification only)")
+                pass
 
             # Prepare new action for REJECTED
             action_type = "internal_revision_rejected" if is_internal_revision else "status_change"
@@ -1032,7 +1032,7 @@ def send_td_client_boq_email(boq_id):
                             sender_name=user_name
                         )
                     else:
-                        log.info(f"[send_client_revision] TD is ONLINE - Email skipped (in-app notification only)")
+                        pass
                 else:
                     log.warning(f"[send_client_revision] TD user not found by email for status check: {td_email}")
             except Exception as email_err:
@@ -1272,7 +1272,7 @@ def send_td_client_boq_email(boq_id):
                                     sender_name=user_name
                                 )
                             else:
-                                log.info(f"[send_client_revision] TD {td_user_id} is ONLINE - Email skipped (in-app notification only)")
+                                pass
                         else:
                             log.warning(f"[send_client_revision] TD user {td_user_id} not found for email status check")
                     except Exception as email_err:

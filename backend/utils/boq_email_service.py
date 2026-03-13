@@ -108,7 +108,6 @@ class BOQEmailService:
                             logo_image.add_header('Content-Disposition', 'inline', filename='logo.png')
                             msg_related.attach(logo_image)
                             logo_attached = True
-                            log.info(f"Logo attached from: {logo_path}")
                             break
                     if not logo_attached:
                         log.warning("Logo file not found, sending email without logo")
@@ -150,7 +149,6 @@ class BOQEmailService:
 
             cc_list_str = ', '.join(cc_list) if cc_emails else ''
             cc_info = f" + CC: {cc_list_str}" if cc_emails else ""
-            log.info(f"Email sent successfully to {', '.join(to_emails)}{cc_info} | Envelope: {all_recipients}")
             return True
 
         except Exception as e:
@@ -1177,7 +1175,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(pm_email, subject, email_html)
             if success:
-                log.info(f"PM assignment email sent successfully to {pm_email}")
+                pass
             else:
                 log.error(f"Failed to send PM assignment email to {pm_email}")
             return success
@@ -1222,7 +1220,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email_async(pm_email, subject, email_html)
             if success:
-                log.info(f"PM assignment email queued for async sending to {pm_email}")
+                pass
             else:
                 log.error(f"Failed to queue PM assignment email to {pm_email}")
             return success
@@ -1415,7 +1413,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(se_email, subject, email_html)
             if success:
-                log.info(f"SE assignment email sent successfully to {se_email}")
+                pass
             else:
                 log.error(f"Failed to send SE assignment email to {se_email}")
             return success
@@ -1620,7 +1618,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(estimator_email, subject, email_html)
             if success:
-                log.info(f"New purchase notification email sent successfully to {estimator_email}")
+                pass
             else:
                 log.error(f"Failed to send new purchase notification email to {estimator_email}")
             return success
@@ -1990,7 +1988,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"New purchase approval email sent successfully to {recipient_email}")
+                pass
             else:
                 log.error(f"Failed to send new purchase approval email to {recipient_email}")
             return success
@@ -2038,7 +2036,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"New purchase rejection email sent successfully to {recipient_email}")
+                pass
             else:
                 log.error(f"Failed to send new purchase rejection email to {recipient_email}")
             return success
@@ -2231,7 +2229,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(buyer_email, subject, email_html)
             if success:
-                log.info(f"Buyer assignment email sent successfully to {buyer_email}")
+                pass
             else:
                 log.error(f"Failed to send Buyer assignment email to {buyer_email}")
             return success
@@ -2466,17 +2464,16 @@ class BOQEmailService:
 
             # Log attachment info if present
             if attachments:
-                log.info(f"Queuing email with {len(attachments)} attachment(s)")
+                pass
 
             # Send email asynchronously (non-blocking)
             success = self.send_email_async(vendor_email, subject, email_html, attachments, cc_emails)
 
             if success:
-                log.info(f"Purchase order email queued for async sending to vendor(s)")
                 if attachments:
-                    log.info(f"Email included {len(attachments)} attachment(s)")
+                    pass
                 if cc_emails:
-                    log.info(f"Email CC'd to {len(cc_emails)} recipient(s)")
+                    pass
             else:
                 log.error(f"Failed to send purchase order email to vendor(s)")
 
@@ -2532,7 +2529,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(se_email, subject, email_html)
             if success:
-                log.info(f"[send_se_items_assigned_notification] Email sent to {se_email} for {items_count} item(s)")
+                pass
             else:
                 log.error(f"[send_se_items_assigned_notification] Failed to send email to {se_email}")
             return success
@@ -2622,7 +2619,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_cr_review_notification] Email sent to {recipient_email} for CR #{cr_id} (context={context})")
+                pass
             else:
                 log.error(f"[send_cr_review_notification] Failed to send email to {recipient_email}")
             return success
@@ -2686,7 +2683,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_cr_rejection_notification] Email sent to {recipient_email} for CR #{cr_id}")
+                pass
             else:
                 log.error(f"[send_cr_rejection_notification] Failed to send email to {recipient_email}")
             return success
@@ -2751,7 +2748,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_cr_approved_notification] Email sent to {recipient_email} for CR #{cr_id}")
+                pass
             else:
                 log.error(f"[send_cr_approved_notification] Failed to send email to {recipient_email}")
             return success
@@ -2808,7 +2805,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(buyer_email, subject, email_html)
             if success:
-                log.info(f"[send_boq_buyer_assignment_notification] Email sent to {buyer_email} for BOQ '{boq_name}'")
+                pass
             else:
                 log.error(f"[send_boq_buyer_assignment_notification] Failed to send email to {buyer_email}")
             return success
@@ -2882,7 +2879,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_vendor_selection_notification] Email sent to {recipient_email} for CR #{cr_id}")
+                pass
             else:
                 log.error(f"[send_vendor_selection_notification] Failed to send email to {recipient_email}")
             return success
@@ -2946,7 +2943,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_td_vendor_rejection_notification] Email sent to {recipient_email} for CR #{cr_id}")
+                pass
             else:
                 log.error(f"[send_td_vendor_rejection_notification] Failed to send email to {recipient_email}")
             return success
@@ -3007,7 +3004,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_td_vendor_approval_notification] Email sent to {recipient_email} for CR #{cr_id}")
+                pass
             else:
                 log.error(f"[send_td_vendor_approval_notification] Failed to send email to {recipient_email}")
             return success
@@ -3094,7 +3091,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_inspection_result_notification] Email sent to {recipient_email} for {cr_ref} ({decision})")
+                pass
             else:
                 log.error(f"[send_inspection_result_notification] Failed to send email to {recipient_email}")
             return success
@@ -3165,7 +3162,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_return_request_td_notification] Email sent to {recipient_email} for {vrr_number}")
+                pass
             else:
                 log.error(f"[send_return_request_td_notification] Failed to send email to {recipient_email}")
             return success
@@ -3247,7 +3244,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_return_request_approved_buyer_notification] Email sent to {recipient_email} for {vrr_number}")
+                pass
             else:
                 log.error(f"[send_return_request_approved_buyer_notification] Failed to send email to {recipient_email}")
             return success
@@ -3311,7 +3308,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_return_request_rejected_buyer_notification] Email sent to {recipient_email} for {vrr_number}")
+                pass
             else:
                 log.error(f"[send_return_request_rejected_buyer_notification] Failed to send email to {recipient_email}")
             return success
@@ -3380,7 +3377,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_return_initiated_pm_notification] Email sent to {recipient_email} for {vrr_number}")
+                pass
             else:
                 log.error(f"[send_return_initiated_pm_notification] Failed to send email to {recipient_email}")
             return success
@@ -3443,7 +3440,7 @@ class BOQEmailService:
             email_html = wrap_email_content(email_body)
             success = self.send_email(recipient_email, subject, email_html)
             if success:
-                log.info(f"[send_replacement_arrival_pm_notification] Email sent to {recipient_email} for {vrr_number}")
+                pass
             else:
                 log.error(f"[send_replacement_arrival_pm_notification] Failed to send email to {recipient_email}")
             return success

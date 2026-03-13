@@ -418,11 +418,11 @@ def td_mail_send():
                 )
 
                 if email_sent:
-                    log.info(f"📧 ✅ TD approval email sent successfully to {estimator_name} ({estimator_email})")
+                    pass
                 else:
                     log.error(f" Failed to send TD approval email to {estimator_name}")
             else:
-                log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped (in-app notification only)")
+                pass
  
             # Prepare new action for APPROVED
             new_action = {
@@ -481,11 +481,11 @@ def td_mail_send():
                 )
 
                 if email_sent:
-                    log.info(f"📧 ✅ TD rejection email sent successfully to {estimator_name} ({estimator_email})")
+                    pass
                 else:
                     log.error(f" Failed to send TD rejection email to {estimator_name}")
             else:
-                log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped (in-app notification only)")
+                pass
  
             # Prepare new action for REJECTED
             new_action = {
@@ -664,7 +664,6 @@ def td_mail_send():
                                 )
                                 send_notification_to_user(uid, fallback_notif.to_dict())
                                 notification_sent = True
-                                log.info(f"BOQ {boq_id} - Direct DB notification created for user {uid}, id={fallback_notif.id}")
                             except Exception as fallback_err:
                                 log.error(f"BOQ {boq_id} - Direct DB notification also failed for user {uid}: {fallback_err}")
                 else:

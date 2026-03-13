@@ -36,8 +36,6 @@ def get_db_connection():
 
 def validate_foreign_keys(cursor):
     """Validate that foreign key references exist before creating constraints"""
-    print("\n🔍 VALIDATION: Checking for orphaned records...")
-    print("-" * 80)
 
     issues = []
 
@@ -52,7 +50,7 @@ def validate_foreign_keys(cursor):
     if orphaned_materials > 0:
         issues.append(f"⚠️  {orphaned_materials} master_materials reference non-existent items")
     else:
-        print(f"   ✓ master_materials.item_id: All references valid")
+        pass
 
     # Check master_labour.item_id
     cursor.execute("""
@@ -65,7 +63,7 @@ def validate_foreign_keys(cursor):
     if orphaned_labour > 0:
         issues.append(f"⚠️  {orphaned_labour} master_labour reference non-existent items")
     else:
-        print(f"   ✓ master_labour.item_id: All references valid")
+        pass
 
     return issues
 
@@ -75,45 +73,21 @@ def run_migration():
     cursor = conn.cursor()
 
     try:
-        print("\n" + "=" * 80)
-        print("PRIORITY 2 - FOREIGN KEY CONSTRAINTS MIGRATION (Part 4 of 4)")
-        print("Performance Analysis 2025-11-18")
-        print("=" * 80)
-        print("\n⚠️  IMPORTANT: This migration adds foreign key constraints.")
-        print("   Foreign keys enforce data integrity but require validation first.")
-        print("=" * 80)
 
         # Validate before adding constraints
         validation_issues = validate_foreign_keys(cursor)
 
         if validation_issues:
-            print("\n" + "=" * 80)
-            print("❌ VALIDATION FAILED: Orphaned records found!")
-            print("=" * 80)
             for issue in validation_issues:
-                print(f"   {issue}")
-            print("\n💡 Resolution Options:")
-            print("   1. Clean up orphaned records first")
-            print("   2. Update orphaned records to reference valid IDs")
-            print("   3. Set item_id = NULL for orphaned records")
-            print("\n   Example cleanup script:")
-            print("   UPDATE master_materials SET item_id = NULL WHERE item_id NOT IN (SELECT item_id FROM boq_items);")
-            print("   UPDATE master_labour SET item_id = NULL WHERE item_id NOT IN (SELECT item_id FROM boq_items);")
-            print("\n⚠️  Migration aborted to prevent data loss.")
-            print("   Fix orphaned records and re-run this migration.")
+                pass
             return
 
-        print("\n✅ VALIDATION PASSED: No orphaned records found")
-        print("   Safe to proceed with foreign key creation.")
 
         # ============================================================
         # SECTION 1: Master Materials & Labour Constraints
         # ============================================================
 
-        print("\n🔧 SECTION 1: Master Materials & Labour Foreign Keys")
-        print("-" * 80)
 
-        print("[1/6] Adding foreign key: master_materials.item_id → boq_items.item_id...")
         cursor.execute("""
             ALTER TABLE master_materials
             ADD CONSTRAINT IF NOT EXISTS fk_master_material_item
@@ -122,9 +96,7 @@ def run_migration():
             ON DELETE SET NULL
             ON UPDATE CASCADE
         """)
-        print("       ✓ Constraint added (ON DELETE SET NULL)")
 
-        print("[2/6] Adding foreign key: master_labour.item_id → boq_items.item_id...")
         cursor.execute("""
             ALTER TABLE master_labour
             ADD CONSTRAINT IF NOT EXISTS fk_master_labour_item
@@ -133,16 +105,12 @@ def run_migration():
             ON DELETE SET NULL
             ON UPDATE CASCADE
         """)
-        print("       ✓ Constraint added (ON DELETE SET NULL)")
 
         # ============================================================
         # SECTION 2: Change Request Constraints
         # ============================================================
 
-        print("\n🔄 SECTION 2: Change Request Foreign Keys")
-        print("-" * 80)
 
-        print("[3/6] Adding foreign key: change_requests.boq_id → boq.boq_id...")
         cursor.execute("""
             ALTER TABLE change_requests
             DROP CONSTRAINT IF EXISTS fk_change_request_boq,
@@ -152,9 +120,7 @@ def run_migration():
             ON DELETE CASCADE
             ON UPDATE CASCADE
         """)
-        print("       ✓ Constraint added (ON DELETE CASCADE)")
 
-        print("[4/6] Adding foreign key: change_requests.project_id → project.project_id...")
         cursor.execute("""
             ALTER TABLE change_requests
             DROP CONSTRAINT IF EXISTS fk_change_request_project,
@@ -164,28 +130,21 @@ def run_migration():
             ON DELETE CASCADE
             ON UPDATE CASCADE
         """)
-        print("       ✓ Constraint added (ON DELETE CASCADE)")
 
         # ============================================================
         # SECTION 3: Additional Index for Foreign Keys
         # ============================================================
 
-        print("\n📊 SECTION 3: Foreign Key Supporting Indexes")
-        print("-" * 80)
 
-        print("[5/6] Creating index on master_materials (item_id)...")
         cursor.execute("""
             CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_master_material_item_id
             ON master_materials(item_id)
         """)
-        print("       ✓ Index created (supports FK constraint)")
 
-        print("[6/6] Creating index on master_labour (item_id)...")
         cursor.execute("""
             CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_master_labour_item_id
             ON master_labour(item_id)
         """)
-        print("       ✓ Index created (supports FK constraint)")
 
         conn.commit()
 
@@ -193,8 +152,6 @@ def run_migration():
         # Verify Constraints
         # ============================================================
 
-        print("\n🔍 Verifying foreign key constraints...")
-        print("-" * 80)
 
         cursor.execute("""
             SELECT
@@ -218,81 +175,24 @@ def run_migration():
         """)
 
         constraints = cursor.fetchall()
-        print(f"   ✓ {len(constraints)} foreign key constraints verified")
         for constraint in constraints:
-            print(f"      • {constraint[1]}.{constraint[2]} → {constraint[3]}.{constraint[4]}")
-
-        print("\n" + "=" * 80)
-        print("✅ MIGRATION COMPLETED SUCCESSFULLY!")
-        print("=" * 80)
-
-        # Print impact summary
-        print("\n📈 DATA INTEGRITY IMPROVEMENTS:")
-        print("-" * 80)
-        print("  ✓ Orphaned Records:        Prevented")
-        print("  ✓ Referential Integrity:   Enforced")
-        print("  ✓ Cascade Deletes:         Enabled")
-        print("  ✓ Query Optimization:      Improved")
-        print("-" * 80)
-        print("  🎯 DATA QUALITY: Significantly improved")
-        print("\n💡 What Do Foreign Keys Do?")
-        print("   • Prevent deletion of referenced records")
-        print("   • Cascade deletes when parent is removed")
-        print("   • Ensure data consistency across tables")
-        print("   • Help query planner optimize joins")
-        print("\n📌 TOTAL MIGRATIONS COMPLETED:")
-        print("   ✓ Part 1: 20 critical indexes")
-        print("   ✓ Part 2: 9 JSONB GIN indexes")
-        print("   ✓ Part 3: 10 composite indexes")
-        print("   ✓ Part 4: 4 foreign key constraints + 2 supporting indexes")
-        print("   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("   TOTAL: 39 indexes + 4 foreign keys")
-        print("\n🎉 PRIORITY 2 IMPLEMENTATION COMPLETE!")
-        print("=" * 80 + "\n")
+            pass
 
     except Exception as e:
         conn.rollback()
-        print(f"\n❌ ERROR: Migration failed!")
-        print(f"   Error: {str(e)}")
-        print("\n💡 Troubleshooting:")
-        print("   - Check if orphaned records exist (run validation)")
-        print("   - Verify table and column names are correct")
-        print("   - Check PostgreSQL version (9.5+ recommended)")
-        print("   - Review PostgreSQL logs for details")
-        print("\n💡 Rollback (if needed):")
-        print("   ALTER TABLE master_materials DROP CONSTRAINT IF EXISTS fk_master_material_item;")
-        print("   ALTER TABLE master_labour DROP CONSTRAINT IF EXISTS fk_master_labour_item;")
-        print("   ALTER TABLE change_requests DROP CONSTRAINT IF EXISTS fk_change_request_boq;")
-        print("   ALTER TABLE change_requests DROP CONSTRAINT IF EXISTS fk_change_request_project;")
         raise
     finally:
         cursor.close()
         conn.close()
 
 if __name__ == "__main__":
-    print("\n" + "=" * 80)
-    print("PRIORITY 2 - FOREIGN KEY CONSTRAINTS MIGRATION")
-    print("Part 4 of 4: Data Integrity & Referential Constraints")
-    print("=" * 80)
-    print("\n⚠️  IMPORTANT WARNINGS:")
-    print("   ⚠️  This migration modifies table constraints")
-    print("   ⚠️  Validates data before creating constraints")
-    print("   ⚠️  May fail if orphaned records exist")
-    print("   ⚠️  Test in development environment first")
-    print("\n✅ SAFETY FEATURES:")
-    print("   ✓ Validates data before creating constraints")
-    print("   ✓ Provides cleanup scripts if validation fails")
-    print("   ✓ Uses ON DELETE CASCADE/SET NULL safely")
-    print("   ✓ Rollback available if issues occur")
 
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == '--auto':
-        print("\n🚀 Auto-running migration...\n")
         run_migration()
     else:
         response = input("\n▶️  Ready to add 4 foreign key constraints? (yes/no): ")
         if response.lower() == 'yes':
             run_migration()
         else:
-            print("\n❌ Migration cancelled.")
-            print("   No changes made to database.\n")
+            pass

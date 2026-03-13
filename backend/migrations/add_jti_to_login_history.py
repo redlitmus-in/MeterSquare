@@ -34,19 +34,14 @@ def upgrade():
 
     with app.app_context():
         try:
-            log.info("=" * 70)
-            log.info("MIGRATION: Add jti to login_history")
-            log.info("=" * 70)
 
             # Add jti column
-            log.info("  [ADD] Adding column 'jti' VARCHAR(36) to login_history")
             db.session.execute(text("""
                 ALTER TABLE login_history
                 ADD COLUMN IF NOT EXISTS jti VARCHAR(36)
             """))
 
             # Add index for fast lookup
-            log.info("  [ADD] Creating index idx_login_history_jti on login_history(jti)")
             db.session.execute(text("""
                 CREATE INDEX IF NOT EXISTS idx_login_history_jti
                 ON login_history(jti)
@@ -54,12 +49,6 @@ def upgrade():
 
             db.session.commit()
 
-            log.info("")
-            log.info("=" * 70)
-            log.info("MIGRATION COMPLETED SUCCESSFULLY")
-            log.info("  Column added: jti VARCHAR(36)")
-            log.info("  Index created: idx_login_history_jti")
-            log.info("=" * 70)
 
             return True
 
@@ -79,16 +68,11 @@ def downgrade():
 
     with app.app_context():
         try:
-            log.info("=" * 70)
-            log.info("ROLLBACK: Remove jti from login_history")
-            log.info("=" * 70)
 
-            log.info("  [DROP] Dropping index idx_login_history_jti")
             db.session.execute(text("""
                 DROP INDEX IF EXISTS idx_login_history_jti
             """))
 
-            log.info("  [DROP] Dropping column 'jti' from login_history")
             db.session.execute(text("""
                 ALTER TABLE login_history
                 DROP COLUMN IF EXISTS jti
@@ -96,10 +80,6 @@ def downgrade():
 
             db.session.commit()
 
-            log.info("")
-            log.info("=" * 70)
-            log.info("ROLLBACK COMPLETED SUCCESSFULLY")
-            log.info("=" * 70)
 
             return True
 

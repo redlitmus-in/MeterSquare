@@ -38,18 +38,14 @@ def run_migration():
     cursor = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
-        print("Starting migration: boq_terms_selections to single-row-per-BOQ structure")
-        print("=" * 60)
 
         # Step 1: Backup existing data
-        print("\n[1/5] Backing up existing data...")
         cursor.execute("""
             SELECT boq_id, term_id, is_checked, created_at, updated_at
             FROM boq_terms_selections
             ORDER BY boq_id, term_id
         """)
         existing_data = cursor.fetchall()
-        print(f"  Found {len(existing_data)} existing records")
 
         # Group by boq_id and collect checked term_ids
         boq_terms_map = {}
@@ -67,16 +63,12 @@ def run_migration():
             if row['updated_at'] and (not boq_terms_map[boq_id]['updated_at'] or row['updated_at'] > boq_terms_map[boq_id]['updated_at']):
                 boq_terms_map[boq_id]['updated_at'] = row['updated_at']
 
-        print(f"  Grouped into {len(boq_terms_map)} BOQs")
 
         # Step 2: Rename old table
-        print("\n[2/5] Renaming old table to boq_terms_selections_old...")
         cursor.execute("ALTER TABLE IF EXISTS boq_terms_selections RENAME TO boq_terms_selections_old")
         conn.commit()
-        print("  Done")
 
         # Step 3: Create new table structure
-        print("\n[3/5] Creating new boq_terms_selections table...")
         cursor.execute("""
             CREATE TABLE boq_terms_selections (
                 id SERIAL PRIMARY KEY,
@@ -88,18 +80,14 @@ def run_migration():
             )
         """)
         conn.commit()
-        print("  Created table with columns: id, boq_id, term_ids (INTEGER[]), created_at, updated_at")
 
         # Step 4: Create index
-        print("\n[4/5] Creating indexes...")
         cursor.execute("""
             CREATE INDEX idx_boq_terms_selections_boq_id ON boq_terms_selections(boq_id)
         """)
         conn.commit()
-        print("  Created index on boq_id")
 
         # Step 5: Migrate data
-        print("\n[5/5] Migrating data to new structure...")
         migrated_count = 0
         for boq_id, data in boq_terms_map.items():
             term_ids = data['term_ids']
@@ -113,29 +101,20 @@ def run_migration():
             migrated_count += 1
 
         conn.commit()
-        print(f"  Migrated {migrated_count} BOQs")
 
         # Step 6: Drop old table (optional - keep for safety)
-        print("\n[INFO] Old table 'boq_terms_selections_old' kept for backup")
-        print("       You can drop it manually after verification: DROP TABLE boq_terms_selections_old;")
 
-        print("\n" + "=" * 60)
-        print("Migration completed successfully!")
-        print("=" * 60)
 
     except Exception as e:
         conn.rollback()
-        print(f"\nERROR: Migration failed: {str(e)}")
-        print("Rolling back changes...")
 
         # Try to restore old table if it was renamed
         try:
             cursor.execute("DROP TABLE IF EXISTS boq_terms_selections")
             cursor.execute("ALTER TABLE IF EXISTS boq_terms_selections_old RENAME TO boq_terms_selections")
             conn.commit()
-            print("Restored original table")
         except Exception as restore_error:
-            print(f"Failed to restore: {restore_error}")
+            pass
 
         raise e
     finally:
@@ -149,14 +128,11 @@ def rollback_migration():
     cursor = conn.cursor()
 
     try:
-        print("Rolling back migration...")
         cursor.execute("DROP TABLE IF EXISTS boq_terms_selections")
         cursor.execute("ALTER TABLE IF EXISTS boq_terms_selections_old RENAME TO boq_terms_selections")
         conn.commit()
-        print("Rollback completed!")
     except Exception as e:
         conn.rollback()
-        print(f"Rollback failed: {str(e)}")
         raise e
     finally:
         cursor.close()

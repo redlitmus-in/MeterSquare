@@ -48,11 +48,9 @@ def upgrade():
         """))
 
         db.session.commit()
-        print("✓ Successfully added material_vendor_selections support to change_requests")
 
     except Exception as e:
         db.session.rollback()
-        print(f"✗ Error in migration: {str(e)}")
         raise
 
 def downgrade():
@@ -73,14 +71,10 @@ def downgrade():
         """))
 
         db.session.commit()
-        print("✓ Successfully rolled back material_vendor_selections migration")
 
     except Exception as e:
         db.session.rollback()
-        print(f"✗ Error in rollback: {str(e)}")
         raise
 
 if __name__ == "__main__":
-    print("Running migration: add_material_vendor_selections")
     upgrade()
-    print("Migration completed successfully!")

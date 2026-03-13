@@ -1,4 +1,7 @@
+import logging
 from flask import jsonify, request, g, send_file
+
+log = logging.getLogger(__name__)
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 from config.db import db
@@ -617,7 +620,6 @@ def create_inventory_transaction():
         # Check if delivery_note_url is provided in request data (for reusing URLs when creating new batch with different transport fee)
         if data.get('delivery_note_url'):
             delivery_note_url = data.get('delivery_note_url')
-            print(f"✓ Using delivery note URL from request: {delivery_note_url}")
         # If batch reference is provided but no file is uploaded and no URL in request, check if batch already has a file URL
         elif delivery_batch_ref and not delivery_note_file:
             existing_batch_txn = InventoryTransaction.query.filter_by(
@@ -628,7 +630,6 @@ def create_inventory_transaction():
 
             if existing_batch_txn and existing_batch_txn.delivery_note_url:
                 delivery_note_url = existing_batch_txn.delivery_note_url
-                print(f"✓ Reusing delivery note URL from batch {delivery_batch_ref}: {delivery_note_url}")
 
         # If batch reference is provided but no transport details, inherit from first transaction in batch
         if delivery_batch_ref:
@@ -649,7 +650,6 @@ def create_inventory_transaction():
                         vehicle_number = batch_txn_with_transport.vehicle_number
                     if not transport_fee:
                         transport_fee = batch_txn_with_transport.transport_fee
-                    print(f"✓ Reusing transport details from batch {delivery_batch_ref}")
 
         if delivery_note_file:
             try:
@@ -906,7 +906,6 @@ def get_all_inventory_transactions():
                     txn_data['delivery_note_url'] = delivery_note.delivery_note_url
 
                 # Log successful match for debugging
-                print(f"✓ Matched transaction {txn.inventory_transaction_id} to DN {delivery_note.delivery_note_number}")
 
             # If transaction still doesn't have a delivery_note_url but has a batch reference,
             # look up the file URL from the pre-fetched batch_ref → url map (no N+1 query)
@@ -914,7 +913,6 @@ def get_all_inventory_transactions():
                 _batch_url = _batch_ref_to_url.get(txn.delivery_batch_ref)
                 if _batch_url:
                     txn_data['delivery_note_url'] = _batch_url
-                    print(f"✓ Found delivery note URL from batch {txn.delivery_batch_ref} for transaction {txn.inventory_transaction_id}")
 
             # If transaction doesn't have transport details but has a batch reference,
             # look up transport details from other transactions in the same batch
@@ -941,7 +939,6 @@ def get_all_inventory_transactions():
                             txn_data['vehicle_number'] = batch_txn_with_transport.vehicle_number
                         if not txn_data.get('transport_fee'):
                             txn_data['transport_fee'] = batch_txn_with_transport.transport_fee
-                        print(f"✓ Found transport details from batch {txn.delivery_batch_ref} for transaction {txn.inventory_transaction_id}")
 
             result.append(txn_data)
 
@@ -1794,7 +1791,7 @@ def send_internal_material_request(request_id):
                 sent_by_user_id=current_user_id
             )
         except Exception as notif_err:
-            print(f"Failed to send IMR sent-for-approval notification: {notif_err}")
+            log.error(f"Failed to send IMR sent-for-approval notification: {notif_err}")
 
         return jsonify({
             'message': 'Internal material request sent for approval successfully',
@@ -2247,7 +2244,6 @@ def approve_internal_request(request_id):
                     po_child.status = 'purchase_completed'
                     po_child.store_request_status = 'completed'
                     po_child.updated_at = datetime.utcnow()
-                    log.info(f"POChild {po_child.id}: {po_child.status} → purchase_completed (PM approved vendor delivery)")
 
             # ✅ FIX: Update CR status when PM approves vendor delivery
             # Only complete parent when ALL children are done AND all materials are covered
@@ -2269,9 +2265,8 @@ def approve_internal_request(request_id):
                             cr.status = 'purchase_completed'
                             cr.store_request_status = 'completed'
                             cr.updated_at = datetime.utcnow()
-                            log.info(f"CR-{cr.cr_id}: All POChildren done + all materials covered → purchase_completed")
                         elif all_done and not all_covered:
-                            log.info(f"CR-{cr.cr_id}: All POChildren done but {len(uncovered)} materials uncovered — NOT completing parent")
+                            pass
                     else:
                         # No POChildren — all materials handled at parent level, safe to complete
                         cr.status = 'purchase_completed'
@@ -2337,7 +2332,7 @@ def approve_internal_request(request_id):
                         })
                 else:
                     # Material not found in inventory - skip deduction but log
-                    print(f"Material '{mat_name}' not found in inventory - skipping deduction")
+                    pass
 
             # If any material has insufficient stock, return error
             if insufficient_stock:
@@ -2401,7 +2396,6 @@ def approve_internal_request(request_id):
                     po_child.status = 'purchase_completed'
                     po_child.store_request_status = 'completed'
                     po_child.updated_at = datetime.utcnow()
-                    log.info(f"POChild {po_child.id}: sent_to_store → purchase_completed (PM approved)")
 
             # ✅ FIX: Update CR status when PM approves store request (grouped materials)
             # Only complete parent when ALL children are done AND all materials are covered
@@ -2423,9 +2417,8 @@ def approve_internal_request(request_id):
                             cr.status = 'purchase_completed'
                             cr.store_request_status = 'completed'
                             cr.updated_at = datetime.utcnow()
-                            log.info(f"CR-{cr.cr_id}: All POChildren done + all materials covered → purchase_completed")
                         elif all_done and not all_covered:
-                            log.info(f"CR-{cr.cr_id}: All POChildren done but {len(uncovered)} materials uncovered — NOT completing parent")
+                            pass
                     else:
                         # No POChildren — all materials handled at parent level, safe to complete
                         cr.status = 'purchase_completed'
@@ -2492,7 +2485,6 @@ def approve_internal_request(request_id):
                 po_child.status = 'purchase_completed'
                 po_child.store_request_status = 'completed'
                 po_child.updated_at = datetime.utcnow()
-                log.info(f"POChild {po_child.id}: → purchase_completed (PM approved single material)")
 
         # ✅ FIX: Update CR status when PM approves store request (single material)
         # Only complete parent when ALL children are done AND all materials are covered
@@ -2515,7 +2507,7 @@ def approve_internal_request(request_id):
                         cr.store_request_status = 'completed'
                         cr.updated_at = datetime.utcnow()
                     elif all_done and not all_covered:
-                        log.info(f"CR-{cr.cr_id}: All POChildren done but {len(uncovered)} materials uncovered — NOT completing parent")
+                        pass
                 else:
                     # No POChildren — all materials handled at parent level, safe to complete
                     cr.status = 'purchase_completed'
@@ -2611,7 +2603,6 @@ def reject_internal_request(request_id):
                     po_child.rejection_reason = rejection_reason
                     po_child.vendor_approved_by_td_name = g.user.get('full_name', 'Production Manager')
                     po_child.updated_at = datetime.utcnow()
-                    log.info(f"Store POChild {po_child.get_formatted_id()} marked as store_rejected (IMR #{request_id} rejected: {rejection_reason})")
 
                     parent_cr = ChangeRequest.query.get(po_child.parent_cr_id)
                     if parent_cr:
@@ -2637,7 +2628,6 @@ def reject_internal_request(request_id):
                         store_po_child.rejection_reason = rejection_reason
                         store_po_child.vendor_approved_by_td_name = g.user.get('full_name', 'Production Manager')
                         store_po_child.updated_at = datetime.utcnow()
-                        log.info(f"Fallback: Store POChild {store_po_child.get_formatted_id()} marked as store_rejected via CR lookup")
         except Exception as po_error:
             log.error(f"Failed to update store POChild/CR on IMR rejection: {po_error}")
 
@@ -2775,7 +2765,7 @@ def dispatch_material(request_id):
                 request_id=request_id
             )
         except Exception as notif_err:
-            print(f"Error sending dispatch notification: {notif_err}")
+            pass
 
         return jsonify({
             'message': 'Material dispatched successfully to project',
@@ -2989,7 +2979,7 @@ def issue_material_from_inventory(request_id):
                 requester_user_id=requester_user_id
             )
         except Exception as notif_err:
-            print(f"Failed to send material issued notification: {notif_err}")
+            log.error(f"Failed to send material issued notification: {notif_err}")
 
         return jsonify({
             'message': 'Material issued successfully from inventory',
@@ -3112,7 +3102,7 @@ def create_material_return():
                     returned_by_name=returned_by_name
                 )
             except Exception as notif_err:
-                print(f"Error sending damaged return notification: {notif_err}")
+                log.error(f"Error sending damaged return notification: {notif_err}")
 
         # Get project details for response
         project_info = {
@@ -3466,7 +3456,7 @@ def review_disposal(return_id):
                         pm_user_id=pm_user_id
                     )
             except Exception as notif_err:
-                print(f"Error sending backup stock notification: {notif_err}")
+                log.error(f"Error sending backup stock notification: {notif_err}")
 
             return jsonify({
                 'message': f'{usable_quantity} {material.unit} added to backup stock',
@@ -3566,7 +3556,7 @@ def review_disposal(return_id):
                         log.error(f"Failed to send PM disposal approval notification: {pm_notif_err}")
 
             except Exception as notif_err:
-                print(f"Error sending disposal notification: {notif_err}")
+                log.error(f"Error sending disposal notification: {notif_err}")
 
             return jsonify({
                 'message': 'Material approved for disposal',
@@ -3787,7 +3777,7 @@ def request_disposal_from_repair(return_id):
                 pm_user_id=current_user_id
             )
         except Exception as email_error:
-            print(f"Failed to send TD notification: {str(email_error)}")
+            log.error(f"Failed to send TD notification: {str(email_error)}")
 
         return jsonify({
             'message': 'Disposal request sent to TD for approval',
@@ -3876,7 +3866,7 @@ def approve_return_to_stock(return_id):
                 site_engineer_id=site_engineer_id
             )
         except Exception as notif_err:
-            print(f"Error sending return approved notification: {notif_err}")
+            log.error(f"Error sending return approved notification: {notif_err}")
 
         return jsonify({
             'message': 'Return approved and added to stock successfully',
@@ -3937,7 +3927,7 @@ def reject_return(return_id):
                     site_engineer_id=site_engineer_id
                 )
         except Exception as notif_err:
-            print(f"Error sending return rejected notification: {notif_err}")
+            log.error(f"Error sending return rejected notification: {notif_err}")
 
         return jsonify({
             'message': 'Return rejected',
@@ -4783,7 +4773,7 @@ def dispatch_delivery_note(delivery_note_id):
                                 se_id_set.add(uid)
                 se_ids = list(se_id_set)
                 if se_ids:
-                    log.info(f"dispatch_delivery_note: notifying SE ids={se_ids} for project '{project_name}'")
+                    pass
                 else:
                     log.warning(f"dispatch_delivery_note: no SE assigned to project '{project_name}' (id={note.project_id}) — SE will not be notified")
 
@@ -5024,7 +5014,6 @@ def get_delivery_notes_for_se():
 
         # Admin viewing as role gets ALL projects
         if is_admin_viewing_as_role or user_role in SUPER_ADMIN_ROLES:
-            log.info(f"Admin {current_user_id} viewing as {view_as_role or 'admin'} - getting ALL projects for delivery notes")
             all_projects = Project.query.filter(Project.is_deleted == False).all()
             project_ids = set(p.project_id for p in all_projects)
         else:
@@ -5143,7 +5132,6 @@ def get_returnable_materials_for_se():
 
         # Admin viewing as role gets ALL projects
         if is_admin_viewing_as_role or user_role in SUPER_ADMIN_ROLES:
-            log.info(f"Admin {current_user_id} viewing as {view_as_role or 'admin'} - getting ALL projects for returnable materials")
             all_projects = Project.query.filter(Project.is_deleted == False).all()
             project_ids = set(p.project_id for p in all_projects)
         else:
@@ -5284,7 +5272,6 @@ def get_material_returns_for_se():
 
         # Admin viewing as role gets ALL projects
         if is_admin_viewing_as_role or user_role in SUPER_ADMIN_ROLES:
-            log.info(f"Admin {current_user_id} viewing as {view_as_role or 'admin'} - getting ALL projects for material returns")
             all_projects = Project.query.filter(Project.is_deleted == False).all()
             project_ids = set(p.project_id for p in all_projects)
         else:
@@ -5544,7 +5531,7 @@ def create_return_delivery_note():
                 returned_by_user_id=current_user_id
             )
         except Exception as notif_err:
-            print(f"Failed to send RDN created notification: {notif_err}")
+            log.error(f"Failed to send RDN created notification: {notif_err}")
 
         return jsonify({
             'message': 'Return delivery note created successfully',
@@ -5927,7 +5914,7 @@ def issue_return_delivery_note(return_note_id):
                 issued_by_user_id=current_user_id
             )
         except Exception as notif_err:
-            print(f"Error sending RDN issue notification: {notif_err}")
+            log.error(f"Error sending RDN issue notification: {notif_err}")
 
         return jsonify({
             'message': 'Return delivery note issued successfully. Ready for dispatch.',
@@ -6880,7 +6867,7 @@ def download_rdn_pdf(return_note_id):
             settings = SystemSettings.query.first()
             company_name = settings.company_name if settings and settings.company_name else "MeterSquare"
         except Exception as e:
-            print(f"Warning: Failed to load company name from settings: {e}")
+            log.error(f"Warning: Failed to load company name from settings: {str(e)}")
             company_name = "MeterSquare"
 
         # Get the user's full name from email (created_by stores email)
@@ -7042,7 +7029,7 @@ def request_material_disposal(material_id):
                 pm_user_id=current_user_id
             )
         except Exception as notif_error:
-            print(f"Error sending disposal request notification: {notif_error}")
+            log.error(f"Error sending disposal request notification: {notif_error}")
             # Don't fail the request if notification fails
 
         return jsonify({
@@ -7443,10 +7430,6 @@ def receive_buyer_transfer(delivery_note_id):
             }), status_code
 
         # Log success
-        log.info(
-            f"PM {pm_name} received buyer transfer {result.delivery_note_number} "
-            f"with {len(result.items_processed)} items. Batch: {result.batch_reference}"
-        )
 
         # Return success response
         return jsonify({

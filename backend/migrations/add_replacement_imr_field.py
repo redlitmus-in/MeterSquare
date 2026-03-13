@@ -42,10 +42,8 @@ def create():
         """)
 
         conn.commit()
-        print("Migration successful: added replacement_imr_id column to vendor_return_requests")
     except Exception as e:
         conn.rollback()
-        print(f"Migration failed: {e}")
         raise
     finally:
         cur.close()
@@ -60,10 +58,8 @@ def rollback():
         cur.execute("DROP INDEX IF EXISTS idx_vrr_replacement_imr;")
         cur.execute("ALTER TABLE vendor_return_requests DROP COLUMN IF EXISTS replacement_imr_id;")
         conn.commit()
-        print("Rollback successful: removed replacement_imr_id column")
     except Exception as e:
         conn.rollback()
-        print(f"Rollback failed: {e}")
         raise
     finally:
         cur.close()

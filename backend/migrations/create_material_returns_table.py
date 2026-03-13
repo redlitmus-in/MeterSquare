@@ -22,7 +22,6 @@ def create_material_returns_table():
         inspector = inspect(db.engine)
 
         if 'material_returns' in inspector.get_table_names():
-            print("Table 'material_returns' already exists. Skipping creation.")
             return
 
         # Create the table using raw SQL
@@ -58,10 +57,8 @@ def create_material_returns_table():
         try:
             db.session.execute(db.text(create_table_sql))
             db.session.commit()
-            print("Successfully created 'material_returns' table with indexes!")
         except Exception as e:
             db.session.rollback()
-            print(f"Error creating table: {e}")
             raise
 
 
@@ -74,10 +71,8 @@ def drop_material_returns_table():
         try:
             db.session.execute(db.text(drop_sql))
             db.session.commit()
-            print("Successfully dropped 'material_returns' table!")
         except Exception as e:
             db.session.rollback()
-            print(f"Error dropping table: {e}")
             raise
 
 

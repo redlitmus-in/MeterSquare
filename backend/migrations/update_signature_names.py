@@ -19,8 +19,6 @@ def run_migration():
             row = result.fetchone()
 
             if row:
-                print(f"Current MD Name: {row[0]}")
-                print(f"Current TD Name: {row[1]}")
 
                 # Update with actual names if they are still defaults
                 if row[0] == 'Managing Director' or row[0] is None:
@@ -29,7 +27,6 @@ def run_migration():
                         SET md_name = 'Amjath K Aboobacker'
                         WHERE md_name = 'Managing Director' OR md_name IS NULL
                     """))
-                    print("Updated MD Name to 'Amjath K Aboobacker'")
 
                 if row[1] == 'Technical Director' or row[1] is None:
                     db.session.execute(db.text("""
@@ -37,15 +34,12 @@ def run_migration():
                         SET td_name = 'Sujith George Charly'
                         WHERE td_name = 'Technical Director' OR td_name IS NULL
                     """))
-                    print("Updated TD Name to 'Sujith George Charly'")
 
                 db.session.commit()
-                print("Migration completed successfully!")
             else:
-                print("No system_settings record found")
+                pass
 
         except Exception as e:
-            print(f"Error running migration: {e}")
             db.session.rollback()
             raise
 

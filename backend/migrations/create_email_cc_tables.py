@@ -24,7 +24,6 @@ def get_db_url():
 def run_migration():
     db_url = get_db_url()
     if not db_url:
-        print("ERROR: No DATABASE_URL found")
         return
 
     conn = psycopg2.connect(db_url)
@@ -32,7 +31,6 @@ def run_migration():
 
     try:
         # 1. Admin-managed default CC recipients
-        print("Creating email_cc_defaults table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS email_cc_defaults (
                 id SERIAL PRIMARY KEY,
@@ -45,7 +43,6 @@ def run_migration():
         """)
 
         # 2. Per-buyer custom CC recipients
-        print("Creating buyer_cc_recipients table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS buyer_cc_recipients (
                 id SERIAL PRIMARY KEY,
@@ -59,7 +56,6 @@ def run_migration():
         """)
 
         # 3. Indexes
-        print("Creating indexes...")
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_buyer_cc_buyer_id
             ON buyer_cc_recipients(buyer_user_id);
@@ -70,7 +66,6 @@ def run_migration():
         """)
 
         # 4. Seed default CC emails (the 7 existing hardcoded ones)
-        print("Seeding default CC emails...")
         cursor.execute("""
             INSERT INTO email_cc_defaults (email, name, is_active) VALUES
                 ('sajisamuel@metersquare.com', 'Saji Samuel', TRUE),
@@ -84,11 +79,9 @@ def run_migration():
         """)
 
         conn.commit()
-        print("Migration completed successfully!")
 
     except Exception as e:
         conn.rollback()
-        print(f"ERROR: {str(e)}")
         raise
     finally:
         cursor.close()
@@ -98,7 +91,6 @@ def run_migration():
 def rollback():
     db_url = get_db_url()
     if not db_url:
-        print("ERROR: No DATABASE_URL found")
         return
 
     conn = psycopg2.connect(db_url)
@@ -108,10 +100,8 @@ def rollback():
         cursor.execute("DROP TABLE IF EXISTS buyer_cc_recipients CASCADE;")
         cursor.execute("DROP TABLE IF EXISTS email_cc_defaults CASCADE;")
         conn.commit()
-        print("Rollback completed successfully!")
     except Exception as e:
         conn.rollback()
-        print(f"ERROR: {str(e)}")
         raise
     finally:
         cursor.close()

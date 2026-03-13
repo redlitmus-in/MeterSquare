@@ -4,7 +4,10 @@ Centralized configuration for change request approval workflow
 All thresholds and defaults are environment-driven
 """
 import os
+import logging
 from typing import Dict, Any
+
+log = logging.getLogger(__name__)
 
 
 class ChangeRequestConfig:
@@ -166,7 +169,7 @@ class ChangeRequestConfig:
             assert 0 <= cls.DEFAULT_PROFIT_PERCENTAGE <= 100, "Profit percentage must be 0-100"
             return True
         except AssertionError as e:
-            print(f"⚠️  Configuration validation failed: {e}")
+            log.error(f"Error in validate_config: {str(e)}")
             return False
 
 

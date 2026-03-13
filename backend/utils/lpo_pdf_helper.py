@@ -258,7 +258,6 @@ def generate_and_save_lpo_pdf(cr_id, po_child_id=None):
         if not pdf_bytes:
             log.error(f"LPO PDF: Generator returned empty bytes for CR-{cr_id}")
             return None
-        log.info(f"LPO PDF generated for CR-{cr_id}, size: {len(pdf_bytes)} bytes")
 
         # ── Upload to Supabase storage ──────────────────────────────
         pdf_url = _upload_to_supabase(pdf_bytes, cr_id, po_child, project)
@@ -272,7 +271,6 @@ def generate_and_save_lpo_pdf(cr_id, po_child_id=None):
             cr.lpo_pdf_url = pdf_url
         db.session.commit()
 
-        log.info(f"LPO PDF saved for {'POChild-' + str(po_child_id) if po_child else 'CR-' + str(cr_id)}: {pdf_url}")
         return pdf_url
 
     except Exception as e:
@@ -425,7 +423,6 @@ def _upload_to_supabase(pdf_bytes, cr_id, po_child, project):
         anon_client = create_supabase_client(upload_supabase_url, anon_key)
         pdf_url = anon_client.storage.from_(SUPABASE_BUCKET).get_public_url(pdf_path)
 
-        log.info(f"LPO PDF uploaded to: {pdf_path}")
         return pdf_url
 
     except Exception as e:

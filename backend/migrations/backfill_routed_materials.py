@@ -15,9 +15,6 @@ from app import create_app
 app = create_app()
 
 def run_backfill():
-    print("=" * 70)
-    print("BACKFILL: routed_materials data for existing change_requests")
-    print("=" * 70)
 
     with app.app_context():
         # Step 1: Backfill store-routed materials
@@ -26,12 +23,10 @@ def run_backfill():
                 "SELECT COUNT(*) FROM change_requests "
                 "WHERE routed_materials IS NOT NULL AND routed_materials <> '{}'::jsonb"
             )).scalar()
-            print(f"CRs with existing routed_materials data: {count}")
 
             if count > 0:
-                print("Backfill already has data. Skipping store backfill.")
+                pass
             else:
-                print("\n1. Backfilling store-routed materials...")
                 db.session.execute(text("""
                     UPDATE change_requests cr
                     SET routed_materials = (
@@ -62,17 +57,14 @@ def run_backfill():
                     "SELECT COUNT(*) FROM change_requests "
                     "WHERE routed_materials IS NOT NULL AND routed_materials <> '{}'::jsonb"
                 )).scalar()
-                print(f"   Store-routed CRs updated: {store_count}")
 
         except Exception as e:
             db.session.rollback()
-            print(f"\n   Store backfill failed: {str(e)}")
             import traceback
             traceback.print_exc()
 
         # Step 2: Backfill vendor-routed materials
         try:
-            print("\n2. Backfilling vendor-routed materials...")
             db.session.execute(text("""
                 UPDATE change_requests cr
                 SET routed_materials = COALESCE(cr.routed_materials, '{}'::jsonb) || COALESCE((
@@ -109,17 +101,12 @@ def run_backfill():
                 "AND routed_materials <> '{}'::jsonb "
                 "AND routed_materials::text LIKE '%vendor%'"
             )).scalar()
-            print(f"   Vendor-routed CRs updated: {vendor_count}")
 
         except Exception as e:
             db.session.rollback()
-            print(f"\n   Vendor backfill failed: {str(e)}")
             import traceback
             traceback.print_exc()
 
-        print("\n" + "=" * 70)
-        print("BACKFILL COMPLETED")
-        print("=" * 70)
 
 if __name__ == "__main__":
     run_backfill()

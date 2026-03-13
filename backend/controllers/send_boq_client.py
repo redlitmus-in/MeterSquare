@@ -147,7 +147,6 @@ def _send_boq_background(app, boq_id, client_emails, message, formats, custom_em
                     failed_sends.append(client_email)
                     log.error(f"[BG_SEND_BOQ] Error sending to {client_email}: {e}")
 
-            log.info(f"[BG_SEND_BOQ] Sent {len(successful_sends)}/{len(client_emails)} for BOQ {boq_id}")
 
             # Update history
             try:
@@ -377,7 +376,6 @@ def _upload_client_boq_file(file_bytes, boq_id, project_name, file_ext):
         anon_client = create_supabase_client(supabase_url, anon_key or upload_key)
         file_url = anon_client.storage.from_(SUPABASE_BUCKET).get_public_url(file_path)
 
-        log.info(f"[SEND_BOQ] Uploaded {file_ext} to: {file_path}")
         return file_url
 
     except Exception as e:

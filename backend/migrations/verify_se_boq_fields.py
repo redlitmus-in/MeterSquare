@@ -32,7 +32,6 @@ def verify():
 
         columns = cur.fetchall()
 
-        print("\nRequired columns:")
         expected = ['assignment_date', 'base_total_for_overhead', 'material_ids', 'overhead_percentage']
 
         found = [col[0] for col in columns]
@@ -40,20 +39,16 @@ def verify():
         for col_name in expected:
             if col_name in found:
                 col_type = [c[1] for c in columns if c[0] == col_name][0]
-                print(f"  [OK] {col_name:30} ({col_type})")
             else:
-                print(f"  [MISSING] {col_name}")
+                pass
 
         if len(found) == len(expected):
-            print("\nAll required columns exist!")
             return True
         else:
-            print(f"\nMissing {len(expected) - len(found)} columns")
             return False
 
         cur.close()
     except Exception as e:
-        print(f"Error: {e}")
         return False
     finally:
         if conn:

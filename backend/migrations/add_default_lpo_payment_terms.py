@@ -23,9 +23,6 @@ def add_default_payment_terms():
         )
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
-        print("\n" + "="*80)
-        print("ADD DEFAULT PAYMENT TERMS TO SYSTEM SETTINGS")
-        print("="*80)
         
         # Default payment terms (master list - like boq_terms)
         default_payment_terms = [
@@ -56,10 +53,8 @@ def add_default_payment_terms():
         settings = cursor.fetchone()
         
         if settings:
-            print(f"\n✓ Found system_settings record (id={settings['id']})")
             
             # Update lpo_payment_terms_list
-            print(f"\nUpdating lpo_payment_terms_list with {len(default_payment_terms)} terms...")
             cursor.execute("""
                 UPDATE system_settings
                 SET lpo_payment_terms_list = %s,
@@ -68,37 +63,24 @@ def add_default_payment_terms():
                 WHERE id = %s
             """, (json.dumps(default_payment_terms), json.dumps(default_general_terms), settings['id']))
             
-            print(f"  ✓ Added {len(default_payment_terms)} payment terms")
-            print(f"  ✓ Added {len(default_general_terms)} general terms")
             
             # Show what was added
-            print("\n📋 Payment Terms Added:")
             for i, term in enumerate(default_payment_terms, 1):
-                print(f"  {i}. {term}")
+                pass
             
-            print("\n📋 General Terms Added:")
             for i, term in enumerate(default_general_terms, 1):
-                print(f"  {i}. {term}")
+                pass
         else:
-            print("\n❌ No system_settings record found!")
-            print("Creating system_settings record...")
             cursor.execute("""
                 INSERT INTO system_settings (
                     id, company_name, lpo_payment_terms_list, lpo_general_terms
                 )
                 VALUES (1, 'MeterSquare ERP', %s, %s)
             """, (json.dumps(default_payment_terms), json.dumps(default_general_terms)))
-            print("  ✓ Created system_settings with default terms")
         
         conn.commit()
-        print("\n" + "="*80)
-        print("✅ DEFAULT PAYMENT TERMS ADDED SUCCESSFULLY")
-        print("="*80)
-        print("\nNow when you edit an LPO, these terms will appear as checkboxes!")
-        print("Users can select which terms to include in each LPO.")
         
     except Exception as e:
-        print(f"\n❌ Error: {str(e)}")
         import traceback
         traceback.print_exc()
         if conn:

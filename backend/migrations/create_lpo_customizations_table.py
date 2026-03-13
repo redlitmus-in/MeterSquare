@@ -49,11 +49,9 @@ def run_migration():
         """)
 
         conn.commit()
-        print("✅ Successfully created lpo_customizations table")
 
     except Exception as e:
         conn.rollback()
-        print(f"❌ Error creating table: {str(e)}")
         raise e
     finally:
         cursor.close()

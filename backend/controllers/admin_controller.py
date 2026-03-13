@@ -916,7 +916,6 @@ def approve_boq_admin(boq_id):
         boq.updated_at = datetime.utcnow()
         db.session.commit()
 
-        log.info(f"BOQ {boq_id} {'approved' if approved else 'rejected'} by admin {current_user.get('user_id')}")
 
         return jsonify({
             "message": f"BOQ {'approved' if approved else 'rejected'} successfully",
@@ -1107,7 +1106,6 @@ def get_online_users():
             session.mark_expired()
         if stale_sessions:
             db.session.commit()
-            log.info(f"Auto-expired {len(stale_sessions)} stale login sessions")
 
         # Step 2: Subquery — latest login_history id per user
         latest_session_sq = db.session.query(
@@ -1230,7 +1228,6 @@ def force_logout_user(user_id):
         target_user.user_status = 'offline'
         db.session.commit()
 
-        log.info(f"Admin {current_user.get('user_id')} force-logged-out user {user_id} ({len(active_sessions)} sessions)")
 
         return jsonify({
             "success": True,
@@ -1274,7 +1271,6 @@ def block_user(user_id):
             session.mark_expired()
 
         db.session.commit()
-        log.info(f"Admin {current_user.get('user_id')} blocked user {user_id}. Reason: {reason}")
 
         # Send account-blocked notification email (non-blocking)
         try:
@@ -1318,7 +1314,6 @@ def unblock_user(user_id):
         target_user.blocked_by = None
 
         db.session.commit()
-        log.info(f"Admin {current_user.get('user_id')} unblocked user {user_id}")
 
         # Send account-unblocked notification email (non-blocking)
         try:

@@ -30,7 +30,6 @@ def run_migration():
         )
         cursor = conn.cursor()
 
-        print("Adding vendor email tracking columns to change_requests table...")
 
         # Add vendor_email_sent column
         cursor.execute("""
@@ -52,15 +51,12 @@ def run_migration():
 
         # Commit changes
         conn.commit()
-        print("[SUCCESS] Successfully added vendor email tracking columns")
 
         cursor.close()
         conn.close()
 
-        print("\nMigration completed successfully!")
 
     except Exception as e:
-        print(f"[ERROR] Migration failed: {str(e)}")
         if conn:
             conn.rollback()
             conn.close()

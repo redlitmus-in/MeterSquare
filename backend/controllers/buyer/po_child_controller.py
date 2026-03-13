@@ -403,7 +403,7 @@ def td_approve_po_child(po_child_id):
             from utils.lpo_pdf_helper import generate_and_save_lpo_pdf
             pdf_url = generate_and_save_lpo_pdf(cr_id=po_child.parent_cr_id, po_child_id=po_child_id)
             if pdf_url:
-                log.info(f"LPO PDF saved for POChild-{po_child_id}: {pdf_url}")
+                pass
             else:
                 log.warning(f"LPO PDF generation failed for POChild-{po_child_id}, will retry at email send")
         except Exception as pdf_err:
@@ -698,10 +698,6 @@ def reselect_vendor_for_po_child(po_child_id):
         db.session.commit()
 
         # Audit log for vendor re-selection
-        log.info(f"PO Child {po_child.get_formatted_id()} vendor re-selected: "
-                 f"vendor_id={vendor_id} ({vendor.company_name}), "
-                 f"materials_total_cost={po_child.materials_total_cost}, "
-                 f"by buyer {buyer_name} (id={buyer_id})")
 
         # Send notification to TD about new vendor selection
         try:
@@ -759,7 +755,6 @@ def get_project_site_engineers(project_id):
         from models.pm_assign_ss import PMAssignSS
         from models.role import Role
 
-        log.info(f"\ud83d\udd0d Fetching site engineers for project {project_id}")
 
         project = Project.query.filter_by(
             project_id=project_id,
@@ -770,8 +765,6 @@ def get_project_site_engineers(project_id):
             log.warning(f"Project {project_id} not found")
             return jsonify({"error": "Project not found"}), 404
 
-        log.info(f"\u2705 Project found: {project.project_name} (Code: {project.project_code})")
-        log.info(f"   project.site_supervisor_id = {project.site_supervisor_id}")
 
         site_engineers = []
         seen_ids = set()
@@ -782,7 +775,6 @@ def get_project_site_engineers(project_id):
             Role.is_deleted == False
         ).all()
         se_role_ids = [role.role_id for role in se_roles]
-        log.info(f"   SE Role IDs: {se_role_ids}")
 
         # Check direct site_supervisor_id
         if project.site_supervisor_id:
@@ -791,7 +783,6 @@ def get_project_site_engineers(project_id):
                 is_deleted=False
             ).first()
             if se_user:
-                log.info(f"   \u2705 Found direct SE: {se_user.full_name} (ID: {se_user.user_id})")
                 site_engineers.append({
                     'user_id': se_user.user_id,
                     'full_name': se_user.full_name,
@@ -876,7 +867,6 @@ def get_project_site_engineers(project_id):
 
                 log.debug(f"After PM fallback: {len(site_engineers)} SEs found")
 
-        log.info(f"Site engineers for project {project_id}: {len(site_engineers)} found")
 
         return jsonify({
             "success": True,
@@ -945,11 +935,9 @@ def complete_po_child_purchase(po_child_id):
         if routing_type == 'store':
             # Store routing: Already routed, just complete purchase
             po_child.status = 'purchase_completed'  # Mark as fully completed
-            log.info(f"Store-routed POChild {po_child.get_formatted_id()}: Completing purchase")
         else:
             # Vendor routing: Route through Production Manager (M2 Store)
             po_child.status = 'routed_to_store'  # Intermediate status
-            log.info(f"Vendor-routed POChild {po_child.get_formatted_id()}: Routing to store")
 
         po_child.purchase_completed_by_user_id = buyer_id
         po_child.purchase_completed_by_name = buyer_name
@@ -984,7 +972,6 @@ def complete_po_child_purchase(po_child_id):
                 log.error(f"POChild {po_child_id} materials_data is not a list: {type(materials_to_route)}")
                 materials_to_route = [materials_to_route] if materials_to_route else []
 
-            log.info(f"POChild {po_child_id}: Processing {len(materials_to_route)} materials for routing to store")
 
             from models.inventory import InternalMaterialRequest
             # notification_service is already imported at top of file
@@ -1019,7 +1006,6 @@ def complete_po_child_purchase(po_child_id):
 
                         # VRR-created POChildren store quantity as 'rejected_qty'; regular ones use 'quantity'
                         quantity = material.get('quantity') or material.get('rejected_qty', 0)
-                        log.info(f"  Material {idx+1}/{len(materials_to_route)}: {material_name} x {quantity}")
 
                         grouped_materials.append({
                             'material_name': material_name,
@@ -1083,7 +1069,6 @@ def complete_po_child_purchase(po_child_id):
                     parent_cr.routed_materials = current_routed
 
             db.session.commit()
-            log.info(f"POChild {po_child_id}: Created 1 grouped request with {len(grouped_materials)} materials")
 
             # Notify Production Manager about incoming vendor delivery
             materials_count = len(grouped_materials) if grouped_materials else 0
@@ -1132,7 +1117,7 @@ def complete_po_child_purchase(po_child_id):
                 parent_cr.purchase_completion_date = datetime.utcnow()
                 parent_cr.updated_at = datetime.utcnow()
             else:
-                log.info(f"CR-{parent_cr.cr_id}: All POChildren routed but {len(uncovered)} materials uncovered — NOT completing parent")
+                pass
 
         db.session.commit()
 
@@ -1251,10 +1236,8 @@ def get_pending_po_children():
             material_vendor_selections = {}
             if parent_cr and parent_cr.material_vendor_selections:
                 material_vendor_selections = parent_cr.material_vendor_selections
-                log.info(f"\ud83d\udce6 POChild {po_child.id}: Parent CR {parent_cr.cr_id} has material_vendor_selections with {len(material_vendor_selections)} materials")
                 for key, val in material_vendor_selections.items():
                     neg_price = val.get('negotiated_price') if isinstance(val, dict) else None
-                    log.info(f"  - Material: '{key}' \u2192 negotiated_price: {neg_price}")
             else:
                 log.warning(f"\u26a0\ufe0f POChild {po_child.id}: No material_vendor_selections found for parent CR {parent_cr.cr_id if parent_cr else 'None'}")
 
@@ -1265,7 +1248,6 @@ def get_pending_po_children():
                 for vp in vendor_products:
                     if vp.product_name:
                         vendor_product_prices[vp.product_name.lower().strip()] = float(vp.unit_price or 0)
-                log.info(f"\ud83d\udce6 POChild {po_child.id}: Loaded {len(vendor_product_prices)} vendor products for vendor {po_child.vendor_id}")
 
             # Build BOQ price lookup - get REAL BOQ prices from BOQ details
             boq_price_lookup = {}
@@ -1332,7 +1314,6 @@ def get_pending_po_children():
                             break
 
                 # Check material_vendor_selections for negotiated price (set by buyer)
-                log.info(f"\ud83d\udd0d Looking for material: '{mat_name_original}' (lowercase: '{mat_name}')")
 
                 # Try multiple name variations for robust matching
                 selection = (material_vendor_selections.get(mat_name_original) or
@@ -1344,7 +1325,6 @@ def get_pending_po_children():
                     for key, val in material_vendor_selections.items():
                         if key.lower() == mat_name:
                             selection = val
-                            log.info(f"\u2713 Found match via case-insensitive search: key='{key}'")
                             break
 
                 negotiated_from_selection = selection.get('negotiated_price') if isinstance(selection, dict) else None
@@ -1372,17 +1352,17 @@ def get_pending_po_children():
                               vendor_product_price or 0)
 
                 if negotiated_from_selection:
-                    log.info(f"\u2705 Found negotiated price {negotiated_from_selection} for '{mat_name_original}' from material_vendor_selections")
+                    pass
                 elif negotiated_from_sub_items:
-                    log.info(f"\u2705 Found negotiated price {negotiated_from_sub_items} for '{mat_name_original}' from sub_items_data")
+                    pass
                 elif material_negotiated_price:
-                    log.info(f"\u2705 Found negotiated price {material_negotiated_price} for '{mat_name_original}' from material.negotiated_price")
+                    pass
                 elif material_vendor_price:
-                    log.info(f"\u2705 Found vendor price {material_vendor_price} for '{mat_name_original}' from material.vendor_price")
+                    pass
                 elif material_unit_price:
-                    log.info(f"\u2705 Using unit_price {material_unit_price} for '{mat_name_original}' from material.unit_price (may be vendor or BOQ)")
+                    pass
                 elif vendor_product_price:
-                    log.info(f"\u2705 Found vendor product price {vendor_product_price} for '{mat_name_original}' from vendor catalog")
+                    pass
                 else:
                     log.warning(f"\u274c No vendor price found for '{mat_name_original}'")
 
@@ -1397,13 +1377,11 @@ def get_pending_po_children():
                     mat_copy['unit_price'] = vendor_price
                     mat_copy['total_price'] = vendor_price * quantity
                     mat_copy['negotiated_price'] = vendor_price
-                    log.info(f"\u2713 Set vendor price {vendor_price} for '{mat_name_original}' (BOQ: {boq_price})")
                 elif boq_price and boq_price > 0:
                     # No vendor price - fallback to BOQ price
                     mat_copy['unit_price'] = boq_price
                     mat_copy['total_price'] = boq_price * quantity
                     mat_copy['negotiated_price'] = None  # No negotiation happened
-                    log.info(f"\u2139 Set BOQ price {boq_price} for '{mat_name_original}' (no vendor price)")
                 else:
                     # No prices found at all - this shouldn't happen
                     mat_copy['unit_price'] = material.get('unit_price', 0)  # Keep original if any
@@ -1423,7 +1401,6 @@ def get_pending_po_children():
                 if final_supplier_notes:
                     mat_copy['supplier_notes'] = final_supplier_notes
                     source = "vendor_selection" if supplier_notes_from_selection else "po_material_data"
-                    log.info(f"\u2705 Added supplier notes for '{mat_name_original}' from {source}: {final_supplier_notes[:50]}...")
                 else:
                     mat_copy['supplier_notes'] = ''  # Ensure field exists even if empty
 
@@ -1846,7 +1823,7 @@ def get_buyer_pending_po_children():
 
                 supplier_notes = selection.get('supplier_notes', '') if isinstance(selection, dict) else ''
                 if supplier_notes:
-                    log.info(f"\u2705 Buyer POChild: Found supplier notes for '{mat_name_original}': {supplier_notes[:50]}...")
+                    pass
 
                 # If unit_price is 0 or missing, use BOQ price as fallback
                 if not mat_copy.get('unit_price') or mat_copy.get('unit_price') == 0:
@@ -1860,11 +1837,9 @@ def get_buyer_pending_po_children():
                 # ✅ Add supplier notes from vendor selection if available
                 if supplier_notes:
                     mat_copy['supplier_notes'] = supplier_notes
-                    log.info(f"\u2705 [get_approved_po_children] Added supplier notes to material '{mat_name_original}': {supplier_notes[:50]}...")
                 else:
                     # Ensure supplier_notes field exists even if empty (for frontend consistency)
                     mat_copy['supplier_notes'] = ''
-                    log.info(f"\u26a0\ufe0f [get_approved_po_children] No supplier notes for material '{mat_name_original}'")
 
                 enriched_materials.append(mat_copy)
 
@@ -1924,7 +1899,6 @@ def get_approved_po_children():
         user_id = current_user['user_id']
         user_role = current_user.get('role_name', current_user.get('role', '')).lower()
 
-        log.info(f"get_approved_po_children called by user {user_id}, role: '{user_role}'")
 
         # Check roles
         is_buyer = user_role == 'buyer'
@@ -1932,7 +1906,6 @@ def get_approved_po_children():
         is_td = user_role in ['technical_director', 'technicaldirector', 'technical director']
         is_admin = user_role == 'admin'
 
-        log.info(f"Role check: is_buyer={is_buyer}, is_estimator={is_estimator}, is_td={is_td}, is_admin={is_admin}")
 
         # Check if admin is viewing as buyer
         context = get_effective_user_context()
@@ -1968,7 +1941,6 @@ def get_approved_po_children():
             POChild.created_at.desc()
         ).all()
 
-        log.info(f"Found {len(approved_po_children)} approved PO children in database")
 
         # ── Batch pre-fetch to eliminate N+1 queries ──────────────────────────
         all_parent_cr_ids = list({pc.parent_cr_id for pc in approved_po_children if pc.parent_cr_id})
@@ -2190,7 +2162,6 @@ def get_approved_po_children():
                 'material_vendor_selections': parent_cr.material_vendor_selections if parent_cr and parent_cr.material_vendor_selections else {},
             })
 
-        log.info(f"Returning {len(result)} approved PO children to user {user_id} (role: {user_role})")
 
         return jsonify({
             "success": True,

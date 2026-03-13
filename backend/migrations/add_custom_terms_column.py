@@ -24,11 +24,9 @@ def run_migration():
                         ADD COLUMN custom_terms TEXT DEFAULT '[]'
                     """))
                     db.session.commit()
-                    print("Successfully added 'custom_terms' column to lpo_customizations table")
                 else:
-                    print("Column 'custom_terms' already exists in lpo_customizations table")
+                    pass
             except Exception as e:
-                print(f"Error with lpo_customizations: {e}")
                 db.session.rollback()
 
             # Add to lpo_default_templates table
@@ -40,15 +38,12 @@ def run_migration():
                         ADD COLUMN custom_terms TEXT DEFAULT '[]'
                     """))
                     db.session.commit()
-                    print("Successfully added 'custom_terms' column to lpo_default_templates table")
                 else:
-                    print("Column 'custom_terms' already exists in lpo_default_templates table")
+                    pass
             except Exception as e:
-                print(f"Error with lpo_default_templates: {e}")
                 db.session.rollback()
 
         except Exception as e:
-            print(f"Error running migration: {e}")
             db.session.rollback()
             raise
 

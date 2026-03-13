@@ -36,41 +36,24 @@ def add_received_columns():
             columns_to_add.append("ADD COLUMN received_by_id INTEGER")
 
         if not columns_to_add:
-            print("All columns already exist. Nothing to do.")
             return True
 
         try:
             alter_sql = f"ALTER TABLE asset_movements {', '.join(columns_to_add)};"
             db.session.execute(db.text(alter_sql))
             db.session.commit()
-            print(f"Added columns: {columns_to_add}")
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error adding columns: {e}")
             return False
 
 
 if __name__ == "__main__":
-    print("=" * 70)
-    print("Migration: Add received tracking columns to asset_movements")
-    print("=" * 70)
-    print()
 
     success = add_received_columns()
 
     if success:
-        print()
-        print("=" * 70)
-        print("Migration Complete!")
-        print("=" * 70)
-        print()
-        print("New columns added to asset_movements:")
-        print("  - received_at: When SE acknowledged receipt")
-        print("  - received_by: Name of SE who received")
-        print("  - received_by_id: ID of SE who received")
+        pass
     else:
-        print()
-        print("Migration Failed! Please check the error above.")
         sys.exit(1)

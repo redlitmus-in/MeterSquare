@@ -48,8 +48,6 @@ if not supabase_url or not supabase_key:
 # Initialize Supabase client
 try:
     supabase: Client = create_client(supabase_url, supabase_key)
-    log.info(f"Supabase client initialized successfully")
-    log.info(f"Using bucket: {SUPABASE_BUCKET}")
 except Exception as e:
     log.error(f"Failed to initialize Supabase client: {str(e)}")
     raise
@@ -109,7 +107,6 @@ def compress_image(file_content, max_size=MAX_IMAGE_SIZE, quality=95):
             # Check size
             compressed_size = output.tell()
             if compressed_size <= max_size:
-                log.info(f"Image compressed from {len(file_content)} to {compressed_size} bytes (quality: {current_quality})")
                 return output.getvalue(), "image/jpeg"
 
             # Reduce quality for next iteration
@@ -128,7 +125,6 @@ def compress_image(file_content, max_size=MAX_IMAGE_SIZE, quality=95):
         img.save(output, format='JPEG', quality=85, optimize=True)
         compressed_size = output.tell()
 
-        log.info(f"Image resized and compressed from {len(file_content)} to {compressed_size} bytes")
         return output.getvalue(), "image/jpeg"
 
     except Exception as e:
@@ -139,9 +135,6 @@ def compress_image(file_content, max_size=MAX_IMAGE_SIZE, quality=95):
 def upload_single_file(path, content, content_type):
     """Upload a single file to Supabase storage"""
     try:
-        log.info(f"Uploading file to: {path}, size: {len(content)} bytes")
-        log.info(f"Content type: {content_type}")
-        log.info(f"Bucket: {SUPABASE_BUCKET}")
 
         # Direct upload with upsert enabled to overwrite if exists
         response = supabase.storage.from_(SUPABASE_BUCKET).upload(
@@ -154,12 +147,9 @@ def upload_single_file(path, content, content_type):
         )
 
         # Log the response for debugging
-        log.info(f"Upload response: {response}")
-        log.info(f"Successfully uploaded: {path}")
 
         # Get the public URL
         public_url = f"{PUBLIC_URL_BASE}{path}"
-        log.info(f"Public URL: {public_url}")
         return public_url
 
     except Exception as e:
@@ -185,9 +175,6 @@ def upload_single_file(path, content, content_type):
 def upload_single_image(path, content, content_type):
     """Upload a single image to Supabase storage (ITEM_SUPABASE_BUCKET)"""
     try:
-        log.info(f"Uploading image to: {path}, size: {len(content)} bytes")
-        log.info(f"Content type: {content_type}")
-        log.info(f"Bucket: {ITEM_SUPABASE_BUCKET}")
 
         # Direct upload with upsert enabled to overwrite if exists
         response = supabase.storage.from_(ITEM_SUPABASE_BUCKET).upload(
@@ -199,12 +186,9 @@ def upload_single_image(path, content, content_type):
             }
         )
 
-        log.info(f"Upload response: {response}")
-        log.info(f"Successfully uploaded: {path}")
 
         # Get the public URL
         public_url = f"{IMAGE_PUBLIC_URL_BASE}{path}"
-        log.info(f"Public URL: {public_url}")
         return public_url
 
     except Exception as e:
@@ -301,7 +285,6 @@ def process_file_batch(files, cr_id):
                 "type": file_info["type"],
                 "url": public_url
             })
-            log.info(f"Successfully processed upload for {file_info['original']}")
         except Exception as e:
             error_msg = str(e) if str(e) else "Upload failed"
             errors.append(f"{file_info['original']}: {error_msg}")
@@ -363,7 +346,6 @@ def process_image_batch(files, item_id):
             try:
                 compressed_content, content_type = compress_image(file_content, MAX_IMAGE_SIZE)
                 compressed_size = len(compressed_content)
-                log.info(f"Original size: {file_size} bytes, Compressed size: {compressed_size} bytes")
             except Exception as e:
                 errors.append(f"{file.filename}: Compression failed - {str(e)}")
                 continue
@@ -401,7 +383,6 @@ def process_image_batch(files, item_id):
                 "type": file_info["type"],
                 "url": public_url
             })
-            log.info(f"Successfully processed upload for {file_info['original']}")
         except Exception as e:
             error_msg = str(e) if str(e) else "Upload failed"
             errors.append(f"{file_info['original']}: {error_msg}")
@@ -592,7 +573,6 @@ def buyer_delete_files(cr_id):
                 try:
                     supabase.storage.from_(SUPABASE_BUCKET).remove([file_path])
                     deleted_count += 1
-                    log.info(f"Deleted file: {file_path}")
                 except Exception as e:
                     log.error(f"Failed to delete {file_path}: {str(e)}")
                     failed_files.append(filename)
@@ -643,7 +623,6 @@ def buyer_delete_all_files(cr_id):
                 try:
                     supabase.storage.from_(SUPABASE_BUCKET).remove([file_path])
                     deleted_count += 1
-                    log.info(f"Deleted file: {file_path}")
                 except Exception as e:
                     log.warning(f"Failed to delete {file_path}: {str(e)}")
                     failed_count += 1
@@ -854,7 +833,6 @@ def delete_item_images(id):
         file_path = f"items/{id}/{filename}"
         try:
             supabase.storage.from_(ITEM_SUPABASE_BUCKET).remove([file_path])
-            log.info(f"Deleted image from storage: {file_path}")
         except Exception as e:
             log.error(f"Failed to delete {file_path} from storage: {str(e)}")
             return jsonify({"error": f"Failed to delete image from storage: {str(e)}"}), 500
@@ -911,7 +889,6 @@ def delete_all_item_images(id):
                     try:
                         supabase.storage.from_(ITEM_SUPABASE_BUCKET).remove([file_path])
                         deleted_count += 1
-                        log.info(f"Deleted image: {file_path}")
                     except Exception as e:
                         log.warning(f"Failed to delete {file_path}: {str(e)}")
                         failed_count += 1

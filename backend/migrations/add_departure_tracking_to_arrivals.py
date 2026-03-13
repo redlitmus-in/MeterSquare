@@ -41,7 +41,6 @@ def run_migration():
                 ALTER TABLE labour_arrivals
                 ADD COLUMN departure_time VARCHAR(10);
             """)
-            print("Will add: departure_time VARCHAR(10)")
 
         # Add departed_at timestamp column
         if 'departed_at' not in existing_columns:
@@ -49,25 +48,19 @@ def run_migration():
                 ALTER TABLE labour_arrivals
                 ADD COLUMN departed_at TIMESTAMP;
             """)
-            print("Will add: departed_at TIMESTAMP")
 
         if not columns_to_add:
-            print("All columns already exist. No migration needed.")
             return
 
         # Execute migrations
         for sql in columns_to_add:
             try:
                 db.session.execute(db.text(sql.strip()))
-                print(f"Executed: {sql.strip()[:60]}...")
             except Exception as e:
-                print(f"Error executing SQL: {e}")
                 db.session.rollback()
                 raise
 
         db.session.commit()
-        print("\n✅ Migration completed successfully!")
-        print("Added columns: departure_time, departed_at to labour_arrivals table")
 
 
 if __name__ == '__main__':

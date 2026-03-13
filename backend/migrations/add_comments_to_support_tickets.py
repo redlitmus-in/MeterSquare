@@ -18,10 +18,8 @@ def run_migration():
                 ADD COLUMN IF NOT EXISTS comments JSONB DEFAULT '[]'::jsonb;
             """))
             db.session.commit()
-            print("Successfully added 'comments' column to support_tickets table")
         except Exception as e:
             db.session.rollback()
-            print(f"Error: {str(e)}")
             # Try alternative approach
             try:
                 db.session.execute(db.text("""
@@ -36,9 +34,8 @@ def run_migration():
                     END $$;
                 """))
                 db.session.commit()
-                print("Successfully added 'comments' column (alternative method)")
             except Exception as e2:
-                print(f"Alternative method also failed: {str(e2)}")
+                pass
 
 if __name__ == '__main__':
     run_migration()

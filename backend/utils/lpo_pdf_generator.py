@@ -2,7 +2,10 @@
 LPO (Local Purchase Order) PDF Generator
 Generates professional purchase order PDFs for vendors
 """
+import logging
 from reportlab.lib import colors
+
+log = logging.getLogger(__name__)
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch, mm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -117,10 +120,10 @@ class LPOPDFGenerator:
                 img.drawWidth  # triggers internal image load
                 return img
             except Exception as img_err:
-                print(f"Warning: image could not be loaded (skipped): {img_err}")
+                log.warning(f"Image could not be loaded (skipped): {img_err}")
                 return None
         except Exception as e:
-            print(f"Error loading image from base64: {e}")
+            log.error(f"Error loading image from base64: {str(e)}")
             return None
 
     def _add_watermark(self, canvas_obj, doc):

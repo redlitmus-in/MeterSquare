@@ -26,7 +26,6 @@ def run_migration():
         conn.autocommit = False
         cursor = conn.cursor()
 
-        print("Connected to database successfully")
 
         # Find all ARDN items that have original_adn_item_id set
         cursor.execute("""
@@ -39,7 +38,6 @@ def run_migration():
         """)
 
         ardn_items = cursor.fetchall()
-        print(f"Found {len(ardn_items)} ADN items with returns")
 
         updated_count = 0
         for original_adn_item_id, total_returned in ardn_items:
@@ -52,7 +50,6 @@ def run_migration():
 
             adn_item = cursor.fetchone()
             if not adn_item:
-                print(f"  Warning: ADN item {original_adn_item_id} not found")
                 continue
 
             item_id, quantity, current_returned, current_status = adn_item
@@ -74,25 +71,21 @@ def run_migration():
                     WHERE item_id = %s
                 """, (total_returned, new_status, item_id))
 
-                print(f"  Updated ADN item {item_id}: quantity_returned {current_returned} -> {total_returned}, status -> {new_status}")
                 updated_count += 1
             else:
-                print(f"  ADN item {item_id}: already correct (quantity_returned={current_returned})")
+                pass
 
         conn.commit()
-        print(f"\n✓ Migration completed successfully! Updated {updated_count} items.")
         return True
 
     except Exception as e:
         if conn:
             conn.rollback()
-        print(f"\n✗ Migration failed: {str(e)}")
         return False
 
     finally:
         if conn:
             conn.close()
-            print("Database connection closed")
 
 
 if __name__ == '__main__':

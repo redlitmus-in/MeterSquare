@@ -28,16 +28,11 @@ def run_migration():
         conn.autocommit = True
         cursor = conn.cursor()
 
-        print("\n" + "="*60)
-        print("VENDOR CATEGORIES TABLE MIGRATION")
-        print("="*60)
-        print("\nConnected to database successfully")
 
         # ========================================
         # CREATE VENDOR_CATEGORIES TABLE
         # ========================================
 
-        print("\n📦 Creating vendor_categories table...")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS vendor_categories (
@@ -52,27 +47,23 @@ def run_migration():
                 last_modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        print("✅ vendor_categories table created")
 
         # Create index on name for faster lookups
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_vendor_categories_name
             ON vendor_categories(name)
         """)
-        print("✅ Index on name created")
 
         # Create index on is_active for filtering
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_vendor_categories_active
             ON vendor_categories(is_active) WHERE is_active = TRUE
         """)
-        print("✅ Index on is_active created")
 
         # ========================================
         # SEED DEFAULT CATEGORIES
         # ========================================
 
-        print("\n📦 Seeding default categories...")
 
         default_categories = [
             ('Construction Materials', 'Building materials, cement, concrete, bricks, etc.'),
@@ -96,15 +87,12 @@ def run_migration():
                 VALUES (%s, %s, TRUE, TRUE)
                 ON CONFLICT (name) DO NOTHING
             """, (name, description))
-            print(f"  ✓ {name}")
 
-        print("\n✅ Default categories seeded")
 
         # ========================================
         # MIGRATE EXISTING VENDOR CATEGORIES
         # ========================================
 
-        print("\n📦 Checking for custom categories in existing vendors...")
 
         # Find any categories in vendors table that are not in our default list
         cursor.execute("""
@@ -118,33 +106,21 @@ def run_migration():
         custom_categories = cursor.fetchall()
 
         if custom_categories:
-            print(f"  Found {len(custom_categories)} custom categories to migrate:")
             for (cat_name,) in custom_categories:
                 cursor.execute("""
                     INSERT INTO vendor_categories (name, is_default, is_active)
                     VALUES (%s, FALSE, TRUE)
                     ON CONFLICT (name) DO NOTHING
                 """, (cat_name,))
-                print(f"    ✓ {cat_name}")
         else:
-            print("  No custom categories found in existing vendors")
+            pass
 
-        print("\n" + "="*60)
-        print("✅ MIGRATION COMPLETED SUCCESSFULLY")
-        print("="*60)
-        print("\nCreated:")
-        print("  ✓ vendor_categories table")
-        print("  ✓ Index on name column")
-        print("  ✓ Index on is_active column")
-        print(f"  ✓ Seeded {len(default_categories)} default categories")
         if custom_categories:
-            print(f"  ✓ Migrated {len(custom_categories)} custom categories")
-        print("="*60 + "\n")
+            pass
 
         cursor.close()
 
     except Exception as e:
-        print(f"\n❌ MIGRATION FAILED: {str(e)}\n")
         import traceback
         traceback.print_exc()
         raise
@@ -152,7 +128,6 @@ def run_migration():
     finally:
         if conn:
             conn.close()
-            print("Database connection closed\n")
 
 
 def rollback_migration():
@@ -168,18 +143,13 @@ def rollback_migration():
         conn.autocommit = True
         cursor = conn.cursor()
 
-        print("\n" + "="*60)
-        print("ROLLING BACK VENDOR CATEGORIES MIGRATION")
-        print("="*60 + "\n")
 
         cursor.execute("DROP TABLE IF EXISTS vendor_categories CASCADE")
 
-        print("\n✅ ROLLBACK COMPLETED SUCCESSFULLY\n")
 
         cursor.close()
 
     except Exception as e:
-        print(f"\n❌ ROLLBACK FAILED: {str(e)}\n")
         raise
 
     finally:

@@ -149,7 +149,6 @@ def get_all_projects():
         user_role = current_user.get('role', '').lower() if current_user else ''
         user_name = current_user.get('full_name') or current_user.get('username') or 'Unknown' if current_user else 'Unknown'
 
-        log.info(f"get_all_projects - user_id: {user_id}, user_role: '{user_role}'")
 
         # Get query parameters
         page = request.args.get('page', 1, type=int)
@@ -168,7 +167,6 @@ def get_all_projects():
         roles_with_full_access = ['admin', 'productionmanager', 'inventory']
         # Normalize role for comparison (lowercase, remove all spaces/underscores)
         normalized_role = user_role.lower().replace('_', '').replace(' ', '').replace('-', '')
-        log.info(f"get_all_projects - normalized_role: '{normalized_role}', has_access: {normalized_role in roles_with_full_access}")
         if normalized_role not in roles_with_full_access:
             # Non-admin users only see projects assigned to them OR projects with no estimator
             query = query.filter(
@@ -586,7 +584,6 @@ def get_assigned_projects():
         effective_role = context.get('effective_role', user_role)
         is_admin_viewing = context.get('is_admin_viewing', False)
 
-        log.info(f"get_assigned_projects - actual_role: {user_role}, effective_role: {effective_role}, is_admin_viewing: {is_admin_viewing}")
 
         # ✅ PERFORMANCE OPTIMIZATION: Eager load BOQs and BOQDetails to eliminate N+1 queries
         # This changes query count from O(N²) to O(1)
@@ -639,7 +636,6 @@ def get_assigned_projects():
                             Project.is_deleted == False,
                             Project.status != 'completed'
                         ).all()
-                    log.info(f"Admin viewing as SE user {effective_user_id}: Fetched {len(projects)} projects for that SE")
                 else:
                     # No specific user, show ALL SE-related projects
                     # SE assignments come from: site_supervisor_id OR pm_assign_ss table
@@ -664,7 +660,6 @@ def get_assigned_projects():
                             Project.is_deleted == False,
                             Project.status != 'completed'
                         ).all()
-                    log.info(f"Admin viewing as SE role: Fetched {len(projects)} total SE projects (site_supervisor_id + pm_assign_ss)")
             else:
                 # Regular SE: Show projects assigned via site_supervisor_id OR pm_assign_ss
                 # Get project IDs from pm_assign_ss assignments
@@ -675,7 +670,6 @@ def get_assigned_projects():
                     PMAssignSS.project_id.isnot(None)
                 ).distinct()
                 assigned_project_ids = [row[0] for row in pm_assign_query.all()]
-                log.info(f"SE {user_id}: Found {len(assigned_project_ids)} projects via pm_assign_ss: {assigned_project_ids}")
 
                 # Filter projects: either site_supervisor_id matches OR in pm_assign_ss
                 if assigned_project_ids:
@@ -694,7 +688,6 @@ def get_assigned_projects():
                         Project.is_deleted == False,
                         Project.status != 'completed'
                     ).all()
-                log.info(f"Regular SE {user_id}: Fetched {len(projects)} assigned projects (via site_supervisor_id or pm_assign_ss)")
 
         elif effective_role in ['projectmanager']:
             # Project Manager projects
@@ -705,7 +698,6 @@ def get_assigned_projects():
                     Project.is_deleted == False,
                     Project.status != 'completed'
                 ).all()
-                log.info(f"Admin viewing as PM: Fetched {len(projects)} total PM projects")
             else:
                 # Regular PM: Show only THEIR projects
                 projects = Project.query.options(*eager_load_options).filter(
@@ -713,7 +705,6 @@ def get_assigned_projects():
                     Project.is_deleted == False,
                     Project.status != 'completed'
                 ).all()
-                log.info(f"Regular PM {user_id}: Fetched {len(projects)} assigned projects")
 
         elif effective_role in ['mep', 'mepsupervisor']:
             # MEP Supervisor projects
@@ -724,7 +715,6 @@ def get_assigned_projects():
                     Project.is_deleted == False,
                     Project.status != 'completed'
                 ).all()
-                log.info(f"Admin viewing as MEP: Fetched {len(projects)} total MEP projects")
             else:
                 # Regular MEP: Show only THEIR projects
                 projects = Project.query.options(*eager_load_options).filter(
@@ -732,7 +722,6 @@ def get_assigned_projects():
                     Project.is_deleted == False,
                     Project.status != 'completed'
                 ).all()
-                log.info(f"Regular MEP {user_id}: Fetched {len(projects)} assigned projects")
 
         elif user_role == 'admin' and not is_admin_viewing:
             # Pure admin view (not viewing as another role) - Show all projects
@@ -740,7 +729,6 @@ def get_assigned_projects():
                 Project.is_deleted == False,
                 Project.status != 'completed'
             ).all()
-            log.info(f"Pure admin view: Fetched {len(projects)} total projects")
 
         else:
             # No projects for other roles
@@ -819,7 +807,6 @@ def get_assigned_projects():
                         for assignment in se_assignments:
                             if assignment.item_indices:
                                 se_assigned_item_indices.update(assignment.item_indices)
-                        log.info(f"SE {user_id} assigned item indices for BOQ {boq.boq_id}: {se_assigned_item_indices}")
 
                 for idx, item in enumerate(items):
                     # Skip items not assigned to this SE (if SE filtering is active)
@@ -851,8 +838,6 @@ def get_assigned_projects():
                     # Calculate overhead from base_total
                     if overhead_percentage > 0 and base_total_for_overhead > 0:
                         item_overhead = (base_total_for_overhead * overhead_percentage) / 100
-                        log.info(f"Calculated overhead for item {item.get('item_name', '')}: {item_overhead} " +
-                               f"from {overhead_percentage}% of base_total {base_total_for_overhead}")
                     elif item_overhead == 0 or item_overhead is None:
                         # Log warning if we can't calculate
                         log.warning(f"Cannot calculate overhead for item {item.get('item_name', 'unknown')}: " +

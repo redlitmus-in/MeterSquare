@@ -32,9 +32,8 @@ def run_migration():
                     ALTER TABLE system_settings
                     ADD COLUMN lpo_general_terms TEXT
                 """))
-                print("Added lpo_general_terms column")
             else:
-                print("lpo_general_terms column already exists")
+                pass
 
             # Add lpo_payment_terms_list column if it doesn't exist
             if 'lpo_payment_terms_list' not in existing_columns:
@@ -42,9 +41,8 @@ def run_migration():
                     ALTER TABLE system_settings
                     ADD COLUMN lpo_payment_terms_list TEXT
                 """))
-                print("Added lpo_payment_terms_list column")
             else:
-                print("lpo_payment_terms_list column already exists")
+                pass
 
             # Set default values with the terms from the image
             default_general_terms = [
@@ -76,13 +74,9 @@ def run_migration():
             """), {"general_terms": json.dumps(default_general_terms), "payment_terms": json.dumps(default_payment_terms)})
 
             db.session.commit()
-            print("Migration completed successfully!")
-            print(f"Default general terms set: {len(default_general_terms)} items")
-            print(f"Default payment terms set: {len(default_payment_terms)} items")
 
         except Exception as e:
             db.session.rollback()
-            print(f"Migration failed: {str(e)}")
             raise
 
 if __name__ == '__main__':

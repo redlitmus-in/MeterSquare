@@ -162,7 +162,6 @@ def build_notification_action_url(
     # Use fallback if provided and role route is 'dashboard'
     if role_route == 'dashboard' and fallback_role_route:
         role_route = fallback_role_route
-        log.info(f"Using fallback route '{fallback_role_route}' for user {user_id}")
 
     # Build base URL
     url = f'/{role_route}/{base_page}'

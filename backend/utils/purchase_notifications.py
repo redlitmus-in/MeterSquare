@@ -66,7 +66,6 @@ def notify_purchase_created(boq_id, project_name, created_by_id, created_by_name
             if notification.target_role:
                 send_notification_to_role(notification.target_role, notification_data)
 
-        log.info(f"Sent {len(notifications)} purchase created notifications for BOQ {boq_id}")
 
     except Exception as e:
         log.error(f"Error sending purchase created notifications: {e}")
@@ -105,7 +104,6 @@ def notify_purchase_approved(boq_id, project_name, approved_by_id, approved_by_n
         for notification in notifications:
             send_notification_to_user(notification.user_id, notification.to_dict())
 
-        log.info(f"Sent purchase approved notification for BOQ {boq_id} to user {target_user_id}")
 
     except Exception as e:
         log.error(f"Error sending purchase approved notification: {e}")
@@ -144,7 +142,6 @@ def notify_purchase_rejected(boq_id, project_name, rejected_by_id, rejected_by_n
         for notification in notifications:
             send_notification_to_user(notification.user_id, notification.to_dict())
 
-        log.info(f"Sent purchase rejected notification for BOQ {boq_id} to user {target_user_id}")
 
     except Exception as e:
         log.error(f"Error sending purchase rejected notification: {e}")
@@ -208,7 +205,6 @@ def notify_purchase_forwarded(boq_id, project_name, forwarded_by_id, forwarded_b
             send_notification_to_user(notification.user_id, notification_data)
             send_notification_to_role(target_role.lower(), notification_data)
 
-        log.info(f"Sent purchase forwarded notification for BOQ {boq_id} to {len(notifications)} users in role {role_name}")
 
     except Exception as e:
         log.error(f"Error sending purchase forwarded notification: {e}")
@@ -249,7 +245,6 @@ def notify_project_action(project_id, project_name, action, actor_id, actor_name
         for notification in notifications:
             send_notification_to_user(notification.user_id, notification.to_dict())
 
-        log.info(f"Sent project {action} notification for project {project_id} to {len(notifications)} users")
 
     except Exception as e:
         log.error(f"Error sending project {action} notification: {e}")

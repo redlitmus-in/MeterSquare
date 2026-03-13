@@ -39,10 +39,6 @@ def run_migration():
 
     with app.app_context():
         try:
-            log.info("=" * 70)
-            log.info("MIGRATION: Add Vendor Delivery Routing Columns")
-            log.info("Table: internal_inventory_material_requests")
-            log.info("=" * 70)
 
             # Define columns to add with their specifications
             columns_to_add = [
@@ -88,7 +84,6 @@ def run_migration():
             result = db.session.execute(existing_columns_query)
             existing_columns = {row[0] for row in result}
 
-            log.info(f"Existing columns: {len(existing_columns)}")
 
             columns_added = 0
             columns_skipped = 0
@@ -99,10 +94,8 @@ def run_migration():
                 col_desc = col['description']
 
                 if col_name in existing_columns:
-                    log.info(f"  [SKIP] Column '{col_name}' already exists")
                     columns_skipped += 1
                 else:
-                    log.info(f"  [ADD] Adding column '{col_name}' ({col_desc})")
                     alter_query = text(f"""
                         ALTER TABLE internal_inventory_material_requests
                         ADD COLUMN IF NOT EXISTS {col_name} {col_type}
@@ -112,12 +105,6 @@ def run_migration():
 
             db.session.commit()
 
-            log.info("")
-            log.info("=" * 70)
-            log.info("MIGRATION COMPLETED SUCCESSFULLY")
-            log.info(f"  Columns added: {columns_added}")
-            log.info(f"  Columns skipped (already exist): {columns_skipped}")
-            log.info("=" * 70)
 
             return True
 

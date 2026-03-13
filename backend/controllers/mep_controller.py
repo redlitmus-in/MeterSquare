@@ -38,7 +38,6 @@ def get_user_role_context(endpoint_name: str = '') -> tuple:
     view_as_role = request.args.get('view_as_role', '').lower()
     if original_role == 'admin' and view_as_role:
         if view_as_role in ALLOWED_VIEW_AS_ROLES:
-            log.info(f"Admin {user_id} viewing {endpoint_name} as role: {view_as_role}")
             user_role = view_as_role
             is_admin_viewing_as = True
         else:
@@ -124,7 +123,6 @@ def get_mep_approval_boq():
         # Filter by role - Admin always sees ALL MEP data
         if original_role == 'admin':
             # Admin always sees all MEP-assigned projects
-            log.info(f"Admin viewing mep_approval_boq - showing all MEP projects")
             query = query.filter(
                 Project.mep_supervisor_id.isnot(None),
                 Project.mep_supervisor_id != []
@@ -292,7 +290,6 @@ def get_mep_assign_project():
         # Filter by role - Admin sees ALL assignments, MEP sees only their assignments
         if original_role == 'admin':
             # Admin sees all MEP-assigned projects (no filter on assigned_by_pm_id)
-            log.info(f"Admin viewing mep_assign_project - showing all MEP assignments")
             # Only filter to MEP-assigned projects
             query = query.filter(
                 Project.mep_supervisor_id.isnot(None),
@@ -342,7 +339,6 @@ def get_mep_assign_project():
         projects = []
         for row in rows:
             # Debug logging
-            log.info(f"BOQ {row.boq_id}: total_boq_items={row.total_boq_items}, total_items_assigned={row.total_items_assigned}, confirmed={row.confirmed_items_count}")
 
             project_data = {
                 "project_id": row.project_id,
@@ -441,7 +437,6 @@ def get_mep_approved_boq():
         # Filter by role - Admin always sees ALL MEP data
         if original_role == 'admin':
             # Admin always sees all MEP-assigned projects
-            log.info(f"Admin viewing mep_approved_boq - showing all MEP projects")
             query = query.filter(
                 Project.mep_supervisor_id.isnot(None),
                 Project.mep_supervisor_id != []
@@ -541,7 +536,6 @@ def get_mep_pending_boq():
         # Filter by role - Admin always sees ALL MEP data
         if original_role == 'admin':
             # Admin sees all MEP-assigned pending projects
-            log.info(f"Admin viewing mep_pending_boq - showing all MEP pending projects")
             query = query.filter(
                 BOQ.status.in_(['approved', 'Approved', 'items_assigned']),
                 Project.mep_supervisor_id.isnot(None),
@@ -685,7 +679,6 @@ def get_mep_rejected_boq():
         # Filter by role - Admin always sees ALL MEP data
         if original_role == 'admin':
             # Admin always sees all MEP-assigned rejected BOQs
-            log.info(f"Admin viewing mep_rejected_boq - showing all MEP rejected BOQs")
             query = query.filter(
                 Project.mep_supervisor_id.isnot(None),
                 Project.mep_supervisor_id != []
@@ -800,7 +793,6 @@ def get_mep_completed_project():
         # Filter by role - Admin always sees ALL MEP data
         if original_role == 'admin':
             # Admin always sees all MEP-assigned completed projects
-            log.info(f"Admin viewing mep_completed_project - showing all MEP completed projects")
             query = query.filter(
                 Project.mep_supervisor_id.isnot(None),
                 Project.mep_supervisor_id != []
@@ -903,23 +895,19 @@ def get_mep_dashboard():
         # IMPORTANT: Admin always sees ALL MEP data (regardless of view_as_role)
         if original_role == 'admin':
             # Admin viewing MEP dashboard - always show ALL MEP-assigned projects
-            log.info(f"Admin {user_id} viewing MEP dashboard - showing all MEP projects")
             assigned_projects = Project.query.filter(
                 Project.is_deleted == False,
                 Project.mep_supervisor_id.isnot(None),
                 Project.mep_supervisor_id != []
             ).all()
-            log.info(f"Admin MEP Dashboard: Found {len(assigned_projects)} MEP-assigned projects")
         elif user_role in MEP_ROLES:
             # Actual MEP user - filter by their user_id in mep_supervisor_id
             mep_user_id = int(user_id) if user_id else None
-            log.info(f"MEP Dashboard: Filtering for MEP user_id={mep_user_id}, role={user_role}")
             if mep_user_id:
                 assigned_projects = Project.query.filter(
                     Project.is_deleted == False,
                     Project.mep_supervisor_id.contains([mep_user_id])
                 ).all()
-                log.info(f"MEP Dashboard: Found {len(assigned_projects)} projects for MEP user_id={mep_user_id}")
             else:
                 assigned_projects = []
         else:

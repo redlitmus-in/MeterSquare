@@ -65,7 +65,6 @@ class ChangeRequestWorkflow:
         # Site Engineer / Site Supervisor → Project Manager
         # Handle both database formats: camelCase (siteEngineer) and snake_case (site_engineer)
         if normalized_role in ['siteengineer', 'sitesupervisor', 'site_engineer', 'site_supervisor']:
-            log.info(f"Site Engineer/Supervisor request - routing to Project Manager")
             return CR_CONFIG.ROLE_PROJECT_MANAGER, "Project Manager"
 
         # Project Manager routing logic
@@ -78,11 +77,9 @@ class ChangeRequestWorkflow:
             )
 
             if has_new_materials:
-                log.info(f"PM request with NEW materials - routing to Estimator for pricing")
                 return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
             else:
                 # All existing materials - should go to Buyer, but for now route to Estimator
-                log.info(f"PM request with existing materials only - routing to Estimator")
                 return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
 
         else:
@@ -101,7 +98,6 @@ class ChangeRequestWorkflow:
         Returns:
             tuple: (approval_required_from, next_approver_display_name)
         """
-        log.info(f"CR {change_request.cr_id}: Simplified workflow → Routing to Estimator")
         return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
 
     @staticmethod
@@ -126,11 +122,9 @@ class ChangeRequestWorkflow:
         )
 
         if has_new_materials:
-            log.info(f"CR {change_request.cr_id}: Has NEW materials - routing to Estimator for pricing")
             return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
         else:
             # All existing materials - should go to Buyer, but for now route to Estimator
-            log.info(f"CR {change_request.cr_id}: Existing materials only - routing to Estimator")
             return CR_CONFIG.ROLE_ESTIMATOR, "Estimator"
 
     @staticmethod

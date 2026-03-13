@@ -9,6 +9,11 @@ __all__ = [
     'get_labour_dashboard', 'get_user_projects',
     'download_assignment_pdf', 'download_daily_schedule_pdf',
 ]
+from config.logging import get_logger
+
+log = get_logger()
+
+
 from datetime import datetime, date, timedelta, timezone
 from flask import request, jsonify, g, make_response, send_file
 from config.db import db
@@ -194,7 +199,7 @@ def get_attendance_to_lock():
             # Regular PM only sees requisitions they approved
             query = query.filter(LabourRequisition.approved_by_user_id == user_id)
         else:
-            log.info(f"Admin viewing all attendance records (no approver filter)")
+            pass
 
         # Filter by approval status
         if approval_status == 'pending':

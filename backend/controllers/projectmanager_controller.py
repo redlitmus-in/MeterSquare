@@ -583,7 +583,7 @@ def assign_projects():
                     if sent:
                         email_sent = True
                 else:
-                    log.info(f"[assign_projects] PM {pm.user_id} is ONLINE - Email skipped")
+                    pass
         except Exception as email_error:
             log.error(f"[assign_projects] Failed to send email to PM: {email_error}")
 
@@ -834,9 +834,9 @@ def assign_items_to_se():
             # This ensures the project shows in the Assigned tab once assignment begins
             boq.status = 'items_assigned'
             if all_items_assigned:
-                log.info(f"✅ All items assigned for BOQ {boq_id}, status set to 'items_assigned'")
+                pass
             else:
-                log.info(f"📋 {assigned_count}/{total_items} items assigned for BOQ {boq_id}, status set to 'items_assigned'")
+                pass
 
         # Update BOQ history
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -907,7 +907,7 @@ def assign_items_to_se():
                     assigned_items=assigned_items
                 )
             else:
-                log.info(f"[assign_items_to_se] SE {se_user_id} is ONLINE - Email skipped")
+                pass
         except Exception as email_err:
             log.error(f"[assign_items_to_se] Failed to send email to SE: {email_err}")
 
@@ -1392,11 +1392,11 @@ def send_boq_to_estimator():
                 )
 
             if email_sent:
-                log.info(f"📧 ✅ SUCCESS: {boq_status.upper()} email sent to {estimator.email}")
+                pass
             else:
                 log.error(f" FAILED: Could not send {boq_status} email to {estimator.email}")
         else:
-            log.info(f"📧 ⏭️  Estimator is ONLINE (status='{estimator_status}') - Email skipped, in-app notification will be sent")
+            pass
 
         if boq_status == 'approved':
             boq.status = 'PM_Approved'

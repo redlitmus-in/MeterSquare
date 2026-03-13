@@ -18,7 +18,6 @@ def upgrade():
             ADD COLUMN IF NOT EXISTS timezone VARCHAR(100) DEFAULT NULL;
         """))
         db.session.commit()
-        print("✅ Migration complete: added 'timezone' column to users table")
 
 def downgrade():
     app = create_app()
@@ -27,7 +26,6 @@ def downgrade():
             ALTER TABLE users DROP COLUMN IF EXISTS timezone;
         """))
         db.session.commit()
-        print("✅ Rollback complete: removed 'timezone' column from users table")
 
 if __name__ == '__main__':
     upgrade()

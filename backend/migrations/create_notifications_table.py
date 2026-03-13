@@ -28,7 +28,6 @@ def create_notifications_table():
         conn = psycopg2.connect(**conn_params)
         cursor = conn.cursor()
 
-        print("Connected to database successfully")
 
         # Create notifications table
         create_table_query = """
@@ -56,7 +55,6 @@ def create_notifications_table():
         """
 
         cursor.execute(create_table_query)
-        print("[OK] Notifications table created successfully")
 
         # Create indexes for better performance
         indexes = [
@@ -88,29 +86,20 @@ def create_notifications_table():
         for index_query in indexes:
             cursor.execute(index_query)
 
-        print("[OK] Indexes created successfully")
 
         # Commit changes
         conn.commit()
-        print("\n[SUCCESS] Migration completed successfully!")
-        print("[SUCCESS] Notifications table is ready to use")
 
     except psycopg2.Error as e:
-        print(f"[ERROR] Database error: {e}")
         if conn:
             conn.rollback()
     except Exception as e:
-        print(f"[ERROR] Error: {e}")
+        pass
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
-            print("\nDatabase connection closed")
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Creating Notifications Table Migration")
-    print("=" * 60)
-    print()
     create_notifications_table()

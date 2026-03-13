@@ -15,7 +15,6 @@ def create_vendors_tables():
         app = create_app()
 
         with app.app_context():
-            print("Connected to database successfully")
 
             # Create vendors table
             create_vendors_table_query = """
@@ -50,7 +49,6 @@ def create_vendors_tables():
             """
 
             db.session.execute(text(create_vendors_table_query))
-            print("✓ Vendors table created successfully")
 
             # Create vendor_products table
             create_vendor_products_table_query = """
@@ -73,16 +71,13 @@ def create_vendors_tables():
             """
 
             db.session.execute(text(create_vendor_products_table_query))
-            print("✓ Vendor products table created successfully")
 
             # Commit changes
             db.session.commit()
-            print("\n✓ All vendor tables created successfully!")
 
             return True
 
     except Exception as e:
-        print(f"✗ Error creating vendor tables: {e}")
         db.session.rollback()
         import traceback
         traceback.print_exc()
@@ -90,19 +85,10 @@ def create_vendors_tables():
 
 
 if __name__ == "__main__":
-    print("="*80)
-    print("Creating Vendor Management Tables")
-    print("="*80)
-    print()
 
     success = create_vendors_tables()
 
     if success:
-        print("\n" + "="*80)
-        print("Migration completed successfully!")
-        print("="*80)
+        pass
     else:
-        print("\n" + "="*80)
-        print("Migration failed!")
-        print("="*80)
         sys.exit(1)

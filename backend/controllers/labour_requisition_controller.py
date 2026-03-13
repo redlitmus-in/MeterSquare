@@ -11,6 +11,11 @@ __all__ = [
     'send_to_production', 'delete_requisition', 'resend_requisition',
     'get_pending_requisitions', 'approve_requisition', 'reject_requisition',
 ]
+from config.logging import get_logger
+
+log = get_logger()
+
+
 from datetime import datetime, date, timedelta
 from flask import request, jsonify, g
 from config.db import db
@@ -146,7 +151,6 @@ def create_worker():
         db.session.add(worker)
         db.session.commit()
 
-        log.info(f"Worker created: {worker.worker_code} by {current_user.get('full_name')}")
 
         return jsonify({
             "success": True,
@@ -235,7 +239,6 @@ def update_worker(worker_id):
 
         db.session.commit()
 
-        log.info(f"Worker updated: {worker.worker_code} by {current_user.get('full_name')}")
 
         return jsonify({
             "success": True,
@@ -268,7 +271,6 @@ def delete_worker(worker_id):
 
         db.session.commit()
 
-        log.info(f"Worker deleted: {worker.worker_code} by {current_user.get('full_name')}")
 
         return jsonify({
             "success": True,
@@ -416,7 +418,6 @@ def create_requisition():
                 db.session.add(requisition)
                 db.session.commit()
 
-                log.info(f"Requisition created: {requisition_code} with {len(labour_items)} labour items, {total_workers} total workers by {current_user.get('full_name')}")
                 break  # Success, exit retry loop
 
             except Exception as commit_error:
@@ -468,8 +469,8 @@ def get_my_requisitions():
 
         # Admin sees ALL requisitions (for oversight when viewing as another role)
         if user_role in SUPER_ADMIN_ROLES:
-            log.info(f"Admin {user_id} viewing all requisitions")
             # No user filtering - admin sees everything
+            pass
         else:
             # Regular users only see their own requisitions
             query = query.filter(LabourRequisition.requested_by_user_id == user_id)
@@ -862,7 +863,6 @@ def resubmit_requisition(requisition_id):
 
         db.session.commit()
 
-        log.info(f"Requisition updated: {requisition.requisition_code} by {current_user.get('full_name')}")
 
         return jsonify({
             "success": True,
@@ -918,7 +918,6 @@ def send_to_production(requisition_id):
 
         db.session.commit()
 
-        log.info(f"Requisition sent to production: {requisition.requisition_code} (created by {requisition.requester_role}) approved by {current_user.get('full_name')}")
 
         # Notify Production Manager(s) about pending assignment
         project = Project.query.get(requisition.project_id)
@@ -980,7 +979,6 @@ def delete_requisition(requisition_id):
 
         db.session.commit()
 
-        log.info(f"Requisition deleted: {requisition.requisition_code} by {current_user.get('full_name')}")
 
         return jsonify({
             "success": True,
@@ -1055,7 +1053,6 @@ def resend_requisition(requisition_id):
         except Exception as notif_err:
             log.error(f"Failed to send resend notification: {notif_err}")
 
-        log.info(f"Requisition resent: {requisition.requisition_code} by {current_user.get('full_name')}")
 
         return jsonify({
             "success": True,
@@ -1133,8 +1130,8 @@ def get_pending_requisitions():
         # Role-based filtering - different logic for pending vs approved/rejected tabs
         # Admin viewing as role sees ALL data for that role (no user-specific filtering)
         if is_admin_viewing_as_role:
-            log.info(f"Admin viewing as {view_as_role} - skipping user-specific filtering")
             # No additional filtering - admin sees all data for the role
+            pass
         elif user_role not in SUPER_ADMIN_ROLES:
             if user_role == 'pm' or user_role == 'projectmanager':
                 # For PENDING tab: filter by project_id (PM's assigned projects)

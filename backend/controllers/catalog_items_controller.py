@@ -288,7 +288,6 @@ def create_catalog_item():
         db.session.commit()
         db.session.refresh(new_item)
 
-        log.info(f"Catalog item created: {new_item.id} - {new_item.item_name} by user {user_id}")
 
         return jsonify({
             'success': True,
@@ -346,7 +345,6 @@ def update_catalog_item(item_id):
         db.session.commit()
         db.session.refresh(item)
 
-        log.info(f"Catalog item updated: {item.id} - {item.item_name} by user {user_id}")
 
         return jsonify({
             'success': True,
@@ -388,7 +386,6 @@ def delete_catalog_item(item_id):
 
         db.session.commit()
 
-        log.info(f"Catalog item soft deleted: {item.id} - {item.item_name} by user {user_id}")
 
         return jsonify({
             'success': True,
@@ -456,7 +453,6 @@ def create_catalog_sub_item(item_id):
         db.session.commit()
         db.session.refresh(new_sub)
 
-        log.info(f"Catalog sub-item created: {new_sub.id} - {new_sub.sub_item_name} under item {item_id} by user {user_id}")
 
         return jsonify({
             'success': True,
@@ -520,7 +516,6 @@ def update_catalog_sub_item(sub_item_id):
         db.session.commit()
         db.session.refresh(sub)
 
-        log.info(f"Catalog sub-item updated: {sub.id} - {sub.sub_item_name} by user {user_id}")
 
         return jsonify({
             'success': True,
@@ -559,7 +554,6 @@ def delete_catalog_sub_item(sub_item_id):
 
         db.session.commit()
 
-        log.info(f"Catalog sub-item soft deleted: {sub.id} - {sub.sub_item_name} by user {user_id}")
 
         return jsonify({
             'success': True,
@@ -681,7 +675,6 @@ def link_material_to_sub_item(sub_item_id):
         db.session.commit()
         db.session.refresh(new_link)
 
-        log.info(f"Material {raw_material_id} linked to sub-item {sub_item_id} by user {user_id}")
 
         return jsonify({
             'success': True,
@@ -722,7 +715,6 @@ def unlink_material_from_sub_item(sub_item_id, material_id):
         link.is_active = False
         db.session.commit()
 
-        log.info(f"Material {material_id} unlinked from sub-item {sub_item_id} by user {user_id}")
 
         return jsonify({
             'success': True,

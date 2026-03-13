@@ -68,18 +68,13 @@ def create_raw_materials_catalog_table():
             try:
                 db.session.execute(db.text(create_table_sql))
                 db.session.commit()
-                print("[SUCCESS] Successfully created 'raw_materials_catalog' table with indexes!")
-                print("[SUCCESS] Table includes: id, material_name, description, brand, size, specification, unit, category")
-                print("[SUCCESS] Audit fields: created_by, created_at, updated_at, is_active")
-                print("[SUCCESS] Indexes created for optimal performance")
             except Exception as e:
                 db.session.rollback()
-                print(f"[ERROR] Error creating raw_materials_catalog table: {e}")
                 import traceback
                 traceback.print_exc()
                 raise
         else:
-            print("[WARNING] Table 'raw_materials_catalog' already exists. Skipping creation.")
+            pass
 
 
 def drop_raw_materials_catalog_table():
@@ -91,10 +86,8 @@ def drop_raw_materials_catalog_table():
         try:
             db.session.execute(db.text(drop_table_sql))
             db.session.commit()
-            print("[SUCCESS] Successfully dropped 'raw_materials_catalog' table!")
         except Exception as e:
             db.session.rollback()
-            print(f"[ERROR] Error dropping raw_materials_catalog table: {e}")
             import traceback
             traceback.print_exc()
             raise
@@ -103,25 +96,13 @@ def drop_raw_materials_catalog_table():
 if __name__ == "__main__":
     import argparse
 
-    print("="*80)
-    print("RAW MATERIALS CATALOG TABLE MIGRATION")
-    print("="*80)
-    print()
 
     parser = argparse.ArgumentParser(description='Raw Materials Catalog Table Migration')
     parser.add_argument('--rollback', action='store_true', help='Rollback the migration (drop table)')
     args = parser.parse_args()
 
     if args.rollback:
-        print("ROLLBACK MODE: Dropping raw_materials_catalog table...")
-        print()
         drop_raw_materials_catalog_table()
     else:
-        print("Creating raw_materials_catalog table...")
-        print()
         create_raw_materials_catalog_table()
 
-    print()
-    print("="*80)
-    print("MIGRATION COMPLETED")
-    print("="*80)

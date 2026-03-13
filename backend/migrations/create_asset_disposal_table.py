@@ -68,7 +68,6 @@ def run_migration():
             # Execute the SQL
             db.session.execute(db.text(create_table_sql))
             db.session.commit()
-            print("Successfully created asset_disposal table")
 
             # Verify the table exists
             result = db.session.execute(db.text("""
@@ -79,15 +78,13 @@ def run_migration():
             """))
 
             columns = result.fetchall()
-            print(f"\nTable has {len(columns)} columns:")
             for col in columns:
-                print(f"  - {col[0]}: {col[1]}")
+                pass
 
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error creating table: {e}")
             return False
 
 

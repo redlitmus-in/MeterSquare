@@ -31,17 +31,10 @@ def run_migration():
         conn.autocommit = True
         cursor = conn.cursor()
 
-        print("\n" + "="*80)
-        print("CLEANUP: REMOVE UNUSED COLUMNS FROM change_requests")
-        print("ENVIRONMENT: DEVELOPMENT ONLY")
-        print("="*80)
-        print("\nConnected to database successfully")
-        print("\nThis migration removes 25 unused columns to clean up the schema.\n")
 
         # ========================================
         # CATEGORY 1: MEP APPROVAL COLUMNS (3)
         # ========================================
-        print("📦 Removing MEP Approval columns (never implemented)...")
 
         cursor.execute("""
             ALTER TABLE change_requests
@@ -49,12 +42,10 @@ def run_migration():
             DROP COLUMN IF EXISTS mep_approved_by_name,
             DROP COLUMN IF EXISTS mep_approval_date;
         """)
-        print("  ✅ Removed 3 MEP approval columns")
 
         # ========================================
         # CATEGORY 2: DEPRECATED PARENT-CHILD COLUMNS (3)
         # ========================================
-        print("\n📦 Removing deprecated parent-child CR columns...")
 
         cursor.execute("""
             ALTER TABLE change_requests
@@ -62,24 +53,20 @@ def run_migration():
             DROP COLUMN IF EXISTS cr_number_suffix,
             DROP COLUMN IF EXISTS submission_group_id;
         """)
-        print("  ✅ Removed 3 deprecated parent-child columns")
 
         # ========================================
         # CATEGORY 3: UNUSED FEATURE COLUMNS (2)
         # ========================================
-        print("\n📦 Removing unused feature columns...")
 
         cursor.execute("""
             ALTER TABLE change_requests
             DROP COLUMN IF EXISTS new_sub_item_reason,
             DROP COLUMN IF EXISTS notification_sent_at;
         """)
-        print("  ✅ Removed 2 unused feature columns")
 
         # ========================================
         # CATEGORY 4: OVERHEAD TRACKING COLUMNS (17)
         # ========================================
-        print("\n📦 Removing overhead tracking columns (not implemented)...")
 
         cursor.execute("""
             ALTER TABLE change_requests
@@ -102,31 +89,16 @@ def run_migration():
             DROP COLUMN IF EXISTS cost_increase_percentage,
             DROP COLUMN IF EXISTS is_over_budget;
         """)
-        print("  ✅ Removed 18 overhead tracking columns")
 
-        print("\n" + "="*80)
-        print("✅ MIGRATION COMPLETED SUCCESSFULLY")
-        print("="*80)
-        print("\nRemoved columns by category:")
-        print("  ✓ MEP Approval: 3 columns")
-        print("  ✓ Deprecated Parent-Child: 3 columns")
-        print("  ✓ Unused Features: 2 columns")
-        print("  ✓ Overhead Tracking: 18 columns")
-        print("  ━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("  TOTAL REMOVED: 26 columns")
-        print("\nSchema is now cleaner and more efficient!")
-        print("="*80 + "\n")
 
         cursor.close()
 
     except Exception as e:
-        print(f"\n❌ MIGRATION FAILED: {str(e)}\n")
         raise
 
     finally:
         if conn:
             conn.close()
-            print("Database connection closed\n")
 
 
 def rollback_migration():
@@ -137,17 +109,13 @@ def rollback_migration():
     there's nothing to restore. If you need these columns back,
     you'll need to add them manually with ALTER TABLE.
     """
-    print("\n⚠️  ROLLBACK NOT SUPPORTED")
-    print("Removed columns had no data. If needed, add them back manually.\n")
 
 
 if __name__ == "__main__":
     """Run migration directly"""
-    print("\n⚠️  WARNING: This will remove 26 unused columns from change_requests")
-    print("Environment: DEVELOPMENT database only")
 
     confirm = input("\nProceed with cleanup? (yes/no): ")
     if confirm.lower() == 'yes':
         run_migration()
     else:
-        print("Migration cancelled.\n")
+        pass

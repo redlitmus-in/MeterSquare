@@ -138,8 +138,6 @@ class NegotiableProfitCalculator:
             # Original allocated = Total Margin - discount
             original_allocated = total_negotiable_margin - discount_amount
 
-            log.info(f"BOQ {boq_id}: Client Amount={total_client_amount}, Internal Cost={total_internal_cost}, "
-                    f"Total Margin={total_negotiable_margin}, Discount={discount_amount}, Original Allocated={original_allocated}")
 
             # Step 2: Use provided already_consumed or default to 0
             if already_consumed is None:
@@ -171,7 +169,6 @@ class NegotiableProfitCalculator:
                 'is_over_budget': is_over_budget
             }
 
-            log.info(f"BOQ {boq_id} Negotiable Margin Analysis: {result}")
             return result
 
         except Exception as e:

@@ -58,11 +58,10 @@ def add_missing_columns(cursor, existing_columns, db_name):
                 alter_query = f"ALTER TABLE support_tickets ADD COLUMN {column_name} {column_type}"
                 cursor.execute(alter_query)
                 columns_added.append(column_name)
-                print(f"  [OK] Added column: {column_name} ({column_type})")
             except Exception as e:
-                print(f"  [ERROR] Error adding {column_name}: {str(e)}")
+                pass
         else:
-            print(f"  [-] Column {column_name} already exists")
+            pass
 
     return columns_added
 
@@ -71,21 +70,18 @@ def add_missing_indexes(cursor, db_name):
     """Add any missing indexes to the table"""
     indexes_added = []
 
-    print(f"\nChecking required indexes:")
     for index_name, create_sql in REQUIRED_INDEXES.items():
         try:
             cursor.execute(create_sql)
             indexes_added.append(index_name)
-            print(f"  [OK] Created/verified index: {index_name}")
         except Exception as e:
-            print(f"  [ERROR] Error creating {index_name}: {str(e)}")
+            pass
 
     return indexes_added
 
 
 def backfill_reporter_user_ids(cursor, db_name):
     """Backfill reporter_user_id for tickets where it's NULL by looking up user by email"""
-    print(f"\nBackfilling reporter_user_id for existing tickets:")
 
     # Find tickets with NULL reporter_user_id
     cursor.execute("""
@@ -97,10 +93,8 @@ def backfill_reporter_user_ids(cursor, db_name):
     tickets_to_update = cursor.fetchall()
 
     if not tickets_to_update:
-        print(f"  [-] No tickets need backfilling")
         return 0
 
-    print(f"  [INFO] Found {len(tickets_to_update)} ticket(s) with NULL reporter_user_id")
 
     updated_count = 0
     for ticket_id, reporter_email in tickets_to_update:
@@ -122,17 +116,13 @@ def backfill_reporter_user_ids(cursor, db_name):
                 WHERE ticket_id = %s
             """, (user_id, ticket_id))
             updated_count += 1
-            print(f"  [OK] Ticket {ticket_id}: Set reporter_user_id = {user_id} (email: {reporter_email})")
         else:
-            print(f"  [-] Ticket {ticket_id}: No user found for email {reporter_email}")
+            pass
 
     return updated_count
 
 def check_and_sync_database(db_name, database_url):
     """Check and sync a single database"""
-    print(f"\n{'='*60}")
-    print(f"Checking {db_name} Database")
-    print(f"{'='*60}")
 
     try:
         # Connect to database
@@ -140,7 +130,6 @@ def check_and_sync_database(db_name, database_url):
         conn.autocommit = True
         cursor = conn.cursor()
 
-        print(f"[OK] Connected to {db_name}")
 
         # Check if support_tickets table exists
         cursor.execute("""
@@ -152,58 +141,49 @@ def check_and_sync_database(db_name, database_url):
         table_exists = cursor.fetchone()[0]
 
         if not table_exists:
-            print(f"[ERROR] Table support_tickets does not exist in {db_name}")
             cursor.close()
             conn.close()
             return False
 
-        print(f"[OK] Table support_tickets exists")
 
         # Get existing columns
         existing_columns = get_existing_columns(cursor)
-        print(f"\nExisting columns in {db_name}: {len(existing_columns)}")
 
         # Add missing columns
-        print(f"\nChecking required columns:")
         columns_added = add_missing_columns(cursor, existing_columns, db_name)
 
         if columns_added:
-            print(f"\n[OK] Added {len(columns_added)} column(s) to {db_name}: {', '.join(columns_added)}")
+            pass
         else:
-            print(f"\n[OK] All required columns already exist in {db_name}")
+            pass
 
         # Add missing indexes
         indexes_added = add_missing_indexes(cursor, db_name)
 
         if indexes_added:
-            print(f"\n[OK] Created/verified {len(indexes_added)} index(es) in {db_name}")
+            pass
 
         # Backfill reporter_user_id for existing tickets
         backfill_count = backfill_reporter_user_ids(cursor, db_name)
         if backfill_count > 0:
-            print(f"\n[OK] Backfilled {backfill_count} ticket(s) with reporter_user_id")
+            pass
 
         # Verify final state
-        print(f"\nVerification - Final column state:")
         final_columns = get_existing_columns(cursor)
         for col_name in REQUIRED_COLUMNS.keys():
             if col_name in final_columns:
-                print(f"  [OK] {col_name}: {final_columns[col_name]}")
+                pass
             else:
-                print(f"  [MISSING] {col_name}: MISSING")
+                pass
 
         cursor.close()
         conn.close()
         return True
 
     except Exception as e:
-        print(f"[ERROR] Error connecting to {db_name}: {str(e)}")
         return False
 
 def main():
-    print("="*60)
-    print("Support Tickets Table Column Sync")
-    print("="*60)
 
     # Check for --prod flag
     is_prod = '--prod' in sys.argv
@@ -217,23 +197,14 @@ def main():
 
     if not database_url:
         env_var = 'DATABASE_URL_PROD' if is_prod else 'DATABASE_URL'
-        print(f"\nERROR: {env_var} environment variable not set")
-        print(f"\nUsage:")
-        print(f"  {env_var}='postgresql://...' python migrations/sync_support_ticket_columns.py {'--prod' if is_prod else ''}")
         sys.exit(1)
 
-    print(f"\nRunning migration on {db_name} database")
 
     success = check_and_sync_database(db_name, database_url)
 
     # Summary
-    print("\n" + "="*60)
-    print("SUMMARY")
-    print("="*60)
     status = "[SUCCESS]" if success else "[FAILED]"
-    print(f"{db_name}: {status}")
 
-    print("\nMigration completed!")
     sys.exit(0 if success else 1)
 
 if __name__ == '__main__':

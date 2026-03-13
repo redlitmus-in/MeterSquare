@@ -25,52 +25,42 @@ def run_migration():
     cur = None
 
     try:
-        print("=" * 60)
-        print("TERMS & CONDITIONS MIGRATION - START")
-        print("=" * 60)
 
         conn = psycopg2.connect(**db_config)
         cur = conn.cursor()
 
         # ===== STEP 1: Update boq_terms table =====
-        print("\n[1/4] Updating boq_terms table...")
 
         # Add display_order column
         cur.execute("""
             ALTER TABLE boq_terms
             ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0;
         """)
-        print("  ✓ Added display_order column")
 
         # Add is_deleted column
         cur.execute("""
             ALTER TABLE boq_terms
             ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
         """)
-        print("  ✓ Added is_deleted column")
 
         # Make template_name nullable (we're focusing on terms_text only)
         cur.execute("""
             ALTER TABLE boq_terms
             ALTER COLUMN template_name DROP NOT NULL;
         """)
-        print("  ✓ Made template_name nullable")
 
         # Create indexes for better query performance
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_boq_terms_is_active_deleted
             ON boq_terms(is_active, is_deleted);
         """)
-        print("  ✓ Created index: idx_boq_terms_is_active_deleted")
 
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_boq_terms_display_order
             ON boq_terms(display_order);
         """)
-        print("  ✓ Created index: idx_boq_terms_display_order")
 
         # ===== STEP 2: Create boq_terms_selections junction table =====
-        print("\n[2/4] Creating boq_terms_selections table...")
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS boq_terms_selections (
@@ -83,26 +73,22 @@ def run_migration():
                 CONSTRAINT unique_boq_term UNIQUE(boq_id, term_id)
             );
         """)
-        print("  ✓ Created boq_terms_selections table")
 
         # Create indexes for junction table
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_boq_terms_selections_boq_id
             ON boq_terms_selections(boq_id);
         """)
-        print("  ✓ Created index: idx_boq_terms_selections_boq_id")
 
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_boq_terms_selections_term_id
             ON boq_terms_selections(term_id);
         """)
-        print("  ✓ Created index: idx_boq_terms_selections_term_id")
 
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_boq_terms_selections_is_checked
             ON boq_terms_selections(is_checked);
         """)
-        print("  ✓ Created index: idx_boq_terms_selections_is_checked")
 
         # Create trigger function for updated_at
         cur.execute("""
@@ -114,7 +100,6 @@ def run_migration():
             END;
             $$ LANGUAGE plpgsql;
         """)
-        print("  ✓ Created trigger function: update_boq_terms_selections_updated_at")
 
         # Drop trigger if exists and create new one
         cur.execute("""
@@ -128,10 +113,8 @@ def run_migration():
             FOR EACH ROW
             EXECUTE FUNCTION update_boq_terms_selections_updated_at();
         """)
-        print("  ✓ Created trigger: trigger_update_boq_terms_selections_updated_at")
 
         # ===== STEP 3: Clear old terms and insert default terms =====
-        print("\n[3/4] Inserting default terms...")
 
         # Clear existing terms that might be from old system
         cur.execute("""
@@ -168,22 +151,15 @@ def run_migration():
             if cur.rowcount > 0:
                 inserted_count += 1
 
-        print(f"  ✓ Inserted {inserted_count} default terms")
 
         # ===== STEP 4: Commit changes =====
-        print("\n[4/4] Committing changes...")
         conn.commit()
-        print("  ✓ All changes committed successfully")
 
         # ===== VERIFICATION =====
-        print("\n" + "=" * 60)
-        print("VERIFICATION")
-        print("=" * 60)
 
         # Count terms in master table
         cur.execute("SELECT COUNT(*) FROM boq_terms WHERE is_active = TRUE AND is_deleted = FALSE;")
         terms_count = cur.fetchone()[0]
-        print(f"  • Active terms in boq_terms: {terms_count}")
 
         # Check if junction table exists
         cur.execute("""
@@ -191,7 +167,6 @@ def run_migration():
             WHERE table_name = 'boq_terms_selections';
         """)
         table_exists = cur.fetchone()[0]
-        print(f"  • boq_terms_selections table exists: {'Yes' if table_exists else 'No'}")
 
         # Check indexes
         cur.execute("""
@@ -199,25 +174,11 @@ def run_migration():
             WHERE tablename IN ('boq_terms', 'boq_terms_selections');
         """)
         indexes_count = cur.fetchone()[0]
-        print(f"  • Total indexes created: {indexes_count}")
 
-        print("\n" + "=" * 60)
-        print("✅ MIGRATION COMPLETED SUCCESSFULLY!")
-        print("=" * 60)
-        print("\nNext steps:")
-        print("  1. Restart the backend server")
-        print("  2. Test the terms selection in BOQ creation")
-        print("  3. Verify PDF generation includes selected terms")
-        print("\n")
 
     except Exception as e:
         if conn:
             conn.rollback()
-        print("\n" + "=" * 60)
-        print("❌ MIGRATION FAILED!")
-        print("=" * 60)
-        print(f"Error: {str(e)}")
-        print("\nChanges have been rolled back.")
         raise
 
     finally:

@@ -55,7 +55,6 @@ def create_vendor():
         db.session.add(new_vendor)
         db.session.commit()
 
-        log.info(f"Vendor created: {new_vendor.vendor_id} by user {current_user['user_id']}")
 
         # Send notification to Technical Directors about new vendor
         try:
@@ -90,7 +89,6 @@ def create_vendor():
                 db.session.commit()
                 for td_user_id, notification in notifications:
                     send_notification_to_user(td_user_id, notification.to_dict())
-                log.info(f"Sent vendor creation notification to {len(notifications)} TD(s)")
         except Exception as notif_error:
             log.error(f"Failed to send vendor creation notification: {notif_error}")
 
@@ -385,7 +383,6 @@ def update_vendor(vendor_id):
 
         db.session.commit()
 
-        log.info(f"Vendor updated: {vendor_id} by user {current_user['user_id']}")
 
         return jsonify({
             "success": True,
@@ -416,7 +413,6 @@ def delete_vendor(vendor_id):
 
         db.session.commit()
 
-        log.info(f"Vendor deleted: {vendor_id} by user {current_user['user_id']}")
 
         return jsonify({
             "success": True,
@@ -456,7 +452,6 @@ def add_vendor_product(vendor_id):
         db.session.add(new_product)
         db.session.commit()
 
-        log.info(f"Product added to vendor {vendor_id}: {new_product.product_id}")
 
         return jsonify({
             "success": True,
@@ -523,7 +518,6 @@ def update_vendor_product(vendor_id, product_id):
 
         db.session.commit()
 
-        log.info(f"Product updated: {product_id}")
 
         return jsonify({
             "success": True,
@@ -555,7 +549,6 @@ def delete_vendor_product(vendor_id, product_id):
 
         db.session.commit()
 
-        log.info(f"Product deleted: {product_id}")
 
         return jsonify({
             "success": True,
@@ -653,7 +646,6 @@ def create_vendor_category():
                 existing.is_active = True
                 existing.last_modified_at = datetime.utcnow()
                 db.session.commit()
-                log.info(f"Vendor category reactivated: {existing.name}")
                 return jsonify({
                     "success": True,
                     "message": f"Category '{existing.name}' reactivated",
@@ -672,7 +664,6 @@ def create_vendor_category():
         db.session.add(new_category)
         db.session.commit()
 
-        log.info(f"New vendor category created: {category_name}")
 
         return jsonify({
             "success": True,
@@ -713,7 +704,6 @@ def get_or_create_category(category_name):
             existing.is_active = True
             existing.last_modified_at = datetime.utcnow()
             db.session.flush()
-            log.info(f"Reactivated vendor category: {existing.name}")
         return existing.name  # Return the actual name from DB to maintain casing
 
     # Create new category
@@ -725,7 +715,6 @@ def get_or_create_category(category_name):
     db.session.add(new_category)
     db.session.flush()
 
-    log.info(f"Auto-created new vendor category: {category_name}")
     return new_category.name
 
 

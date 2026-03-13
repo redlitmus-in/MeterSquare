@@ -33,10 +33,8 @@ def create():
             ADD COLUMN IF NOT EXISTS refund_evidence JSONB DEFAULT NULL;
         """)
         conn.commit()
-        print("Migration successful: added refund_evidence column to vendor_return_requests")
     except Exception as e:
         conn.rollback()
-        print(f"Migration failed: {e}")
         raise
     finally:
         cur.close()
@@ -52,10 +50,8 @@ def rollback():
             DROP COLUMN IF EXISTS refund_evidence;
         """)
         conn.commit()
-        print("Rollback successful: removed refund_evidence column")
     except Exception as e:
         conn.rollback()
-        print(f"Rollback failed: {e}")
         raise
     finally:
         cur.close()

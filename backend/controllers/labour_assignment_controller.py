@@ -9,6 +9,11 @@ __all__ = [
     'get_arrivals_for_date', 'confirm_arrival', 'mark_no_show', 'mark_departure',
     'clock_in_worker', 'clock_out_worker', 'get_daily_attendance', 'update_attendance',
 ]
+from config.logging import get_logger
+
+log = get_logger()
+
+
 from datetime import datetime, date, timedelta
 from flask import request, jsonify, g
 from config.db import db
@@ -365,7 +370,7 @@ def assign_workers_to_requisition(requisition_id):
                 )
                 db.session.add(arrival)
             else:
-                log.info(f"Arrival record already exists for worker {worker.worker_id} on {requisition.required_date}, skipping creation")
+                pass
 
         # Update requisition
         requisition.assignment_status = 'assigned'

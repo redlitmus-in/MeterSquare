@@ -26,12 +26,8 @@ def run_migration():
 
     with app.app_context():
         try:
-            print("=" * 60)
-            print("MIGRATION: Drop supplier_notes TEXT columns")
-            print("=" * 60)
 
             # Check if columns exist before dropping
-            print("\n1. Checking if columns exist...")
 
             # Check change_requests.supplier_notes
             cr_check = db.session.execute(text("""
@@ -50,45 +46,30 @@ def run_migration():
             """)).fetchone()
 
             if not cr_check and not po_check:
-                print("\n✓ Both columns have already been dropped. Nothing to do.")
                 return
 
             # Drop change_requests.supplier_notes
             if cr_check:
-                print("\n2. Dropping change_requests.supplier_notes column...")
                 db.session.execute(text("""
                     ALTER TABLE change_requests DROP COLUMN IF EXISTS supplier_notes
                 """))
-                print("   ✓ Dropped change_requests.supplier_notes")
             else:
-                print("\n2. change_requests.supplier_notes already dropped")
+                pass
 
             # Drop po_child.supplier_notes
             if po_check:
-                print("\n3. Dropping po_child.supplier_notes column...")
                 db.session.execute(text("""
                     ALTER TABLE po_child DROP COLUMN IF EXISTS supplier_notes
                 """))
-                print("   ✓ Dropped po_child.supplier_notes")
             else:
-                print("\n3. po_child.supplier_notes already dropped")
+                pass
 
             db.session.commit()
 
-            print("\n" + "=" * 60)
-            print("✅ MIGRATION COMPLETED SUCCESSFULLY")
-            print("=" * 60)
-            print("\nPer-material notes are now the only supplier notes:")
-            print("  - Stored in: change_requests.material_vendor_selections")
-            print("  - Stored in: po_child.materials_data")
-            print("  - Displayed in: LPO PDF as sub-rows under each material")
-            print("=" * 60)
 
         except Exception as e:
             db.session.rollback()
-            print(f"\n❌ ERROR during migration: {str(e)}")
             import traceback
-            print(traceback.format_exc())
             raise
 
 if __name__ == '__main__':

@@ -696,11 +696,10 @@ def submit_inspection(imr_id):
                 if pending_returns == 0:
                     cr.inspection_status = 'resolved'
 
-                log.info(f"Replacement inspection approved → VRR {linked_vrr.return_request_number} completed")
 
             elif decision == 'fully_rejected':
                 # VRR stays in replacement_pending — rejection flow continues
-                log.info(f"Replacement inspection rejected → VRR {linked_vrr.return_request_number} stays pending")
+                pass
 
         db.session.commit()
 
@@ -917,11 +916,11 @@ def _notify_buyer_inspection_result(cr, inspection, decision, accepted_count=0, 
                     rejected_count=rejected_count
                 )
                 if sent:
-                    log.info(f"[INSPECTION EMAIL] Sent to offline buyer {buyer_user.email} for {cr_ref} ({decision})")
+                    pass
                 else:
                     log.warning(f"[INSPECTION EMAIL] Failed to send to {buyer_user.email} for {cr_ref}")
             else:
-                log.info(f"[INSPECTION EMAIL] Skipping – buyer (user_id={buyer_id}) is online")
+                pass
         except Exception as email_err:
             log.error(f"[INSPECTION EMAIL] Error sending email for {cr_ref}: {email_err}")
 
@@ -1284,7 +1283,6 @@ def upload_inspection_evidence():
                 if result.returncode == 0:
                     with open(tmp_out_path, 'rb') as f:
                         file_content = f.read()
-                    log.info(f'Faststart applied to {ext} file for CR {cr_id}')
                 os.unlink(tmp_in_path)
                 if os.path.exists(tmp_out_path):
                     os.unlink(tmp_out_path)
@@ -1767,11 +1765,11 @@ def _notify_td_return_request_created(return_request, cr):
                         recipient_name=td.full_name or td.email
                     )
                     if sent:
-                        log.info(f"[VRR EMAIL] Sent to offline TD {td.email} for {return_request.return_request_number}")
+                        pass
                     else:
                         log.warning(f"[VRR EMAIL] Failed to send to {td.email}")
                 else:
-                    log.info(f"[VRR EMAIL] Skipping – TD (user_id={td.user_id}) is online")
+                    pass
             except Exception as email_err:
                 log.error(f"[VRR EMAIL] Error sending email to TD {td.user_id}: {email_err}")
 
@@ -2103,11 +2101,11 @@ def _notify_pm_return_initiated(return_request):
                         recipient_name=pm.full_name or pm.email
                     )
                     if sent:
-                        log.info(f"[VRR INITIATE EMAIL] Sent to offline PM {pm.email} for {return_request.return_request_number}")
+                        pass
                     else:
                         log.warning(f"[VRR INITIATE EMAIL] Failed to send to {pm.email}")
                 else:
-                    log.info(f"[VRR INITIATE EMAIL] Skipping – PM (user_id={pm.user_id}) is online")
+                    pass
             except Exception as email_err:
                 log.error(f"[VRR INITIATE EMAIL] Error sending email to PM {pm.user_id}: {email_err}")
 
@@ -2297,7 +2295,6 @@ def confirm_replacement_received(request_id):
 
         db.session.commit()
 
-        log.info(f"Replacement materials sent for inspection: VRR {return_request.return_request_number} → IMR {imr.request_id}")
 
         # Notify PM about replacement materials ready for inspection
         try:
@@ -2351,9 +2348,8 @@ def confirm_replacement_received(request_id):
                                 recipient_email=pm.email,
                                 recipient_name=pm.full_name or pm.email
                             )
-                            log.info(f"[REPLACEMENT EMAIL] Sent to offline PM {pm.email} for {return_request.return_request_number}")
                         else:
-                            log.info(f"[REPLACEMENT EMAIL] Skipping – PM (user_id={pm.user_id}) is online")
+                            pass
                     except Exception as email_err:
                         log.error(f"[REPLACEMENT EMAIL] Error sending to PM {pm.user_id}: {email_err}")
         except Exception as notif_err:
@@ -2797,9 +2793,8 @@ def td_approve_return_request(request_id):
                         new_vendor_name=return_request.new_vendor_name,
                         new_po_ref=new_po_ref
                     )
-                    log.info(f"[VRR NEW VENDOR EMAIL] Sent to offline buyer {buyer_user.email} for {return_request.return_request_number}")
                 else:
-                    log.info(f"[VRR NEW VENDOR EMAIL] Skipping – buyer (user_id={return_request.created_by_buyer_id}) is online")
+                    pass
             except Exception as notif_err:
                 log.error(f"Failed to notify buyer: {str(notif_err)}")
 
@@ -2873,11 +2868,11 @@ def _notify_buyer_return_approved(return_request, td_name='Technical Director', 
                     recipient_name=buyer_user.full_name or buyer_user.email
                 )
                 if sent:
-                    log.info(f"[VRR APPROVE EMAIL] Sent to offline buyer {buyer_user.email} for {return_request.return_request_number}")
+                    pass
                 else:
                     log.warning(f"[VRR APPROVE EMAIL] Failed to send to {buyer_user.email}")
             else:
-                log.info(f"[VRR APPROVE EMAIL] Skipping – buyer (user_id={return_request.created_by_buyer_id}) is online")
+                pass
         except Exception as email_err:
             log.error(f"[VRR APPROVE EMAIL] Error: {email_err}")
 
@@ -2951,9 +2946,8 @@ def td_reject_return_request(request_id):
                     recipient_email=buyer_user.email,
                     recipient_name=buyer_user.full_name or buyer_user.email
                 )
-                log.info(f"[VRR REJECT EMAIL] Sent to offline buyer {buyer_user.email} for {return_request.return_request_number}")
             else:
-                log.info(f"[VRR REJECT EMAIL] Skipping – buyer (user_id={return_request.created_by_buyer_id}) is online")
+                pass
         except Exception as notif_err:
             log.error(f"Failed to notify buyer: {str(notif_err)}")
 

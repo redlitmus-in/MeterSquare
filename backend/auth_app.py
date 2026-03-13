@@ -73,11 +73,5 @@ if __name__ == "__main__":
     port = 5001  # Auth service runs on port 5001
     debug = environment != "production"
 
-    print(f"=" * 80)
-    print(f"🔐 AUTH SERVICE STARTING")
-    print(f"Environment: {environment}")
-    print(f"Port: {port}")
-    print(f"Debug Mode: {debug}")
-    print(f"=" * 80)
 
     app.run(host="0.0.0.0", port=port, debug=debug)

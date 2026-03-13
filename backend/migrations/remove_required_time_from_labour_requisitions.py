@@ -19,7 +19,6 @@ log = get_logger()
 def run_migration():
     """Remove required_time column from labour_requisitions table"""
     try:
-        log.info("Starting migration: remove_required_time_from_labour_requisitions")
 
         # Remove deprecated column
         migration_sql = text("""
@@ -31,8 +30,6 @@ def run_migration():
         db.session.execute(migration_sql)
         db.session.commit()
 
-        log.info("✓ Successfully removed required_time column from labour_requisitions table")
-        log.info("Migration completed successfully!")
 
         return True
 
@@ -45,7 +42,6 @@ def run_migration():
 def rollback_migration():
     """Rollback the migration (re-add the required_time column)"""
     try:
-        log.info("Starting rollback: add_required_time_back_to_labour_requisitions")
 
         rollback_sql = text("""
             -- Re-add the required_time column
@@ -58,8 +54,6 @@ def rollback_migration():
         db.session.execute(rollback_sql)
         db.session.commit()
 
-        log.info("✓ Successfully re-added required_time column")
-        log.info("Rollback completed successfully!")
 
         return True
 

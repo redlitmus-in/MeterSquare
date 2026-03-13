@@ -228,9 +228,6 @@ def create_raw_material():
         user_role = current_user.get('role') or current_user.get('role_name') or ''
 
         # Debug logging - show all available keys and values in g.user
-        log.info(f"Create raw material - g.user keys: {list(current_user.keys())}")
-        log.info(f"Create raw material - g.user full data: {current_user}")
-        log.info(f"Create raw material - User role: '{user_role}', User ID: {user_id}")
 
         # If role is empty, provide helpful error message
         if not user_role:
@@ -294,7 +291,6 @@ def create_raw_material():
         # Refresh the object to load relationships
         db.session.refresh(new_material)
 
-        log.info(f"Raw material created: {new_material.id} - {new_material.material_name} by user {user_id}")
 
         return jsonify({
             'success': True,
@@ -400,7 +396,6 @@ def update_raw_material(material_id):
         # Refresh the object to load relationships
         db.session.refresh(material)
 
-        log.info(f"Raw material updated: {material.id} - {material.material_name} by user {user_id}")
 
         return jsonify({
             'success': True,
@@ -476,7 +471,6 @@ def delete_raw_material(material_id):
         material.is_active = False
         db.session.commit()
 
-        log.info(f"Raw material soft deleted: {material.id} - {material.material_name} by user {user_id}")
 
         return jsonify({
             'success': True,

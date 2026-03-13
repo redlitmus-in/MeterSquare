@@ -39,8 +39,6 @@ def run_migration():
 
     database_url = os.environ.get('DATABASE_URL')
     if not database_url:
-        print("ERROR: DATABASE_URL environment variable not set")
-        print("Usage: DATABASE_URL='postgresql://...' python migrations/consolidate_boq_preliminaries_to_jsonb.py")
         return False
 
     conn = None
@@ -49,14 +47,10 @@ def run_migration():
         # Use manual transaction control (autocommit off by default)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        print("=" * 70)
-        print("Migration: Consolidate boq_preliminaries to JSONB")
-        print("=" * 70)
 
         # ------------------------------------------------------------------
         # Step 1: Check if migration has already been applied
         # ------------------------------------------------------------------
-        print("\n1. Checking current table state...")
 
         cursor.execute("""
             SELECT column_name
@@ -74,19 +68,17 @@ def run_migration():
             """)
             old_columns = [row['column_name'] for row in cursor.fetchall()]
             if not old_columns:
-                print("   Migration already applied. Nothing to do.")
                 cursor.close()
                 conn.close()
                 return True
             else:
-                print("   Partial migration detected. Continuing from where it left off...")
+                pass
         else:
-            print("   Table is in original state. Proceeding with full migration.")
+            pass
 
         # ------------------------------------------------------------------
         # Step 2: Add selected_preliminaries JSONB column (if not exists)
         # ------------------------------------------------------------------
-        print("\n2. Adding selected_preliminaries JSONB column...")
 
         cursor.execute("""
             SELECT column_name
@@ -99,9 +91,8 @@ def run_migration():
                 ALTER TABLE boq_preliminaries
                 ADD COLUMN selected_preliminaries JSONB DEFAULT '[]'::jsonb
             """)
-            print("   Added selected_preliminaries column")
         else:
-            print("   selected_preliminaries column already exists")
+            pass
 
         conn.commit()
 
@@ -110,7 +101,6 @@ def run_migration():
         # For each distinct boq_id, collect all is_checked=true rows,
         # join with preliminaries_master for full details, build JSON array
         # ------------------------------------------------------------------
-        print("\n3. Migrating existing data to JSONB...")
 
         # Get all distinct boq_ids
         cursor.execute("""
@@ -119,7 +109,6 @@ def run_migration():
             ORDER BY boq_id
         """)
         boq_ids = [row['boq_id'] for row in cursor.fetchall()]
-        print(f"   Found {len(boq_ids)} distinct BOQs to process")
 
         migrated_count = 0
         for boq_id in boq_ids:
@@ -178,12 +167,10 @@ def run_migration():
             migrated_count += 1
 
         conn.commit()
-        print(f"   Migrated {migrated_count} BOQs successfully")
 
         # ------------------------------------------------------------------
         # Step 4: Drop old foreign key constraint on prelim_id
         # ------------------------------------------------------------------
-        print("\n4. Dropping old foreign key constraint on prelim_id...")
 
         # Find the FK constraint name dynamically
         cursor.execute("""
@@ -204,17 +191,15 @@ def run_migration():
         for fk_row in fk_rows:
             fk_name = fk_row['conname']
             cursor.execute(f'ALTER TABLE boq_preliminaries DROP CONSTRAINT IF EXISTS "{fk_name}"')
-            print(f"   Dropped FK constraint: {fk_name}")
 
         if not fk_rows:
-            print("   No FK constraint found on prelim_id (already removed)")
+            pass
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 5: Drop old unique constraint UNIQUE(boq_id, prelim_id)
         # ------------------------------------------------------------------
-        print("\n5. Dropping old unique constraint on (boq_id, prelim_id)...")
 
         # Find unique constraint dynamically
         cursor.execute("""
@@ -228,17 +213,15 @@ def run_migration():
         for uq_row in uq_rows:
             uq_name = uq_row['conname']
             cursor.execute(f'ALTER TABLE boq_preliminaries DROP CONSTRAINT IF EXISTS "{uq_name}"')
-            print(f"   Dropped unique constraint: {uq_name}")
 
         if not uq_rows:
-            print("   No unique constraint found (already removed)")
+            pass
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 6: Drop old indexes on prelim_id and is_checked
         # ------------------------------------------------------------------
-        print("\n6. Dropping old indexes...")
 
         old_indexes = [
             'idx_boq_preliminaries_prelim_id',
@@ -246,14 +229,12 @@ def run_migration():
         ]
         for idx_name in old_indexes:
             cursor.execute(f'DROP INDEX IF EXISTS {idx_name}')
-            print(f"   Dropped index: {idx_name}")
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 7: Drop old columns (prelim_id, is_checked)
         # ------------------------------------------------------------------
-        print("\n7. Dropping old columns (prelim_id, is_checked)...")
 
         cursor.execute("""
             SELECT column_name
@@ -266,16 +247,14 @@ def run_migration():
         if columns_to_drop:
             drop_clauses = ", ".join(f"DROP COLUMN {col}" for col in columns_to_drop)
             cursor.execute(f"ALTER TABLE boq_preliminaries {drop_clauses}")
-            print(f"   Dropped columns: {', '.join(columns_to_drop)}")
         else:
-            print("   Columns already dropped")
+            pass
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 8: Add new UNIQUE constraint on boq_id alone
         # ------------------------------------------------------------------
-        print("\n8. Adding new UNIQUE constraint on boq_id...")
 
         # Check if constraint already exists
         cursor.execute("""
@@ -291,16 +270,14 @@ def run_migration():
                 ALTER TABLE boq_preliminaries
                 ADD CONSTRAINT uq_boq_preliminaries_boq_id UNIQUE (boq_id)
             """)
-            print("   Added UNIQUE constraint: uq_boq_preliminaries_boq_id")
         else:
-            print("   UNIQUE constraint already exists")
+            pass
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 9: Set selected_preliminaries to NOT NULL with default '[]'
         # ------------------------------------------------------------------
-        print("\n9. Setting selected_preliminaries to NOT NULL...")
 
         # First ensure no NULLs exist
         cursor.execute("""
@@ -310,7 +287,7 @@ def run_migration():
         """)
         null_fixed = cursor.rowcount
         if null_fixed > 0:
-            print(f"   Fixed {null_fixed} rows with NULL selected_preliminaries")
+            pass
 
         cursor.execute("""
             ALTER TABLE boq_preliminaries
@@ -320,14 +297,12 @@ def run_migration():
             ALTER TABLE boq_preliminaries
             ALTER COLUMN selected_preliminaries SET DEFAULT '[]'::jsonb
         """)
-        print("   Set NOT NULL constraint and DEFAULT '[]'")
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 10: Verify final state
         # ------------------------------------------------------------------
-        print("\n10. Verifying final table state...")
 
         cursor.execute("""
             SELECT column_name, data_type, is_nullable, column_default
@@ -336,47 +311,30 @@ def run_migration():
             ORDER BY ordinal_position
         """)
         columns = cursor.fetchall()
-        print("   Final columns:")
         for col in columns:
-            print(f"     - {col['column_name']}: {col['data_type']} "
-                  f"(nullable={col['is_nullable']}, default={col['column_default']})")
+            pass
 
         cursor.execute("SELECT COUNT(*) AS total FROM boq_preliminaries")
         total = cursor.fetchone()['total']
-        print(f"\n   Total rows after consolidation: {total}")
 
         cursor.execute("""
             SELECT COUNT(DISTINCT boq_id) AS unique_boqs FROM boq_preliminaries
         """)
         unique_boqs = cursor.fetchone()['unique_boqs']
-        print(f"   Unique BOQ IDs: {unique_boqs}")
 
         # Verify 1:1 relationship (rows == unique boq_ids)
         if total == unique_boqs:
-            print("   One row per BOQ: VERIFIED")
+            pass
         else:
-            print(f"   WARNING: Row count ({total}) != unique BOQ count ({unique_boqs})")
+            pass
 
         cursor.close()
         conn.close()
 
-        print("\n" + "=" * 70)
-        print("MIGRATION COMPLETED SUCCESSFULLY")
-        print("=" * 70)
-        print("\nSummary:")
-        print("  - Added selected_preliminaries JSONB column (NOT NULL, DEFAULT '[]')")
-        print(f"  - Migrated {migrated_count} BOQs with checked preliminary data")
-        print("  - Removed prelim_id and is_checked columns")
-        print("  - Dropped old FK, unique constraint, and indexes")
-        print("  - Added new UNIQUE constraint on boq_id")
-        print("\nJSONB structure per item:")
-        print('  {"prelim_id": 1, "name": "...", "description": "...",')
-        print('   "unit": "nos", "rate": 500.00, "display_order": 1}')
 
         return True
 
     except Exception as e:
-        print(f"\nERROR: Migration failed - {str(e)}")
         traceback.print_exc()
         if conn:
             conn.rollback()
@@ -396,7 +354,6 @@ def rollback_migration():
 
     database_url = os.environ.get('DATABASE_URL')
     if not database_url:
-        print("ERROR: DATABASE_URL environment variable not set")
         return False
 
     conn = None
@@ -404,14 +361,10 @@ def rollback_migration():
         conn = psycopg2.connect(database_url)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        print("=" * 70)
-        print("Rollback: Consolidate boq_preliminaries to JSONB")
-        print("=" * 70)
 
         # ------------------------------------------------------------------
         # Step 1: Check if rollback is needed
         # ------------------------------------------------------------------
-        print("\n1. Checking current table state...")
 
         cursor.execute("""
             SELECT column_name
@@ -420,7 +373,6 @@ def rollback_migration():
             AND column_name = 'selected_preliminaries'
         """)
         if not cursor.fetchone():
-            print("   selected_preliminaries column does not exist. Rollback not needed.")
             cursor.close()
             conn.close()
             return True
@@ -432,12 +384,11 @@ def rollback_migration():
             AND column_name = 'prelim_id'
         """)
         if cursor.fetchone():
-            print("   prelim_id column already exists. Rollback may have been partially applied.")
+            pass
 
         # ------------------------------------------------------------------
         # Step 2: Drop the new UNIQUE constraint on boq_id
         # ------------------------------------------------------------------
-        print("\n2. Dropping UNIQUE constraint on boq_id...")
 
         cursor.execute("""
             SELECT con.conname
@@ -449,14 +400,12 @@ def rollback_migration():
         for uq_row in cursor.fetchall():
             uq_name = uq_row['conname']
             cursor.execute(f'ALTER TABLE boq_preliminaries DROP CONSTRAINT IF EXISTS "{uq_name}"')
-            print(f"   Dropped constraint: {uq_name}")
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 3: Re-add prelim_id and is_checked columns
         # ------------------------------------------------------------------
-        print("\n3. Re-adding prelim_id and is_checked columns...")
 
         cursor.execute("""
             SELECT column_name
@@ -471,21 +420,18 @@ def rollback_migration():
                 ALTER TABLE boq_preliminaries
                 ADD COLUMN prelim_id INTEGER
             """)
-            print("   Added prelim_id column")
 
         if 'is_checked' not in existing_cols:
             cursor.execute("""
                 ALTER TABLE boq_preliminaries
                 ADD COLUMN is_checked BOOLEAN DEFAULT FALSE NOT NULL
             """)
-            print("   Added is_checked column")
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 4: Expand JSONB data back into individual rows
         # ------------------------------------------------------------------
-        print("\n4. Expanding JSONB data back into individual rows...")
 
         # Get all consolidated rows
         cursor.execute("""
@@ -550,12 +496,10 @@ def rollback_migration():
                 """, (fallback['prelim_id'], row['id']))
 
         conn.commit()
-        print(f"   Expanded {expanded_count} additional rows from JSONB data")
 
         # ------------------------------------------------------------------
         # Step 5: Set prelim_id to NOT NULL and add FK constraint
         # ------------------------------------------------------------------
-        print("\n5. Restoring prelim_id NOT NULL and FK constraint...")
 
         # Make sure no NULLs remain
         cursor.execute("""
@@ -565,74 +509,63 @@ def rollback_migration():
         """)
         null_count = cursor.fetchone()['null_count']
         if null_count > 0:
-            print(f"   WARNING: {null_count} rows still have NULL prelim_id. Deleting them.")
             cursor.execute("DELETE FROM boq_preliminaries WHERE prelim_id IS NULL")
 
         cursor.execute("""
             ALTER TABLE boq_preliminaries
             ALTER COLUMN prelim_id SET NOT NULL
         """)
-        print("   Set prelim_id to NOT NULL")
 
         cursor.execute("""
             ALTER TABLE boq_preliminaries
             ADD CONSTRAINT boq_preliminaries_prelim_id_fkey
             FOREIGN KEY (prelim_id) REFERENCES preliminaries_master(prelim_id)
         """)
-        print("   Added FK constraint: boq_preliminaries_prelim_id_fkey")
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 6: Restore UNIQUE(boq_id, prelim_id) constraint
         # ------------------------------------------------------------------
-        print("\n6. Restoring UNIQUE(boq_id, prelim_id) constraint...")
 
         cursor.execute("""
             ALTER TABLE boq_preliminaries
             ADD CONSTRAINT boq_preliminaries_boq_id_prelim_id_key
             UNIQUE (boq_id, prelim_id)
         """)
-        print("   Added unique constraint: boq_preliminaries_boq_id_prelim_id_key")
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 7: Restore old indexes
         # ------------------------------------------------------------------
-        print("\n7. Restoring old indexes...")
 
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_boq_preliminaries_prelim_id
             ON boq_preliminaries(prelim_id)
         """)
-        print("   Restored index: idx_boq_preliminaries_prelim_id")
 
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_boq_preliminaries_is_checked
             ON boq_preliminaries(is_checked)
         """)
-        print("   Restored index: idx_boq_preliminaries_is_checked")
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 8: Drop selected_preliminaries column
         # ------------------------------------------------------------------
-        print("\n8. Dropping selected_preliminaries column...")
 
         cursor.execute("""
             ALTER TABLE boq_preliminaries
             DROP COLUMN IF EXISTS selected_preliminaries
         """)
-        print("   Dropped selected_preliminaries column")
 
         conn.commit()
 
         # ------------------------------------------------------------------
         # Step 9: Verify final state
         # ------------------------------------------------------------------
-        print("\n9. Verifying rollback state...")
 
         cursor.execute("""
             SELECT column_name, data_type, is_nullable
@@ -641,29 +574,19 @@ def rollback_migration():
             ORDER BY ordinal_position
         """)
         columns = cursor.fetchall()
-        print("   Final columns:")
         for col in columns:
-            print(f"     - {col['column_name']}: {col['data_type']} (nullable={col['is_nullable']})")
+            pass
 
         cursor.execute("SELECT COUNT(*) AS total FROM boq_preliminaries")
         total = cursor.fetchone()['total']
-        print(f"\n   Total rows after rollback: {total}")
 
         cursor.close()
         conn.close()
 
-        print("\n" + "=" * 70)
-        print("ROLLBACK COMPLETED SUCCESSFULLY")
-        print("=" * 70)
-        print("\nRestored table to original junction table pattern:")
-        print("  - prelim_id (FK to preliminaries_master)")
-        print("  - is_checked (boolean)")
-        print("  - UNIQUE(boq_id, prelim_id)")
 
         return True
 
     except Exception as e:
-        print(f"\nERROR: Rollback failed - {str(e)}")
         traceback.print_exc()
         if conn:
             conn.rollback()
@@ -673,10 +596,8 @@ def rollback_migration():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == '--rollback':
-        print("Starting rollback...")
         success = rollback_migration()
     else:
-        print("Starting migration...")
         success = run_migration()
 
     sys.exit(0 if success else 1)

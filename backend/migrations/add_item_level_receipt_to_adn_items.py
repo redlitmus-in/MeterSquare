@@ -26,7 +26,6 @@ def run_migration():
         conn.autocommit = True
         cursor = conn.cursor()
 
-        print("Connected to database successfully")
 
         # Check if is_received column exists
         cursor.execute("""
@@ -37,39 +36,32 @@ def run_migration():
         """)
 
         if cursor.fetchone():
-            print("✓ Column 'is_received' already exists in asset_delivery_note_items table")
+            pass
         else:
             # Add new columns for item-level receipt tracking
-            print("Adding item-level receipt columns...")
 
             cursor.execute("""
                 ALTER TABLE asset_delivery_note_items
                 ADD COLUMN is_received BOOLEAN DEFAULT FALSE
             """)
-            print("  ✓ Added is_received column")
 
             cursor.execute("""
                 ALTER TABLE asset_delivery_note_items
                 ADD COLUMN received_at TIMESTAMP
             """)
-            print("  ✓ Added received_at column")
 
             cursor.execute("""
                 ALTER TABLE asset_delivery_note_items
                 ADD COLUMN received_by VARCHAR(255)
             """)
-            print("  ✓ Added received_by column")
 
             cursor.execute("""
                 ALTER TABLE asset_delivery_note_items
                 ADD COLUMN received_by_id INTEGER
             """)
-            print("  ✓ Added received_by_id column")
 
-            print("✓ Successfully added item-level receipt columns")
 
             # Update existing items in DELIVERED ADNs to mark them as received
-            print("\nUpdating existing DELIVERED items to is_received=TRUE...")
 
             cursor.execute("""
                 UPDATE asset_delivery_note_items
@@ -84,19 +76,15 @@ def run_migration():
             """)
 
             updated_count = cursor.rowcount
-            print(f"✓ Updated {updated_count} existing DELIVERED items to is_received=TRUE")
 
-        print("\n✓ Migration completed successfully!")
         return True
 
     except Exception as e:
-        print(f"\n✗ Migration failed: {str(e)}")
         return False
 
     finally:
         if conn:
             conn.close()
-            print("Database connection closed")
 
 
 if __name__ == '__main__':

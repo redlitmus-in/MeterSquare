@@ -37,9 +37,6 @@ def up():
 
     with app.app_context():
         try:
-            log.info("=" * 70)
-            log.info("MIGRATION: Create token_blacklist table")
-            log.info("=" * 70)
 
             db.session.execute(text("""
                 CREATE TABLE IF NOT EXISTS token_blacklist (
@@ -65,12 +62,6 @@ def up():
 
             db.session.commit()
 
-            print("✅ Created token_blacklist table")
-            log.info("=" * 70)
-            log.info("MIGRATION COMPLETED SUCCESSFULLY")
-            log.info("  Table  : token_blacklist")
-            log.info("  Indexes: idx_token_blacklist_jti, idx_token_blacklist_expires")
-            log.info("=" * 70)
             return True
 
         except Exception as e:
@@ -89,9 +80,6 @@ def down():
 
     with app.app_context():
         try:
-            log.info("=" * 70)
-            log.info("ROLLBACK: Drop token_blacklist table")
-            log.info("=" * 70)
 
             db.session.execute(text("""
                 DROP TABLE IF EXISTS token_blacklist
@@ -99,8 +87,6 @@ def down():
 
             db.session.commit()
 
-            print("✅ Dropped token_blacklist table")
-            log.info("ROLLBACK COMPLETED SUCCESSFULLY")
             return True
 
         except Exception as e:

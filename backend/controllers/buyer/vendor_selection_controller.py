@@ -120,7 +120,7 @@ def select_vendor_for_purchase(cr_id):
                 from sqlalchemy.orm.attributes import flag_modified
                 flag_modified(cr, 'routed_materials')
             else:
-                log.info(f"CR-{cr_id}: Cleared store_request_status (was store_rejected, now selecting vendor)")
+                pass
 
         # Update CR status to pending_td_approval so it shows in TD's view
         cr.status = 'pending_td_approval'
@@ -294,7 +294,7 @@ def select_vendor_for_purchase(cr_id):
                         Role.is_deleted == False
                     ).first()
                     if td_role:
-                        log.info(f"[TD Notification] Found TD role via ilike: {td_role.role}")
+                        pass
 
                 if td_role:
                     tds = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).all()
@@ -725,8 +725,7 @@ def select_vendor_for_material(cr_id):
         elif all_materials_have_vendors and has_store_routing:
             # Mixed routing: vendor selections saved but parent CR stays in current status
             # Frontend should call create_po_children to properly split vendor and store materials
-            log.info(f"CR-{cr_id}: All vendor materials selected but store routing exists. "
-                     f"Parent CR NOT set to pending_td_approval. Frontend must create POChildren.")
+            pass
 
         cr.updated_at = datetime.utcnow()
         db.session.commit()
@@ -805,17 +804,13 @@ def select_vendor_for_material(cr_id):
                                     all_submitted=all_materials_have_vendors
                                 )
                                 if sent:
-                                    log.info(
-                                        f"[VENDOR SELECT EMAIL] Email sent to offline TD {td_user.email} for CR {cr_id}"
-                                    )
+                                    pass
                                 else:
                                     log.warning(
                                         f"[VENDOR SELECT EMAIL] Email failed for TD {td_user.email}, CR {cr_id}"
                                     )
                             else:
-                                log.info(
-                                    f"[VENDOR SELECT EMAIL] Skipping email – TD (user_id={td_user.user_id}) is ONLINE"
-                                )
+                                pass
                         except Exception as email_err:
                             log.error(f"[VENDOR SELECT EMAIL] Error for CR {cr_id}, TD {td_user.user_id}: {email_err}")
 
@@ -943,7 +938,7 @@ def create_po_children(cr_id):
                             materials_already_approved.add(mat_name.lower().strip())
 
         if materials_already_approved:
-            log.info(f"Materials already approved/purchased for CR {cr_id}: {materials_already_approved}")
+            pass
 
         # Count existing POChild records to determine next suffix for NEW vendors
         # Use max suffix to avoid gaps if POChildren were deleted
@@ -1099,8 +1094,7 @@ def create_po_children(cr_id):
         if (len(active_vendor_groups) == 1 and not existing_po_children
                 and not has_store_routing and single_routing_type == 'vendor'
                 and not all_materials_covered):
-            log.info(f"CR-{cr_id}: Single vendor group has {total_materials_in_groups} materials "
-                     f"but CR has {total_parent_materials} total. Creating POChild instead of updating parent.")
+            pass
 
         # ========================================================================
         # Multi-vendor / mixed routing / store routing: Create POChildren as before
@@ -1237,7 +1231,7 @@ def create_po_children(cr_id):
                     if isinstance(vendor_selection, dict):
                         negotiated_price = vendor_selection.get('negotiated_price')
                         if negotiated_price:
-                            log.info(f"Using vendor price from parent CR material_vendor_selections for '{material_name}': {negotiated_price}")
+                            pass
 
                 # CRITICAL FIX: If supplier_notes not provided, check parent CR's material_vendor_selections
                 # This is where the buyer stores the supplier notes when selecting vendors
@@ -1246,7 +1240,7 @@ def create_po_children(cr_id):
                     if isinstance(vendor_selection, dict):
                         supplier_notes_for_material = vendor_selection.get('supplier_notes', '')
                         if supplier_notes_for_material:
-                            log.info(f"Using supplier notes from parent CR material_vendor_selections for '{material_name}': {supplier_notes_for_material[:50]}...")
+                            pass
 
                 # Lookup vendor product price as fallback
                 vendor_product_price = vendor_product_prices.get(material_name.lower().strip() if material_name else '', 0)
@@ -1312,7 +1306,7 @@ def create_po_children(cr_id):
                     should_consolidate = True
                 else:
                     # TD already approved or purchase completed - create new POChild for new purchase
-                    log.info(f"Existing POChild {existing_po_child.get_formatted_id()} for vendor {vendor.company_name} has status '{existing_po_child.status}' (approved/completed) - will create NEW POChild for new purchase")
+                    pass
 
             if should_consolidate and existing_po_child:
                 # Consolidate: Add new materials to existing POChild for same vendor/routing
@@ -1530,7 +1524,7 @@ def create_po_children(cr_id):
                 parent_cr.status = 'split_to_sub_crs'
                 parent_cr.updated_at = datetime.utcnow()
             else:
-                log.info(f"Parent CR-{parent_cr.cr_id} NOT hidden - {len(uncovered_materials)} materials still unassigned: {uncovered_materials}")
+                pass
 
         db.session.commit()
 
@@ -1845,7 +1839,7 @@ def td_approve_vendor(cr_id):
             from utils.lpo_pdf_helper import generate_and_save_lpo_pdf
             pdf_url = generate_and_save_lpo_pdf(cr_id=cr_id)
             if pdf_url:
-                log.info(f"LPO PDF saved for CR-{cr_id}: {pdf_url}")
+                pass
             else:
                 log.warning(f"LPO PDF generation failed for CR-{cr_id}, will retry at email send")
         except Exception as pdf_err:
@@ -1930,17 +1924,13 @@ def td_approve_vendor(cr_id):
                                 item_name=cr.item_name or f'CR-{cr_id}'
                             )
                             if sent:
-                                log.info(
-                                    f"[TD APPROVE EMAIL] Email sent to offline buyer {buyer_user.email} for CR {cr_id}"
-                                )
+                                pass
                             else:
                                 log.warning(
                                     f"[TD APPROVE EMAIL] Email failed for buyer {buyer_user.email}, CR {cr_id}"
                                 )
                         else:
-                            log.info(
-                                f"[TD APPROVE EMAIL] Skipping email – buyer (user_id={buyer_to_notify}) is ONLINE"
-                            )
+                            pass
                     else:
                         log.warning(f"[TD APPROVE EMAIL] Buyer user_id={buyer_to_notify} not found, skipping email")
                 except Exception as email_err:
@@ -2098,7 +2088,7 @@ def td_reject_vendor(cr_id):
                                 rejection_reason=reason
                             )
                         else:
-                            log.info(f"[TD Reject] Buyer {buyer_to_notify} is online — skipping email")
+                            pass
                 except Exception as email_error:
                     log.error(f"[TD Reject] Failed to send rejection email to buyer: {email_error}")
             else:

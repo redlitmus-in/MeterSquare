@@ -55,12 +55,10 @@ def add_transport_fields_to_return_delivery_notes():
     try:
         db.session.execute(add_columns_sql)
         db.session.commit()
-        print("✓ Added transport_fee and delivery_note_url columns to return_delivery_notes table")
         return True
 
     except Exception as e:
         db.session.rollback()
-        print(f"✗ Error adding columns to return_delivery_notes: {str(e)}")
         return False
 
 
@@ -75,11 +73,9 @@ def rollback_transport_fields():
     try:
         db.session.execute(rollback_sql)
         db.session.commit()
-        print("✓ Removed transport_fee and delivery_note_url columns from return_delivery_notes table")
         return True
     except Exception as e:
         db.session.rollback()
-        print(f"✗ Error removing columns from return_delivery_notes: {str(e)}")
         return False
 
 
@@ -88,13 +84,9 @@ if __name__ == "__main__":
 
     app = create_app()
     with app.app_context():
-        print("=== Adding Transport Fields to Return Delivery Notes Table ===")
         success = add_transport_fields_to_return_delivery_notes()
 
         if success:
-            print("\n✓ Migration completed successfully!")
-            print("\nColumns added:")
-            print("  - transport_fee (NUMERIC(10, 2))")
-            print("  - delivery_note_url (TEXT)")
+            pass
         else:
-            print("\n✗ Migration failed!")
+            pass

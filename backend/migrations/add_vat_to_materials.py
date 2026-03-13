@@ -18,10 +18,8 @@ def main():
                 '''))
                 conn.commit()
 
-            print("VAT percentage column added to boq_material table successfully")
 
         except Exception as e:
-            print(f"Error adding VAT percentage column: {str(e)}")
             raise
 
 if __name__ == "__main__":

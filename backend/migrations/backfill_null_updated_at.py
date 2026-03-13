@@ -29,11 +29,9 @@ def upgrade():
     engine = create_engine(DATABASE_URL)
 
     with engine.connect() as conn:
-        log.info("Starting updated_at backfill migration...")
 
         try:
             # 1. Backfill change_requests table
-            log.info("Backfilling change_requests.updated_at...")
             result = conn.execute(text("""
                 UPDATE change_requests
                 SET updated_at = created_at
@@ -41,10 +39,8 @@ def upgrade():
                   AND created_at IS NOT NULL;
             """))
             cr_updated = result.rowcount
-            log.info(f"✅ Updated {cr_updated} change_request records")
 
             # 2. Backfill po_child table
-            log.info("Backfilling po_child.updated_at...")
             result = conn.execute(text("""
                 UPDATE po_child
                 SET updated_at = created_at
@@ -52,23 +48,8 @@ def upgrade():
                   AND created_at IS NOT NULL;
             """))
             pc_updated = result.rowcount
-            log.info(f"✅ Updated {pc_updated} po_child records")
 
             conn.commit()
-            log.info("🎉 Backfill completed successfully!")
-
-            # Print summary
-            log.info("")
-            log.info("=" * 60)
-            log.info("BACKFILL SUMMARY:")
-            log.info(f"  - ChangeRequests updated: {cr_updated}")
-            log.info(f"  - POChildren updated: {pc_updated}")
-            log.info(f"  - Total records updated: {cr_updated + pc_updated}")
-            log.info("")
-            log.info("IMPACT:")
-            log.info("  - New records will now appear first in buyer view")
-            log.info("  - Sorting by updated_at will work correctly")
-            log.info("=" * 60)
 
         except Exception as e:
             log.error(f" Error during backfill: {str(e)}")
@@ -84,7 +65,6 @@ def verify():
     engine = create_engine(DATABASE_URL)
 
     with engine.connect() as conn:
-        log.info("Verifying updated_at backfill...")
 
         # Check change_requests
         result = conn.execute(text("""
@@ -104,11 +84,9 @@ def verify():
         """))
         pc_null_count = result.scalar()
 
-        log.info(f"ChangeRequests with NULL updated_at: {cr_null_count}")
-        log.info(f"POChildren with NULL updated_at: {pc_null_count}")
 
         if cr_null_count == 0 and pc_null_count == 0:
-            log.info("✅ Verification passed: No NULL updated_at values found")
+            pass
         else:
             log.warning(f" Found {cr_null_count + pc_null_count} records with NULL updated_at")
 
@@ -116,10 +94,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 1 and sys.argv[1] == "--verify":
-        log.info("Running verification...")
         verify()
     else:
-        log.info("Running upgrade (backfilling NULL values)...")
         upgrade()
-        log.info("")
         verify()

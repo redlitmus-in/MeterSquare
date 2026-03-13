@@ -188,7 +188,7 @@ def confirm_client_approval(boq_id):
                             td_name=td.full_name
                         )
                     else:
-                        log.info(f"[confirm_client_approval] TD {td.user_id} is ONLINE - Email skipped")
+                        pass
         except Exception as email_err:
             log.error(f"[confirm_client_approval] Failed to send email to TD: {email_err}")
 
@@ -587,7 +587,6 @@ def send_boq_to_project_manager():
         # Send email only when PM is offline (case-insensitive, handles None)
         pm_status = (pm.user_status or "").lower().strip()
         email_sent = False
-        log.info(f"📧 PM {pm.full_name} user_status={repr(pm.user_status)} → normalized='{pm_status}'")
 
         if pm_status == "offline":
             email_sent = boq_email_service.send_boq_approval_to_pm(
@@ -600,11 +599,11 @@ def send_boq_to_project_manager():
                 pm_name=pm.full_name
             )
             if email_sent:
-                log.info(f"✅ BOQ approval email sent to offline PM {pm.full_name} ({pm.email})")
+                pass
             else:
                 log.error(f" Failed to send BOQ approval email to PM {pm.full_name} ({pm.email})")
         else:
-            log.info(f"⏭️  PM {pm.full_name} is '{pm.user_status}' - skipping email, in-app notification only")
+            pass
 
         # Update BOQ status
         boq.status = 'Pending_PM_Approval'
@@ -853,11 +852,11 @@ def send_boq_to_technical_director():
             )
 
             if email_sent:
-                log.info(f"📧 ✅ SUCCESS: BOQ submission email sent to TD {td.email}")
+                pass
             else:
                 log.error(f" FAILED: Could not send email to TD {td.email}")
         else:
-            log.info(f"📧 ⏭️  TD is ONLINE (status='{td_status}') - Email skipped, in-app notification will be sent")
+            pass
 
         if email_sent or td_status != "offline":
             # Update BOQ status to Pending_TD_Approval

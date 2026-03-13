@@ -1,3 +1,7 @@
+import logging
+
+log = logging.getLogger(__name__)
+
 # Email configuration for logo display
 import os
 import base64
@@ -40,7 +44,7 @@ def get_logo_url():
                 logo_data = base64.b64encode(f.read()).decode('utf-8')
                 return f"data:image/png;base64,{logo_data}"
     except Exception as e:
-        print(f"Error loading logo: {e}")
+        log.error(f"Error loading logo: {str(e)}")
 
     # Fallback: Use a generic logo URL
     return "https://via.placeholder.com/200x80/ef4444/ffffff?text=MeterSquare"

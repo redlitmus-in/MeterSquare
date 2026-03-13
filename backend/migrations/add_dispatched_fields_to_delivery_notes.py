@@ -24,21 +24,17 @@ def run_migration():
             ALTER TABLE material_delivery_notes
             ADD COLUMN IF NOT EXISTS dispatched_at TIMESTAMP;
         """)
-        print("Added dispatched_at column")
 
         # Add dispatched_by column
         cursor.execute("""
             ALTER TABLE material_delivery_notes
             ADD COLUMN IF NOT EXISTS dispatched_by VARCHAR(255);
         """)
-        print("Added dispatched_by column")
 
         conn.commit()
-        print("Migration completed successfully!")
 
     except Exception as e:
         conn.rollback()
-        print(f"Migration failed: {e}")
         raise e
     finally:
         cursor.close()

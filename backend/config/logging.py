@@ -36,7 +36,7 @@ def get_logger():
 
         logger.propagate = False
     except Exception as e:
-        print(f"Error setting up logging: {str(e)}")
+        logging.error(f"Error in get_logger: {str(e)}")
         raise
 
     return logger

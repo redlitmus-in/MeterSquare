@@ -17,7 +17,6 @@ def fix_missing_sizes():
     fixed_count = 0
     total_count = len(change_requests)
 
-    print(f"Processing {total_count} change requests...")
 
     for cr in change_requests:
         try:
@@ -28,7 +27,6 @@ def fix_missing_sizes():
             ).first()
 
             if not boq_details or not boq_details.boq_details:
-                print(f"⚠️  CR {cr.cr_id}: No BOQ details found, skipping")
                 continue
 
             # Build material lookup from BOQ
@@ -81,7 +79,6 @@ def fix_missing_sizes():
                     if boq_mat and boq_mat.get('size'):
                         mat['size'] = boq_mat['size']
                         updated_materials = True
-                        print(f"  ✓ Updated material '{mat.get('material_name')}' with size: {boq_mat['size']}")
 
             # Fix sub_items_data
             if cr.sub_items_data:
@@ -109,24 +106,17 @@ def fix_missing_sizes():
                 flag_modified(cr, 'materials_data')
                 flag_modified(cr, 'sub_items_data')
                 fixed_count += 1
-                print(f"✅ CR {cr.cr_id} ({cr.formatted_cr_id}): Fixed missing size fields")
 
         except Exception as e:
-            print(f"❌ Error processing CR {cr.cr_id}: {str(e)}")
             continue
 
     # Commit all changes
     try:
         db.session.commit()
-        print(f"\n✅ Migration complete! Fixed {fixed_count} out of {total_count} change requests")
     except Exception as e:
         db.session.rollback()
-        print(f"\n❌ Error committing changes: {str(e)}")
         raise
 
 
 if __name__ == '__main__':
-    print("=" * 60)
-    print("Fix Missing Size Fields in Change Requests")
-    print("=" * 60)
     fix_missing_sizes()

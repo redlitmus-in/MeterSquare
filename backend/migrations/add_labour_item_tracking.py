@@ -76,22 +76,17 @@ def run_migration():
             """)
 
         if not columns_to_add:
-            print("All columns already exist. No migration needed.")
             return
 
         # Execute migrations
         for sql in columns_to_add:
             try:
                 db.session.execute(db.text(sql.strip()))
-                print(f"Executed: {sql.strip()[:60]}...")
             except Exception as e:
-                print(f"Error executing SQL: {e}")
                 db.session.rollback()
                 raise
 
         db.session.commit()
-        print("\n✅ Migration completed successfully!")
-        print("Added columns: boq_id, item_id, labour_id, work_status")
 
 
 if __name__ == '__main__':

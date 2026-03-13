@@ -94,11 +94,9 @@ def create_preliminary_purchase_requests_table():
             # Execute the SQL
             db.session.execute(db.text(sql))
             db.session.commit()
-            print("✅ Successfully created preliminary_purchase_requests table with indexes")
             return True
         except Exception as e:
             db.session.rollback()
-            print(f"❌ Error creating table: {str(e)}")
             return False
 
 

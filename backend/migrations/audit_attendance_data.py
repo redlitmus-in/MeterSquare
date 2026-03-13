@@ -18,13 +18,8 @@ app = create_app()
 def audit_attendance():
     """Comprehensive audit of attendance data"""
     with app.app_context():
-        print('\n' + '='*80)
-        print('📋 COMPREHENSIVE ATTENDANCE DATABASE AUDIT')
-        print('='*80)
 
         # 1. Overall statistics
-        print('\n1️⃣  OVERALL STATISTICS:')
-        print('-'*80)
         result = db.session.execute(text("""
             SELECT
                 COUNT(*) as total_records,
@@ -36,16 +31,8 @@ def audit_attendance():
             FROM daily_attendance
         """)).fetchone()
 
-        print(f'Total Records: {result[0]}')
-        print(f'With Labour Role: {result[1]}')
-        print(f'Without Labour Role: {result[2]}')
-        print(f'Deleted: {result[3]}')
-        print(f'Locked: {result[4]}')
-        print(f'Pending: {result[5]}')
 
         # 2. Labour role distribution
-        print('\n2️⃣  LABOUR ROLE DISTRIBUTION:')
-        print('-'*80)
         result = db.session.execute(text("""
             SELECT
                 COALESCE(labour_role, '(NULL)') as role,
@@ -60,21 +47,15 @@ def audit_attendance():
             ORDER BY count DESC
         """)).fetchall()
 
-        print(f"{'Role':<30} {'Count':<8} {'Hours':<10} {'Cost':<12} {'Projects':<10} {'Workers':<10}")
-        print('-'*80)
         for row in result:
             role = str(row[0])[:28]
-            print(f'{role:<30} {row[1]:<8} {float(row[2] or 0):<10.2f} {float(row[3] or 0):<12.2f} {row[4]:<10} {row[5]:<10}')
 
         # 3. Records without labour_role (if any)
-        print('\n3️⃣  RECORDS WITHOUT LABOUR_ROLE:')
-        print('-'*80)
         result = db.session.execute(text("""
             SELECT COUNT(*) FROM daily_attendance WHERE labour_role IS NULL AND is_deleted = false
         """)).fetchone()
 
         if result[0] > 0:
-            print(f'⚠️  Found {result[0]} records without labour_role')
 
             # Show details
             details = db.session.execute(text("""
@@ -92,16 +73,12 @@ def audit_attendance():
                 LIMIT 10
             """)).fetchall()
 
-            print(f"\n{'ID':<6} {'Worker':<20} {'Project':<20} {'Date':<12} {'Req ID':<8}")
-            print('-'*80)
             for row in details:
-                print(f"{row[0]:<6} {str(row[1])[:18]:<20} {str(row[2])[:18]:<20} {str(row[3]):<12} {row[4] or 'N/A':<8}")
+                pass
         else:
-            print('✓ All records have labour_role set!')
+            pass
 
         # 4. Project-wise breakdown
-        print('\n4️⃣  PROJECT-WISE BREAKDOWN:')
-        print('-'*80)
         result = db.session.execute(text("""
             SELECT
                 p.project_id,
@@ -117,15 +94,10 @@ def audit_attendance():
             ORDER BY total_attendance DESC
         """)).fetchall()
 
-        print(f"{'Project':<40} {'Attendance':<12} {'Roles':<10} {'Hours':<10} {'Cost':<12}")
-        print('-'*80)
         for row in result:
             project_name = str(row[1])[:38]
-            print(f'{project_name:<40} {row[2]:<12} {row[3]:<10} {float(row[4] or 0):<10.2f} {float(row[5] or 0):<12.2f}')
 
         # 5. Detailed role breakdown per project
-        print('\n5️⃣  ROLE BREAKDOWN BY PROJECT:')
-        print('-'*80)
         result = db.session.execute(text("""
             SELECT
                 p.project_name,
@@ -144,15 +116,9 @@ def audit_attendance():
         for row in result:
             if current_project != row[0]:
                 current_project = row[0]
-                print(f'\n📁 {current_project}:')
-                print(f"  {'Role':<30} {'Count':<8} {'Hours':<10} {'Cost':<12}")
-                print('  ' + '-'*70)
             role = str(row[1])[:28]
-            print(f'  {role:<30} {row[2]:<8} {float(row[3] or 0):<10.2f} {float(row[4] or 0):<12.2f}')
 
         # 6. Check requisition linkage
-        print('\n6️⃣  REQUISITION LINKAGE:')
-        print('-'*80)
         result = db.session.execute(text("""
             SELECT
                 COUNT(*) as total,
@@ -166,13 +132,7 @@ def audit_attendance():
         with_req = result[1]
         without_req = result[2]
 
-        print(f'Total Active Records: {total}')
-        print(f'With Requisition Link: {with_req} ({with_req*100//total if total > 0 else 0}%)')
-        print(f'Without Requisition Link: {without_req} ({without_req*100//total if total > 0 else 0}%)')
 
-        print('\n' + '='*80)
-        print('✓ AUDIT COMPLETE')
-        print('='*80)
 
 
 if __name__ == "__main__":

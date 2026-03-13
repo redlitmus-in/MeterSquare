@@ -46,17 +46,11 @@ def add_material_fields():
                 db.session.execute(alter_query)
                 db.session.commit()
 
-                print("Successfully added material detail fields to boq_material table")
-                print("  - brand (VARCHAR 255)")
-                print("  - size (VARCHAR 255)")
-                print("  - specification (TEXT)")
-                print("\nMigration completed successfully!")
             else:
-                print("All columns already exist. No migration needed.")
+                pass
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error adding material fields: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -64,20 +58,10 @@ def add_material_fields():
     return True
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Adding Material Detail Fields to BOQ Material Table")
-    print("=" * 60)
-    print()
 
     success = add_material_fields()
 
     if success:
-        print("\n" + "=" * 60)
-        print("Next Steps:")
-        print("=" * 60)
-        print("1. Database table updated with new fields")
-        print("2. Restart backend server: python app.py")
-        print("3. Test API: Materials will now support brand, size, specification")
-        print()
+        pass
     else:
-        print("\nMigration failed. Please check the error above.")
+        pass

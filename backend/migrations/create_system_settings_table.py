@@ -21,7 +21,6 @@ def create_system_settings_table():
 
     with app.app_context():
         try:
-            print("Creating system_settings table...")
 
             # Create table
             db.create_all()
@@ -30,7 +29,6 @@ def create_system_settings_table():
             existing_settings = SystemSettings.query.first()
 
             if existing_settings:
-                print("✓ System settings already exist")
                 return
 
             # Create default settings
@@ -68,11 +66,8 @@ def create_system_settings_table():
             db.session.add(default_settings)
             db.session.commit()
 
-            print("✓ System settings table created successfully")
-            print("✓ Default settings initialized")
 
         except Exception as e:
-            print(f"✗ Error creating system_settings table: {str(e)}")
             db.session.rollback()
             raise
 

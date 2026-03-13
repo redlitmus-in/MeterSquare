@@ -22,7 +22,6 @@ def run_migration():
         conn.autocommit = True
         cursor = conn.cursor()
 
-        print("Connected to database successfully")
 
         # Check if backup_stock column exists
         cursor.execute("""
@@ -33,14 +32,12 @@ def run_migration():
 
         if cursor.fetchone() is None:
             # Add backup_stock column
-            print("Adding backup_stock column...")
             cursor.execute("""
                 ALTER TABLE inventory_materials
                 ADD COLUMN backup_stock FLOAT DEFAULT 0.0 NOT NULL
             """)
-            print("Added backup_stock column successfully")
         else:
-            print("backup_stock column already exists")
+            pass
 
         # Check if backup_condition_notes column exists
         cursor.execute("""
@@ -51,14 +48,12 @@ def run_migration():
 
         if cursor.fetchone() is None:
             # Add backup_condition_notes column
-            print("Adding backup_condition_notes column...")
             cursor.execute("""
                 ALTER TABLE inventory_materials
                 ADD COLUMN backup_condition_notes TEXT
             """)
-            print("Added backup_condition_notes column successfully")
         else:
-            print("backup_condition_notes column already exists")
+            pass
 
         # Check if delivery_note_items table exists first
         cursor.execute("""
@@ -79,26 +74,21 @@ def run_migration():
 
             if cursor.fetchone() is None:
                 # Add use_backup column
-                print("Adding use_backup column to delivery_note_items...")
                 cursor.execute("""
                     ALTER TABLE delivery_note_items
                     ADD COLUMN use_backup BOOLEAN DEFAULT FALSE
                 """)
-                print("Added use_backup column successfully")
             else:
-                print("use_backup column already exists")
+                pass
         else:
-            print("delivery_note_items table does not exist yet - will have use_backup column when created")
+            pass
 
-        print("\nMigration completed successfully!")
 
     except Exception as e:
-        print(f"Error during migration: {e}")
         raise
     finally:
         if conn:
             conn.close()
-            print("Database connection closed")
 
 if __name__ == "__main__":
     run_migration()

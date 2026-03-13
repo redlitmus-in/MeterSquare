@@ -41,31 +41,20 @@ def run_up():
         ("add_suspicious_activity_alerts",alerts_up),
     ]
 
-    print("")
-    print("=" * 70)
-    print("  SECURITY MIGRATIONS — APPLY")
-    print("=" * 70)
 
     all_ok = True
     for name, fn in migrations:
-        print(f"\n>>> Running: {name}")
         ok = fn()
         if ok:
-            print(f"    OK: {name}")
+            pass
         else:
-            print(f"    FAILED: {name}")
             all_ok = False
             break   # stop on first failure — later migrations may depend on this one
 
-    print("")
-    print("=" * 70)
     if all_ok:
-        print("  ALL MIGRATIONS APPLIED SUCCESSFULLY")
-        print("  Login should work now on both msq.kol.tel and msq.ath.cx")
+        pass
     else:
-        print("  MIGRATION FAILED — check the error above and fix before retrying")
-    print("=" * 70)
-    print("")
+        pass
     return all_ok
 
 
@@ -83,29 +72,19 @@ def run_down():
         ("add_user_block_fields",          block_down),
     ]
 
-    print("")
-    print("=" * 70)
-    print("  SECURITY MIGRATIONS — ROLLBACK")
-    print("=" * 70)
 
     all_ok = True
     for name, fn in rollbacks:
-        print(f"\n>>> Rolling back: {name}")
         ok = fn()
         if ok:
-            print(f"    OK: {name} rolled back")
+            pass
         else:
-            print(f"    FAILED: {name}")
             all_ok = False
 
-    print("")
-    print("=" * 70)
     if all_ok:
-        print("  ALL MIGRATIONS ROLLED BACK")
+        pass
     else:
-        print("  ROLLBACK HAD ERRORS — check above")
-    print("=" * 70)
-    print("")
+        pass
     return all_ok
 
 

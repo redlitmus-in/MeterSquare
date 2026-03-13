@@ -34,85 +34,61 @@ def upgrade():
     engine = create_engine(DATABASE_URL)
 
     with engine.connect() as conn:
-        log.info("=" * 60)
-        log.info("Adding performance indexes...")
-        log.info("=" * 60)
 
         try:
             # ── internal_inventory_material_requests ──────────────────────
             # Filtered by project_id + status on every IMR list view
-            log.info("[1/8] idx_imr_project_status ...")
             conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS idx_imr_project_status
                 ON internal_inventory_material_requests(project_id, status);
             """))
-            log.info("  OK idx_imr_project_status")
 
             # Filtered by cr_id + status on purchase completion
-            log.info("[2/8] idx_imr_cr_status ...")
             conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS idx_imr_cr_status
                 ON internal_inventory_material_requests(cr_id, status)
                 WHERE cr_id IS NOT NULL;
             """))
-            log.info("  OK idx_imr_cr_status")
 
             # status alone (PENDING list queries)
-            log.info("[3/8] idx_imr_status ...")
             conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS idx_imr_status
                 ON internal_inventory_material_requests(status);
             """))
-            log.info("  OK idx_imr_status")
 
             # ── material_delivery_notes ───────────────────────────────────
             # Filtered by project_id + status on SE delivery views
-            log.info("[4/8] idx_mdn_project_status ...")
             conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS idx_mdn_project_status
                 ON material_delivery_notes(project_id, status)
                 WHERE project_id IS NOT NULL;
             """))
-            log.info("  OK idx_mdn_project_status")
 
-            log.info("[5/8] idx_mdn_status ...")
             conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS idx_mdn_status
                 ON material_delivery_notes(status);
             """))
-            log.info("  OK idx_mdn_status")
 
             # ── return_delivery_notes ─────────────────────────────────────
-            log.info("[6/8] idx_rdn_project_status ...")
             conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS idx_rdn_project_status
                 ON return_delivery_notes(project_id, status);
             """))
-            log.info("  OK idx_rdn_project_status")
 
-            log.info("[7/8] idx_rdn_status ...")
             conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS idx_rdn_status
                 ON return_delivery_notes(status);
             """))
-            log.info("  OK idx_rdn_status")
 
             # ── inventory_transactions ────────────────────────────────────
             # Used in stock history queries — material + type + recency
-            log.info("[8/8] idx_inv_tx_material_type ...")
             conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS idx_inv_tx_material_type
                 ON inventory_transactions(inventory_material_id, transaction_type, created_at DESC);
             """))
-            log.info("  OK idx_inv_tx_material_type")
 
             conn.commit()
 
-            log.info("")
-            log.info("=" * 60)
-            log.info("All 8 performance indexes created successfully!")
-            log.info("Expected improvement: 200-500ms reduction per inventory query")
-            log.info("=" * 60)
 
         except Exception as e:
             log.error(f"Error creating indexes: {str(e)}")
@@ -129,7 +105,6 @@ def downgrade():
     engine = create_engine(DATABASE_URL)
 
     with engine.connect() as conn:
-        log.info("Rolling back performance indexes...")
         try:
             conn.execute(text("DROP INDEX IF EXISTS idx_imr_project_status;"))
             conn.execute(text("DROP INDEX IF EXISTS idx_imr_cr_status;"))
@@ -140,7 +115,6 @@ def downgrade():
             conn.execute(text("DROP INDEX IF EXISTS idx_rdn_status;"))
             conn.execute(text("DROP INDEX IF EXISTS idx_inv_tx_material_type;"))
             conn.commit()
-            log.info("Rollback complete — all 8 indexes dropped.")
         except Exception as e:
             log.error(f"Error during rollback: {str(e)}")
             conn.rollback()
@@ -149,8 +123,6 @@ def downgrade():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--downgrade":
-        log.info("Running downgrade (removing indexes)...")
         downgrade()
     else:
-        log.info("Running upgrade (adding indexes)...")
         upgrade()

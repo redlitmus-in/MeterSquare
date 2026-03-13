@@ -20,9 +20,6 @@ app = create_app()
 def run_migration():
     """Add routed_materials JSONB column to change_requests table"""
 
-    print("=" * 70)
-    print("MIGRATION: Add routed_materials tracking to change_requests")
-    print("=" * 70)
 
     with app.app_context():
         try:
@@ -35,21 +32,17 @@ def run_migration():
             """))
 
             if result.fetchone():
-                print("✓ Column 'routed_materials' already exists. Skipping migration.")
                 return
 
             # Add the column
-            print("\n1. Adding 'routed_materials' column...")
             db.session.execute(text("""
                 ALTER TABLE change_requests
                 ADD COLUMN routed_materials JSONB DEFAULT '{}'::jsonb
             """))
 
             db.session.commit()
-            print("✓ Column added successfully")
 
             # Initialize existing records
-            print("\n2. Initializing routed_materials for existing records...")
 
             # Mark materials as routed for CRs that have store requests
             db.session.execute(text("""
@@ -82,7 +75,6 @@ def run_migration():
                 WHERE routed_materials IS NOT NULL AND routed_materials != '{}'::jsonb
             """)).scalar()
 
-            print(f"✓ Initialized {updated_store} CRs with store-routed materials")
 
             # Mark materials as routed for CRs that have PO children
             db.session.execute(text("""
@@ -121,15 +113,10 @@ def run_migration():
                 AND routed_materials::text LIKE '%vendor%'
             """)).scalar()
 
-            print(f"✓ Initialized {updated_vendor} CRs with vendor-routed materials")
 
-            print("\n" + "=" * 70)
-            print("✓ MIGRATION COMPLETED SUCCESSFULLY")
-            print("=" * 70)
 
         except Exception as e:
             db.session.rollback()
-            print(f"\n✗ MIGRATION FAILED: {str(e)}")
             import traceback
             traceback.print_exc()
             raise

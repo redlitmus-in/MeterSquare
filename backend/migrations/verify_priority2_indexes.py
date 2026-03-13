@@ -28,16 +28,11 @@ def verify_indexes():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    print("\n" + "=" * 90)
-    print("PRIORITY 2 - COMPREHENSIVE VERIFICATION REPORT")
-    print("=" * 90)
 
     # ============================================================
     # PART 1: Verify Critical Indexes
     # ============================================================
 
-    print("\n📊 PART 1: Critical Indexes (20 expected)")
-    print("-" * 90)
 
     part1_indexes = [
         'idx_boq_details_boq_deleted',
@@ -77,18 +72,15 @@ def verify_indexes():
         else:
             missing_part1.append(idx_name)
 
-    print(f"   Found: {len(found_part1)}/{len(part1_indexes)} indexes")
     if missing_part1:
-        print(f"   ❌ Missing: {', '.join(missing_part1)}")
+        pass
     else:
-        print(f"   ✅ All Part 1 indexes created successfully!")
+        pass
 
     # ============================================================
     # PART 2: Verify JSONB GIN Indexes
     # ============================================================
 
-    print("\n📊 PART 2: JSONB GIN Indexes (9 expected)")
-    print("-" * 90)
 
     part2_indexes = [
         'idx_boq_details_items',  # May exist from previous migration
@@ -117,18 +109,15 @@ def verify_indexes():
         else:
             missing_part2.append(idx_name)
 
-    print(f"   Found: {len(found_part2)}/{len(part2_indexes)} GIN indexes")
     if missing_part2:
-        print(f"   ❌ Missing: {', '.join(missing_part2)}")
+        pass
     else:
-        print(f"   ✅ All Part 2 GIN indexes created successfully!")
+        pass
 
     # ============================================================
     # PART 3: Verify Composite Workflow Indexes
     # ============================================================
 
-    print("\n📊 PART 3: Composite Workflow Indexes (10 expected)")
-    print("-" * 90)
 
     part3_indexes = [
         'idx_assignment_buyer_workflow',
@@ -158,18 +147,15 @@ def verify_indexes():
         else:
             missing_part3.append(idx_name)
 
-    print(f"   Found: {len(found_part3)}/{len(part3_indexes)} composite indexes")
     if missing_part3:
-        print(f"   ❌ Missing: {', '.join(missing_part3)}")
+        pass
     else:
-        print(f"   ✅ All Part 3 composite indexes created successfully!")
+        pass
 
     # ============================================================
     # PART 4: Verify Foreign Key Constraints
     # ============================================================
 
-    print("\n📊 PART 4: Foreign Key Constraints (4 expected)")
-    print("-" * 90)
 
     cursor.execute("""
         SELECT
@@ -194,13 +180,11 @@ def verify_indexes():
 
     foreign_keys = cursor.fetchall()
 
-    print(f"   Found: {len(foreign_keys)}/4 foreign key constraints")
     if len(foreign_keys) < 4:
-        print(f"   ⚠️  Some foreign keys missing (this is optional)")
+        pass
     else:
-        print(f"   ✅ All foreign keys created successfully!")
         for fk in foreign_keys:
-            print(f"      • {fk[1]}.{fk[2]} → {fk[3]}.{fk[4]}")
+            pass
 
     # Part 4 supporting indexes
     part4_indexes = [
@@ -216,7 +200,6 @@ def verify_indexes():
         if cursor.fetchone():
             found_part4.append(idx_name)
 
-    print(f"   Found: {len(found_part4)}/{len(part4_indexes)} FK supporting indexes")
 
     # ============================================================
     # Overall Summary
@@ -225,9 +208,6 @@ def verify_indexes():
     total_expected = len(part1_indexes) + len(part2_indexes) + len(part3_indexes) + len(part4_indexes)
     total_found = len(found_part1) + len(found_part2) + len(found_part3) + len(found_part4)
 
-    print("\n" + "=" * 90)
-    print("📈 OVERALL SUMMARY")
-    print("=" * 90)
 
     summary_data = [
         ["Part 1: Critical Indexes", len(found_part1), len(part1_indexes), "✅" if len(found_part1) == len(part1_indexes) else "❌"],
@@ -239,14 +219,11 @@ def verify_indexes():
         ["TOTAL INDEXES", total_found, total_expected, "✅" if total_found >= 39 else "❌"]
     ]
 
-    print(tabulate(summary_data, headers=["Category", "Found", "Expected", "Status"], tablefmt="grid"))
 
     # ============================================================
     # Performance Check
     # ============================================================
 
-    print("\n📊 INDEX USAGE STATISTICS (Top 10)")
-    print("-" * 90)
 
     cursor.execute("""
         SELECT
@@ -262,41 +239,21 @@ def verify_indexes():
 
     index_stats = cursor.fetchall()
     if index_stats:
-        print(tabulate(index_stats, headers=["Table", "Index", "Scans", "Size"], tablefmt="grid"))
+        pass
     else:
-        print("   No usage statistics available yet (indexes just created)")
+        pass
 
     # ============================================================
     # Final Verdict
     # ============================================================
 
-    print("\n" + "=" * 90)
     if total_found >= 39 and len(foreign_keys) >= 0:  # FKs are optional
-        print("✅ VERIFICATION PASSED!")
-        print("=" * 90)
-        print(f"   • {total_found}/{total_expected} indexes created successfully")
-        print(f"   • {len(foreign_keys)}/4 foreign keys created")
-        print("   • Database performance optimized")
-        print("   • Ready for production workload")
-        print("\n💡 Next Steps:")
-        print("   1. Monitor query performance improvement")
-        print("   2. Check dashboard load times (should be 3-5x faster)")
-        print("   3. Run EXPLAIN ANALYZE on key queries")
-        print("   4. Proceed with Priority 3 (API optimization) after 1 week")
+        pass
     elif total_found >= 35:
-        print("⚠️  PARTIAL SUCCESS")
-        print("=" * 90)
-        print(f"   • {total_found}/{total_expected} indexes created")
-        print("   • Some indexes missing (see details above)")
-        print("   • Re-run missing migrations")
+        pass
     else:
-        print("❌ VERIFICATION FAILED")
-        print("=" * 90)
-        print(f"   • Only {total_found}/{total_expected} indexes created")
-        print("   • Multiple migrations incomplete")
-        print("   • Review error messages and re-run migrations")
+        pass
 
-    print("=" * 90 + "\n")
 
     cursor.close()
     conn.close()
@@ -305,11 +262,4 @@ if __name__ == "__main__":
     try:
         verify_indexes()
     except Exception as e:
-        print(f"\n❌ ERROR: Verification failed!")
-        print(f"   Error: {str(e)}")
-        print("\n💡 Troubleshooting:")
-        print("   - Check DATABASE_URL in .env")
-        print("   - Verify database connection")
-        print("   - Ensure migrations were run")
-        print("   - Install tabulate: pip install tabulate")
         sys.exit(1)

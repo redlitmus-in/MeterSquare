@@ -28,30 +28,25 @@ def run_migration():
             """))
 
             if result.fetchone():
-                print("Column 'labour_role' already exists in daily_attendance table")
                 return True
 
             # Add the column
-            print("Adding 'labour_role' column to daily_attendance table...")
             db.session.execute(db.text("""
                 ALTER TABLE daily_attendance
                 ADD COLUMN labour_role VARCHAR(100) NULL
             """))
 
             # Add index for performance
-            print("Adding index on labour_role column...")
             db.session.execute(db.text("""
                 CREATE INDEX IF NOT EXISTS idx_daily_attendance_labour_role
                 ON daily_attendance(labour_role)
             """))
 
             db.session.commit()
-            print("Migration completed successfully!")
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"Migration failed: {str(e)}")
             return False
 
 

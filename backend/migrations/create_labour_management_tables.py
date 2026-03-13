@@ -37,13 +37,10 @@ def run_migration():
         conn.autocommit = True
         cursor = conn.cursor()
 
-        print("Connected to database successfully")
-        print("=" * 60)
 
         # ============================================================
         # 1. WORKERS TABLE
         # ============================================================
-        print("\n[1/6] Creating workers table...")
 
         cursor.execute("""
             SELECT EXISTS (
@@ -83,14 +80,12 @@ def run_migration():
             cursor.execute("CREATE INDEX idx_workers_skills ON workers USING GIN(skills)")
             cursor.execute("CREATE INDEX idx_workers_is_deleted ON workers(is_deleted)")
 
-            print("✓ workers table created successfully")
         else:
-            print("→ workers table already exists, skipping...")
+            pass
 
         # ============================================================
         # 2. LABOUR REQUISITIONS TABLE
         # ============================================================
-        print("\n[2/6] Creating labour_requisitions table...")
 
         cursor.execute("""
             SELECT EXISTS (
@@ -145,14 +140,12 @@ def run_migration():
             cursor.execute("CREATE INDEX idx_requisitions_required_date ON labour_requisitions(required_date)")
             cursor.execute("CREATE INDEX idx_requisitions_code ON labour_requisitions(requisition_code)")
 
-            print("✓ labour_requisitions table created successfully")
         else:
-            print("→ labour_requisitions table already exists, skipping...")
+            pass
 
         # ============================================================
         # 3. LABOUR ARRIVALS TABLE
         # ============================================================
-        print("\n[3/6] Creating labour_arrivals table...")
 
         cursor.execute("""
             SELECT EXISTS (
@@ -188,14 +181,12 @@ def run_migration():
             cursor.execute("CREATE INDEX idx_arrivals_requisition ON labour_arrivals(requisition_id)")
             cursor.execute("CREATE INDEX idx_arrivals_status ON labour_arrivals(arrival_status)")
 
-            print("✓ labour_arrivals table created successfully")
         else:
-            print("→ labour_arrivals table already exists, skipping...")
+            pass
 
         # ============================================================
         # 4. WORKER ASSIGNMENTS TABLE
         # ============================================================
-        print("\n[4/6] Creating worker_assignments table...")
 
         cursor.execute("""
             SELECT EXISTS (
@@ -237,14 +228,12 @@ def run_migration():
             cursor.execute("CREATE INDEX idx_assignments_dates ON worker_assignments(assignment_start_date, assignment_end_date)")
             cursor.execute("CREATE INDEX idx_assignments_factory ON worker_assignments(is_factory_resource) WHERE is_factory_resource = TRUE")
 
-            print("✓ worker_assignments table created successfully")
         else:
-            print("→ worker_assignments table already exists, skipping...")
+            pass
 
         # ============================================================
         # 5. DAILY ATTENDANCE TABLE
         # ============================================================
-        print("\n[5/6] Creating daily_attendance table...")
 
         cursor.execute("""
             SELECT EXISTS (
@@ -316,14 +305,12 @@ def run_migration():
             cursor.execute("CREATE INDEX idx_attendance_entered_by ON daily_attendance(entered_by_user_id, attendance_date)")
             cursor.execute("CREATE INDEX idx_attendance_date ON daily_attendance(attendance_date)")
 
-            print("✓ daily_attendance table created successfully")
         else:
-            print("→ daily_attendance table already exists, skipping...")
+            pass
 
         # ============================================================
         # 6. ATTENDANCE APPROVAL HISTORY TABLE
         # ============================================================
-        print("\n[6/6] Creating attendance_approval_history table...")
 
         cursor.execute("""
             SELECT EXISTS (
@@ -354,21 +341,15 @@ def run_migration():
             cursor.execute("CREATE INDEX idx_approval_history_date ON attendance_approval_history(action_date)")
             cursor.execute("CREATE INDEX idx_approval_history_action ON attendance_approval_history(action)")
 
-            print("✓ attendance_approval_history table created successfully")
         else:
-            print("→ attendance_approval_history table already exists, skipping...")
+            pass
 
-        print("\n" + "=" * 60)
-        print("Labour Management System migration completed successfully!")
-        print("=" * 60)
 
     except Exception as e:
-        print(f"\n❌ Error during migration: {e}")
         raise
     finally:
         if conn:
             conn.close()
-            print("\nDatabase connection closed")
 
 
 if __name__ == "__main__":

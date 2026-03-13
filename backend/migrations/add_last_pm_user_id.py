@@ -23,8 +23,6 @@ def run_migration():
 
     database_url = os.environ.get('DATABASE_URL')
     if not database_url:
-        print("ERROR: DATABASE_URL environment variable not set")
-        print("Usage: DATABASE_URL='postgresql://...' python migrations/add_last_pm_user_id.py")
         return False
 
     # Create Flask app context
@@ -44,7 +42,6 @@ def run_migration():
             """)
             result = db.session.execute(check_sql)
             if result.fetchone():
-                print("Column 'last_pm_user_id' already exists in 'boq' table. Skipping migration.")
                 return True
 
             # Add the column
@@ -55,12 +52,10 @@ def run_migration():
             db.session.execute(alter_sql)
             db.session.commit()
 
-            print("Successfully added 'last_pm_user_id' column to 'boq' table.")
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error running migration: {e}")
             return False
 
 if __name__ == '__main__':

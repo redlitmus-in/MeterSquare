@@ -24,7 +24,6 @@ def run_migration():
 
     with app.app_context():
         try:
-            print("Starting migration: Adding intended_recipient_name to internal_inventory_material_requests...")
 
             # Check if column already exists
             check_query = text("""
@@ -37,7 +36,6 @@ def run_migration():
             result = db.session.execute(check_query).fetchone()
 
             if result:
-                print("✓ Column 'intended_recipient_name' already exists. Skipping migration.")
                 return
 
             # Add the new column
@@ -49,12 +47,9 @@ def run_migration():
             db.session.execute(alter_query)
             db.session.commit()
 
-            print("✓ Successfully added intended_recipient_name column")
-            print("✓ Migration completed successfully!")
 
         except Exception as e:
             db.session.rollback()
-            print(f"✗ Migration failed: {str(e)}")
             import traceback
             traceback.print_exc()
             sys.exit(1)

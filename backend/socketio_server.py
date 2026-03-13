@@ -143,7 +143,6 @@ def handle_connect(user_id, role, username):
     join_room(role_room)
     active_connections[sid]['rooms'].append(role_room)
 
-    log.info(f"User {username} (ID: {user_id}, Role: {role}) connected [SID: {sid}]")
 
     # Send connection success message
     emit('connected', {
@@ -168,7 +167,6 @@ def handle_disconnect():
 
     if sid in active_connections:
         user_info = active_connections[sid]
-        log.info(f"User {user_info['username']} (ID: {user_info['user_id']}) disconnected [SID: {sid}]")
 
         # Leave all rooms
         for room in user_info['rooms']:
@@ -245,7 +243,6 @@ def handle_join_user(user_id):
                 'rooms': [room]
             }
 
-        log.info(f"[Socket.IO] User {user_id} joined room: {room} [SID: {sid}]")
         emit('room_joined', {'room': room, 'type': 'user'})
     except Exception as e:
         log.error(f"Error joining user room: {e}")
@@ -279,7 +276,6 @@ def send_notification_to_user(user_id, notification_data):
     active_users = [conn for conn in active_connections.values() if room in conn.get('rooms', [])]
 
     # Log with INFO level for better visibility
-    log.info(f"[Socket.IO] Emitting 'notification' to room '{room}' - Title: {notification_data.get('title', 'N/A')}, Tracked connections: {len(active_users)}, Total active: {len(active_connections)}")
 
     # Log detailed connection info for debugging
     if len(active_connections) > 0:
@@ -287,8 +283,7 @@ def send_notification_to_user(user_id, notification_data):
         for sid, conn in active_connections.items():
             all_rooms.update(conn.get('rooms', []))
             if room in conn.get('rooms', []):
-                log.info(f"[Socket.IO] Target user {user_id} found in connection SID: {sid}, rooms: {conn.get('rooms', [])}")
-        log.info(f"[Socket.IO] All active rooms: {all_rooms}")
+                pass
     else:
         log.warning(f"[Socket.IO] No active connections tracked! User {user_id} may still receive via direct room join.")
 
@@ -360,7 +355,6 @@ def is_user_connected(user_id) -> bool:
 @authenticate_socket
 def handle_pr_submitted(data, user_id, role, username):
     """Handle PR submitted event"""
-    log.info(f"PR submitted by {username}")
 
     # Broadcast to procurement role
     emit('pr:submitted', {
@@ -374,7 +368,6 @@ def handle_pr_submitted(data, user_id, role, username):
 @authenticate_socket
 def handle_pr_approved(data, user_id, role, username):
     """Handle PR approved event"""
-    log.info(f"PR approved by {username}")
 
     # Notify the PR creator
     creator_id = data.get('creator_id')
@@ -390,7 +383,6 @@ def handle_pr_approved(data, user_id, role, username):
 @authenticate_socket
 def handle_pr_rejected(data, user_id, role, username):
     """Handle PR rejected event"""
-    log.info(f"PR rejected by {username}")
 
     # Notify the PR creator
     creator_id = data.get('creator_id')
@@ -406,7 +398,6 @@ def handle_pr_rejected(data, user_id, role, username):
 @authenticate_socket
 def handle_pr_forwarded(data, user_id, role, username):
     """Handle PR forwarded event"""
-    log.info(f"PR forwarded by {username}")
 
     # Notify the target user or role
     target_user_id = data.get('target_user_id')
@@ -430,7 +421,6 @@ def handle_pr_forwarded(data, user_id, role, username):
 @authenticate_socket
 def handle_project_created(data, user_id, role, username):
     """Handle project created event"""
-    log.info(f"Project created by {username}")
 
     # Notify relevant users or roles
     target_users = data.get('target_users', [])
@@ -446,7 +436,6 @@ def handle_project_created(data, user_id, role, username):
 @authenticate_socket
 def handle_project_updated(data, user_id, role, username):
     """Handle project updated event"""
-    log.info(f"Project updated by {username}")
 
     # Notify project members
     project_id = data.get('project_id')
@@ -462,7 +451,6 @@ def handle_project_updated(data, user_id, role, username):
 @authenticate_socket
 def handle_project_approved(data, user_id, role, username):
     """Handle project approved event"""
-    log.info(f"Project approved by {username}")
 
     # Notify the project creator
     creator_id = data.get('creator_id')
@@ -478,7 +466,6 @@ def handle_project_approved(data, user_id, role, username):
 @authenticate_socket
 def handle_project_rejected(data, user_id, role, username):
     """Handle project rejected event"""
-    log.info(f"Project rejected by {username}")
 
     # Notify the project creator
     creator_id = data.get('creator_id')
@@ -526,7 +513,6 @@ def init_socketio(app):
         app: Flask application instance
     """
     socketio.init_app(app)
-    log.info("Socket.IO server initialized")
     return socketio
 
 
@@ -538,7 +524,6 @@ def handle_join_support():
     try:
         room = 'support_tickets'
         join_room(room)
-        log.info(f"Client joined support_tickets room [SID: {request.sid}]")
         emit('room_joined', {'room': room, 'type': 'support'})
     except Exception as e:
         log.error(f"Error joining support room: {e}")
@@ -561,4 +546,3 @@ def emit_support_ticket_event(event_type, ticket_data):
 
     socketio.emit('support_ticket', event_data, room=room)
     socketio.emit('support_ticket', event_data, broadcast=True)  # Also broadcast
-    log.info(f"Emitted support ticket event: {event_type} for ticket {ticket_data.get('ticket_number', 'N/A')}")

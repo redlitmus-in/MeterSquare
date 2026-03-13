@@ -28,7 +28,6 @@ def run_migration():
             """))
 
             if result.fetchone()[0]:
-                print("Table 'asset_stock_in_items' already exists")
                 return True
 
             # Create the table
@@ -49,29 +48,18 @@ def run_migration():
             """))
 
             db.session.commit()
-            print("Successfully created 'asset_stock_in_items' table")
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"Migration failed: {e}")
             return False
 
 
 if __name__ == '__main__':
-    print("=" * 70)
-    print("Migration: Create asset_stock_in_items table")
-    print("=" * 70)
-    print()
 
     success = run_migration()
 
     if success:
-        print()
-        print("=" * 70)
-        print("Migration Complete!")
-        print("=" * 70)
+        pass
     else:
-        print()
-        print("Migration Failed! Please check the error above.")
         sys.exit(1)

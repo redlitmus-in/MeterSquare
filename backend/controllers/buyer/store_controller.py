@@ -469,7 +469,6 @@ def complete_from_store(cr_id):
             db.session.add(new_request)
             requests_created = 1
 
-            log.info(f"Created 1 grouped Internal Material Request for CR-{cr_id} with {len(grouped_materials)} materials from store")
 
         # ✅ FIX: Update routed_materials to prevent duplicates
         from sqlalchemy.orm.attributes import flag_modified
@@ -545,17 +544,14 @@ def complete_from_store(cr_id):
                 db.session.flush()
                 store_po_child_id = store_po_child.id
                 store_po_child_suffix = f".{next_suffix}"
-                log.info(f"Created store POChild PO-{cr_id}{store_po_child_suffix} with {len(grouped_materials)} materials (split scenario)")
 
                 if new_request and store_po_child_id:
                     new_request.po_child_id = store_po_child_id
-                    log.info(f"Linked IMR to store POChild {store_po_child_id}")
 
             # Split/partial scenario: set store_request_status
             cr.store_request_status = 'pending_store_approval'
             if all_materials_routed:
                 cr.status = 'split_to_sub_crs'
-                log.info(f"All materials routed for CR-{cr_id} (split), set status to split_to_sub_crs")
             else:
                 cr.status = 'sent_to_store'
         else:
@@ -563,7 +559,6 @@ def complete_from_store(cr_id):
             if all_materials_routed:
                 cr.status = 'sent_to_store'
                 cr.store_request_status = 'pending_store_approval'
-                log.info(f"All materials sent to store for CR-{cr_id}, set parent status to sent_to_store (no POChild)")
             elif cr.status in ('pending', 'assigned_to_buyer', 'send_to_buyer', 'approved_by_pm'):
                 cr.status = 'sent_to_store'
 
@@ -815,17 +810,14 @@ def route_all_to_store(cr_id):
                 db.session.add(store_po_child)
                 db.session.flush()
                 store_po_child_id = store_po_child.id
-                log.info(f"Created store POChild PO-{cr_id}.{next_suffix} with {len(grouped_materials)} materials (split scenario via route_all_to_store)")
 
                 # Link IMR to store POChild
                 new_request.po_child_id = store_po_child_id
-                log.info(f"Linked IMR to store POChild {store_po_child_id}")
 
             # Set parent CR status for split scenario
             cr.store_request_status = 'pending_store_approval'
             if all_materials_routed:
                 cr.status = 'split_to_sub_crs'
-                log.info(f"All materials routed for CR-{cr_id} (split), set status to split_to_sub_crs")
             else:
                 cr.status = 'sent_to_store'
         else:
@@ -854,9 +846,9 @@ def route_all_to_store(cr_id):
             log.error(f"Failed to send PM notification for store routing: {notif_error}")
 
         if store_po_child_id:
-            log.info(f"CR-{cr_id}: {len(grouped_materials)} materials sent to store via POChild (split scenario). Status: {cr.status}")
+            pass
         else:
-            log.info(f"CR-{cr_id}: All {len(grouped_materials)} materials sent to store directly (no POChild). Status: sent_to_store")
+            pass
 
         return jsonify({
             "success": True,

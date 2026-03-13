@@ -215,7 +215,6 @@ def download_client_pdf():
                 terms_result = db.session.execute(query, {'term_ids': term_ids})
                 for row in terms_result:
                     selected_terms.append({'terms_text': row[0]})
-            log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
 
@@ -484,7 +483,6 @@ def download_client_excel():
                 terms_result = db.session.execute(query, {'term_ids': term_ids})
                 for row in terms_result:
                     selected_terms.append({'terms_text': row[0]})
-            log.info(f"Fetched {len(selected_terms)} selected terms for BOQ {boq_id}")
         except Exception as e:
             log.error(f"Error fetching terms for BOQ {boq_id}: {str(e)}")
 

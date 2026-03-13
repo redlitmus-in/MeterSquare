@@ -38,9 +38,6 @@ def up():
 
     with app.app_context():
         try:
-            log.info("=" * 70)
-            log.info("MIGRATION: Add is_blocked fields to users table")
-            log.info("=" * 70)
 
             db.session.execute(text("""
                 ALTER TABLE users
@@ -57,13 +54,6 @@ def up():
 
             db.session.commit()
 
-            print("✅ Added is_blocked fields to users table")
-            log.info("=" * 70)
-            log.info("MIGRATION COMPLETED SUCCESSFULLY")
-            log.info("  Table  : users")
-            log.info("  Columns: is_blocked, blocked_reason, blocked_at, blocked_by")
-            log.info("  Index  : idx_users_is_blocked")
-            log.info("=" * 70)
             return True
 
         except Exception as e:
@@ -82,9 +72,6 @@ def down():
 
     with app.app_context():
         try:
-            log.info("=" * 70)
-            log.info("ROLLBACK: Remove is_blocked fields from users table")
-            log.info("=" * 70)
 
             db.session.execute(text("""
                 DROP INDEX IF EXISTS idx_users_is_blocked
@@ -100,8 +87,6 @@ def down():
 
             db.session.commit()
 
-            print("✅ Removed is_blocked fields from users table")
-            log.info("ROLLBACK COMPLETED SUCCESSFULLY")
             return True
 
         except Exception as e:

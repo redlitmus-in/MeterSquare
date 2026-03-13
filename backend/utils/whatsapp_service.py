@@ -28,17 +28,14 @@ class WhatsAppService:
         """Clean and format phone number with country code"""
         # Remove all non-digit characters (spaces, +, -, etc.)
         clean_phone = ''.join(filter(str.isdigit, str(phone_number)))
-        log.info(f"Phone number cleaning: '{phone_number}' -> '{clean_phone}'")
 
         # Remove duplicate country code if present
         if clean_phone.startswith('9191') and len(clean_phone) == 14:
             clean_phone = clean_phone[2:]  # Remove first "91"
-            log.info(f"Removed duplicate country code: '{clean_phone}'")
 
         # Ensure phone has country code (assume India if 10 digits)
         if len(clean_phone) == 10:
             clean_phone = '91' + clean_phone
-            log.info(f"Added India country code: '{clean_phone}'")
 
         return clean_phone
 
@@ -78,11 +75,6 @@ class WhatsAppService:
                 'channel_id': self.phone_id
             }
 
-            log.info(f"=== ECHT.IM WHATSAPP API CALL ===")
-            log.info(f"URL: {self.api_url}")
-            log.info(f"Message ID: {message_id}")
-            log.info(f"Source: {self.source_number}")
-            log.info(f"Destination: {clean_phone}")
 
             response = requests.post(
                 self.api_url,
@@ -91,8 +83,6 @@ class WhatsAppService:
                 timeout=30
             )
 
-            log.info(f"Response status: {response.status_code}")
-            log.info(f"Response body: {response.text}")
 
             response_data = response.json() if response.text else {}
 
@@ -105,7 +95,6 @@ class WhatsAppService:
             )
 
             if is_success:
-                log.info(f"WhatsApp message sent successfully to {clean_phone}")
                 return {
                     'success': True,
                     'message': 'WhatsApp message sent successfully',
@@ -187,7 +176,6 @@ class WhatsAppService:
                 'interactive': interactive
             }
 
-            log.info(f"Sending WhatsApp interactive message to {clean_phone}")
 
             response = requests.post(
                 self.api_url,
@@ -197,7 +185,6 @@ class WhatsAppService:
             )
 
             if response.status_code in [200, 201]:
-                log.info(f"WhatsApp interactive message sent successfully to {clean_phone}")
                 return {
                     'success': True,
                     'message': 'WhatsApp message sent successfully',
@@ -314,10 +301,6 @@ MeterSquare Interiors LLC
 
 _MeterSquare Interiors LLC_"""
 
-        log.info(f"=== SENDING PURCHASE ORDER via WhatsApp ===")
-        log.info(f"Phone: {phone_number}")
-        log.info(f"Vendor: {vendor_data.get('company_name')}")
-        log.info(f"PDF URL: {pdf_url}")
 
         # First send the text message
         result = self.send_message(phone_number, body_text)
@@ -332,8 +315,8 @@ _MeterSquare Interiors LLC_"""
                 caption=whatsapp_caption
             )
             if not pdf_result.get('success'):
-                print(f"WARNING: Failed to send PDF: {pdf_result.get('message')}")
                 # Still return success for text message
+                pass
         else:
-            print(f"WARNING: PDF NOT SENT! -- pdf_url: {pdf_url}")
+            pass
         return result

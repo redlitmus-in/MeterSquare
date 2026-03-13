@@ -307,7 +307,7 @@ def create_change_request():
                 except (ValueError, TypeError) as e:
                     log.warning(f" Could not parse sub_item_id: {raw_sub_item_id}, error: {e}")
             else:
-                log.info("ℹ️ No sub_item_id provided in change request materials")
+                pass
 
         # DUPLICATE DETECTION: Check for similar requests within last 30 seconds
         # This prevents accidental double-clicks and form re-submissions
@@ -379,9 +379,9 @@ def create_change_request():
 
         # Log successful change request creation with sub_item_id
         if primary_sub_item_id:
-            log.info(f"   - sub_item_id {primary_sub_item_id} will be saved to change_requests table")
+            pass
         else:
-            log.info(f"   - No sub_item_id provided (this is OK for some change request types)")
+            pass
 
         # Add to BOQ History - Track change request creation
         existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -966,7 +966,7 @@ def send_for_review(cr_id):
                             recipient_role=next_role
                         )
                     else:
-                        log.info(f"[send_for_review] Receiver {next_approver_id} is ONLINE - Email skipped")
+                        pass
         except Exception as email_err:
             log.error(f"[send_for_review] Failed to send email to receiver: {email_err}")
 
@@ -1483,7 +1483,7 @@ def get_all_change_requests():
         if user_role == 'buyer':
             sub_crs = [cr for cr in change_requests if cr.is_sub_cr]
             for cr in sub_crs:
-                log.info(f"  Sub-CR {cr.get_formatted_cr_id()}: status={cr.status}, vendor_selection_status={cr.vendor_selection_status}, assigned_to_buyer={cr.assigned_to_buyer_user_id}")
+                pass
 
         # Overhead tracking columns removed - negotiable margin calculated on-the-fly
 
@@ -2260,7 +2260,7 @@ def approve_change_request(cr_id):
                                 context='forwarded'
                             )
                         else:
-                            log.info(f"[approve_cr/pm] Receiver {next_approver_id} is ONLINE - Email skipped")
+                            pass
             except Exception as email_err:
                 log.error(f"[approve_cr/pm] Failed to send email to receiver: {email_err}")
 
@@ -2383,7 +2383,7 @@ def approve_change_request(cr_id):
                                 recipient_name=creator_user.full_name or creator_user.username
                             )
                         else:
-                            log.info(f"[approve_cr/td] CR creator {change_request.requested_by_user_id} is ONLINE - Email skipped")
+                            pass
             except Exception as email_err:
                 log.error(f"[approve_cr/td] Failed to send email to CR creator: {email_err}")
 
@@ -2426,7 +2426,7 @@ def approve_change_request(cr_id):
                 buyer = User.query.filter_by(user_id=selected_buyer_id, is_deleted=False).first()
                 # Verify the user is actually a buyer
                 if buyer and buyer_role and buyer.role_id == buyer_role.role_id:
-                    log.info(f"Estimator selected buyer {buyer.full_name} (ID: {buyer.user_id}) for CR {cr_id}")
+                    pass
                 else:
                     buyer = None
                     log.warning(f"Selected buyer_id {selected_buyer_id} not found or not a buyer")
@@ -2437,13 +2437,13 @@ def approve_change_request(cr_id):
                 if project and project.buyer_id:
                     buyer = User.query.filter_by(user_id=project.buyer_id, is_deleted=False).first()
                     if buyer:
-                        log.info(f"Using project buyer {buyer.full_name} (ID: {buyer.user_id})")
+                        pass
 
             # Priority 3: Use first available buyer in system
             if not buyer and buyer_role:
                 buyer = User.query.filter_by(role_id=buyer_role.role_id, is_deleted=False).first()
                 if buyer:
-                    log.info(f"No buyer assigned to project {change_request.project_id}, using system buyer: {buyer.full_name}")
+                    pass
 
             if buyer:
                 change_request.assigned_to_buyer_user_id = buyer.user_id
@@ -2557,7 +2557,7 @@ def approve_change_request(cr_id):
                                 context='purchase'
                             )
                         else:
-                            log.info(f"[approve_cr/estimator] Buyer {change_request.assigned_to_buyer_user_id} is ONLINE - Email skipped")
+                            pass
             except Exception as email_err:
                 log.error(f"[approve_cr/estimator] Failed to send email to Buyer: {email_err}")
 
@@ -3238,7 +3238,7 @@ def reject_change_request(cr_id):
                             recipient_name=creator_user.full_name or creator_user.username
                         )
                     else:
-                        log.info(f"[reject_change_request] Creator {change_request.requested_by_user_id} is ONLINE - Email skipped")
+                        pass
         except Exception as email_err:
             log.error(f"[reject_change_request] Failed to send rejection email: {email_err}")
 

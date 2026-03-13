@@ -25,10 +25,8 @@ def upgrade():
                 """))
                 conn.commit()
 
-            print("[SUCCESS] Successfully added fax column to vendors table")
 
         except Exception as e:
-            print(f"[ERROR] Error adding fax column: {str(e)}")
             raise
 
 def downgrade():
@@ -45,13 +43,9 @@ def downgrade():
                 """))
                 conn.commit()
 
-            print("[SUCCESS] Successfully removed fax column from vendors table")
 
         except Exception as e:
-            print(f"[ERROR] Error removing fax column: {str(e)}")
             raise
 
 if __name__ == '__main__':
-    print("Running migration: Add fax to vendors")
     upgrade()
-    print("Migration completed!")

@@ -40,8 +40,6 @@ def run_migration():
             # Execute the SQL
             db.session.execute(db.text(alter_sql))
             db.session.commit()
-            print("Successfully added items column to asset_requisitions table")
-            print("Made category_id and quantity nullable for multi-item support")
 
             # Verify the column exists
             result = db.session.execute(db.text("""
@@ -53,15 +51,13 @@ def run_migration():
             """))
 
             columns = result.fetchall()
-            print("\nVerified columns:")
             for col in columns:
-                print(f"  - {col[0]}: {col[1]} (nullable: {col[2]})")
+                pass
 
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error updating table: {e}")
             return False
 
 

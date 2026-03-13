@@ -21,7 +21,6 @@ def run_migration():
         conn = psycopg2.connect(DATABASE_URL)
         cursor = conn.cursor()
 
-        print("Creating boq_terms table...")
 
         # Create boq_terms table
         cursor.execute("""
@@ -39,7 +38,6 @@ def run_migration():
             );
         """)
 
-        print("[OK] boq_terms table created")
 
         # Create index for faster queries
         cursor.execute("""
@@ -48,7 +46,6 @@ def run_migration():
             CREATE INDEX IF NOT EXISTS idx_boq_terms_is_active ON boq_terms(is_active);
         """)
 
-        print("[OK] Indexes created")
 
         # Insert default Terms & Conditions
         cursor.execute("""
@@ -67,16 +64,13 @@ def run_migration():
             ON CONFLICT (template_name) DO NOTHING;
         """)
 
-        print("[OK] Default Terms & Conditions inserted")
 
         # Commit the transaction
         conn.commit()
-        print("\n[SUCCESS] Migration completed successfully!")
 
     except Exception as e:
         if conn:
             conn.rollback()
-        print(f"\n[ERROR] Migration failed: {str(e)}")
         raise
 
     finally:
@@ -87,8 +81,4 @@ def run_migration():
 
 
 if __name__ == "__main__":
-    print("=" * 80)
-    print("BOQ TERMS TABLE MIGRATION")
-    print("=" * 80)
     run_migration()
-    print("=" * 80)

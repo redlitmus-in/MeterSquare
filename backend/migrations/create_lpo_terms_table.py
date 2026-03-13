@@ -23,12 +23,8 @@ def create_lpo_terms_table():
         )
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
-        print("\n" + "="*80)
-        print("CREATE LPO_TERMS TABLE MIGRATION")
-        print("="*80)
         
         # Create lpo_terms table
-        print("\n[1/3] Creating lpo_terms table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS lpo_terms (
                 term_id SERIAL PRIMARY KEY,
@@ -43,30 +39,24 @@ def create_lpo_terms_table():
                 updated_by INTEGER REFERENCES users(user_id)
             );
         """)
-        print("  ✓ Created lpo_terms table")
         
         # Create indexes
-        print("\n[2/3] Creating indexes...")
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_lpo_terms_is_active_deleted
             ON lpo_terms(is_active, is_deleted);
         """)
-        print("  ✓ Created index: idx_lpo_terms_is_active_deleted")
         
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_lpo_terms_type
             ON lpo_terms(term_type);
         """)
-        print("  ✓ Created index: idx_lpo_terms_type")
         
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_lpo_terms_display_order
             ON lpo_terms(display_order);
         """)
-        print("  ✓ Created index: idx_lpo_terms_display_order")
         
         # Insert default payment terms
-        print("\n[3/3] Inserting default payment terms...")
         
         default_payment_terms = [
             ("100% CDC after delivery", "payment", 1),
@@ -101,15 +91,10 @@ def create_lpo_terms_table():
                 ON CONFLICT DO NOTHING;
             """, (term_text, term_type, display_order))
         
-        print(f"  ✓ Inserted {len(all_terms)} default terms")
         
         conn.commit()
-        print("\n" + "="*80)
-        print("✅ LPO_TERMS TABLE MIGRATION COMPLETED SUCCESSFULLY")
-        print("="*80)
         
     except Exception as e:
-        print(f"\n❌ Error during migration: {str(e)}")
         import traceback
         traceback.print_exc()
         if conn:

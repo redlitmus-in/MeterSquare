@@ -312,8 +312,8 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
             db.session.add(master_sub_item)
             db.session.flush()
         else:
-            # Sub-item already exists - just log it, don't update (to preserve existing data)
-            log.info(f"Sub-item '{sub_item_name}' already exists in master table (ID: {master_sub_item.sub_item_id})")
+            # Sub-item already exists - don't update (to preserve existing data)
+            pass
 
         master_sub_item_id = master_sub_item.sub_item_id
         master_sub_item_ids.append(master_sub_item_id)
@@ -366,8 +366,8 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     db.session.add(master_material)
                     db.session.flush()
                 else:
-                    # Material already exists globally - just log it, don't create duplicate
-                    log.info(f"Material '{material_name}' already exists in master table (ID: {master_material.material_id})")
+                    # Material already exists globally - don't create duplicate
+                    pass
 
         # Add labour for this sub-item
         labour_list = sub_item.get("labour", [])
@@ -411,8 +411,8 @@ def add_sub_items_to_master_tables(master_item_id, sub_items, created_by):
                     db.session.add(master_labour)
                     db.session.flush()
                 else:
-                    # Labour already exists globally - just log it, don't create duplicate
-                    log.info(f"Labour '{labour_role}' already exists in master table (ID: {master_labour.labour_id})")
+                    # Labour already exists globally - don't create duplicate
+                    pass
 
     # New sub-items / materials may have been added — bust the cache
     clear_master_catalog_cache()
@@ -1420,13 +1420,13 @@ def get_boq(boq_id):
             if user_role in ['projectmanager', 'project_manager']:
                 can_view_new_purchase = True
             else:
-                log.info(f"BOQ {boq_id} - Access DENIED: Only PM can view '{boq_status}', current role: '{user_role}'")
+                pass
         elif boq_status in ['add_new_purchase', 'new_purchase_request']:
             # Estimator and Project Manager can view
             if user_role in ['estimator', 'projectmanager', 'project_manager']:
                 can_view_new_purchase = True
             else:
-                log.info(f"BOQ {boq_id} - Access DENIED: Only Estimator/PM can view '{boq_status}', current role: '{user_role}'")
+                pass
         elif boq_status == 'new_purchase_approved':
             # All roles can view when new purchase is approved
             can_view_new_purchase = True
@@ -1435,9 +1435,9 @@ def get_boq(boq_id):
             if user_role in ['projectmanager', 'project_manager']:
                 can_view_new_purchase = True
             else:
-                log.info(f"BOQ {boq_id} - Access DENIED: Only PM can view 'new_purchase_rejected', current role: '{user_role}'")
+                pass
         else:
-            log.info(f"BOQ {boq_id} - Access DENIED: Unknown status '{boq_status}'")
+            pass
 
         # Filter new purchase items based on access control
         filtered_new_purchase_items = []
@@ -4160,7 +4160,7 @@ def send_boq_email(boq_id):
                     )
 
                     if email_sent:
-                        log.info(f"📧 ✅ Email sent successfully to TD: {td_email}")
+                        pass
                     else:
                         log.error(f" Failed to send email to TD: {td_email}")
                 else:
@@ -4292,7 +4292,6 @@ def send_boq_email(boq_id):
                     # Find TD user by email
                     td_user = UserModel.query.filter_by(email=td_email).first()
                     if td_user:
-                        log.info(f"[send_boq_email] Sending notification to TD {td_user.user_id}")
                         try:
                             # Send appropriate notification based on revision type
                             if is_internal_revision:

@@ -42,7 +42,6 @@ if supabase_url and supabase_key:
     try:
         supabase = create_client(supabase_url, supabase_key)
         PUBLIC_URL_BASE = f"{supabase_url}/storage/v1/object/public/{SUPABASE_BUCKET}/"
-        log.info("Supabase client initialized for support tickets")
     except Exception as e:
         log.error(f"Failed to initialize Supabase client: {str(e)}")
 else:
@@ -84,7 +83,6 @@ def upload_file_to_supabase(file, ticket_id):
         )
 
         public_url = f"{PUBLIC_URL_BASE}{supabase_path}"
-        log.info(f"File uploaded to Supabase: {supabase_path}")
 
         return {
             'file_name': unique_filename,
@@ -106,7 +104,6 @@ def delete_file_from_supabase(storage_path):
         return
     try:
         supabase.storage.from_(SUPABASE_BUCKET).remove([storage_path])
-        log.info(f"File deleted from Supabase: {storage_path}")
     except Exception as e:
         log.warning(f"Failed to delete file from Supabase: {str(e)}")
 
@@ -146,13 +143,11 @@ def public_create_ticket():
         current_user = getattr(g, 'user', None)
         if current_user and current_user.get('user_id'):
             reporter_user_id = current_user.get('user_id')
-            log.info(f"Ticket created by logged-in user: {reporter_user_id}")
         else:
             # Try to find user by email
             user = User.query.filter_by(email=reporter_email, is_active=True, is_deleted=False).first()
             if user:
                 reporter_user_id = user.user_id
-                log.info(f"Found user by email {reporter_email}: user_id={reporter_user_id}")
 
         new_ticket = SupportTicket(
             ticket_number=ticket_number,
@@ -217,7 +212,6 @@ def public_create_ticket():
             new_ticket.attachments = attachments
             db.session.commit()
 
-        log.info(f"Ticket created: {new_ticket.ticket_number} by {data['reporter_email']}")
 
         # Send notification to dev team when ticket is submitted (not draft)
         if new_ticket.status == 'submitted':
@@ -230,7 +224,6 @@ def public_create_ticket():
                     subject=new_ticket.title,
                     priority=new_ticket.priority
                 )
-                log.info(f"Sent ticket submission notification for {new_ticket.ticket_number}")
             except Exception as notif_error:
                 log.error(f"Failed to send ticket submission notification: {notif_error}")
 
@@ -412,7 +405,6 @@ def public_submit_ticket(ticket_id):
         except Exception as e:
             log.error(f"Failed to emit ticket submitted event: {e}")
 
-        log.info(f"New support ticket submitted: {ticket.ticket_number} by {ticket.reporter_name}")
 
         return jsonify({
             "success": True,
@@ -622,7 +614,6 @@ def admin_approve_ticket(ticket_id):
             flag_modified(ticket, 'response_history')
 
         db.session.commit()
-        log.info(f"Ticket approved: {ticket.ticket_number}")
 
         # Notify client about ticket approval
         try:
@@ -687,7 +678,6 @@ def admin_reject_ticket(ticket_id):
         flag_modified(ticket, 'response_history')
 
         db.session.commit()
-        log.info(f"Ticket rejected: {ticket.ticket_number}")
 
         # Notify client about ticket rejection
         try:
@@ -769,7 +759,6 @@ def admin_resolve_ticket(ticket_id):
             flag_modified(ticket, 'attachments')
 
         db.session.commit()
-        log.info(f"Ticket resolved: {ticket.ticket_number}")
 
         # Notify client about ticket resolution
         try:
@@ -835,7 +824,6 @@ def admin_update_status(ticket_id):
         flag_modified(ticket, 'response_history')
 
         db.session.commit()
-        log.info(f"Ticket status updated: {ticket.ticket_number} to {new_status}")
 
         # Notify client about status updates (but not for 'closed' which is handled separately)
         if new_status in ['in_review', 'in_progress', 'pending_deployment']:
@@ -909,7 +897,6 @@ def admin_add_files(ticket_id):
             ticket.response_date = datetime.utcnow()
 
         db.session.commit()
-        log.info(f"Files added to ticket {ticket.ticket_number}")
 
         return jsonify({
             "success": True,
@@ -970,7 +957,6 @@ def admin_close_ticket(ticket_id):
         flag_modified(ticket, 'response_history')
 
         db.session.commit()
-        log.info(f"Ticket closed by admin: {ticket.ticket_number}")
 
         # Notify client that their ticket was closed
         try:
@@ -1038,7 +1024,6 @@ def add_comment(ticket_id):
         flag_modified(ticket, 'comments')
 
         db.session.commit()
-        log.info(f"Comment added to ticket {ticket.ticket_number} by {sender_name} ({sender_type})")
 
         # Send notifications based on who added the comment
         if sender_type == 'client':

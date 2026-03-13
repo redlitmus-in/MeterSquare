@@ -32,7 +32,6 @@ def create_login_history_table():
     try:
         cursor = conn.cursor()
 
-        print("Connected to database successfully")
 
         # Create login_history table
         create_table_query = """
@@ -71,7 +70,6 @@ def create_login_history_table():
         cursor.execute(create_table_query)
         conn.commit()
 
-        print("login_history table created successfully!")
 
         # Add comments to table and columns
         comments_query = """
@@ -91,7 +89,6 @@ def create_login_history_table():
         cursor.execute(comments_query)
         conn.commit()
 
-        print("Table comments added successfully!")
 
         # Verify table creation
         cursor.execute("""
@@ -102,20 +99,15 @@ def create_login_history_table():
         """)
 
         columns = cursor.fetchall()
-        print("\nTable structure:")
-        print("-" * 60)
         for col in columns:
-            print(f"  {col[0]}: {col[1]} (nullable: {col[2]})")
+            pass
 
         cursor.close()
         conn.close()
-        print("\nMigration completed successfully!")
 
     except psycopg2.Error as e:
-        print(f"Database error: {e}")
         raise
     except Exception as e:
-        print(f"Error: {e}")
         raise
 
 
@@ -142,13 +134,11 @@ def drop_login_history_table():
         cursor.execute("DROP TABLE IF EXISTS login_history CASCADE")
         conn.commit()
 
-        print("login_history table dropped successfully!")
 
         cursor.close()
         conn.close()
 
     except Exception as e:
-        print(f"Error: {e}")
         raise
 
 

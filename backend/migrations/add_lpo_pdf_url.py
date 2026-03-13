@@ -37,10 +37,8 @@ def create():
             ADD COLUMN IF NOT EXISTS lpo_pdf_url TEXT DEFAULT NULL;
         """)
         conn.commit()
-        print("Migration successful: added lpo_pdf_url column to change_requests and po_child")
     except Exception as e:
         conn.rollback()
-        print(f"Migration failed: {e}")
         raise
     finally:
         cur.close()
@@ -60,10 +58,8 @@ def rollback():
             DROP COLUMN IF EXISTS lpo_pdf_url;
         """)
         conn.commit()
-        print("Rollback successful: removed lpo_pdf_url columns")
     except Exception as e:
         conn.rollback()
-        print(f"Rollback failed: {e}")
         raise
     finally:
         cur.close()

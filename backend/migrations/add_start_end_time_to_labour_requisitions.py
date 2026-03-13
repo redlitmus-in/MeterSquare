@@ -19,7 +19,6 @@ log = get_logger()
 def run_migration():
     """Add start_time and end_time columns to labour_requisitions table"""
     try:
-        log.info("Starting migration: add_start_end_time_to_labour_requisitions")
 
         # Add columns to labour_requisitions table
         migration_sql = text("""
@@ -40,8 +39,6 @@ def run_migration():
         db.session.execute(migration_sql)
         db.session.commit()
 
-        log.info("✓ Successfully added start_time and end_time columns to labour_requisitions table")
-        log.info("Migration completed successfully!")
 
         return True
 
@@ -54,7 +51,6 @@ def run_migration():
 def rollback_migration():
     """Rollback the migration (remove the added columns)"""
     try:
-        log.info("Starting rollback: remove_start_end_time_from_labour_requisitions")
 
         rollback_sql = text("""
             -- Remove the added columns
@@ -66,8 +62,6 @@ def rollback_migration():
         db.session.execute(rollback_sql)
         db.session.commit()
 
-        log.info("✓ Successfully removed start_time and end_time columns")
-        log.info("Rollback completed successfully!")
 
         return True
 

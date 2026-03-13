@@ -75,7 +75,6 @@ def user_register():
 
         # Map frontend role to database role (e.g., 'procurement' -> 'buyer')
         db_role_name = map_frontend_role_to_db(role_name)
-        log.info(f"Registration: frontend_role={role_name}, db_role={db_role_name}")
 
         # Get or create role
         role = Role.query.filter(
@@ -136,7 +135,6 @@ def user_login():
         # Map frontend role to database role (e.g., 'procurement' -> 'buyer')
         db_role_name = map_frontend_role_to_db(role_name) if role_name else None
 
-        log.info(f"Login attempt: email={email}, frontend_role={role_name}, db_role={db_role_name}")
 
         # Build query to check user exists
         query = db.session.query(User).join(
@@ -161,7 +159,6 @@ def user_login():
             else:
                 return jsonify({"error": "User not found or inactive"}), 404
 
-        log.info(f"User found: user_id={user.user_id}, email={user.email}")
         
         # Send OTP to user's email ASYNCHRONOUSLY (instant return)
         otp = send_otp_async(email)
@@ -334,12 +331,10 @@ def logout():
                         ).order_by(LoginHistory.login_at.desc()).first()
                         if active_session:
                             active_session.mark_logged_out()
-                            log.info(f"Marked login session {active_session.id} as logged out for user {user_id}")
                     except Exception as e:
                         log.error(f"Error marking login session as logged out: {str(e)}")
 
                     db.session.commit()
-                    log.info(f"User {user_id} logged out and set to offline")
             except jwt.ExpiredSignatureError:
                 # Token expired — decode without expiry check to still get user_id
                 # from the signed token (never trust user_id from request body)
@@ -356,11 +351,9 @@ def logout():
                             ).order_by(LoginHistory.login_at.desc()).first()
                             if active_session:
                                 active_session.mark_logged_out()
-                                log.info(f"Marked login session {active_session.id} as logged out for user {user_id} (expired token path)")
                         except Exception as e:
                             log.error(f"Error marking login session as logged out (expired token path): {str(e)}")
                         db.session.commit()
-                        log.info(f"User {user_id} logged out via expired token")
                 except Exception as e:
                     log.error(f"Error decoding expired token during logout: {str(e)}")
             except jwt.InvalidTokenError:
@@ -437,7 +430,6 @@ def site_supervisor_login_sms():
             clean_phone = ''.join(filter(str.isdigit, str(phone)))
             # Get last 10 digits for matching (ignore country code variations)
             phone_suffix = clean_phone[-10:] if len(clean_phone) >= 10 else clean_phone
-            log.info(f"Phone login attempt: original={phone}, cleaned={clean_phone}, suffix={phone_suffix}")
 
         # Build query for site supervisor/site engineer roles only
         query = db.session.query(User).join(

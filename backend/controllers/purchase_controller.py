@@ -46,7 +46,6 @@ def add_new_purchase():
             effective_role = context.get('effective_role', current_user.get('role', ''))
             actual_role = current_user.get('role', '')
 
-            log.info(f"Add new purchase - User: {created_by}, actual_role: {actual_role}, effective_role: {effective_role}")
         else:
             created_by = data.get("created_by", "Admin")
             user_id = None
@@ -277,7 +276,6 @@ def add_new_purchase():
 
         # Append new action
         current_actions.append(new_action)
-        log.info(f"Appending add_new_purchase action to BOQ {boq_id} history. Total actions: {len(current_actions)}")
 
         if existing_history:
             # Update existing history
@@ -292,7 +290,6 @@ def add_new_purchase():
             existing_history.last_modified_by = created_by
             existing_history.last_modified_at = datetime.utcnow()
 
-            log.info(f"Updated existing history for BOQ {boq_id} with {len(current_actions)} actions")
         else:
             # Create new history entry
             boq_history = BOQHistory(
@@ -309,10 +306,8 @@ def add_new_purchase():
                 created_by=created_by
             )
             db.session.add(boq_history)
-            log.info(f"Created new history for BOQ {boq_id} with {len(current_actions)} actions")
 
         db.session.commit()
-        log.info(f"Successfully added {len(new_boq_items)} new items to BOQ {boq_id}")
 
         # Send notification to estimators about new purchase
         try:
@@ -366,7 +361,6 @@ def new_purchase_send_estimator(boq_id):
         effective_role = context.get('effective_role', current_user.get('role', ''))
         actual_role = current_user.get('role', '')
 
-        log.info(f"Send new purchase - User: {pm_name}, actual_role: {actual_role}, effective_role: {effective_role}")
         # Get BOQ
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
         if not boq:
@@ -421,7 +415,6 @@ def new_purchase_send_estimator(boq_id):
         unsent_item_ids = new_purchase_item_ids - already_sent_item_ids
         unsent_item_names = new_purchase_item_names - already_sent_item_names
 
-        log.info(f"BOQ {boq_id} - Total new purchases: {len(new_purchase_item_ids)}, Already sent: {len(already_sent_item_ids)}, Unsent: {len(unsent_item_ids)}")
         # Get all items from BOQ details
         all_items = []
         if boq_details.boq_details and "items" in boq_details.boq_details:
@@ -456,12 +449,10 @@ def new_purchase_send_estimator(boq_id):
             if has_new_materials:
                 break
 
-        log.info(f"BOQ {boq_id} - Material analysis: has_new_materials={has_new_materials}")
 
         # Route based on material type
         if has_new_materials:
             # NEW materials → Send to Estimator for pricing
-            log.info(f"BOQ {boq_id} - Routing to ESTIMATOR (has new materials)")
 
             # Find Estimator (who created the original BOQ)
             estimator_name = boq.created_by
@@ -484,7 +475,6 @@ def new_purchase_send_estimator(boq_id):
             }
             email_sent = False
             estimator_status = (estimator.user_status or "").lower().strip()
-            log.info(f"Estimator {estimator.full_name} user_status={repr(estimator.user_status)} → normalized='{estimator_status}'")
             if estimator_status == "offline":
                 email_service = BOQEmailService()
                 email_sent = email_service.send_new_purchase_notification(
@@ -496,17 +486,16 @@ def new_purchase_send_estimator(boq_id):
                     new_items_data=new_items_data
                 )
                 if email_sent:
-                    log.info(f"New purchase notification email sent to offline estimator {estimator.email}")
+                    pass
                 else:
                     log.warning(f"Failed to send new purchase notification email to {estimator.email}")
             else:
-                log.info(f"Estimator {estimator.full_name} is '{estimator.user_status}' - skipping email, in-app notification only")
+                pass
 
             # Update BOQ status to "new_purchase_request"
             boq.status = "new_purchase_request"
             boq.last_modified_by = pm_name
             boq.last_modified_at = datetime.utcnow()
-            log.info(f"BOQ {boq_id} status updated to 'new_purchase_request'")
 
             try:
                 existing_history = BOQHistory.query.filter_by(boq_id=boq_id).order_by(BOQHistory.action_date.desc()).first()
@@ -606,7 +595,6 @@ def new_purchase_send_estimator(boq_id):
 
         else:
             # EXISTING materials → Send directly to Buyer
-            log.info(f"BOQ {boq_id} - Routing to BUYER (all existing materials from BOQ)")
 
             # Find available buyers
             buyer_role = Role.query.filter_by(role='buyer').first()
@@ -629,7 +617,6 @@ def new_purchase_send_estimator(boq_id):
             boq.status = "assigned_to_buyer"
             boq.last_modified_by = pm_name
             boq.last_modified_at = datetime.utcnow()
-            log.info(f"BOQ {boq_id} status updated to 'assigned_to_buyer'")
 
             # Log to BOQ history
             try:
@@ -711,7 +698,6 @@ def new_purchase_send_estimator(boq_id):
                     db.session.add(boq_history_entry)
 
                 db.session.commit()
-                log.info(f"BOQ history updated for buyer assignment")
             except Exception as history_error:
                 log.error(f"Error storing buyer assignment in BOQ history: {history_error}")
                 db.session.rollback()
@@ -765,7 +751,6 @@ def process_new_purchase_decision(boq_id):
         effective_role = context.get('effective_role', current_user.get('role', ''))
         actual_role = current_user.get('role', '')
 
-        log.info(f"Process new purchase decision - User: {estimator_name}, actual_role: {actual_role}, effective_role: {effective_role}")
 
         # Get request data
         data = request.get_json() or {}
@@ -897,7 +882,6 @@ def process_new_purchase_decision(boq_id):
 
         if status == 'approved':
             buyer_status = (buyer.user_status or "").lower().strip()
-            log.info(f"Buyer {buyer.full_name} user_status={repr(buyer.user_status)} → normalized='{buyer_status}'")
             if buyer_status == "offline":
                 email_sent = email_service.send_new_purchase_approval(
                     recipient_email=recipient_email,
@@ -910,16 +894,15 @@ def process_new_purchase_decision(boq_id):
                     total_amount=total_amount
                 )
                 if email_sent:
-                    log.info(f"Purchase approval email sent to offline buyer {recipient_email}")
+                    pass
                 else:
                     log.warning(f"Failed to send purchase approval email to {recipient_email}")
             else:
-                log.info(f"Buyer {buyer.full_name} is '{buyer.user_status}' - skipping email, in-app notification only")
+                pass
             # Update BOQ status to "assigned_to_buyer" when Estimator approves (routing to Buyer)
             boq.status = "assigned_to_buyer"
             boq.last_modified_by = estimator_name
             boq.last_modified_at = datetime.utcnow()
-            log.info(f"BOQ {boq_id} status updated to 'assigned_to_buyer' after Estimator approval, routing to Buyer")
 
         else:  # rejected
             # When rejected, send notification to PM (not buyer)
@@ -927,7 +910,6 @@ def process_new_purchase_decision(boq_id):
             pm_recipient_name = pm_name
 
             pm_status = (pm.user_status or "").lower().strip()
-            log.info(f"PM {pm.full_name} user_status={repr(pm.user_status)} → normalized='{pm_status}'")
             if pm_status == "offline":
                 email_sent = email_service.send_new_purchase_rejection(
                     recipient_email=pm_recipient_email,
@@ -941,16 +923,15 @@ def process_new_purchase_decision(boq_id):
                     total_amount=total_amount
                 )
                 if email_sent:
-                    log.info(f"Purchase rejection email sent to offline PM {pm_recipient_email}")
+                    pass
                 else:
                     log.warning(f"Failed to send purchase rejection email to {pm_recipient_email}")
             else:
-                log.info(f"PM {pm.full_name} is '{pm.user_status}' - skipping email, in-app notification only")
+                pass
             # Update BOQ status to "rejected" when Estimator rejects
             boq.status = "rejected"
             boq.last_modified_by = estimator_name
             boq.last_modified_at = datetime.utcnow()
-            log.info(f"BOQ {boq_id} status updated to 'rejected' after new purchase rejection")
 
         # Log decision in BOQ history
         try:

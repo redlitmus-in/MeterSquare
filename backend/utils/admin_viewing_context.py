@@ -27,12 +27,10 @@ def get_effective_user_context():
         viewing_as_role_id = request.headers.get('X-Viewing-As-Role-Id')
         viewing_as_user_id = request.headers.get('X-Viewing-As-User-Id')
 
-        log.info(f"Admin context check - viewing_as_role header: '{viewing_as_role}', viewing_as_role_id: '{viewing_as_role_id}'")
 
         if viewing_as_role and viewing_as_role != 'admin':
             # Admin is viewing as another role
             # Return context that indicates admin wants to see data for that role
-            log.info(f"Admin IS viewing as another role: {viewing_as_role}")
             return {
                 'actual_role': 'admin',
                 'actual_user_id': user_id,
@@ -42,7 +40,7 @@ def get_effective_user_context():
                 'is_admin_viewing': True
             }
         else:
-            log.info(f"Admin NOT viewing as another role (header missing or admin)")
+            pass
 
     # Regular user or admin not viewing as another role
     return {

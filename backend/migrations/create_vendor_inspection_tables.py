@@ -35,18 +35,11 @@ def run_migration():
         conn.autocommit = True
         cursor = conn.cursor()
 
-        print("\n" + "=" * 60)
-        print("VENDOR DELIVERY INSPECTION MIGRATION")
-        print("=" * 60)
-        print("\nConnected to database successfully")
-        print("\nThis migration adds support for quality inspection of")
-        print("vendor deliveries and return-to-vendor workflow.\n")
 
         # ========================================
         # TABLE 1: vendor_delivery_inspections
         # ========================================
 
-        print("1/6 Creating vendor_delivery_inspections table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS vendor_delivery_inspections (
                 id SERIAL PRIMARY KEY,
@@ -82,13 +75,11 @@ def run_migration():
                 is_deleted BOOLEAN DEFAULT FALSE
             )
         """)
-        print("  vendor_delivery_inspections table created")
 
         # ========================================
         # TABLE 2: vendor_return_requests
         # ========================================
 
-        print("2/6 Creating vendor_return_requests table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS vendor_return_requests (
                 id SERIAL PRIMARY KEY,
@@ -149,13 +140,11 @@ def run_migration():
                 is_deleted BOOLEAN DEFAULT FALSE
             )
         """)
-        print("  vendor_return_requests table created")
 
         # ========================================
         # TABLE 3: inspection_iteration_tracker
         # ========================================
 
-        print("3/6 Creating inspection_iteration_tracker table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS inspection_iteration_tracker (
                 id SERIAL PRIMARY KEY,
@@ -184,20 +173,16 @@ def run_migration():
                 is_deleted BOOLEAN DEFAULT FALSE
             )
         """)
-        print("  inspection_iteration_tracker table created")
 
         # ========================================
         # ALTER EXISTING TABLES
         # ========================================
 
-        print("4/6 Adding inspection_status to change_requests...")
         cursor.execute("""
             ALTER TABLE change_requests
             ADD COLUMN IF NOT EXISTS inspection_status VARCHAR(30)
         """)
-        print("  change_requests.inspection_status added")
 
-        print("5/6 Adding columns to po_child...")
         cursor.execute("""
             ALTER TABLE po_child
             ADD COLUMN IF NOT EXISTS inspection_status VARCHAR(30)
@@ -210,13 +195,11 @@ def run_migration():
             ALTER TABLE po_child
             ADD COLUMN IF NOT EXISTS store_request_status VARCHAR(50)
         """)
-        print("  po_child columns added")
 
         # ========================================
         # INDEXES
         # ========================================
 
-        print("6/6 Creating indexes...")
 
         # vendor_delivery_inspections indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_vdi_cr_id ON vendor_delivery_inspections(cr_id)")
@@ -242,32 +225,16 @@ def run_migration():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_iit_parent ON inspection_iteration_tracker(parent_iteration_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_iit_suffix ON inspection_iteration_tracker(cr_id, iteration_suffix)")
 
-        print("  All indexes created")
 
         cursor.close()
 
-        print("\n" + "=" * 60)
-        print("MIGRATION COMPLETED SUCCESSFULLY")
-        print("=" * 60)
-        print("\nTables created:")
-        print("  1. vendor_delivery_inspections")
-        print("  2. vendor_return_requests")
-        print("  3. inspection_iteration_tracker")
-        print("\nColumns added:")
-        print("  - change_requests.inspection_status")
-        print("  - po_child.inspection_status")
-        print("  - po_child.delivery_routing (if not existed)")
-        print("  - po_child.store_request_status (if not existed)")
-        print("=" * 60 + "\n")
 
     except Exception as e:
-        print(f"\nMIGRATION FAILED: {str(e)}\n")
         raise
 
     finally:
         if conn:
             conn.close()
-            print("Database connection closed\n")
 
 
 def rollback_migration():
@@ -283,29 +250,22 @@ def rollback_migration():
         conn.autocommit = True
         cursor = conn.cursor()
 
-        print("\n" + "=" * 60)
-        print("ROLLING BACK VENDOR INSPECTION MIGRATION")
-        print("=" * 60 + "\n")
 
         # Drop tables in reverse dependency order
-        print("Dropping tables...")
         cursor.execute("DROP TABLE IF EXISTS inspection_iteration_tracker CASCADE")
         cursor.execute("DROP TABLE IF EXISTS vendor_return_requests CASCADE")
         cursor.execute("DROP TABLE IF EXISTS vendor_delivery_inspections CASCADE")
 
         # Remove added columns
-        print("Removing added columns...")
         cursor.execute("ALTER TABLE change_requests DROP COLUMN IF EXISTS inspection_status")
         cursor.execute("ALTER TABLE po_child DROP COLUMN IF EXISTS inspection_status")
         # Note: NOT removing delivery_routing and store_request_status from po_child
         # as they may have been added by a different migration
 
-        print("\nROLLBACK COMPLETED SUCCESSFULLY\n")
 
         cursor.close()
 
     except Exception as e:
-        print(f"\nROLLBACK FAILED: {str(e)}\n")
         raise
 
     finally:

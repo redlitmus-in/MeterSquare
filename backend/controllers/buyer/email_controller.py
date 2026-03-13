@@ -571,7 +571,6 @@ def send_vendor_email(cr_id, po_child_id=None):
                     generator = LPOPDFGenerator()
                     pdf_bytes = generator.generate_lpo_pdf(lpo_data)
                     attachments.append((lpo_filename, pdf_bytes, 'application/pdf'))
-                    log.info(f"✅ LPO PDF generated on-the-fly: {lpo_filename} ({len(pdf_bytes)} bytes)")
                 else:
                     log.warning(f" No lpo_data available for {formatted_id}, skipping LPO PDF attachment")
             except Exception as e:
@@ -620,11 +619,9 @@ def send_vendor_email(cr_id, po_child_id=None):
                     resolved_email = _cc_resolved_map.get(name)
                     if resolved_email:
                         cc_email_list.append(resolved_email)
-                        log.info(f"CC email resolved by name '{name}' → {resolved_email}")
                     else:
                         log.warning(f"CC recipient '{name}' has no email — skipping")
 
-        log.info(f"Email sending for {formatted_id}: TO={email_list}, CC={cc_email_list}")
 
         email_sent = email_service.send_vendor_purchase_order_async(
             email_list, vendor_data, purchase_data, buyer_data, project_data, custom_email_body, attachments, cc_email_list
@@ -669,15 +666,13 @@ def send_vendor_email(cr_id, po_child_id=None):
                         except Exception as notif_err:
                             log.warning(f"Failed to create CC notification for user {cc_user.user_id}: {notif_err}")
                     if cc_users:
-                        log.info(f"Sent in-app notifications to {len(cc_users)} CC user(s)")
+                        pass
                 except Exception as notif_bulk_err:
                     log.warning(f"CC notification block failed: {notif_bulk_err}")
 
             recipient_count = len(email_list)
             cc_count = len(cc_email_list)
             po_type = "POChild" if is_po_child else "Parent CR"
-            log.info(f"✅ Email sent for {formatted_id} ({po_type}) to {recipient_count} recipient(s)" +
-                     (f" + {cc_count} CC" if cc_count > 0 else ""))
 
             cc_msg = f" + {cc_count} CC recipient(s)" if cc_count > 0 else ""
             return jsonify({
@@ -717,7 +712,6 @@ def send_po_child_vendor_email(po_child_id):
             return jsonify({"error": "Purchase order child not found"}), 404
 
         # Redirect to unified function with LPO support
-        log.info(f"🔄 Redirecting POChild {po_child_id} to unified send_vendor_email")
         return send_vendor_email(cr_id=po_child.parent_cr_id, po_child_id=po_child_id)
 
     except Exception as e:
@@ -892,7 +886,6 @@ def send_vendor_whatsapp(cr_id):
                 from utils.lpo_pdf_generator import LPOPDFGenerator
                 from models.system_settings import SystemSettings
                 from models.lpo_customization import LPOCustomization
-                log.info("Step 1: Starting PDF generation...")
 
                 # If no lpo_data provided, generate using same logic as preview_lpo_pdf
                 if not lpo_data:
@@ -1070,7 +1063,6 @@ def send_vendor_whatsapp(cr_id):
                 # Continue without PDF
 
         # Send WhatsApp message
-        log.info(f"=== SENDING WHATSAPP MESSAGE ===")
         whatsapp_service = WhatsAppService()
         result = whatsapp_service.send_purchase_order(
             phone_number=vendor_phone,
@@ -1080,7 +1072,6 @@ def send_vendor_whatsapp(cr_id):
             project_data=project_data,
             pdf_url=pdf_url
         )
-        log.info(f"WhatsApp send_purchase_order result: {result}")
 
         if result.get('success'):
             # Update WhatsApp sent status

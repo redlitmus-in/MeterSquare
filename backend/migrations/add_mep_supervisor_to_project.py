@@ -29,7 +29,6 @@ def run_migration():
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
 
-        print("Connected to database successfully")
 
         # Check if column already exists
         cursor.execute("""
@@ -39,12 +38,10 @@ def run_migration():
         """)
 
         if cursor.fetchone():
-            print("⚠️  Column 'mep_supervisor_id' already exists in 'project' table. Skipping migration.")
             cursor.close()
             conn.close()
             return
 
-        print("Adding mep_supervisor_id column to project table...")
 
         # Add mep_supervisor_id column as JSONB type (stores array of MEP IDs)
         cursor.execute("""
@@ -61,35 +58,23 @@ def run_migration():
         # Commit the changes
         conn.commit()
 
-        print("✅ Successfully added mep_supervisor_id column to project table")
-        print("   - Type: JSONB")
-        print("   - Default: NULL")
-        print("   - Purpose: Store multiple MEP Supervisor assignments per project")
 
         # Close cursor and connection
         cursor.close()
         conn.close()
 
-        print("\n✅ Migration completed successfully!")
 
     except psycopg2.Error as e:
-        print(f"❌ Database error occurred: {e}")
         if conn:
             conn.rollback()
             conn.close()
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
         if conn:
             conn.rollback()
             conn.close()
         sys.exit(1)
 
 if __name__ == "__main__":
-    print("="*60)
-    print("MEP SUPERVISOR PROJECT ASSIGNMENT MIGRATION")
-    print("="*60)
-    print("\nThis migration adds 'mep_supervisor_id' column to 'project' table")
-    print("to support MEP Supervisor role assignments (separate from PMs).\n")
 
     run_migration()

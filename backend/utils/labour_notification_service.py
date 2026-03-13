@@ -67,7 +67,6 @@ class LabourNotificationMixin:
                 except Exception as email_err:
                     pass  # Don't fail notification on email error
 
-            log.info(f"Sent labour requisition notification for {requisition_code}")
         except Exception as e:
             log.error(f"Error sending labour requisition notification: {e}")
 
@@ -98,7 +97,6 @@ class LabourNotificationMixin:
                 sender_name=pm_name
             )
             send_notification_to_user(se_user_id, notification.to_dict())
-            log.info(f"Sent labour requisition approved notification for {requisition_code}")
         except Exception as e:
             log.error(f"Error sending labour requisition approved notification: {e}")
 
@@ -130,7 +128,6 @@ class LabourNotificationMixin:
                 sender_name=pm_name
             )
             send_notification_to_user(se_user_id, notification.to_dict())
-            log.info(f"Sent labour requisition rejected notification for {requisition_code}")
         except Exception as e:
             log.error(f"Error sending labour requisition rejected notification: {e}")
 
@@ -170,7 +167,6 @@ class LabourNotificationMixin:
                 )
                 send_notification_to_user(prod_mgr.user_id, notification.to_dict())
 
-            log.info(f"Sent labour sent-to-production notification for {requisition_code}")
         except Exception as e:
             log.error(f"Error sending labour sent-to-production notification: {e}")
 
@@ -225,7 +221,6 @@ class LabourNotificationMixin:
                 )
                 send_notification_to_user(user_id, notification.to_dict())
 
-            log.info(f"Sent workers-assigned notifications for {requisition_code}")
         except Exception as e:
             log.error(f"Error sending workers-assigned notification: {e}")
 
@@ -277,6 +272,5 @@ class LabourNotificationMixin:
                 )
                 send_notification_to_user(admin.user_id, notification.to_dict())
 
-            log.info(f"Sent attendance-locked notification for project {project_name} ({locked_count} records)")
         except Exception as e:
             log.error(f"Error sending attendance-locked notification: {e}")

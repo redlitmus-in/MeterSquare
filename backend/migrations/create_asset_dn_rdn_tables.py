@@ -240,23 +240,13 @@ def run_migration():
         for i, sql in enumerate(sql_statements):
             try:
                 db.session.execute(db.text(sql))
-                print(f"✓ Statement {i + 1} executed successfully")
             except Exception as e:
                 if "already exists" in str(e).lower():
-                    print(f"⚠ Statement {i + 1} skipped (already exists)")
+                    pass
                 else:
-                    print(f"✗ Statement {i + 1} failed: {str(e)}")
                     raise e
 
         db.session.commit()
-        print("\n✅ Migration completed successfully!")
-        print("\nTables created:")
-        print("  - asset_delivery_notes (ADN)")
-        print("  - asset_delivery_note_items")
-        print("  - asset_return_delivery_notes (ARDN)")
-        print("  - asset_return_delivery_note_items")
-        print("  - asset_stock_in")
-        print("  - asset_stock_in_items")
 
 
 def rollback_migration():
@@ -275,12 +265,10 @@ def rollback_migration():
         for sql in sql_statements:
             try:
                 db.session.execute(db.text(sql))
-                print(f"✓ Executed: {sql[:50]}...")
             except Exception as e:
-                print(f"✗ Failed: {str(e)}")
+                pass
 
         db.session.commit()
-        print("\n✅ Rollback completed!")
 
 
 if __name__ == "__main__":

@@ -18,7 +18,6 @@ def migrate():
 
     with app.app_context():
         try:
-            print("Adding requester_role column to labour_requisitions table...")
 
             # Add requester_role column
             # Values: 'SE' (Site Engineer), 'PM' (Project Manager)
@@ -41,15 +40,11 @@ def migrate():
             """)
 
             db.session.commit()
-            print("✓ Successfully added requester_role column")
-            print("✓ Created index on requester_role")
-            print("✓ Updated existing records to 'SE'")
 
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"✗ Error during migration: {str(e)}")
             return False
 
 def rollback():
@@ -58,7 +53,6 @@ def rollback():
 
     with app.app_context():
         try:
-            print("Rolling back: Removing requester_role column...")
 
             # Drop index
             db.session.execute("""
@@ -72,13 +66,11 @@ def rollback():
             """)
 
             db.session.commit()
-            print("✓ Successfully rolled back migration")
 
             return True
 
         except Exception as e:
             db.session.rollback()
-            print(f"✗ Error during rollback: {str(e)}")
             return False
 
 if __name__ == "__main__":

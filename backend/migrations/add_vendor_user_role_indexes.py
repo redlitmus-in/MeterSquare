@@ -26,13 +26,11 @@ def upgrade():
     trans = conn.begin()
 
     try:
-        log.info("Starting vendor/user/role index migration...")
 
         # ========== VENDORS TABLE INDEXES ==========
         # Currently has only: idx_vendor_deleted (is_deleted, vendor_id)
         # Missing critical indexes for status filtering and lookups
 
-        log.info("Creating vendor indexes...")
 
         # Index for active vendor listing (most common query pattern)
         conn.execute(text("""
@@ -72,7 +70,6 @@ def upgrade():
         # ========== VENDOR_PRODUCTS TABLE INDEXES ==========
         # Currently has NO explicit indexes - causing 270-290ms queries
 
-        log.info("Creating vendor_products indexes...")
 
         # Index for vendor's products listing (primary query pattern)
         conn.execute(text("""
@@ -106,7 +103,6 @@ def upgrade():
         # Currently has only primary key and role_id FK
         # Missing composite indexes causing 100-180ms queries
 
-        log.info("Creating users indexes...")
 
         # Index for role-based queries (most common pattern)
         conn.execute(text("""
@@ -147,7 +143,6 @@ def upgrade():
         # Currently has only: role column index
         # Missing composite indexes causing 290-350ms queries
 
-        log.info("Creating roles indexes...")
 
         # Index for active roles queries
         conn.execute(text("""
@@ -166,7 +161,6 @@ def upgrade():
         # ========== NOTIFICATIONS TABLE - SUPPORT TICKETS INDEX ==========
         # Missing index for support ticket dashboard counts (taking 100-180ms)
 
-        log.info("Creating notification support ticket index...")
 
         conn.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_notification_support_tickets
@@ -175,24 +169,7 @@ def upgrade():
         """))
 
         trans.commit()
-        log.info("[SUCCESS] All vendor/user/role indexes created successfully!")
 
-        print("\n" + "="*70)
-        print("VENDOR/USER/ROLE INDEX MIGRATION COMPLETED SUCCESSFULLY")
-        print("="*70)
-        print("\nIndexes Created:")
-        print("  - vendors: 5 new indexes (status, email, category, created_by, date)")
-        print("  - vendor_products: 4 new indexes (vendor, category, name, date)")
-        print("  - users: 5 new indexes (role, email, department, status, date)")
-        print("  - roles: 2 new indexes (active, status lookup)")
-        print("  - notifications: 1 new index (support tickets)")
-        print("\nExpected Performance Improvements:")
-        print("  - Vendor queries: 270ms -> 30ms (90% faster)")
-        print("  - Vendor products: 290ms -> 40ms (86% faster)")
-        print("  - User queries: 180ms -> 30ms (83% faster)")
-        print("  - Role queries: 350ms -> 20ms (94% faster)")
-        print("  - Notification counts: 180ms -> 30ms (83% faster)")
-        print("="*70 + "\n")
 
     except Exception as e:
         trans.rollback()
@@ -211,7 +188,6 @@ def downgrade():
     trans = conn.begin()
 
     try:
-        log.info("Removing vendor/user/role indexes...")
 
         indexes = [
             # Vendor indexes
@@ -239,11 +215,9 @@ def downgrade():
         ]
 
         for index_sql in indexes:
-            log.info(f"Dropping index: {index_sql}")
             conn.execute(text(index_sql))
 
         trans.commit()
-        log.info("[SUCCESS] All indexes removed successfully")
 
     except Exception as e:
         trans.rollback()
@@ -256,9 +230,6 @@ def downgrade():
 
 
 if __name__ == "__main__":
-    print("\n" + "="*70)
-    print("RUNNING VENDOR/USER/ROLE INDEX MIGRATION")
-    print("="*70 + "\n")
 
     from app import create_app
 
@@ -267,10 +238,5 @@ if __name__ == "__main__":
     with app.app_context():
         try:
             upgrade()
-            print("\n[SUCCESS] Migration completed successfully!")
-            print("="*70 + "\n")
         except Exception as e:
-            print(f"\n[ERROR] Migration failed: {e}")
-            print("Please check the logs for details.")
-            print("="*70 + "\n")
             raise

@@ -38,29 +38,25 @@ def run_migration():
 
             if 'closed_by' not in existing_columns:
                 columns_to_add.append("ADD COLUMN closed_by VARCHAR(50)")
-                print("Will add: closed_by")
             else:
-                print("Column closed_by already exists")
+                pass
 
             if 'closed_by_name' not in existing_columns:
                 columns_to_add.append("ADD COLUMN closed_by_name VARCHAR(255)")
-                print("Will add: closed_by_name")
             else:
-                print("Column closed_by_name already exists")
+                pass
 
             if 'closed_date' not in existing_columns:
                 columns_to_add.append("ADD COLUMN closed_date TIMESTAMP")
-                print("Will add: closed_date")
             else:
-                print("Column closed_date already exists")
+                pass
 
             if columns_to_add:
                 alter_query = f"ALTER TABLE support_tickets {', '.join(columns_to_add)}"
                 db.session.execute(db.text(alter_query))
                 db.session.commit()
-                print(f"\nSuccessfully added {len(columns_to_add)} column(s) to support_tickets table")
             else:
-                print("\nAll columns already exist. No changes needed.")
+                pass
 
             # Verify columns were added
             verify_query = """
@@ -71,18 +67,12 @@ def run_migration():
                 ORDER BY column_name
             """
             result = db.session.execute(db.text(verify_query))
-            print("\nVerification - Current columns:")
             for row in result.fetchall():
-                print(f"  - {row[0]}: {row[1]}")
+                pass
 
         except Exception as e:
             db.session.rollback()
-            print(f"Error running migration: {str(e)}")
             raise
 
 if __name__ == '__main__':
-    print("Running migration: Add closed_by columns to support_tickets")
-    print("=" * 60)
     run_migration()
-    print("=" * 60)
-    print("Migration completed!")

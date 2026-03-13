@@ -511,7 +511,6 @@ def assign_projects_sitesupervisor():
 
                     # Append new action
                     current_actions.append(new_action)
-                    log.info(f"Appending SE assignment action to BOQ {boq.boq_id} history. Total actions: {len(current_actions)}")
 
                     if existing_history:
                         # Update existing history
@@ -530,7 +529,6 @@ def assign_projects_sitesupervisor():
                         existing_history.last_modified_by = pm_name
                         existing_history.last_modified_at = datetime.utcnow()
 
-                        log.info(f"Updated existing history for BOQ {boq.boq_id} with {len(current_actions)} actions")
                     else:
                         # Create new history entry
                         boq_history = BOQHistory(
@@ -548,12 +546,10 @@ def assign_projects_sitesupervisor():
                             created_by=pm_name
                         )
                         db.session.add(boq_history)
-                        log.info(f"Created new history for BOQ {boq.boq_id} with {len(current_actions)} actions")
 
                     boq_histories_updated += 1
 
         db.session.commit()
-        log.info(f"Successfully assigned Site Engineer to {len(assigned_projects)} projects and updated {boq_histories_updated} BOQ histories")
 
         # Send notification to Site Engineer about project assignment
         try:
@@ -582,7 +578,6 @@ def assign_projects_sitesupervisor():
                 sender_name=pm_name
             )
             send_notification_to_user(site_supervisor_id, notification.to_dict())
-            log.info(f"Sent project assignment notification to site engineer {site_supervisor_id}")
         except Exception as notif_error:
             log.error(f"Failed to send project assignment notification: {notif_error}")
 
@@ -613,7 +608,6 @@ def assign_projects_sitesupervisor():
         if buyer_user and buyer_user.email and projects_data_for_buyer_email:
             try:
                 buyer_status = (buyer_user.user_status or "").lower().strip()
-                log.info(f"Buyer {buyer_user.full_name} user_status={repr(buyer_user.user_status)} → normalized='{buyer_status}'")
                 if buyer_status == "offline":
                     email_service = BOQEmailService()
                     buyer_email_sent = email_service.send_buyer_assignment_notification(
@@ -623,11 +617,11 @@ def assign_projects_sitesupervisor():
                         projects_data=projects_data_for_buyer_email
                     )
                     if buyer_email_sent:
-                        log.info(f"Buyer assignment notification email sent successfully to offline buyer {buyer_user.email}")
+                        pass
                     else:
                         log.warning(f"Failed to send buyer assignment notification email to {buyer_user.email}")
                 else:
-                    log.info(f"Buyer {buyer_user.full_name} is '{buyer_user.user_status}' - skipping email, in-app notification only")
+                    pass
             except Exception as email_error:
                 log.error(f"Error sending buyer assignment notification email: {email_error}")
                 # Don't fail the entire request if email fails
@@ -915,7 +909,6 @@ def request_project_completion(project_id):
             ~ChangeRequest.status.in_(CR_CONFIG.COMPLETION_STATUSES)
         ).all()
 
-        log.info(f"Validation for SE {user_id} on project {project_id}: Found {len(incomplete_crs)} incomplete CRs for this SE")
 
         # Block only THIS SE's incomplete purchases
         blocking_purchases = []
@@ -1081,10 +1074,7 @@ def request_project_completion(project_id):
                 }), 400
 
         # Mark all SE assignments as completion requested
-        log.info(f"SE {user_id} requesting completion for project {project_id}. Found {len(se_assignments)} assignments to update.")
         for assignment in se_assignments:
-            log.info(f"  - Updating assignment {assignment.pm_assign_id}: PM {assignment.assigned_by_pm_id} -> SE {assignment.assigned_to_se_id}, "
-                    f"was se_completion_requested={assignment.se_completion_requested}, setting to True")
             assignment.se_completion_requested = True
             assignment.se_completion_request_date = datetime.utcnow()
             assignment.last_modified_by = se_name
@@ -1107,7 +1097,6 @@ def request_project_completion(project_id):
         project.total_se_assignments = unique_pairs_query or 0
 
         # Log for debugging
-        log.info(f"Project {project_id}: total_se_assignments = {project.total_se_assignments}, SE assignments found: {len(se_assignments)}")
 
         # Set completion_requested flag
         project.completion_requested = True
@@ -1135,7 +1124,7 @@ def request_project_completion(project_id):
                 PMAssignSS.assigned_by_pm_id.isnot(None)
             ).all()
         for v in verification:
-            log.info(f"  VERIFICATION: Assignment {v.pm_assign_id} - se_completion_requested = {v.se_completion_requested}")
+            pass
 
         # Send notification to PM about completion request
         try:
@@ -1150,7 +1139,6 @@ def request_project_completion(project_id):
         except Exception as notif_error:
             log.error(f"Failed to send completion request notification: {notif_error}")
 
-        log.info(f"Site Engineer {user_id} requested completion for project {project_id}")
 
         return jsonify({
             "success": True,
@@ -1578,7 +1566,6 @@ def assign_boq_to_buyer(boq_id):
                 sender_name=se_name
             )
             send_notification_to_user(buyer_id, notification.to_dict())
-            log.info(f"Sent BOQ assignment notification to buyer {buyer_id}")
         except Exception as notif_error:
             log.error(f"Failed to send BOQ assignment notification: {notif_error}")
 
@@ -1595,7 +1582,6 @@ def assign_boq_to_buyer(boq_id):
         except Exception as email_error:
             log.warning(f"Failed to send email notification: {str(email_error)}")
 
-        log.info(f"Site Engineer {se_user_id} assigned BOQ {boq_id} to buyer {buyer_id}")
 
         return jsonify({
             "success": True,
@@ -1649,15 +1635,12 @@ def get_se_ongoing_projects():
         if is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor']:
             if effective_user_id:
                 target_se_id = effective_user_id
-                log.info(f"Admin viewing as SE user {effective_user_id} - filtering by that SE")
             else:
                 # Admin viewing as SE role without specific user - show ALL SE projects
                 show_all_se_projects = True
-                log.info(f"Admin viewing as SE role without specific user - showing ALL SE projects")
         elif user_role == 'admin' and not is_admin_viewing:
             # Pure admin (not viewing as SE) - show ALL SE projects
             show_all_se_projects = True
-            log.info(f"Pure admin view - showing ALL SE projects")
         else:
             target_se_id = user_id
 
@@ -2052,15 +2035,12 @@ def get_se_completed_projects():
         if is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor']:
             if effective_user_id:
                 target_se_id = effective_user_id
-                log.info(f"Admin viewing as SE user {effective_user_id} - filtering by that SE (completed)")
             else:
                 # Admin viewing as SE role without specific user - show ALL SE projects
                 show_all_se_projects = True
-                log.info(f"Admin viewing as SE role without specific user - showing ALL SE completed projects")
         elif user_role == 'admin' and not is_admin_viewing:
             # Pure admin (not viewing as SE) - show ALL SE projects
             show_all_se_projects = True
-            log.info(f"Pure admin view - showing ALL SE completed projects")
         else:
             target_se_id = user_id
 
@@ -2428,7 +2408,6 @@ def get_all_sitesupervisor_boqs():
         user_id = current_user['user_id']
         user_role = current_user.get('role', '').lower()
 
-        log.info(f"=== SE BOQ API called by user_id={user_id}, role={user_role} ===")
 
         # Import PMAssignSS model for item-level assignments
         from models.pm_assign_ss import PMAssignSS
@@ -2446,20 +2425,17 @@ def get_all_sitesupervisor_boqs():
             item_assignments = PMAssignSS.query.filter(
                 PMAssignSS.is_deleted == False
             ).all()
-            log.info(f"=== Admin viewing all assignments ===")
         elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor'] and effective_user_id:
             # Admin viewing as specific SE user - sees only that SE's assignments
             item_assignments = PMAssignSS.query.filter(
                 PMAssignSS.assigned_to_se_id == effective_user_id,
                 PMAssignSS.is_deleted == False
             ).all()
-            log.info(f"=== Admin viewing as SE user {effective_user_id} - filtering by that SE ===")
         elif is_admin_viewing and effective_role in ['siteengineer', 'sitesupervisor']:
             # Admin viewing as SE role (no specific user) - sees all SE assignments
             item_assignments = PMAssignSS.query.filter(
                 PMAssignSS.is_deleted == False
             ).all()
-            log.info(f"=== Admin viewing as SE role (all SEs) ===")
         else:
             # Regular SE sees only their assignments
             item_assignments = PMAssignSS.query.filter(
@@ -2467,14 +2443,12 @@ def get_all_sitesupervisor_boqs():
                 PMAssignSS.is_deleted == False
             ).all()
 
-        log.info(f"=== Found {len(item_assignments)} item assignments for SE {effective_user_id if is_admin_viewing else user_id} ===")
 
         # DEBUG: Log all SE assignments to help troubleshoot
         if len(item_assignments) == 0:
             all_assignments = PMAssignSS.query.filter(PMAssignSS.is_deleted == False).limit(20).all()
-            log.info(f"=== DEBUG: No assignments found for user_id={user_id}. Sample of all assignments: ===")
             for a in all_assignments:
-                log.info(f"    Assignment {a.pm_assign_id}: project={a.project_id}, boq={a.boq_id}, assigned_to_se_id={a.assigned_to_se_id}, assigned_by_pm_id={a.assigned_by_pm_id}")
+                pass
 
         # Get unique project IDs from assignments
         project_ids_from_assignments = list(set([a.project_id for a in item_assignments if a.project_id]))
@@ -2503,7 +2477,6 @@ def get_all_sitesupervisor_boqs():
             project_ids_from_project_level = [p.project_id for p in projects_from_project_table]
             all_project_ids = list(set(project_ids_from_assignments + project_ids_from_project_level))
 
-        log.info(f"=== Total unique project IDs: {len(all_project_ids)} - {all_project_ids} ===")
 
         # Fetch all projects in one query
         if not all_project_ids:

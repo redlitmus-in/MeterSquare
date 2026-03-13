@@ -28,14 +28,10 @@ def fix_missing_sub_item_names():
     """
 
     with app.app_context():
-        print("\n" + "="*80)
-        print("MIGRATION: Fix Missing sub_item_name in Change Requests")
-        print("="*80 + "\n")
 
         # Get all non-deleted change requests
         change_requests = ChangeRequest.query.filter_by(is_deleted=False).all()
 
-        print(f"📊 Total change requests to process: {len(change_requests)}\n")
 
         fixed_count = 0
         skipped_count = 0
@@ -52,7 +48,6 @@ def fix_missing_sub_item_names():
                 ).first()
 
                 if not boq_details or not boq_details.boq_details:
-                    print(f"⚠️  CR-{cr.cr_id}: No BOQ details found, skipping...")
                     skipped_count += 1
                     continue
 
@@ -100,9 +95,8 @@ def fix_missing_sub_item_names():
                             if lookup_key and lookup_key in material_lookup:
                                 mat['sub_item_name'] = material_lookup[lookup_key]['sub_item_name']
                                 needs_update = True
-                                print(f"  ✅ CR-{cr.cr_id}: Added sub_item_name '{mat['sub_item_name']}' to material '{mat.get('material_name')}'")
                             else:
-                                print(f"  ⚠️  CR-{cr.cr_id}: Could not find sub_item_name for material '{mat.get('material_name')}'")
+                                pass
 
                         updated_materials.append(mat)
 
@@ -124,9 +118,8 @@ def fix_missing_sub_item_names():
                             if lookup_key and lookup_key in material_lookup:
                                 sub_item['sub_item_name'] = material_lookup[lookup_key]['sub_item_name']
                                 needs_update = True
-                                print(f"  ✅ CR-{cr.cr_id}: Added sub_item_name '{sub_item['sub_item_name']}' to sub-item '{sub_item.get('material_name')}'")
                             else:
-                                print(f"  ⚠️  CR-{cr.cr_id}: Could not find sub_item_name for sub-item '{sub_item.get('material_name')}'")
+                                pass
 
                         updated_sub_items.append(sub_item)
 
@@ -137,24 +130,14 @@ def fix_missing_sub_item_names():
                     cr.updated_at = datetime.utcnow()
                     db.session.commit()
                     fixed_count += 1
-                    print(f"  💾 CR-{cr.cr_id}: Updated and saved")
                 else:
                     skipped_count += 1
 
             except Exception as e:
-                print(f"❌ CR-{cr.cr_id}: Error - {str(e)}")
                 db.session.rollback()
                 error_count += 1
                 continue
 
-        print("\n" + "="*80)
-        print("MIGRATION SUMMARY")
-        print("="*80)
-        print(f"✅ Fixed: {fixed_count}")
-        print(f"⏭️  Skipped (no changes needed): {skipped_count}")
-        print(f"❌ Errors: {error_count}")
-        print(f"📊 Total processed: {len(change_requests)}")
-        print("="*80 + "\n")
 
 
 if __name__ == '__main__':

@@ -25,7 +25,6 @@ def run_migration():
                     ALTER TABLE lpo_customizations
                     ADD COLUMN po_child_id INTEGER REFERENCES po_child(id)
                 """))
-                print("Added 'po_child_id' column to lpo_customizations table")
 
                 # Drop old unique constraint on cr_id if it exists
                 try:
@@ -33,9 +32,8 @@ def run_migration():
                         ALTER TABLE lpo_customizations
                         DROP CONSTRAINT IF EXISTS lpo_customizations_cr_id_key
                     """))
-                    print("Dropped old unique constraint on cr_id")
                 except Exception as e:
-                    print(f"Note: Could not drop old constraint (may not exist): {e}")
+                    pass
 
                 # Add new unique constraint for (cr_id, po_child_id) pair
                 db.session.execute(db.text("""
@@ -43,15 +41,12 @@ def run_migration():
                     ADD CONSTRAINT uq_lpo_customization_cr_po_child
                     UNIQUE (cr_id, po_child_id)
                 """))
-                print("Added unique constraint on (cr_id, po_child_id)")
 
                 db.session.commit()
-                print("Migration completed successfully!")
             else:
-                print("Column 'po_child_id' already exists in lpo_customizations table")
+                pass
 
         except Exception as e:
-            print(f"Error running migration: {e}")
             db.session.rollback()
             raise
 

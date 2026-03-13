@@ -35,16 +35,13 @@ def add_sub_item_percentage_columns():
                 "ALTER TABLE boq_sub_items ADD COLUMN IF NOT EXISTS actual_profit FLOAT DEFAULT 0.0;",
             ]
 
-            print("Adding new columns to boq_sub_items table...")
 
             for sql in sql_statements:
                 db.session.execute(db.text(sql))
 
             db.session.commit()
-            print("[SUCCESS] Successfully added all new columns to boq_sub_items table")
 
             # Update existing records with default values
-            print("\nUpdating existing sub-items with default percentage values...")
             update_sql = """
                 UPDATE boq_sub_items
                 SET
@@ -64,32 +61,21 @@ def add_sub_item_percentage_columns():
             db.session.execute(db.text(update_sql))
             db.session.commit()
 
-            print("[SUCCESS] Successfully updated existing sub-items with default values")
 
             # Verify the changes
             verify_sql = "SELECT column_name, data_type, column_default FROM information_schema.columns WHERE table_name = 'boq_sub_items' AND column_name IN ('misc_percentage', 'overhead_profit_percentage', 'transport_percentage', 'material_cost', 'labour_cost', 'internal_cost', 'planned_profit', 'actual_profit') ORDER BY column_name;"
             result = db.session.execute(db.text(verify_sql))
 
-            print("\n[SUCCESS] Migration completed! New columns added:")
             for row in result:
-                print(f"  - {row[0]} ({row[1]}) DEFAULT {row[2]}")
+                pass
 
         except Exception as e:
             db.session.rollback()
-            print(f"[ERROR] Error during migration: {str(e)}")
             raise
         finally:
             db.session.close()
 
 if __name__ == "__main__":
-    print("=" * 70)
-    print("BOQ Sub-Item Percentage Columns Migration")
-    print("=" * 70)
-    print("\nThis migration adds per-sub-item percentage calculation fields")
-    print("to support top-down cost breakdown matching PDF format.\n")
 
     add_sub_item_percentage_columns()
 
-    print("\n" + "=" * 70)
-    print("Migration completed successfully!")
-    print("=" * 70)

@@ -46,10 +46,8 @@ def create():
         """)
 
         conn.commit()
-        print("Migration successful: added extension_original_days column to project table")
     except Exception as e:
         conn.rollback()
-        print(f"Migration failed: {e}")
         raise
     finally:
         cur.close()
@@ -66,10 +64,8 @@ def rollback():
             DROP COLUMN IF EXISTS extension_original_days;
         """)
         conn.commit()
-        print("Rollback successful: removed extension_original_days column")
     except Exception as e:
         conn.rollback()
-        print(f"Rollback failed: {e}")
         raise
     finally:
         cur.close()

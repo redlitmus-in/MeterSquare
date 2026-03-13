@@ -125,7 +125,6 @@ def preview_lpo_pdf(cr_id):
                 # Try to create the table
                 LPOCustomization.__table__.create(db.engine, checkfirst=True)
                 db.session.commit()
-                log.info("Created lpo_customizations table")
             except Exception as create_error:
                 db.session.rollback()
                 log.warning(f"Could not create table: {str(create_error)}")
@@ -497,7 +496,6 @@ def save_lpo_customization(cr_id):
             try:
                 LPOCustomization.__table__.create(db.engine, checkfirst=True)
                 db.session.commit()
-                log.info("Created lpo_customizations table")
                 customization = None  # Table is empty, so no existing record
             except Exception as create_error:
                 db.session.rollback()
@@ -535,7 +533,6 @@ def save_lpo_customization(cr_id):
 
         db.session.commit()
 
-        log.info(f"LPO customization saved for CR {cr_id} by user {buyer_id}")
 
         return jsonify({
             "success": True,
@@ -592,12 +589,10 @@ def generate_lpo_pdf(cr_id):
         if po_child_id:
             po_child = POChild.query.filter_by(id=po_child_id, is_deleted=False).first()
             vendor_id = po_child.vendor_id if po_child else None
-            log.info(f"LPO PDF - POChild {po_child_id} has vendor_id: {vendor_id}")
 
         # Fallback to CR's selected vendor
         if not vendor_id:
             vendor_id = cr.selected_vendor_id
-            log.info(f"LPO PDF - Using CR's selected_vendor_id: {vendor_id}")
 
         # Auto-detect vendor from material_vendor_selections if still not found
         if not vendor_id and cr.material_vendor_selections and isinstance(cr.material_vendor_selections, dict):
@@ -608,7 +603,6 @@ def generate_lpo_pdf(cr_id):
 
             if len(vendor_ids_in_selections) == 1:
                 vendor_id = list(vendor_ids_in_selections)[0]
-                log.info(f"LPO PDF - Auto-detected vendor_id: {vendor_id}")
             elif len(vendor_ids_in_selections) > 1:
                 log.warning(f"LPO PDF - Multiple vendors detected, cannot auto-detect")
 
@@ -643,7 +637,6 @@ def generate_lpo_pdf(cr_id):
                     "project": project.project_name if project else "",
                     "subject": preserved_subject  # Keep customized subject
                 }
-                log.info(f"LPO PDF - Refreshed vendor data for vendor_id {vendor_id}: {vendor.company_name}")
             else:
                 log.warning(f"LPO PDF - Vendor {vendor_id} not found in database")
         else:
@@ -697,7 +690,6 @@ def save_lpo_default_template():
             try:
                 LPODefaultTemplate.__table__.create(db.engine, checkfirst=True)
                 db.session.commit()
-                log.info("Created lpo_default_templates table")
                 template = None
             except Exception as create_error:
                 db.session.rollback()
@@ -731,7 +723,6 @@ def save_lpo_default_template():
 
         db.session.commit()
 
-        log.info(f"LPO default template saved for user {user_id}")
 
         return jsonify({
             "success": True,
