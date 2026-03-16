@@ -15,11 +15,9 @@ import re
 import json
 import hashlib
 import logging
-import threading
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Dict, List, Optional, Set
-from collections import defaultdict
 
 from flask import Flask, request, g, jsonify
 from flask_limiter import Limiter
@@ -208,24 +206,11 @@ class TokenFingerprint:
 class IPBlocker:
     """
     IP blocking and suspicious activity detection
-    Thread-safe with automatic block expiration
-    Uses Redis (if available) for shared cache across workers, DB for persistence
+    Uses Redis (if available) for shared cache across workers, DB as source of truth
+    No in-memory caching — avoids sync issues between workers
     """
 
     def __init__(self):
-        # Memory cache for fast lookups (synced with database)
-        self._blocked_ips: Dict[str, Dict] = {}  # {ip: {'blocked_at': datetime, 'reason': str}}
-        self._suspicious_ips: Dict[str, Dict] = defaultdict(lambda: {
-            'failed_logins': 0,
-            'rate_limit_hits': 0,
-            'suspicious_requests': 0,
-            'first_seen': datetime.utcnow(),
-            'last_seen': datetime.utcnow()
-        })
-        self._lock = threading.Lock()
-        self._db_synced = False
-
-        # Redis client (shared cache across all workers)
         self._redis = None
         self._init_redis()
 
@@ -244,10 +229,12 @@ class IPBlocker:
             logger.debug(f"IPBlocker: Redis unavailable, falling back to DB queries — {e}")
 
         # Thresholds
-        self.FAILED_LOGIN_THRESHOLD = 10  # Block after 10 failed logins
+        self.FAILED_LOGIN_THRESHOLD = 10  # Block IP after 10 failed logins from same IP
         self.RATE_LIMIT_THRESHOLD = 20    # Block after 20 rate limit hits
         self.SUSPICIOUS_THRESHOLD = 15    # Block after 15 suspicious requests
         self.TOTAL_HISTORICAL_THRESHOLD = 100  # Permanent block after 100 total failed attempts
+        self.USER_FAILED_THRESHOLD = 5    # Lock user account after 5 failed OTP attempts
+        self.USER_LOCK_DURATION = 1800    # Lock account for 30 minutes (seconds)
 
         # Progressive blocking durations (hours)
         # Each time an IP is blocked, the duration increases
@@ -262,87 +249,22 @@ class IPBlocker:
         # Whitelist (never block these)
         self._whitelist: Set[str] = {'127.0.0.1', 'localhost', '::1'}
 
-    def _sync_from_database(self):
-        """Load blocked IPs and suspicious activity from database into memory cache"""
-        # Quick check without lock first (performance optimization)
-        if self._db_synced:
-            return
-
-        # Thread-safe sync - only one thread should sync
-        with self._lock:
-            # Double-check after acquiring lock
-            if self._db_synced:
-                return
-
-            try:
-                from models.security import BlockedIP, SecurityAuditLog
-                from sqlalchemy import func
-
-                now = datetime.utcnow()
-                last_24h = now - timedelta(hours=24)
-
-                # Load blocked IPs
-                blocked = BlockedIP.query.filter(
-                    BlockedIP.unblocked_at.is_(None),
-                    db.or_(
-                        BlockedIP.expires_at.is_(None),
-                        BlockedIP.expires_at > now,
-                        BlockedIP.is_permanent == True
-                    )
-                ).all()
-
-                for block in blocked:
-                    self._blocked_ips[block.ip_address] = {
-                        'blocked_at': block.blocked_at,
-                        'reason': block.reason,
-                        'db_id': block.id,
-                        'block_count': block.block_count or 1,
-                        'is_permanent': block.is_permanent or False
-                    }
-
-                # Load failed login counts per IP from last 24 hours
-                # This ensures protection survives server restarts
-                failed_logins_by_ip = db.session.query(
-                    SecurityAuditLog.ip_address,
-                    func.count(SecurityAuditLog.id).label('count')
-                ).filter(
-                    SecurityAuditLog.event_type == 'LOGIN_FAILED',
-                    SecurityAuditLog.timestamp > last_24h,
-                    SecurityAuditLog.ip_address.isnot(None)
-                ).group_by(SecurityAuditLog.ip_address).all()
-
-                for ip, count in failed_logins_by_ip:
-                    if ip and ip not in self._whitelist:
-                        self._suspicious_ips[ip]['failed_logins'] = count
-                        self._suspicious_ips[ip]['last_seen'] = now
-
-                self._db_synced = True
-                logger.info(f"Synced {len(blocked)} blocked IPs and {len(failed_logins_by_ip)} suspicious IPs from database")
-            except Exception as e:
-                logger.error(f"Failed to sync from database: {e}")
-                # Don't set _db_synced so we can retry on next request
-
     def is_blocked(self, ip: str) -> bool:
         """
         Check if IP is blocked.
-        - Redis available: checks Redis cache (10s TTL) — fast, shared across all workers
-        - Redis unavailable: queries DB directly — accurate but slower
-        - Both fail: falls back to memory cache
+        Redis cache (10s TTL) for speed, DB as source of truth.
         """
         if ip in self._whitelist:
             return False
 
-        # Fast path: check Redis cache first
         if self._redis:
             try:
-                redis_key = f"ip_blocked:{ip}"
-                cached = self._redis.get(redis_key)
+                cached = self._redis.get(f"ip_blocked:{ip}")
                 if cached is not None:
                     return cached == b"1"
             except Exception:
-                pass  # Redis failed, fall through to DB check
+                pass
 
-        # DB check (source of truth)
         try:
             from models.security import BlockedIP
 
@@ -359,7 +281,6 @@ class IPBlocker:
 
             result = block is not None
 
-            # Write result to Redis cache (TTL: 10s — unblock reflects within 10s max)
             if self._redis:
                 try:
                     self._redis.setex(f"ip_blocked:{ip}", 10, b"1" if result else b"0")
@@ -369,9 +290,7 @@ class IPBlocker:
             return result
         except Exception as e:
             logger.error(f"Failed to check IP block from DB: {e}")
-            # Fallback to memory cache if DB fails
-            with self._lock:
-                return ip in self._blocked_ips
+            return False
 
     def block_ip(self, ip: str, reason: str = ""):
         """
@@ -382,21 +301,12 @@ class IPBlocker:
             logger.warning(f"Attempted to block whitelisted IP: {ip}")
             return
 
-        # Get block count and calculate progressive duration
         block_count, is_permanent, duration_hours = self._get_progressive_block_info(ip)
 
         if is_permanent:
             expires_at = None
         else:
             expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
-
-        with self._lock:
-            self._blocked_ips[ip] = {
-                'blocked_at': datetime.utcnow(),
-                'reason': reason,
-                'block_count': block_count,
-                'is_permanent': is_permanent
-            }
 
         # Save to database
         self._save_block_to_database(ip, reason, expires_at, block_count, is_permanent)
@@ -496,20 +406,13 @@ class IPBlocker:
             db.session.rollback()
 
     def unblock_ip(self, ip: str, user_id: int = None):
-        """Unblock an IP address"""
-        with self._lock:
-            self._blocked_ips.pop(ip, None)
-            self._suspicious_ips.pop(ip, None)  # Also clear failed login counter
-            self._db_synced = False  # Force re-sync from DB on next request
-
-        # Delete from Redis immediately — all workers see unblock instantly
+        """Unblock an IP address — clears Redis cache + updates DB"""
         if self._redis:
             try:
                 self._redis.delete(f"ip_blocked:{ip}")
             except Exception:
                 pass
 
-        # Update database
         self._unblock_in_database(ip, user_id)
         logger.info(f"IP UNBLOCKED: {ip}")
 
@@ -529,39 +432,71 @@ class IPBlocker:
 
     def record_failed_login(self, ip: str):
         """
-        Record a failed login attempt
-        Memory counter is pre-loaded from DB on startup, so we just increment it
-        This ensures protection survives server restarts
+        Record a failed login attempt from an IP.
+        Does NOT block IP for failed logins — shared WiFi means blocking
+        one IP could lock out an entire office/construction site.
+        IP blocking is only used for suspicious requests (SQL injection, XSS).
+        User account locking (record_user_failed_login) handles brute force protection.
         """
-        # Ensure we've synced from database first
-        self._sync_from_database()
-
-        with self._lock:
-            self._suspicious_ips[ip]['failed_logins'] += 1
-            self._suspicious_ips[ip]['last_seen'] = datetime.utcnow()
-            current_count = self._suspicious_ips[ip]['failed_logins']
-
-        # Check if threshold reached
-        if current_count >= self.FAILED_LOGIN_THRESHOLD:
-            self.block_ip(ip, f"Too many failed logins ({current_count} in last 24h)")
+        pass
 
     def record_rate_limit_hit(self, ip: str):
-        """Record a rate limit hit"""
-        with self._lock:
-            self._suspicious_ips[ip]['rate_limit_hits'] += 1
-            self._suspicious_ips[ip]['last_seen'] = datetime.utcnow()
+        """Record a rate limit hit using Redis counter, DB fallback"""
+        if self._redis:
+            try:
+                key = f"rate_limit_hits:{ip}"
+                count = self._redis.incr(key)
+                self._redis.expire(key, 3600)
+                if count >= self.RATE_LIMIT_THRESHOLD:
+                    self.block_ip(ip, f"Too many rate limit violations ({count})")
+                return
+            except Exception:
+                pass
 
-            if self._suspicious_ips[ip]['rate_limit_hits'] >= self.RATE_LIMIT_THRESHOLD:
-                self.block_ip(ip, f"Too many rate limit violations ({self._suspicious_ips[ip]['rate_limit_hits']})")
+        # DB fallback when Redis unavailable
+        try:
+            from models.security import SecurityAuditLog
+            last_hour = datetime.utcnow() - timedelta(hours=1)
+            count = SecurityAuditLog.query.filter(
+                SecurityAuditLog.event_type == 'RATE_LIMIT_HIT',
+                SecurityAuditLog.ip_address == ip,
+                SecurityAuditLog.timestamp > last_hour
+            ).count()
+            if count >= self.RATE_LIMIT_THRESHOLD:
+                self.block_ip(ip, f"Too many rate limit violations ({count})")
+        except Exception:
+            pass
+
+        audit_log("RATE_LIMIT_HIT", severity="WARNING", details={"ip": ip})
 
     def record_suspicious_request(self, ip: str, reason: str = ""):
-        """Record a suspicious request (SQL injection attempt, etc.)"""
-        with self._lock:
-            self._suspicious_ips[ip]['suspicious_requests'] += 1
-            self._suspicious_ips[ip]['last_seen'] = datetime.utcnow()
+        """Record a suspicious request (SQL injection attempt, etc.) using Redis counter, DB fallback"""
+        if self._redis:
+            try:
+                key = f"suspicious_reqs:{ip}"
+                count = self._redis.incr(key)
+                self._redis.expire(key, 3600)
+                if count >= self.SUSPICIOUS_THRESHOLD:
+                    self.block_ip(ip, f"Too many suspicious requests: {reason}")
+                return
+            except Exception:
+                pass
 
-            if self._suspicious_ips[ip]['suspicious_requests'] >= self.SUSPICIOUS_THRESHOLD:
+        # DB fallback when Redis unavailable
+        try:
+            from models.security import SecurityAuditLog
+            last_hour = datetime.utcnow() - timedelta(hours=1)
+            count = SecurityAuditLog.query.filter(
+                SecurityAuditLog.event_type == 'SUSPICIOUS_REQUEST',
+                SecurityAuditLog.ip_address == ip,
+                SecurityAuditLog.timestamp > last_hour
+            ).count()
+            if count >= self.SUSPICIOUS_THRESHOLD:
                 self.block_ip(ip, f"Too many suspicious requests: {reason}")
+        except Exception:
+            pass
+
+        audit_log("SUSPICIOUS_REQUEST", severity="WARNING", details={"ip": ip, "reason": reason})
 
     def get_blocked_ips(self) -> List[str]:
         """Get list of blocked IPs from database"""
@@ -581,34 +516,104 @@ class IPBlocker:
             return [b.ip_address for b in blocked]
         except Exception as e:
             logger.error(f"Failed to get blocked IPs from database: {e}")
-            # Fallback to memory cache with progressive blocking check
-            with self._lock:
-                current_time = datetime.utcnow()
-                expired = []
-                for ip, info in self._blocked_ips.items():
-                    # Permanent blocks never expire
-                    if info.get('is_permanent', False):
-                        continue
-                    # Calculate expiry based on block count
-                    block_count = info.get('block_count', 1)
-                    duration_key = min(block_count, 5)
-                    duration_hours = self.BLOCK_DURATIONS.get(duration_key, 24)
-                    if duration_hours is None:
-                        continue  # Permanent
-                    if current_time - info.get('blocked_at', current_time) > timedelta(hours=duration_hours):
-                        expired.append(ip)
-                for ip in expired:
-                    del self._blocked_ips[ip]
-                return list(self._blocked_ips.keys())
+            return []
 
     def get_suspicious_ips(self) -> Dict:
-        """Get suspicious IP activity"""
-        return dict(self._suspicious_ips)
+        """Get suspicious IP activity from DB audit log"""
+        try:
+            from models.security import SecurityAuditLog
+            from sqlalchemy import func
+
+            last_24h = datetime.utcnow() - timedelta(hours=24)
+            results = db.session.query(
+                SecurityAuditLog.ip_address,
+                func.count(SecurityAuditLog.id).label('count')
+            ).filter(
+                SecurityAuditLog.event_type == 'LOGIN_FAILED',
+                SecurityAuditLog.timestamp > last_24h,
+                SecurityAuditLog.ip_address.isnot(None)
+            ).group_by(SecurityAuditLog.ip_address).all()
+
+            return {ip: {'failed_logins': count} for ip, count in results}
+        except Exception as e:
+            logger.error(f"Failed to get suspicious IPs: {e}")
+            return {}
 
     def add_to_whitelist(self, ip: str):
         """Add IP to whitelist"""
         self._whitelist.add(ip)
         self.unblock_ip(ip)  # Unblock if previously blocked
+
+    def is_user_locked(self, identifier: str) -> bool:
+        """Check if a user account is temporarily locked after too many failed attempts"""
+        if self._redis:
+            try:
+                return self._redis.get(f"user_locked:{identifier}") is not None
+            except Exception:
+                pass
+
+        try:
+            from models.security import SecurityAuditLog
+            last_30min = datetime.utcnow() - timedelta(seconds=self.USER_LOCK_DURATION)
+            count = SecurityAuditLog.query.filter(
+                SecurityAuditLog.event_type == 'LOGIN_FAILED',
+                SecurityAuditLog.timestamp > last_30min,
+                SecurityAuditLog.details.cast(db.Text).contains(identifier)
+            ).count()
+            return count >= self.USER_FAILED_THRESHOLD
+        except Exception as e:
+            logger.error(f"Failed to check user lock: {e}")
+            return False
+
+    def record_user_failed_login(self, identifier: str):
+        """Record a failed login for a specific user account (email/phone)"""
+        if not identifier:
+            return
+
+        if self._redis:
+            try:
+                key = f"user_fail:{identifier}"
+                count = self._redis.incr(key)
+                self._redis.expire(key, self.USER_LOCK_DURATION)
+                if count >= self.USER_FAILED_THRESHOLD:
+                    self._redis.setex(f"user_locked:{identifier}", self.USER_LOCK_DURATION, b"1")
+                    logger.warning(f"USER LOCKED: {identifier} — {count} failed attempts in {self.USER_LOCK_DURATION}s")
+                    audit_log("USER_LOCKED", severity="WARNING", details={
+                        "identifier": identifier[:50],
+                        "failed_attempts": count,
+                        "lock_duration_minutes": self.USER_LOCK_DURATION // 60
+                    })
+                return
+            except Exception:
+                pass
+
+        try:
+            from models.security import SecurityAuditLog
+            last_30min = datetime.utcnow() - timedelta(seconds=self.USER_LOCK_DURATION)
+            count = SecurityAuditLog.query.filter(
+                SecurityAuditLog.event_type == 'LOGIN_FAILED',
+                SecurityAuditLog.timestamp > last_30min,
+                SecurityAuditLog.details.cast(db.Text).contains(identifier)
+            ).count()
+            if count >= self.USER_FAILED_THRESHOLD:
+                logger.warning(f"USER LOCKED: {identifier} — {count} failed attempts (DB count)")
+                audit_log("USER_LOCKED", severity="WARNING", details={
+                    "identifier": identifier[:50],
+                    "failed_attempts": count,
+                    "lock_duration_minutes": self.USER_LOCK_DURATION // 60
+                })
+        except Exception as e:
+            logger.error(f"Failed to record user failed login: {e}")
+
+    def unlock_user(self, identifier: str):
+        """Manually unlock a user account"""
+        if self._redis:
+            try:
+                self._redis.delete(f"user_locked:{identifier}")
+                self._redis.delete(f"user_fail:{identifier}")
+            except Exception:
+                pass
+        logger.info(f"USER UNLOCKED: {identifier}")
 
 
 # Global IP blocker instance
@@ -643,13 +648,11 @@ class AuditLogger:
     """
     Security audit logging
     Tracks all security-relevant events
-    Saves to database for persistence + keeps recent logs in memory for fast access
+    Saves to database for persistence, reads from DB for queries
     """
 
     def __init__(self):
-        self._logs: List[Dict] = []
-        self._lock = threading.Lock()
-        self._max_logs = 1000  # Keep last 1000 logs in memory for fast access
+        pass
 
     def log(self, event_type: str, severity: str = "INFO",
             user_id: int = None, details: Dict = None):
@@ -674,14 +677,7 @@ class AuditLogger:
             'details': details or {}
         }
 
-        # Add to memory log for fast recent access
-        with self._lock:
-            self._logs.append(event)
-            # Trim if too many logs
-            if len(self._logs) > self._max_logs:
-                self._logs = self._logs[-self._max_logs:]
-
-        # Also log to file/console
+        # Log to file/console
         log_message = f"AUDIT: [{severity}] {event_type}"
         if user_id:
             log_message += f" user_id={user_id}"
@@ -746,16 +742,7 @@ class AuditLogger:
             return [log.to_dict() for log in logs]
         except Exception as e:
             logger.error(f"Failed to get audit logs from database: {e}")
-            # Fallback to memory logs if database fails
-            with self._lock:
-                logs = self._logs.copy()
-            if event_type:
-                logs = [l for l in logs if l['event_type'] == event_type]
-            if user_id:
-                logs = [l for l in logs if l['user_id'] == user_id]
-            if severity:
-                logs = [l for l in logs if l['severity'] == severity]
-            return sorted(logs, key=lambda x: x['timestamp'], reverse=True)[:limit]
+            return []
 
     def get_failed_logins(self, hours: int = 24) -> List[Dict]:
         """Get failed login attempts in last N hours"""
@@ -771,12 +758,7 @@ class AuditLogger:
             return [log.to_dict() for log in logs]
         except Exception as e:
             logger.error(f"Failed to get failed logins from database: {e}")
-            cutoff = datetime.utcnow() - timedelta(hours=hours)
-            return [
-                l for l in self._logs
-                if l['event_type'] == 'LOGIN_FAILED'
-                and datetime.fromisoformat(l['timestamp']) > cutoff
-            ]
+            return []
 
     def get_security_summary(self) -> Dict:
         """Get security event summary from database"""
@@ -833,23 +815,14 @@ class AuditLogger:
             }
         except Exception as e:
             logger.error(f"Failed to get security summary from database: {e}")
-            # Fallback to memory-based summary
-            now = datetime.utcnow()
-            last_24h = now - timedelta(hours=24)
-
-            recent_logs = [
-                l for l in self._logs
-                if datetime.fromisoformat(l['timestamp']) > last_24h
-            ]
-
             return {
-                'total_events_24h': len(recent_logs),
-                'failed_logins_24h': len([l for l in recent_logs if l['event_type'] == 'LOGIN_FAILED']),
-                'rate_limit_hits_24h': len([l for l in recent_logs if l['event_type'] == 'RATE_LIMIT_EXCEEDED']),
-                'blocked_ips_24h': len([l for l in recent_logs if l['event_type'] == 'IP_BLOCKED']),
-                'critical_events_24h': len([l for l in recent_logs if l['severity'] == 'CRITICAL']),
-                'blocked_ips_count': len(ip_blocker.get_blocked_ips()),
-                'suspicious_ips_count': len(ip_blocker.get_suspicious_ips())
+                'total_events_24h': 0,
+                'failed_logins_24h': 0,
+                'rate_limit_hits_24h': 0,
+                'blocked_ips_24h': 0,
+                'critical_events_24h': 0,
+                'blocked_ips_count': 0,
+                'suspicious_ips_count': 0
             }
 
 
@@ -1032,21 +1005,29 @@ def init_advanced_security(app: Flask):
         if suspicious_response:
             return suspicious_response
 
-    # Log all requests in production
-    @app.after_request
-    def log_request(response):
-        # Skip OPTIONS preflight and non-error responses
-        if is_production() and response.status_code >= 500 and request.method != 'OPTIONS':
-            audit_log(
-                "REQUEST_ERROR",
-                severity="CRITICAL",
-                details={
-                    "status_code": response.status_code,
-                    "path": request.path,
-                    "method": request.method
-                }
-            )
-        return response
+    # Auto-cleanup old audit logs on startup (keep last 30 days only)
+    with app.app_context():
+        try:
+            from models.security import SecurityAuditLog
+            cutoff = datetime.utcnow() - timedelta(days=30)
+            total_deleted = 0
+            batch_size = 5000
+            while True:
+                ids = db.session.query(SecurityAuditLog.id).filter(
+                    SecurityAuditLog.timestamp < cutoff
+                ).limit(batch_size).all()
+                if not ids:
+                    break
+                SecurityAuditLog.query.filter(
+                    SecurityAuditLog.id.in_([i[0] for i in ids])
+                ).delete(synchronize_session=False)
+                db.session.commit()
+                total_deleted += len(ids)
+            if total_deleted:
+                logger.info(f"Cleaned up {total_deleted} audit logs older than 30 days")
+        except Exception as e:
+            db.session.rollback()
+            logger.debug(f"Audit log cleanup skipped: {e}")
 
     logger.debug(f"Advanced security initialized (production={is_production()})")
 
@@ -1069,14 +1050,16 @@ def on_login_success(user_id: int):
     })
 
 
-def on_login_failed(email: str = None):
-    """Call this after failed login"""
+def on_login_failed(identifier: str = None):
+    """Call this after failed login — tracks both IP and user account"""
     ip = get_remote_address()
     ip_blocker.record_failed_login(ip)
+    if identifier:
+        ip_blocker.record_user_failed_login(identifier)
     audit_log(
         "LOGIN_FAILED",
         severity="WARNING",
-        details={"email": email[:50] if email else None}
+        details={"email": identifier[:50] if identifier else None, "ip": ip}
     )
 
 
@@ -1222,6 +1205,18 @@ def register_security_routes(app: Flask):
             audit_log("IP_UNBLOCKED", details={"ip": ip, "unblocked_by": user_id})
             return jsonify({"success": True, "message": f"IP {ip} unblocked"})
         return jsonify({"success": False, "error": "IP required"}), 400
+
+    @security_bp.route('/unlock-user', methods=['POST'])
+    @admin_required
+    def unlock_user():
+        """Unlock a user account (admin only)"""
+        data = request.get_json()
+        identifier = data.get('email') or data.get('phone')
+        if identifier:
+            ip_blocker.unlock_user(identifier)
+            audit_log("USER_UNLOCKED", details={"identifier": identifier[:50], "unlocked_by": g.user.get('user_id')})
+            return jsonify({"success": True, "message": f"User {identifier} unlocked"})
+        return jsonify({"success": False, "error": "Email or phone required"}), 400
 
     app.register_blueprint(security_bp)
     logger.debug("Security routes registered at /api/security/* (admin-protected)")

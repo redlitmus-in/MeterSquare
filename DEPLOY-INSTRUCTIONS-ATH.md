@@ -127,6 +127,67 @@ For FULL UPDATE (Backend + Frontend together)
 
 
 ================================================================
+  SECTION 2.5 — REDIS SETUP (Required for OTP & Rate Limiting)
+================================================================
+
+Redis is used for OTP storage, rate limiting, IP blocking cache,
+and general caching. Without Redis the app still works but falls
+back to in-memory storage (OTPs and rate limits won't survive
+backend restarts).
+
+----------------------------------------------------------------
+STEP 1 — Install Redis
+----------------------------------------------------------------
+
+  apt update && apt install redis-server -y
+
+----------------------------------------------------------------
+STEP 2 — Enable and start Redis
+----------------------------------------------------------------
+
+  systemctl enable redis-server
+  systemctl start redis-server
+
+----------------------------------------------------------------
+STEP 3 — Verify Redis is running
+----------------------------------------------------------------
+
+  redis-cli ping
+
+  MUST SEE: PONG
+  IF ERROR: Check logs → journalctl -u redis-server -n 20
+
+----------------------------------------------------------------
+STEP 4 — Add Redis URL to backend .env
+----------------------------------------------------------------
+
+  Open /root/msq-ath/backend/.env and add this line:
+
+    REDIS_URL=redis://localhost:6379/0
+
+  Then restart the backend:
+
+    systemctl restart msq-ath
+
+----------------------------------------------------------------
+STEP 5 — Verify Redis is connected
+----------------------------------------------------------------
+
+  journalctl -u msq-ath -n 20 --no-pager
+
+  Look for: "Redis connected" or no Redis errors in the logs.
+
+----------------------------------------------------------------
+Redis Daily Commands
+----------------------------------------------------------------
+
+  Check status:     systemctl status redis-server
+  Restart Redis:    systemctl restart redis-server
+  Monitor live:     redis-cli monitor
+  Check memory:     redis-cli info memory
+
+
+================================================================
   SECTION 3 — DAILY COMMANDS (Quick Reference)
 ================================================================
 

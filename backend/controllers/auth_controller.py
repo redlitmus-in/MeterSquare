@@ -21,11 +21,12 @@ import os
 
 # Import security logging functions
 try:
-    from utils.advanced_security import on_login_success, on_login_failed
+    from utils.advanced_security import on_login_success, on_login_failed, ip_blocker
 except ImportError:
-    # Fallback if advanced_security not available
     def on_login_success(user_id): pass
     def on_login_failed(email): pass
+    from types import SimpleNamespace
+    ip_blocker = SimpleNamespace(is_user_locked=lambda x: False)
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
 
@@ -132,9 +133,11 @@ def user_login():
         if not email:
             return jsonify({"error": "Email is required"}), 400
 
+        if ip_blocker.is_user_locked(email):
+            return jsonify({"error": "Account temporarily locked due to too many failed attempts. Please try again after 30 minutes."}), 429
+
         # Map frontend role to database role (e.g., 'procurement' -> 'buyer')
         db_role_name = map_frontend_role_to_db(role_name) if role_name else None
-
 
         # Build query to check user exists
         query = db.session.query(User).join(
@@ -422,6 +425,10 @@ def site_supervisor_login_sms():
         if login_method == "email" and not email:
             return jsonify({"error": "Email is required"}), 400
 
+        identifier = email if login_method == "email" else phone
+        if ip_blocker.is_user_locked(identifier):
+            return jsonify({"error": "Account temporarily locked due to too many failed attempts. Please try again after 30 minutes."}), 429
+
         # Clean phone number - remove all non-digits
         clean_phone = None
         phone_suffix = None
@@ -525,6 +532,10 @@ def verify_sms_otp_login():
             return jsonify({"error": "Phone number is required"}), 400
         if login_method == "email" and not email:
             return jsonify({"error": "Email is required"}), 400
+
+        identifier = email if login_method == "email" else phone
+        if ip_blocker.is_user_locked(identifier):
+            return jsonify({"error": "Account temporarily locked due to too many failed attempts. Please try again after 30 minutes."}), 429
 
         try:
             otp_input = int(otp_input)

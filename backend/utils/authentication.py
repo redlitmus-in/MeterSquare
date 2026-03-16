@@ -456,7 +456,18 @@ def verification_otp():
         return jsonify({"error": "OTP is required"}), 400
     if not email_id:
         return jsonify({"error": "Email is required"}), 400
-    
+
+    # Check if user account is locked (too many failed attempts)
+    try:
+        from utils.advanced_security import ip_blocker
+        if ip_blocker.is_user_locked(email_id):
+            return jsonify({
+                "error": "Account temporarily locked",
+                "message": "Too many failed attempts. Please try again in 30 minutes."
+            }), 429
+    except Exception:
+        pass
+
     # Assuming OTP is stored as int, convert input accordingly
     try:
         otp_input = int(otp_input)
