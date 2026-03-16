@@ -19,8 +19,8 @@ def get_environment():
 
 
 def is_production():
-    """Check if running in production environment"""
-    return get_environment() == "production"
+    """Check if running in a production-like environment (production or ath)"""
+    return get_environment() in ("production", "ath")
 
 
 def is_development():

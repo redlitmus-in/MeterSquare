@@ -51,6 +51,10 @@ def initialize_db(app):
         database_url = os.getenv("DATABASE_URL")
         if not database_url:
             raise ValueError("DATABASE_URL environment variable is required in production but is not set.")
+    elif environment == "ath":
+        database_url = os.getenv("ATH_DB_URL")
+        if not database_url:
+            raise ValueError("ATH_DATABASE_URL (or DATABASE_URL) is required for ath environment but is not set.")
     else:
         database_url = os.getenv("DEV_DATABASE_URL")
 
