@@ -5432,7 +5432,7 @@ def get_pending_boq():
 
         # OPTIMIZED: Use func.count() instead of .count()
         if page is not None:
-            total_count = query.with_entities(func.count()).scalar()
+            total_count = query.order_by(None).with_entities(func.count()).scalar()
 
             if total_count == 0:
                 return jsonify({
@@ -5577,7 +5577,7 @@ def get_approved_boq():
 
         # OPTIMIZED: Use func.count() instead of .count()
         if page is not None:
-            total_count = query.with_entities(func.count()).scalar()
+            total_count = query.order_by(None).with_entities(func.count()).scalar()
 
             if total_count == 0:
                 return jsonify({
@@ -5717,7 +5717,7 @@ def get_rejected_boq():
         # OPTIMIZED: Use func.count() instead of .count()
         from sqlalchemy import func
         if page is not None:
-            total_count = query.with_entities(func.count()).scalar()
+            total_count = query.order_by(None).with_entities(func.count()).scalar()
             if total_count == 0:
                 return jsonify({"message": "Rejected BOQs retrieved successfully", "count": 0, "data": [], "pagination": {"page": page, "page_size": page_size, "total_count": 0, "total_pages": 0, "has_next": False, "has_prev": False}}), 200
             offset = (page - 1) * page_size
@@ -5852,7 +5852,7 @@ def get_completed_boq():
         # OPTIMIZED: Use func.count() instead of .count()
         from sqlalchemy import func
         if page is not None:
-            total_count = query.with_entities(func.count()).scalar()
+            total_count = query.order_by(None).with_entities(func.count()).scalar()
             if total_count == 0:
                 return jsonify({"message": "Completed BOQs retrieved successfully", "count": 0, "data": [], "pagination": {"page": page, "page_size": page_size, "total_count": 0, "total_pages": 0, "has_next": False, "has_prev": False}}), 200
             offset = (page - 1) * page_size
@@ -5989,7 +5989,7 @@ def get_send_to_client_boq():
         # OPTIMIZED: Use func.count() instead of .count()
         from sqlalchemy import func
         if page is not None:
-            total_count = query.with_entities(func.count()).scalar()
+            total_count = query.order_by(None).with_entities(func.count()).scalar()
             if total_count == 0:
                 return jsonify({"message": "Send to client BOQs retrieved successfully", "count": 0, "data": [], "pagination": {"page": page, "page_size": page_size, "total_count": 0, "total_pages": 0, "has_next": False, "has_prev": False}}), 200
             offset = (page - 1) * page_size
@@ -6123,7 +6123,7 @@ def get_cancelled_boq():
         # OPTIMIZED: Use func.count() instead of .count()
         from sqlalchemy import func
         if page is not None:
-            total_count = query.with_entities(func.count()).scalar()
+            total_count = query.order_by(None).with_entities(func.count()).scalar()
             if total_count == 0:
                 return jsonify({"message": "Cancelled BOQs retrieved successfully", "count": 0, "data": [], "pagination": {"page": page, "page_size": page_size, "total_count": 0, "total_pages": 0, "has_next": False, "has_prev": False}}), 200
             offset = (page - 1) * page_size
@@ -6265,7 +6265,7 @@ def get_revisions_boq():
         # OPTIMIZED: Use func.count() instead of .count()
         from sqlalchemy import func
         if page is not None:
-            total_count = query.with_entities(func.count()).scalar()
+            total_count = query.order_by(None).with_entities(func.count()).scalar()
             if total_count == 0:
                 return jsonify({"message": "Revision BOQs retrieved successfully", "count": 0, "data": [], "pagination": {"page": page, "page_size": page_size, "total_count": 0, "total_pages": 0, "has_next": False, "has_prev": False}}), 200
             offset = (page - 1) * page_size

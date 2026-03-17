@@ -1,35 +1,40 @@
 #!/bin/bash
 # ================================================================
 # MeterSquare Deployment Script — Both Domains
-# Deploys msq.kol.tel (production) and msq.ath.cx (staging)
+# Both msq.kol.tel and msq.ath.cx use ZIP-based deployment.
 #
 # Usage:
-#   bash deploy.sh           → deploy both domains
-#   bash deploy.sh kol       → deploy only msq.kol.tel
-#   bash deploy.sh ath       → deploy only msq.ath.cx
+#   bash deploy.sh        → deploy BOTH domains (zip-based)
+#   bash deploy.sh kol    → deploy only msq.kol.tel (zip-based)
+#   bash deploy.sh ath    → deploy only msq.ath.cx  (zip-based)
+#
+# Before running this on the server:
+#   1. Build locally:  bash package-kol.sh  (or package-ath.sh)
+#   2. Send zip to admin
+#   3. Admin extracts:
+#        unzip msq-kol-YYYY-MM-DD.zip -d /root/msq
+#        unzip msq-ath-YYYY-MM-DD.zip -d /root/msq-ath
+#   4. Run:  bash deploy.sh kol   (or ath / both)
 # ================================================================
 
-set -e  # Exit on any error
+set -e
 
-# ---------------------------------------------------------------
-# Server paths — confirmed
-# ---------------------------------------------------------------
-PROJECT_ROOT_KOL="/root/msq"       # msq.kol.tel project root
-PROJECT_ROOT_ATH="/root/msq-ath"   # msq.ath.cx project root
-WEB_ROOT_KOL="/var/www/msq"        # msq.kol.tel nginx static files
-WEB_ROOT_ATH="/var/www/msq-ath"    # msq.ath.cx nginx static files
+PROJECT_ROOT_KOL="/root/msq"
+PROJECT_ROOT_ATH="/root/msq-ath"
+WEB_ROOT_KOL="/var/www/msq"
+WEB_ROOT_ATH="/var/www/msq-ath"
 
-TARGET="${1:-both}"   # default: deploy both
+TARGET="${1:-both}"
 
 echo "====================================="
 echo " MeterSquare Deployment — $TARGET"
 echo "====================================="
 
 # ---------------------------------------------------------------
-# STEP 1: Pull latest code (kol uses git, ath uses zip — skip git for ath)
+# STEP 0: Ensure Redis is running
 # ---------------------------------------------------------------
 echo ""
-echo "[0/5] Ensuring Redis is running (required for OTP & rate limiting)..."
+echo "[0/4] Ensuring Redis is running..."
 if ! command -v redis-server &>/dev/null; then
     echo "  Redis not installed — installing..."
     apt-get install -y redis-server
@@ -39,93 +44,99 @@ systemctl start redis-server 2>/dev/null || true
 redis-cli ping && echo "  Redis: PONG (OK)" || echo "  WARNING: Redis not responding"
 echo "Done."
 
+# ---------------------------------------------------------------
+# STEP 1: Install Python dependencies
+#   kol → venv
+#   ath → system pip3
+# ---------------------------------------------------------------
 echo ""
-echo "[1/5] Pulling latest code..."
+echo "[1/4] Installing Python dependencies..."
+
 if [[ "$TARGET" == "both" || "$TARGET" == "kol" ]]; then
-    echo "  Pulling /root/msq (git)..."
-    cd "$PROJECT_ROOT_KOL" && git pull origin main
+    echo "  msq.kol.tel (system pip3)..."
+    cd "$PROJECT_ROOT_KOL/backend"
+    pip3 install -r requirements.txt --quiet
 fi
+
 if [[ "$TARGET" == "both" || "$TARGET" == "ath" ]]; then
-    echo "  msq-ath uses zip deploy — skipping git pull."
-    echo "  Make sure you unzipped the latest files to $PROJECT_ROOT_ATH"
+    echo "  msq.ath.cx (system pip3)..."
+    cd "$PROJECT_ROOT_ATH/backend"
+    pip3 install -r requirements.txt --quiet
 fi
+
 echo "Done."
 
 # ---------------------------------------------------------------
-# STEP 2: Install Python dependencies
+# STEP 2: Deploy pre-built frontend (from zip — no npm build on server)
 # ---------------------------------------------------------------
 echo ""
-echo "[2/5] Installing Python dependencies..."
-if [[ "$TARGET" == "both" || "$TARGET" == "kol" ]]; then
-    cd "$PROJECT_ROOT_KOL/backend" && source venv/bin/activate && pip install -r requirements.txt --quiet
-fi
-if [[ "$TARGET" == "both" || "$TARGET" == "ath" ]]; then
-    cd "$PROJECT_ROOT_ATH/backend" && pip3 install -r requirements.txt --quiet
-fi
-echo "Done."
-
-# ---------------------------------------------------------------
-# STEP 3: Build frontend(s)
-# ---------------------------------------------------------------
-echo ""
-echo "[3/5] Building frontend..."
+echo "[2/4] Deploying frontend..."
 
 if [[ "$TARGET" == "both" || "$TARGET" == "kol" ]]; then
-    echo "  Building msq.kol.tel (production)..."
-    cd "$PROJECT_ROOT_KOL/frontend"
-    npm install --silent
-    npm run build:production
-    sudo mkdir -p "$WEB_ROOT_KOL"
-    sudo rm -rf "${WEB_ROOT_KOL:?}"/*
-    sudo cp -r "$PROJECT_ROOT_KOL/frontend/dist/." "$WEB_ROOT_KOL/"
+    echo "  msq.kol.tel — copying pre-built dist/..."
+    if [ ! -d "$PROJECT_ROOT_KOL/frontend/dist" ]; then
+        echo "  ERROR: $PROJECT_ROOT_KOL/frontend/dist/ not found."
+        echo "  Run  bash package-kol.sh  locally, then unzip to $PROJECT_ROOT_KOL"
+        exit 1
+    fi
+    mkdir -p "$WEB_ROOT_KOL"
+    rm -rf "${WEB_ROOT_KOL:?}"/*
+    cp -r "$PROJECT_ROOT_KOL/frontend/dist/." "$WEB_ROOT_KOL/"
     echo "  Deployed to $WEB_ROOT_KOL"
 fi
 
 if [[ "$TARGET" == "both" || "$TARGET" == "ath" ]]; then
-    echo "  Deploying msq.ath.cx frontend (pre-built dist from zip)..."
+    echo "  msq.ath.cx — copying pre-built dist/..."
     if [ ! -d "$PROJECT_ROOT_ATH/frontend/dist" ]; then
-        echo "  ERROR: frontend/dist/ not found. Include dist/ in the zip."
+        echo "  ERROR: $PROJECT_ROOT_ATH/frontend/dist/ not found."
+        echo "  Run  bash package-ath.sh  locally, then unzip to $PROJECT_ROOT_ATH"
         exit 1
     fi
-    sudo mkdir -p "$WEB_ROOT_ATH"
-    sudo rm -rf "${WEB_ROOT_ATH:?}"/*
-    sudo cp -r "$PROJECT_ROOT_ATH/frontend/dist/." "$WEB_ROOT_ATH/"
+    mkdir -p "$WEB_ROOT_ATH"
+    rm -rf "${WEB_ROOT_ATH:?}"/*
+    cp -r "$PROJECT_ROOT_ATH/frontend/dist/." "$WEB_ROOT_ATH/"
     echo "  Deployed to $WEB_ROOT_ATH"
 fi
 
 # ---------------------------------------------------------------
-# STEP 4: Reload nginx
+# STEP 3: Reload Nginx
 # ---------------------------------------------------------------
 echo ""
-echo "[4/5] Reloading Nginx..."
-sudo nginx -t && sudo systemctl reload nginx
+echo "[3/4] Reloading Nginx..."
+nginx -t && systemctl reload nginx
 echo "Done."
 
 # ---------------------------------------------------------------
-# STEP 5: Restart backend service(s)
+# STEP 4: Update systemd service + restart backend
 # ---------------------------------------------------------------
 echo ""
-echo "[5/5] Restarting backend(s)..."
+echo "[4/4] Updating service files and restarting backend(s)..."
 
 if [[ "$TARGET" == "both" || "$TARGET" == "kol" ]]; then
+    echo "  Updating msq.service..."
+    cp "$PROJECT_ROOT_KOL/backend/msq.service" /etc/systemd/system/msq.service
+    systemctl daemon-reload
     echo "  Reloading msq (msq.kol.tel, port 5000)..."
-    sudo systemctl reload msq 2>/dev/null || sudo systemctl restart msq
-    sudo systemctl status msq --no-pager -l | head -5
+    systemctl reload msq 2>/dev/null || systemctl restart msq
+    systemctl status msq --no-pager -l | head -5
 fi
 
 if [[ "$TARGET" == "both" || "$TARGET" == "ath" ]]; then
+    echo "  Updating msq-ath.service..."
+    cp "$PROJECT_ROOT_ATH/backend/msq-ath.service" /etc/systemd/system/msq-ath.service
+    systemctl daemon-reload
     echo "  Reloading msq-ath (msq.ath.cx, port 5050)..."
-    sudo systemctl reload msq-ath 2>/dev/null || sudo systemctl restart msq-ath
-    sudo systemctl status msq-ath --no-pager -l | head -5
+    systemctl reload msq-ath 2>/dev/null || systemctl restart msq-ath
+    systemctl status msq-ath --no-pager -l | head -5
 fi
 
 echo ""
 echo "====================================="
 echo " Deployment complete!"
 if [[ "$TARGET" == "both" || "$TARGET" == "kol" ]]; then
-echo " msq.kol.tel : https://msq.kol.tel/api/health"
+    echo " msq.kol.tel : https://msq.kol.tel/api/health"
 fi
 if [[ "$TARGET" == "both" || "$TARGET" == "ath" ]]; then
-echo " msq.ath.cx  : https://msq.ath.cx/api/health"
+    echo " msq.ath.cx  : https://msq.ath.cx/api/health"
 fi
 echo "====================================="

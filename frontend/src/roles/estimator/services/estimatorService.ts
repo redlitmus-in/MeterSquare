@@ -849,7 +849,7 @@ class EstimatorService {
     try {
       // Try to fetch from backend API first
       try {
-        const response = await apiClient.get('/estimator_dashboard');
+        const response = await deduplicatedGet('/estimator_dashboard');
         if (response.data) {
           // Map backend response (snake_case) to frontend format (camelCase)
           const backendData = response.data;

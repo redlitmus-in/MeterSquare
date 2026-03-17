@@ -8,13 +8,12 @@ User=root
 Group=root
 
 WorkingDirectory=/root/msq/backend
-Environment="PATH=/root/msq/backend/venv/bin"
 
 # Load all environment variables from .env file
 EnvironmentFile=/root/msq/backend/.env
 
-# Start Gunicorn with the config file
-ExecStart=/root/msq/backend/venv/bin/gunicorn \
+# Start Gunicorn with the config file (system pip3 — no venv)
+ExecStart=/usr/local/bin/gunicorn \
     --config /root/msq/backend/gunicorn.conf.py \
     "app:create_app()"
 
