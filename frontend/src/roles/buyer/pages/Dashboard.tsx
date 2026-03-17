@@ -16,9 +16,9 @@ import {
 } from '@heroicons/react/24/outline';
 import { useAuthStore } from '@/store/authStore';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
-import { getBuyerDashboardAnalytics, BuyerDashboardAnalytics, buyerService, Purchase, POChild, TDRejectedPOChild, PurchaseListResponse } from '../services/buyerService';
+import { getBuyerDashboardAnalytics, BuyerDashboardAnalytics } from '../services/buyerService';
 import { useAutoSync } from '@/hooks/useAutoSync';
-import { STALE_TIMES, REALTIME_TABLES } from '@/lib/constants';
+import { STALE_TIMES } from '@/lib/constants';
 
 // Format currency
 const formatCurrency = (value: number) => {
@@ -52,187 +52,51 @@ const BuyerDashboard: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // ========== FETCH SAME DATA AS PURCHASE ORDERS PAGE ==========
-  // This ensures counts ALWAYS match between Dashboard and Purchase Orders
-
-  // Fetch pending purchases (same API as PurchaseOrders)
-  const { data: pendingData, isLoading: isPendingLoading, refetch: refetchPending } = useAutoSync<PurchaseListResponse>({
-    queryKey: ['buyer-pending-purchases-dashboard'],
-    fetchFn: () => buyerService.getPendingPurchases(1, 1000), // Get all for counting
-    realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL],
-    staleTime: STALE_TIMES.STANDARD,
-  });
-
-  // Fetch completed purchases
-  const { data: completedData, isLoading: isCompletedLoading, refetch: refetchCompleted } = useAutoSync<PurchaseListResponse>({
-    queryKey: ['buyer-completed-purchases-dashboard'],
-    fetchFn: () => buyerService.getCompletedPurchases(1, 1000),
-    realtimeTables: [...REALTIME_TABLES.PURCHASES],
+  // ========== SINGLE ANALYTICS FETCH (replaces 5 × 1000-record list fetches) ==========
+  // The /buyer/dashboard endpoint pre-aggregates all counts server-side in one query.
+  const { data: analyticsData, isLoading: loading, refetch: refetchAnalytics } = useAutoSync<BuyerDashboardAnalytics>({
+    queryKey: ['buyer-dashboard-analytics'],
+    fetchFn: () => getBuyerDashboardAnalytics(30),
+    // Listen to all tables that affect dashboard counts
+    realtimeTables: ['purchases', 'purchase_materials', 'change_requests', 'po_child'],
     staleTime: STALE_TIMES.DASHBOARD,
   });
 
-  // Fetch rejected purchases
-  const { data: rejectedData, isLoading: isRejectedLoading, refetch: refetchRejected } = useAutoSync<PurchaseListResponse>({
-    queryKey: ['buyer-rejected-purchases-dashboard'],
-    fetchFn: () => buyerService.getRejectedPurchases(1, 1000),
-    realtimeTables: [...REALTIME_TABLES.PURCHASES_FULL],
-    staleTime: STALE_TIMES.DASHBOARD,
-  });
-
-  // Fetch approved PO children
-  const { data: approvedPOChildrenData, isLoading: isApprovedPOChildrenLoading, refetch: refetchApprovedPOChildren } = useAutoSync<{
-    success: boolean;
-    approved_count: number;
-    po_children: POChild[];
-  }>({
-    queryKey: ['buyer-approved-po-children-dashboard'],
-    fetchFn: () => buyerService.getApprovedPOChildren(),
-    realtimeTables: ['po_child', ...REALTIME_TABLES.CHANGE_REQUESTS],
-    staleTime: STALE_TIMES.STANDARD,
-  });
-
-  // Fetch pending PO children
-  const { data: pendingPOChildrenData, isLoading: isPendingPOChildrenLoading, refetch: refetchPendingPOChildren } = useAutoSync<{
-    success: boolean;
-    pending_count: number;
-    po_children: POChild[];
-  }>({
-    queryKey: ['buyer-pending-po-children-dashboard'],
-    fetchFn: () => buyerService.getBuyerPendingPOChildren(),
-    realtimeTables: ['po_child', ...REALTIME_TABLES.CHANGE_REQUESTS],
-    staleTime: STALE_TIMES.STANDARD,
-  });
-
-  // Fetch analytics for other data (trends, store requests, deliveries, etc.)
+  // Sync analytics state for charts (store_requests, deliveries, trends, etc.)
   useEffect(() => {
-    const fetchOtherAnalytics = async () => {
-      try {
-        const data = await getBuyerDashboardAnalytics(30);
-        setAnalytics(data);
-      } catch (err) {
-        console.error('Failed to fetch analytics:', err);
-      }
-    };
-    fetchOtherAnalytics();
-  }, []);
+    if (analyticsData) setAnalytics(analyticsData);
+  }, [analyticsData]);
 
-  // ========== CLIENT-SIDE FILTERING (EXACT SAME AS PurchaseOrders.tsx) ==========
-  // Using 'any' to avoid type conflicts - the data structure is the same
-  const rawPendingPurchases = useMemo(() => {
-    return (pendingData?.pending_purchases || []) as any[];
-  }, [pendingData]);
+  const error = null; // Errors are handled by useAutoSync
 
-  const completedPurchases = useMemo(() => {
-    return (completedData?.completed_purchases || []) as any[];
-  }, [completedData]);
-
-  const completedPOChildren = useMemo(() => {
-    return ((completedData as any)?.completed_po_children || []) as any[];
-  }, [completedData]);
-
-  const rejectedPurchases = useMemo(() => {
-    return (rejectedData?.rejected_purchases || []) as any[];
-  }, [rejectedData]);
-
-  const tdRejectedPOChildren = useMemo(() => {
-    return ((rejectedData as any)?.td_rejected_po_children || []) as any[];
-  }, [rejectedData]);
-
-  const approvedPOChildren = useMemo(() => {
-    return (approvedPOChildrenData?.po_children || []) as any[];
-  }, [approvedPOChildrenData]);
-
-  const pendingPOChildren = useMemo(() => {
-    return (pendingPOChildrenData?.po_children || []) as any[];
-  }, [pendingPOChildrenData]);
-
-  // ========== FILTERING LOGIC (EXACT COPY FROM PurchaseOrders.tsx) ==========
-  // Pending Purchase: No vendor, not pending TD, not rejected, not sent to store
-  const pendingPurchaseItems = useMemo(() => {
-    return rawPendingPurchases.filter((p: any) =>
-      !p.vendor_id &&
-      !p.vendor_selection_pending_td_approval &&
-      !p.rejection_type &&
-      !p.store_requests_pending &&
-      !p.all_store_requests_approved
-    );
-  }, [rawPendingPurchases]);
-
-  // Store Approved: All store requests approved, no vendor
-  const storeApprovedItems = useMemo(() => {
-    return rawPendingPurchases.filter((p: any) =>
-      p.all_store_requests_approved &&
-      !p.vendor_id &&
-      !p.rejection_type
-    );
-  }, [rawPendingPurchases]);
-
-  // Vendor Approved: Has vendor, not pending TD approval
-  const vendorApprovedItems = useMemo(() => {
-    return rawPendingPurchases.filter((p: any) => p.vendor_id && !p.vendor_selection_pending_td_approval && !p.rejection_type);
-  }, [rawPendingPurchases]);
-
-  // Store Requests Pending
-  const storeRequestsPending = useMemo(() => {
-    return rawPendingPurchases.filter((p: any) => p.store_requests_pending && !p.rejection_type);
-  }, [rawPendingPurchases]);
-
-  // Vendor Pending TD Approval
-  const vendorPendingApproval = useMemo(() => {
-    return rawPendingPurchases.filter((p: any) => p.vendor_selection_pending_td_approval && !p.rejection_type);
-  }, [rawPendingPurchases]);
-
-  // Calculate vendor pending actual count (same as PurchaseOrders.tsx)
-  const vendorPendingActualCount = useMemo(() => {
-    const parentIdsWithPOChildren = new Set(
-      pendingPOChildren.map((child: any) => child.parent_cr_id).filter(Boolean)
-    );
-    const parentsWithoutChildren = vendorPendingApproval.filter(
-      (p: any) => !parentIdsWithPOChildren.has(p.cr_id)
-    );
-    const items = [...parentsWithoutChildren, ...pendingPOChildren];
-    const seen = new Set<string>();
-    return items.filter((item: any) => {
-      const key = 'parent_cr_id' in item
-        ? `poChild-${item.id}`
-        : `purchase-${item.cr_id}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).length;
-  }, [vendorPendingApproval, pendingPOChildren]);
-
-  // ========== STATS (EXACT SAME CALCULATION AS PurchaseOrders.tsx line 475-487) ==========
+  // ========== STATS (derived from server-aggregated counts) ==========
   const stats = useMemo(() => {
+    const po = analyticsData?.purchase_orders;
+    const poc = analyticsData?.po_children;
+    if (!po || !poc) return { ongoing: 0, pendingPurchase: 0, storeApproved: 0, vendorApproved: 0, pendingApproval: 0, storeRequestsPending: 0, vendorPendingApproval: 0, completed: 0, rejected: 0 };
+    const vendorPendingApproval = po.pending_td_approval + poc.pending_td_approval;
     return {
-      ongoing: pendingPurchaseItems.length + storeApprovedItems.length + vendorApprovedItems.length + approvedPOChildren.length,
-      pendingPurchase: pendingPurchaseItems.length,
-      storeApproved: storeApprovedItems.length,
-      vendorApproved: vendorApprovedItems.length + approvedPOChildren.length,
-      pendingApproval: storeRequestsPending.length + vendorPendingActualCount,
-      storeRequestsPending: storeRequestsPending.length,
-      vendorPendingApproval: vendorPendingActualCount,
-      completed: completedPurchases.length + completedPOChildren.length,
-      rejected: rejectedPurchases.length + tdRejectedPOChildren.length
+      ongoing: po.total_ongoing,
+      pendingPurchase: po.pending_vendor_selection,
+      storeApproved: po.store_approved,
+      vendorApproved: po.ready_to_complete + poc.vendor_approved,
+      pendingApproval: po.store_requests_pending + vendorPendingApproval,
+      storeRequestsPending: po.store_requests_pending,
+      vendorPendingApproval,
+      completed: po.completed + po.routed_to_store + poc.completed,
+      rejected: po.rejected + poc.rejected,
     };
-  }, [pendingPurchaseItems, storeApprovedItems, vendorApprovedItems, approvedPOChildren, vendorPendingActualCount, completedPurchases, completedPOChildren, rejectedPurchases, tdRejectedPOChildren, storeRequestsPending]);
+  }, [analyticsData]);
 
-  // Combined loading state
-  const loading = isPendingLoading || isCompletedLoading || isRejectedLoading || isApprovedPOChildrenLoading || isPendingPOChildrenLoading;
-  const error = null; // Errors are handled by individual queries
+  // Completed sub-counts for the KPI card breakdown
+  const completedPurchasesCount = (analyticsData?.purchase_orders.completed ?? 0) + (analyticsData?.purchase_orders.routed_to_store ?? 0);
+  const completedPOChildrenCount = analyticsData?.po_children.completed ?? 0;
 
   // Refresh all data
   const fetchAnalytics = async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     try {
-      await Promise.all([
-        refetchPending(),
-        refetchCompleted(),
-        refetchRejected(),
-        refetchApprovedPOChildren(),
-        refetchPendingPOChildren(),
-        getBuyerDashboardAnalytics(30).then(setAnalytics)
-      ]);
+      await refetchAnalytics();
     } finally {
       setRefreshing(false);
     }
@@ -616,11 +480,11 @@ const BuyerDashboard: React.FC = () => {
             <div className="mt-2 text-xs space-y-1">
               <div className="flex justify-between">
                 <span className="text-gray-500">Purchase Orders</span>
-                <span className="font-medium text-emerald-600">{completedPurchases.length}</span>
+                <span className="font-medium text-emerald-600">{completedPurchasesCount}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Split POs</span>
-                <span className="font-medium text-emerald-600">{completedPOChildren.length}</span>
+                <span className="font-medium text-emerald-600">{completedPOChildrenCount}</span>
               </div>
             </div>
           </motion.div>

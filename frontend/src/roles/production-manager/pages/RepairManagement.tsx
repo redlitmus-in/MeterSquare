@@ -139,16 +139,22 @@ const RepairManagement: React.FC = () => {
     setProcessing(true);
     try {
       if (confirmAction === 'repair') {
-        // Mark as repaired and move from backup stock to main stock
         await inventoryService.addRepairedToStock(selectedItem.return_id!, repairNotes);
         showSuccess('Material marked as repaired and added to main stock');
+        // Update status in state — item moves from pending tab to completed tab without re-fetch
+        setRepairItems(prev => prev.map(item =>
+          item.return_id === selectedItem.return_id
+            ? { ...item, disposal_status: 'repaired' }
+            : item
+        ));
       } else {
-        // Request disposal - send to TD for approval
         await inventoryService.requestDisposalFromRepair(
           selectedItem.return_id!,
           repairNotes || `Material from RDN ${selectedItem.reference_number} cannot be repaired`
         );
         showSuccess('Disposal request sent to Technical Director');
+        // Remove from list — item is now in disposal workflow (not repair workflow)
+        setRepairItems(prev => prev.filter(item => item.return_id !== selectedItem.return_id));
       }
 
       setShowConfirmModal(false);
@@ -156,7 +162,6 @@ const RepairManagement: React.FC = () => {
       setSelectedItem(null);
       setConfirmAction(null);
       setRepairNotes('');
-      await fetchRepairItems();
     } catch (error: any) {
       console.error('Error processing action:', error);
       showError(error.message || 'Failed to process action');

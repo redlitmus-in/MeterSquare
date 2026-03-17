@@ -139,6 +139,12 @@ const ChangeRequestsPage: React.FC = () => {
   // Track if we've already auto-opened modal from URL (to prevent reopening on close)
   const hasAutoOpenedRef = useRef<string | null>(null);
 
+  // Refs to read current tab values inside effects without making them reactive deps
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+  const vendorApprovalsSubTabRef = useRef(vendorApprovalsSubTab);
+  useEffect(() => { vendorApprovalsSubTabRef.current = vendorApprovalsSubTab; }, [vendorApprovalsSubTab]);
+
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const changeRequestUpdateTimestamp = useRealtimeUpdateStore(state => state.changeRequestUpdateTimestamp);
 
@@ -157,18 +163,22 @@ const ChangeRequestsPage: React.FC = () => {
     // This provides instant updates across all roles without server load.
   }, []);
 
-  // ✅ RELOAD change requests when real-time update is received
+  // ✅ RELOAD only the active tab's data on real-time update (not all 6 loaders)
   useEffect(() => {
-    // Skip initial mount
     if (changeRequestUpdateTimestamp === 0) return;
 
-    loadChangeRequests(false); // Silent reload without loading spinner
-    loadCompletedRequests(false); // Also reload completed requests
-    loadVendorApprovals(); // Also reload vendor approvals
-    loadPendingPOChildren(); // Also reload PO children
-    loadApprovedPOChildren(); // Also reload approved PO children
-    loadRejectedPOChildren(); // Also reload rejected PO children
-  }, [changeRequestUpdateTimestamp]); // Reload whenever timestamp changes
+    const tab = activeTabRef.current;
+    if (tab === 'vendor_approvals') {
+      loadVendorApprovals();
+      loadPendingPOChildren();
+      loadApprovedPOChildren();
+      loadRejectedPOChildren();
+    } else if (tab === 'completed') {
+      loadCompletedRequests(false);
+    } else {
+      loadChangeRequests(false);
+    }
+  }, [changeRequestUpdateTimestamp]);
 
   // ✅ PERFORMANCE: Reload when page changes
   useEffect(() => {
@@ -251,34 +261,16 @@ const ChangeRequestsPage: React.FC = () => {
 
   const loadVendorApprovals = async () => {
     try {
-      // Fetch all change requests and filter for vendor approvals
-      const response = await changeRequestService.getChangeRequests();
+      // Fetch only CRs that have a vendor_selection_status (not all 200+ CRs)
+      const response = await changeRequestService.getChangeRequests(undefined, 100, undefined, 'has_any');
       if (response.success && response.data) {
-        console.log('🔍 All change requests:', response.data);
-        console.log('📊 Total change requests:', response.data.length);
-
-        // Filter for change requests with vendor selection (pending, approved, or rejected)
-        // Include ALL CRs that have a vendor_selection_status
+        // All returned CRs already have vendor_selection_status; filter for valid statuses
         const pendingVendorApprovals = response.data.filter(
           (cr: ChangeRequestItem) => {
             const vendorStatus = cr.vendor_selection_status;
-
-            // Check if this CR has a vendor selection status (pending, approved, or rejected)
-            const hasVendorSelection = vendorStatus && ['pending_td_approval', 'approved', 'rejected'].includes(vendorStatus);
-
-            console.log(`CR-${cr.cr_id}:`, {
-              status: cr.status,
-              vendor_selection_status: cr.vendor_selection_status,
-              selected_vendor_name: cr.selected_vendor_name,
-              formatted_cr_id: cr.formatted_cr_id,
-              hasVendorSelection
-            });
-
-            return hasVendorSelection;
+            return vendorStatus && ['pending_td_approval', 'approved', 'rejected'].includes(vendorStatus);
           }
         );
-
-        console.log('✅ Filtered vendor approvals:', pendingVendorApprovals.length);
 
         // Map to Purchase format for compatibility
         const mappedApprovals: Purchase[] = pendingVendorApprovals.map((cr: ChangeRequestItem) => {
@@ -345,7 +337,6 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await buyerService.getPendingPOChildren();
       if (response.success) {
-        console.log('🔍 Pending PO Children:', response.po_children);
         const children = response.po_children || [];
         // Sort by updated_at (latest first), fallback to created_at
         const sorted = children.sort((a, b) => {
@@ -363,11 +354,8 @@ const ChangeRequestsPage: React.FC = () => {
   // Load approved PO children (for approved sub-tab)
   const loadApprovedPOChildren = async () => {
     try {
-      console.log('📥 Loading approved PO children for TD...');
       const response = await buyerService.getApprovedPOChildren();
-      console.log('📥 Approved PO Children response:', response);
       if (response.success) {
-        console.log('✅ Approved PO Children loaded:', response.po_children?.length || 0, 'items');
         const children = response.po_children || [];
         // Exclude store-routed POChildren - TD only manages vendor approvals
         const vendorOnly = children.filter((pc: any) => pc.routing_type !== 'store');
@@ -375,16 +363,14 @@ const ChangeRequestsPage: React.FC = () => {
         const sorted = vendorOnly.sort((a, b) => {
           const dateA = new Date(a.updated_at || a.created_at).getTime();
           const dateB = new Date(b.updated_at || b.created_at).getTime();
-          return dateB - dateA; // Descending (newest first)
+          return dateB - dateA;
         });
         setApprovedPOChildren(sorted);
       } else {
-        console.warn('⚠️ Approved PO Children response not successful:', response);
         setApprovedPOChildren([]);
       }
     } catch (error: any) {
-      console.error('❌ Error loading approved PO children:', error);
-      // Don't show error toast, just set empty state to avoid breaking UI
+      console.error('Error loading approved PO children:', error);
       setApprovedPOChildren([]);
     }
   };
@@ -394,7 +380,6 @@ const ChangeRequestsPage: React.FC = () => {
     try {
       const response = await buyerService.getRejectedPOChildren();
       if (response.success) {
-        console.log('🚫 Rejected PO Children loaded:', response.po_children?.length || 0, 'items');
         const children = response.po_children || [];
         // Sort by updated_at (latest first), fallback to created_at
         const sorted = children.sort((a, b) => {

@@ -117,6 +117,9 @@ export function useAutoSync<TData = any>({
 
   // Silent background refresh without UI flicker
   const silentRefresh = useCallback(async () => {
+    // Skip if a fetch is already in progress — the in-flight request will return fresh data.
+    // Without this guard, real-time events firing during an active fetch cause duplicate requests.
+    if (queryClient.isFetching({ queryKey }) > 0) return;
     // Invalidate and refetch in background
     await queryClient.invalidateQueries({ queryKey, refetchType: 'active' });
   }, [queryClient, queryKey]);

@@ -332,6 +332,11 @@ const ProjectApprovals: React.FC = () => {
   // ✅ LISTEN TO REAL-TIME UPDATES - This makes data reload automatically!
   const boqUpdateTimestamp = useRealtimeUpdateStore(state => state.boqUpdateTimestamp);
 
+  // Ref to read filterStatus inside realtime effect without making it a dependency
+  // (avoids double loadBOQs when tab changes, since filterStatus useEffect also calls loadBOQs)
+  const filterStatusRef = useRef(filterStatus);
+  useEffect(() => { filterStatusRef.current = filterStatus; }, [filterStatus]);
+
   // Load tab counts from backend
   const loadTabCounts = async () => {
     try {
@@ -356,6 +361,9 @@ const ProjectApprovals: React.FC = () => {
   }, []); // Empty dependency array - run only once on mount
 
   // ✅ RELOAD BOQs when real-time update is received
+  // NOTE: filterStatus intentionally omitted from deps — we use filterStatusRef to read its current
+  // value without triggering this effect on tab changes. Tab changes are handled by the separate
+  // filterStatus useEffect below. Having filterStatus in both caused double loadBOQs() on every tab switch.
   useEffect(() => {
     // Skip initial mount (timestamp is set on mount)
     if (boqUpdateTimestamp === 0) return;
@@ -364,12 +372,12 @@ const ProjectApprovals: React.FC = () => {
     loadBOQs(false); // Silent reload without loading spinner
     loadTabCounts(); // Reload tab counts
 
-    // Reload tab-specific data based on active tab
-    if (filterStatus === 'revisions') {
+    // Reload tab-specific data based on active tab (read via ref, not dep)
+    if (filterStatusRef.current === 'revisions') {
       loadRevisionTabs(); // Reload revision tabs
     }
     // Note: 'assigned' tab data (pendingDayExtensions) will auto-reload via useEffect when boqs updates
-  }, [boqUpdateTimestamp, filterStatus]); // Reload whenever timestamp OR active tab changes
+  }, [boqUpdateTimestamp]); // Only reload when realtime update fires, NOT on tab change
 
   // State for revision sub-tab (internal/client) from URL
   const [urlSubTab, setUrlSubTab] = useState<'client' | 'internal'>('client');

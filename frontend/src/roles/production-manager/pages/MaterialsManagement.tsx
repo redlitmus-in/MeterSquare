@@ -57,11 +57,12 @@ const MaterialsManagement: React.FC = () => {
     is_active: true
   });
 
-  // Fetch materials on component mount
+  // Fetch on mount only — all filter/category/status filtering is client-side,
+  // so re-fetching on filter change just duplicates the same API call.
   useEffect(() => {
     fetchMaterials();
     fetchPendingRequests();
-  }, [statusFilter, categoryFilter]);
+  }, []);
 
   // Fetch requests when tab changes
   useEffect(() => {

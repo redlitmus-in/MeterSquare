@@ -442,18 +442,6 @@ const PurchaseOrders: React.FC = () => {
       ...filteredPOChildren
     ];
 
-    // Debug logging to check what we're sorting
-    console.log('🔍 Mixed Ordering Debug:', {
-      totalItems: combined.length,
-      parentPurchases: filteredPurchases.length,
-      poChildren: filteredPOChildren.length,
-      sample: combined.slice(0, 5).map(item => ({
-        id: isPOChild(item) ? `POChild-${item.id}` : `Purchase-${item.cr_id}`,
-        created_at: item.created_at,
-        type: isPOChild(item) ? 'POChild' : 'Purchase'
-      }))
-    });
-
     // Sort by updated_at (fallback to created_at) in descending order — recently updated POs show first
     const sorted = combined.sort((a, b) => {
       const updatedA = (a as any).updated_at;
@@ -462,14 +450,6 @@ const PurchaseOrders: React.FC = () => {
       const dateB = updatedB ? new Date(updatedB).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
       return dateB - dateA;
     });
-
-    // Debug logging after sort
-    console.log('✅ After sorting (first 10):', sorted.slice(0, 10).map(item => ({
-      id: isPOChild(item) ? `POChild-${item.id}` : `Purchase-${item.cr_id}`,
-      created_at: item.created_at,
-      type: isPOChild(item) ? 'POChild' : 'Purchase',
-      date: item.created_at ? new Date(item.created_at).toLocaleString() : 'No date'
-    })));
 
     return sorted;
   }, [activeTab, ongoingSubTab, filteredPurchases, vendorApprovedPOChildren, searchTerm]);

@@ -346,9 +346,7 @@ const StockOutPage: React.FC = () => {
         }
       }
 
-      // Refresh materials list to get updated stock values
-      const materialsData = await inventoryService.getAllInventoryItems();
-      setMaterials(materialsData);
+      // No inventory refresh needed — stock only changes when a DN is ISSUED, not on IMR approval
       showSuccess('Request approved successfully');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to approve request';

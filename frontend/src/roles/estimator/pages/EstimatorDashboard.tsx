@@ -78,7 +78,8 @@ const EstimatorDashboard: React.FC = () => {
 
   const loadClientPending = async () => {
     try {
-      const result = await estimatorService.getClientPendingBOQs();
+      // Fetch only 5 from backend — dashboard only shows 5
+      const result = await estimatorService.getClientPendingBOQs(5);
       if (result.success) {
         setClientPendingBOQs(result.data.slice(0, 5));
       }
@@ -89,7 +90,8 @@ const EstimatorDashboard: React.FC = () => {
 
   const loadClientRejected = async () => {
     try {
-      const result = await estimatorService.getClientRejectedBOQs();
+      // Fetch 20 from backend (buffer for client-side Client_Rejected filter), show 5
+      const result = await estimatorService.getClientRejectedBOQs(20);
       if (result.success) {
         setClientRejectedBOQs(result.data.slice(0, 5));
       }
@@ -100,7 +102,8 @@ const EstimatorDashboard: React.FC = () => {
 
   const loadCompletedProjects = async () => {
     try {
-      const result = await estimatorService.getApprovedBOQs();
+      // Fetch 50 most recent approved BOQs — enough to deduplicate into 5 unique projects
+      const result = await estimatorService.getApprovedBOQs(50);
       if (result.success) {
         // Group by project and take top 5
         const projectMap = new Map();

@@ -63,9 +63,10 @@ class EstimatorService {
     }
   }
 
-  async getApprovedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+  async getApprovedBOQs(pageSize?: number): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await deduplicatedGet('/approved_boq');
+      const config = pageSize ? { params: { page: 1, page_size: pageSize } } : undefined;
+      const response = await deduplicatedGet('/approved_boq', config);
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -119,9 +120,10 @@ class EstimatorService {
     }
   }
 
-  async getSentBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+  async getSentBOQs(pageSize?: number): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await deduplicatedGet('/all_send_boq');
+      const config = pageSize ? { params: { page: 1, page_size: pageSize } } : undefined;
+      const response = await deduplicatedGet('/all_send_boq', config);
       return {
         success: true,
         data: response.data?.data || response.data || [],
@@ -134,14 +136,16 @@ class EstimatorService {
   }
 
   // Get BOQs sent to client (Client Pending) - same as getSentBOQs but with clearer naming
-  async getClientPendingBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
-    return this.getSentBOQs();
+  async getClientPendingBOQs(pageSize?: number): Promise<{ success: boolean; data: any[]; count: number }> {
+    return this.getSentBOQs(pageSize);
   }
 
   // Get BOQs rejected by client
-  async getClientRejectedBOQs(): Promise<{ success: boolean; data: any[]; count: number }> {
+  // pageSize: fetch this many from backend before client-side filtering for Client_Rejected status
+  async getClientRejectedBOQs(pageSize?: number): Promise<{ success: boolean; data: any[]; count: number }> {
     try {
-      const response = await deduplicatedGet('/rejected_boq');
+      const config = pageSize ? { params: { page: 1, page_size: pageSize } } : undefined;
+      const response = await deduplicatedGet('/rejected_boq', config);
       // Filter only client-rejected BOQs (status: Client_Rejected or client_rejected)
       const clientRejected = (response.data?.data || response.data || []).filter((boq: any) =>
         boq.status === 'Client_Rejected' || boq.status === 'client_rejected'

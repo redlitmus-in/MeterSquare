@@ -242,8 +242,8 @@ class ChangeRequestService {
    * Get all change requests (role-filtered by backend)
    * GET /api/change-requests
    */
-  // ✅ PERFORMANCE: Added pagination parameters and status filter
-  async getChangeRequests(page?: number, pageSize: number = 50, status?: string): Promise<{
+  // ✅ PERFORMANCE: Added pagination parameters, status filter, and vendor_selection_status filter
+  async getChangeRequests(page?: number, pageSize: number = 50, status?: string, vendorSelectionStatus?: string): Promise<{
     success: boolean;
     data: ChangeRequestItem[];
     message?: string;
@@ -272,6 +272,9 @@ class ChangeRequestService {
       }
       if (status) {
         params.status = status;
+      }
+      if (vendorSelectionStatus) {
+        params.vendor_selection_status = vendorSelectionStatus;
       }
 
       const response = await apiClient.get('/change-requests', { params });

@@ -1005,6 +1005,7 @@ def get_all_change_requests():
         page_size = request.args.get('page_size', default=20, type=int)
         page_size = min(page_size, 100)  # Cap at 100 items per page
         status_filter = request.args.get('status', type=str)  # Optional status filter
+        vendor_selection_status_filter = request.args.get('vendor_selection_status', type=str)  # Filter by vendor selection status
 
         current_user = getattr(g, 'user', None)
         if not current_user:
@@ -1465,6 +1466,13 @@ def get_all_change_requests():
                 query = query.filter(ChangeRequest.status.in_(CR_COMPLETED_STATUSES))
             else:
                 query = query.filter(ChangeRequest.status == status_filter)
+
+        # Apply vendor_selection_status filter if provided (e.g., 'has_any' fetches only CRs with a vendor selection)
+        if vendor_selection_status_filter:
+            if vendor_selection_status_filter == 'has_any':
+                query = query.filter(ChangeRequest.vendor_selection_status.isnot(None))
+            else:
+                query = query.filter(ChangeRequest.vendor_selection_status == vendor_selection_status_filter)
 
         # Execute query with optional pagination
         ordered_query = query.order_by(ChangeRequest.created_at.desc())
