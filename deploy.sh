@@ -45,9 +45,7 @@ redis-cli ping && echo "  Redis: PONG (OK)" || echo "  WARNING: Redis not respon
 echo "Done."
 
 # ---------------------------------------------------------------
-# STEP 1: Install Python dependencies
-#   kol → venv
-#   ath → system pip3
+# STEP 1: Install Python dependencies (system pip3 — both kol and ath)
 # ---------------------------------------------------------------
 echo ""
 echo "[1/4] Installing Python dependencies..."
