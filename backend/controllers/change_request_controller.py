@@ -1147,47 +1147,9 @@ def get_all_change_requests():
             )
 
             if is_admin_viewing:
-                # Admin viewing as PM - show requests only from projects where a PM is assigned
-                # This simulates what a PM would see - only their assigned projects
-                from sqlalchemy import not_, and_, or_
-
-                # Get ALL projects that have a PM assigned (any PM)
-                all_pm_projects = Project.query.filter(
-                    Project.user_id.isnot(None),
-                    Project.is_deleted == False
-                ).all()
-                all_pm_project_ids = [p.project_id for p in all_pm_projects]
-
-                # SS/SE pending drafts (not yet sent to PM) - these should be EXCLUDED
-                # Use lower() for case-insensitive comparison (DB has 'siteEngineer', 'SiteEngineer', etc.)
-                is_ss_se_pending_draft = and_(
-                    func.lower(ChangeRequest.requested_by_role).in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']),
-                    ChangeRequest.status == 'pending'
-                )
-
-                # Admin/PM created requests (any status) - these should be INCLUDED
-                is_admin_or_pm_created = func.lower(ChangeRequest.requested_by_role).in_(['admin', 'projectmanager', 'project_manager', 'pm'])
-
-                # SS/SE requests that are NOT pending (sent for approval) - these should be INCLUDED
-                is_ss_se_sent_for_review = and_(
-                    func.lower(ChangeRequest.requested_by_role).in_(['siteengineer', 'site_engineer', 'sitesupervisor', 'site_supervisor']),
-                    ChangeRequest.status != 'pending'
-                )
-                # Filter: only show requests from projects with PM assigned
-                # Include: admin/PM created (any status) OR SS/SE created but sent for review (not pending)
-                if all_pm_project_ids:
-                    query = query.filter(
-                        and_(
-                            ChangeRequest.project_id.in_(all_pm_project_ids),
-                            or_(
-                                is_admin_or_pm_created,  # Admin/PM created requests
-                                is_ss_se_sent_for_review  # SS/SE requests sent for review
-                            )
-                        )
-                    )
-                else:
-                    # No projects with PM, show nothing
-                    query = query.filter(ChangeRequest.cr_id == -1)
+                # Admin viewing as PM - show ALL change requests across all project managers
+                # Admin must have full visibility regardless of which role they're viewing as
+                pass  # No filtering - admin sees everything
 
             elif pm_project_ids:
                 # Regular PM - sees requests from their assigned projects

@@ -242,6 +242,61 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
     [requestMaterialsForComparison]
   );
 
+  // Resolve vendor details from multiple sources in priority order:
+  // 1. vendor_details nested object (from POChild or backend join)
+  // 2. Flat vendor_* fields on the changeRequest
+  // 3. material_vendor_selections — the vendor data stored when buyer made the selection
+  const resolvedVendorDetails = useMemo(() => {
+    if (!changeRequest) return null;
+    const cr = changeRequest as any;
+
+    if (cr.vendor_details) return cr.vendor_details;
+
+    if (cr.vendor_contact_person || cr.vendor_email) {
+      return {
+        company_name: changeRequest.selected_vendor_name,
+        contact_person_name: cr.vendor_contact_person,
+        email: cr.vendor_email,
+        phone_code: cr.vendor_phone_code,
+        phone: cr.vendor_phone,
+        category: cr.vendor_category,
+        street_address: cr.vendor_street_address,
+        city: cr.vendor_city,
+        state: cr.vendor_state,
+        country: cr.vendor_country,
+        pin_code: cr.vendor_pin_code,
+        gst_number: cr.vendor_gst_number,
+      };
+    }
+
+    const selections = cr.material_vendor_selections;
+    if (selections && typeof selections === 'object') {
+      const selectedVendorId = changeRequest.selected_vendor_id;
+      for (const key of Object.keys(selections)) {
+        const entry = selections[key];
+        if (!entry || typeof entry !== 'object') continue;
+        if (selectedVendorId && entry.vendor_id !== selectedVendorId) continue;
+        const compList: any[] = entry.vendor_comparison_data || [];
+        const compData = compList.find((v: any) => v.is_selected) || compList[0] || {};
+        return {
+          company_name: entry.vendor_name || compData.vendor_name,
+          contact_person_name: entry.vendor_contact_person || compData.vendor_contact_person,
+          email: entry.vendor_email || compData.vendor_email,
+          phone_code: entry.vendor_phone_code || compData.vendor_phone_code,
+          phone: entry.vendor_phone || compData.vendor_phone,
+          category: compData.vendor_category,
+          street_address: compData.vendor_street_address,
+          city: compData.vendor_city,
+          state: compData.vendor_state,
+          country: compData.vendor_country,
+          pin_code: compData.vendor_pin_code,
+          gst_number: compData.vendor_gst_number,
+        };
+      }
+    }
+    return null;
+  }, [changeRequest]);
+
   if (!isOpen || !changeRequest) return null;
 
   const getStatusColor = (status: string) => {
@@ -868,7 +923,7 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <div className="flex justify-between items-start">
                             <span className="text-xs text-gray-500 min-w-[100px]">Company Name</span>
                             <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                              {(changeRequest as any).vendor_details?.company_name || changeRequest.selected_vendor_name || 'N/A'}
+                              {resolvedVendorDetails?.company_name || changeRequest.selected_vendor_name || 'N/A'}
                             </span>
                           </div>
 
@@ -876,28 +931,28 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <div className="flex justify-between items-start">
                             <span className="text-xs text-gray-500 min-w-[100px]">Contact Person</span>
                             <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                              {(changeRequest as any).vendor_details?.contact_person_name || (changeRequest as any).vendor_contact_person || 'N/A'}
+                              {resolvedVendorDetails?.contact_person_name || 'N/A'}
                             </span>
                           </div>
 
                           <div className="flex justify-between items-start">
                             <span className="text-xs text-gray-500 min-w-[100px]">Email</span>
                             <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4 break-words">
-                              {(changeRequest as any).vendor_details?.email || (changeRequest as any).vendor_email || 'N/A'}
+                              {resolvedVendorDetails?.email || 'N/A'}
                             </span>
                           </div>
 
                           <div className="flex justify-between items-start">
                             <span className="text-xs text-gray-500 min-w-[100px]">Phone</span>
                             <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                              {(changeRequest as any).vendor_details?.phone_code || (changeRequest as any).vendor_phone_code || ''} {(changeRequest as any).vendor_details?.phone || (changeRequest as any).vendor_phone || 'N/A'}
+                              {resolvedVendorDetails?.phone_code || ''} {resolvedVendorDetails?.phone || 'N/A'}
                             </span>
                           </div>
 
                           <div className="flex justify-between items-start">
                             <span className="text-xs text-gray-500 min-w-[100px]">Category</span>
                             <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                              {(changeRequest as any).vendor_details?.category || (changeRequest as any).vendor_category || 'N/A'}
+                              {resolvedVendorDetails?.category || 'N/A'}
                             </span>
                           </div>
                         </div>
@@ -914,25 +969,25 @@ const ChangeRequestDetailsModal: React.FC<ChangeRequestDetailsModalProps> = ({
                           <h3 className="text-sm font-semibold text-gray-900">Selection Details</h3>
                         </div>
                         <div className="space-y-3">
-                          {/* Show address from vendor_details or fallback fields */}
+                          {/* Show address from resolvedVendorDetails */}
                           <div className="flex justify-between items-start">
                             <span className="text-xs text-gray-500 min-w-[100px]">Address</span>
                             <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
                               {[
-                                (changeRequest as any).vendor_details?.street_address || (changeRequest as any).vendor_street_address,
-                                (changeRequest as any).vendor_details?.city || (changeRequest as any).vendor_city,
-                                (changeRequest as any).vendor_details?.state || (changeRequest as any).vendor_state,
-                                (changeRequest as any).vendor_details?.country || (changeRequest as any).vendor_country,
-                                (changeRequest as any).vendor_details?.pin_code || (changeRequest as any).vendor_pin_code
+                                resolvedVendorDetails?.street_address,
+                                resolvedVendorDetails?.city,
+                                resolvedVendorDetails?.state,
+                                resolvedVendorDetails?.country,
+                                resolvedVendorDetails?.pin_code
                               ].filter(Boolean).join(', ') || 'N/A'}
                             </span>
                           </div>
 
-                          {/* Show GST/TRN from vendor_details or fallback field */}
+                          {/* Show GST/TRN from resolvedVendorDetails */}
                           <div className="flex justify-between items-start">
                             <span className="text-xs text-gray-500 min-w-[100px]">GST/TRN Number</span>
                             <span className="text-sm font-medium text-gray-900 text-right flex-1 ml-4">
-                              {(changeRequest as any).vendor_details?.gst_number || (changeRequest as any).vendor_gst_number || 'N/A'}
+                              {resolvedVendorDetails?.gst_number || 'N/A'}
                             </span>
                           </div>
 

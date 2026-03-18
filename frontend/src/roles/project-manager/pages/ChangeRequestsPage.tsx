@@ -220,7 +220,11 @@ const ChangeRequestsPage: React.FC = () => {
     if (showLoadingSpinner) setIsLoading(true);
     setIsFetching(true);
     try {
-      const response = await changeRequestService.getChangeRequests(currentPage, perPage);
+      // Admin viewing as PM: fetch all records (no pagination) so all tabs show correct counts
+      const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role_name?.toLowerCase() === 'admin';
+      const response = isAdmin
+        ? await changeRequestService.getChangeRequests()
+        : await changeRequestService.getChangeRequests(currentPage, perPage);
       if (response.success) {
         setChangeRequestsData(response.data);
         if (response.pagination) {
