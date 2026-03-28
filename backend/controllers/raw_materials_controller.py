@@ -17,6 +17,7 @@ from sqlalchemy import or_, and_, func
 from config.db import db
 from models.raw_materials_catalog import RawMaterialsCatalog
 from models.user import User
+from models.boq import BOQDetails
 from config.logging import get_logger
 
 log = get_logger()
@@ -483,6 +484,56 @@ def delete_raw_material(material_id):
         return jsonify({
             'success': False,
             'error': 'Failed to delete raw material',
+            'message': str(e)
+        }), 500
+
+
+def get_non_boq_catalogue_materials():
+    """
+    GET /api/raw-materials/non-boq-materials
+
+    Return active raw materials catalogue items that are NOT already listed
+    in the given BOQ. Allows PM/SE to pick additional items from the catalogue
+    without re-entering all fields manually.
+
+    Query Parameters:
+    - boq_id (optional): The BOQ to exclude materials from
+    - search (optional): Filter by name, brand, or category
+
+    Returns:
+    - materials: List of catalogue materials not present in the BOQ
+    - total_count: Number of materials returned
+    """
+    try:
+        search = request.args.get('search', '').strip()
+
+        # Build catalogue query — return all active items
+        query = RawMaterialsCatalog.query.filter(RawMaterialsCatalog.is_active == True)
+
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.filter(
+                or_(
+                    RawMaterialsCatalog.material_name.ilike(search_pattern),
+                    RawMaterialsCatalog.brand.ilike(search_pattern),
+                    RawMaterialsCatalog.category.ilike(search_pattern)
+                )
+            )
+
+        query = query.order_by(RawMaterialsCatalog.material_name.asc())
+        all_materials = query.all()
+
+        return jsonify({
+            'success': True,
+            'materials': [m.to_dict() for m in all_materials],
+            'total_count': len(all_materials)
+        }), 200
+
+    except Exception as e:
+        log.error(f"Error fetching non-BOQ catalogue materials: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch catalogue materials',
             'message': str(e)
         }), 500
 

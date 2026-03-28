@@ -276,15 +276,16 @@ def check_store_availability(cr_id):
         ).all()
 
         def _find_inventory_by_name(name):
-            # Find first inventory item whose name contains 'name' (case-insensitive)
-            name_lower = name.lower()
+            # Normalize: strip, lowercase, collapse all extra spaces — then exact match only
+            name_norm = ' '.join(name.strip().lower().split())
             for _item in _all_inventory_items:
-                if name_lower in (_item.material_name or '').lower():
+                item_norm = ' '.join((_item.material_name or '').strip().lower().split())
+                if name_norm == item_norm:
                     return _item
             return None
 
         for mat in materials:
-            mat_name = mat.get('material_name') or mat.get('name') or ''
+            mat_name = (mat.get('material_name') or mat.get('name') or '').strip()
             mat_qty = mat.get('quantity', 0)
 
             # Skip materials already in active POChildren (sent to vendor / pending TD approval)

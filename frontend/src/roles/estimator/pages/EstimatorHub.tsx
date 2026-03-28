@@ -227,18 +227,6 @@ const ProjectCreationForm: React.FC<{
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="location">Location *</Label>
-          <Label htmlFor="client_email">Client Email</Label>
-          <Input
-            id="client_email"
-            type="email"
-            value={formData.client_email}
-            onChange={(e) => handleChange('client_email', e.target.value)}
-            placeholder="Enter client email address"
-          />
-        </div>
-
-        <div className="space-y-2">
           <Label htmlFor="location">Location</Label>
           <Input
             id="location"

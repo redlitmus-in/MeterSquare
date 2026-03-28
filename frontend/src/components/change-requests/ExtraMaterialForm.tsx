@@ -5,13 +5,16 @@ import {
   TrashIcon,
   ExclamationTriangleIcon,
   InformationCircleIcon,
-  CalculatorIcon
+  CalculatorIcon,
+  BookOpenIcon,
+  PencilSquareIcon
 } from '@heroicons/react/24/outline';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import { apiClient, API_BASE_URL } from '@/api/config';
 import { useAuthStore } from '@/store/authStore';
 import { useAdminViewStore } from '@/store/adminViewStore';
 import { changeRequestService } from '@/services/changeRequestService';
+import { rawMaterialsService, RawMaterial } from '@/services/rawMaterialsService';
 import { MATERIAL_CONSUMING_STATUSES } from '@/lib/constants';
 
 interface Project {
@@ -63,6 +66,8 @@ interface Material {
 interface MaterialItem {
   id: string;
   isNew: boolean;
+  fromCatalogue?: boolean;       // True when selected from raw_materials_catalog (not in BOQ)
+  catalogueMaterialId?: number;  // ID in raw_materials_catalog
   subItemId?: string;  // The sub-item (scope) ID like "Protection"
   subItemName: string;  // The sub-item (scope) name like "Protection"
   materialId?: string;  // The actual material ID like "Bubble Wrap"
@@ -293,6 +298,17 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const [existingRequests, setExistingRequests] = useState<any[]>([]);
   const [showExistingRequests, setShowExistingRequests] = useState(false);
   const [loadingRequests, setLoadingRequests] = useState(false);
+
+  // Catalogue picker state
+  // pickerSubItemId  — which sub-item has the picker open (null = closed)
+  // pickerMode       — 'choice'    : showing "From Catalogue | Enter Manually" buttons
+  //                  — 'catalogue' : showing the searchable catalogue list
+  const [pickerSubItemId, setPickerSubItemId] = useState<string | null>(null);
+  const [pickerMode, setPickerMode] = useState<'choice' | 'catalogue'>('choice');
+  const [catalogueMaterials, setCatalogueMaterials] = useState<RawMaterial[]>([]);
+  const [catalogueLoading, setCatalogueLoading] = useState(false);
+  const [catalogueSearch, setCatalogueSearch] = useState('');
+
 
   // Custom units support - same as BOQCreationForm
   const [customUnits, setCustomUnits] = useState<{ value: string; label: string }[]>([]);
@@ -629,6 +645,73 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
   const removeMaterial = (id: string) => {
     setMaterials(materials.filter(m => m.id !== id));
   };
+
+  // Load catalogue materials for a sub-item (called when user enters catalogue mode)
+  const openCataloguePicker = async (subItemId: string, search?: string) => {
+    setPickerSubItemId(subItemId);
+    setPickerMode('catalogue');
+    setCatalogueLoading(true);
+    try {
+      const boqId = selectedBoq?.boq_id;
+      const results = await rawMaterialsService.getNonBoqCatalogueMaterials(boqId, search);
+      setCatalogueMaterials(results);
+    } catch {
+      showError('Failed to load catalogue materials');
+      setCatalogueMaterials([]);
+    } finally {
+      setCatalogueLoading(false);
+    }
+  };
+
+  // Close picker completely
+  const closePicker = () => {
+    setPickerSubItemId(null);
+    setPickerMode('choice');
+    setCatalogueMaterials([]);
+    setCatalogueSearch('');
+  };
+
+  // Add a material from the raw_materials_catalog as an additional item
+  const addMaterialFromCatalogue = (subItem: SubItem, catalogueMaterial: RawMaterial) => {
+    const newMaterial: MaterialItem = {
+      id: `material-${Date.now()}-${Math.random()}`,
+      isNew: true,
+      fromCatalogue: true,
+      catalogueMaterialId: catalogueMaterial.id,
+      subItemId: subItem.sub_item_id,
+      subItemName: subItem.sub_item_name,
+      materialName: catalogueMaterial.material_name,
+      quantity: 0,
+      unit: catalogueMaterial.unit || 'nos',
+      unitRate: catalogueMaterial.unit_price || 0,
+      reasonForNew: '',
+      justification: '',
+      brand: catalogueMaterial.brand || '',
+      specification: catalogueMaterial.specification || '',
+      size: catalogueMaterial.size || ''
+    };
+    setMaterials(prev => [...prev, newMaterial]);
+    closePicker();
+  };
+
+  // Per-sub-item type checks — so sub-item A's choices don't affect sub-item B
+  const subItemHasNewMaterial = useCallback((subItemName: string) =>
+    materials.some(m => m.subItemName === subItemName && m.isNew),
+  [materials]);
+
+  const subItemHasExistingMaterial = useCallback((subItemName: string) =>
+    materials.some(m => m.subItemName === subItemName && !m.isNew),
+  [materials]);
+
+  // Global mode: once any sub-item uses "Add New" or "Select Material",
+  // all other sub-items are locked to the same mode for consistency.
+  const globalMode = useMemo<'none' | 'select' | 'add_new'>(() => {
+    const hasSelectMaterial = materials.some(m => !m.isNew);
+    const hasAddNew = materials.some(m => m.isNew) || pickerSubItemId !== null;
+    if (hasSelectMaterial) return 'select';
+    if (hasAddNew) return 'add_new';
+    return 'none';
+  }, [materials, pickerSubItemId]);
 
   // Material type validation - Check if materials are mixed
   const materialTypeInfo = useMemo(() => {
@@ -1561,37 +1644,15 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
             <h3 className="text-sm font-medium text-gray-900">Materials Purchase Request</h3>
           </div>
 
-          {/* Warning banner for material type restriction */}
-          {materialTypeInfo.currentType && (
-            <div className={`p-3 rounded-lg border ${
-              materialTypeInfo.currentType === 'existing'
-                ? 'bg-blue-50 border-blue-200'
-                : 'bg-green-50 border-green-200'
-            }`}>
+          {/* Info banner — shown when mixed materials are in the request */}
+          {materialTypeInfo.isMixed && (
+            <div className="p-3 rounded-lg border bg-yellow-50 border-yellow-200">
               <div className="flex items-start gap-2">
-                <InformationCircleIcon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
-                  materialTypeInfo.currentType === 'existing'
-                    ? 'text-blue-600'
-                    : 'text-green-600'
-                }`} />
+                <InformationCircleIcon className="w-5 h-5 flex-shrink-0 mt-0.5 text-yellow-600" />
                 <div className="text-sm">
-                  <p className={`font-medium ${
-                    materialTypeInfo.currentType === 'existing'
-                      ? 'text-blue-900'
-                      : 'text-green-900'
-                  }`}>
-                    {materialTypeInfo.currentType === 'existing'
-                      ? 'Existing Materials Selected'
-                      : 'New Materials Selected'}
-                  </p>
-                  <p className={`text-xs mt-1 ${
-                    materialTypeInfo.currentType === 'existing'
-                      ? 'text-blue-700'
-                      : 'text-green-700'
-                  }`}>
-                    {materialTypeInfo.currentType === 'existing'
-                      ? 'You can only add existing BOQ materials in this request. To add new materials, create a separate request.'
-                      : 'You can only add new materials in this request. To add existing BOQ materials, create a separate request.'}
+                  <p className="font-medium text-yellow-900">Mixed Materials Request</p>
+                  <p className="text-xs mt-1 text-yellow-700">
+                    This request contains both existing BOQ materials and new/catalogue materials. It will go through Estimator review before purchase.
                   </p>
                 </div>
               </div>
@@ -1751,12 +1812,6 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                             return;
                           }
 
-                          // Prevent adding existing materials if new materials already exist
-                          if (materialTypeInfo.currentType === 'new') {
-                            showError('Cannot mix existing and new materials. Please create separate requests for each type.');
-                            e.target.value = ""; // Reset dropdown
-                            return;
-                          }
 
                           // Robust find: Try by ID first, fallback to name
                           let material = subItem.materials.find(m => m.material_id === selectedValue);
@@ -1817,14 +1872,29 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           // Reset dropdown to default
                           e.target.value = "";
                         }}
-                        disabled={materialTypeInfo.currentType === 'new' || !hasAvailableMaterials}
+                        disabled={
+                          !hasAvailableMaterials ||
+                          pickerSubItemId === subItem.sub_item_id ||
+                          subItemHasNewMaterial(subItem.sub_item_name) ||
+                          globalMode === 'add_new'
+                        }
                         className={`w-full pl-3 pr-10 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-[#243d8a] focus:border-[#243d8a] ${
-                          materialTypeInfo.currentType === 'new' || !hasAvailableMaterials
+                          !hasAvailableMaterials || pickerSubItemId === subItem.sub_item_id || subItemHasNewMaterial(subItem.sub_item_name) || globalMode === 'add_new'
                             ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed'
                             : 'bg-white border-gray-300'
                         }`}
                         defaultValue=""
-                        title={materialTypeInfo.currentType === 'new' ? 'Cannot add existing materials when new materials are selected' : ''}
+                        title={
+                          globalMode === 'add_new'
+                            ? 'Another sub-item is using Add New mode — remove it to switch to Select Material'
+                            : subItemHasNewMaterial(subItem.sub_item_name)
+                              ? 'This sub-item already has a new material added'
+                              : pickerSubItemId === subItem.sub_item_id
+                                ? 'Close the picker first to select an existing material'
+                                : !hasAvailableMaterials
+                                  ? 'No more BOQ materials available'
+                                  : ''
+                        }
                       >
                         <option value="">Select Material</option>
                         {subItem.materials
@@ -1884,44 +1954,138 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                     </div>
                     );
                   })()}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // Prevent adding new materials if existing materials already exist
-                      if (materialTypeInfo.currentType === 'existing') {
-                        showError('Cannot mix existing and new materials. Please create separate requests for each type.');
-                        return;
-                      }
+                  {/* Add New — picker with two modes */}
+                  {pickerSubItemId === subItem.sub_item_id ? (
+                    <div className="flex flex-col gap-2 p-2 bg-gray-50 border border-gray-200 rounded-lg shadow-sm w-full mt-1">
 
-                      // Add new material for this specific sub-item
-                      const newMaterial: MaterialItem = {
-                        id: `material-${Date.now()}-${Math.random()}`,
-                        isNew: true,
-                        subItemId: subItem.sub_item_id,
-                        subItemName: subItem.sub_item_name,
-                        materialName: '',
-                        quantity: 0,
-                        unit: 'nos',
-                        unitRate: 0,
-                        reasonForNew: '',
-                        justification: '',
-                        brand: '',
-                        specification: ''
-                      };
-                      // Use functional update to avoid stale state
-                      setMaterials(prevMaterials => [...prevMaterials, newMaterial]);
-                    }}
-                    disabled={materialTypeInfo.currentType === 'existing'}
-                    className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg shadow-md transition-all ${
-                      materialTypeInfo.currentType === 'existing'
-                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white hover:from-[#1e3270] hover:to-[#3d4f8a]'
-                    }`}
-                    title={materialTypeInfo.currentType === 'existing' ? 'Cannot add new materials when existing materials are selected' : ''}
-                  >
-                    <PlusIcon className="w-3.5 h-3.5" />
-                    Add New
-                  </button>
+                      {/* Mode: choice — show two option buttons */}
+                      {pickerMode === 'choice' && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-gray-500">Add material:</span>
+                          <button
+                            type="button"
+                            onClick={() => openCataloguePicker(subItem.sub_item_id)}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                          >
+                            <BookOpenIcon className="w-3.5 h-3.5" />
+                            From Catalogue
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              closePicker();
+                              const newMaterial: MaterialItem = {
+                                id: `material-${Date.now()}-${Math.random()}`,
+                                isNew: true,
+                                subItemId: subItem.sub_item_id,
+                                subItemName: subItem.sub_item_name,
+                                materialName: '',
+                                quantity: 0,
+                                unit: 'nos',
+                                unitRate: 0,
+                                reasonForNew: '',
+                                justification: '',
+                                brand: '',
+                                specification: ''
+                              };
+                              setMaterials(prevMaterials => [...prevMaterials, newMaterial]);
+                            }}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-orange-500 text-white hover:bg-orange-600 transition-colors"
+                          >
+                            <PencilSquareIcon className="w-3.5 h-3.5" />
+                            Enter Manually
+                          </button>
+                          <button
+                            type="button"
+                            onClick={closePicker}
+                            className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1.5"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Mode: catalogue — show search + results */}
+                      {pickerMode === 'catalogue' && (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-medium text-emerald-700">Select from Catalogue</span>
+                            <button
+                              type="button"
+                              onClick={() => { setPickerMode('choice'); setCatalogueMaterials([]); setCatalogueSearch(''); }}
+                              className="text-xs text-gray-400 hover:text-gray-600 ml-auto"
+                            >
+                              ← Back
+                            </button>
+                            <button type="button" onClick={closePicker} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+                          </div>
+                          <input
+                            type="text"
+                            value={catalogueSearch}
+                            onChange={(e) => {
+                              setCatalogueSearch(e.target.value);
+                              openCataloguePicker(subItem.sub_item_id, e.target.value);
+                            }}
+                            placeholder="Search by name, brand or category…"
+                            autoFocus
+                            className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                          />
+                          {catalogueLoading ? (
+                            <p className="text-xs text-gray-400 py-1 px-1">Loading…</p>
+                          ) : catalogueMaterials.length === 0 ? (
+                            <p className="text-xs text-gray-400 py-1 px-1">
+                              {catalogueSearch ? 'No catalogue materials match your search.' : 'No catalogue materials available (all already in BOQ).'}
+                            </p>
+                          ) : (
+                            <div className="max-h-44 overflow-y-auto border border-gray-200 rounded-lg bg-white divide-y divide-gray-100">
+                              {catalogueMaterials.map(mat => (
+                                <button
+                                  key={mat.id}
+                                  type="button"
+                                  onClick={() => addMaterialFromCatalogue(subItem, mat)}
+                                  className="w-full text-left px-3 py-2 hover:bg-emerald-50 transition-colors"
+                                >
+                                  <span className="block text-xs font-medium text-gray-900">{mat.material_name}</span>
+                                  <span className="block text-[10px] text-gray-500">
+                                    {[mat.brand, mat.size, mat.category].filter(Boolean).join(' · ')}
+                                    {mat.unit_price ? ` · AED${mat.unit_price}/${mat.unit}` : ''}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (subItemHasExistingMaterial(subItem.sub_item_name)) {
+                          showError('This sub-item already has an existing BOQ material. Remove it first to add a new material.');
+                          return;
+                        }
+                        setPickerSubItemId(subItem.sub_item_id);
+                        setPickerMode('choice');
+                      }}
+                      disabled={subItemHasExistingMaterial(subItem.sub_item_name) || globalMode === 'select'}
+                      className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg shadow-md transition-all ${
+                        subItemHasExistingMaterial(subItem.sub_item_name) || globalMode === 'select'
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          : 'bg-gradient-to-r from-[#243d8a] to-[#4a5fa8] text-white hover:from-[#1e3270] hover:to-[#3d4f8a]'
+                      }`}
+                      title={
+                        globalMode === 'select'
+                          ? 'Another sub-item is using Select Material mode — remove it to switch to Add New'
+                          : subItemHasExistingMaterial(subItem.sub_item_name)
+                            ? 'This sub-item already has an existing BOQ material'
+                            : ''
+                      }
+                    >
+                      <PlusIcon className="w-3.5 h-3.5" />
+                      Add New
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1940,7 +2104,12 @@ const ExtraMaterialForm: React.FC<ExtraMaterialFormProps> = ({ onSubmit, onCance
                           <p className="text-[10px] text-gray-500 mt-0.5">
                             {!material.isNew && `${material.materialName}`}
                             {!material.isNew && !isSiteEngineer && ` | AED${material.unitRate}/${material.unit}`}
-                            {material.isNew && <span className="text-green-600 font-medium">New Material</span>}
+                            {material.isNew && material.fromCatalogue && (
+                              <span className="text-emerald-600 font-medium">Catalogue Item</span>
+                            )}
+                            {material.isNew && !material.fromCatalogue && (
+                              <span className="text-orange-600 font-medium">New Material</span>
+                            )}
                           </p>
                         </div>
                         <button

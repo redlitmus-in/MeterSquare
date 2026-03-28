@@ -366,6 +366,33 @@ class RawMaterialsService {
   }
 
   /**
+   * Get catalogue materials NOT already listed in the given BOQ.
+   * Used in the Request Purchase form so PM/SE can pick additional
+   * items from the master catalogue without typing everything manually.
+   *
+   * @param boqId  - Exclude materials already in this BOQ (optional)
+   * @param search - Filter by name, brand, or category (optional)
+   */
+  async getNonBoqCatalogueMaterials(boqId?: number, search?: string): Promise<RawMaterial[]> {
+    try {
+      const params: Record<string, any> = {};
+      if (boqId) params.boq_id = boqId;
+      if (search?.trim()) params.search = search.trim();
+
+      const response = await apiClient.get(`${this.baseUrl}/non-boq-materials`, { params });
+
+      if (response.data.success) {
+        return response.data.materials as RawMaterial[];
+      }
+
+      throw new Error(response.data.message || 'Failed to fetch catalogue materials');
+    } catch (error: any) {
+      console.error('Error fetching non-BOQ catalogue materials:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get raw material by ID
    *
    * @param materialId - Material ID

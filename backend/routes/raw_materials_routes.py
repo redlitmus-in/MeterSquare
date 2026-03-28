@@ -7,14 +7,7 @@ select materials from it when creating BOQs.
 """
 
 from flask import Blueprint
-from controllers.raw_materials_controller import (
-    get_all_raw_materials,
-    search_raw_materials,
-    create_raw_material,
-    update_raw_material,
-    delete_raw_material,
-    get_material_categories
-)
+from controllers.raw_materials_controller import *
 from controllers.boq_controller import search_all_materials, get_all_item, get_all_master_materials, get_all_master_sub_items
 from controllers.auth_controller import jwt_required
 
@@ -125,6 +118,22 @@ def delete_material_route(material_id):
     Sets is_active to False instead of actually deleting the record.
     """
     return delete_raw_material(material_id)
+
+
+@raw_materials_routes.route('/non-boq-materials', methods=['GET'])
+@jwt_required
+def non_boq_materials_route():
+    """
+    GET /api/raw-materials/non-boq-materials
+
+    Return active catalogue materials NOT listed in the given BOQ.
+    Used by PM/SE to pick additional items from the catalogue.
+
+    Query Parameters:
+    - boq_id (optional): Exclude materials already in this BOQ
+    - search (optional): Filter by name, brand, or category
+    """
+    return get_non_boq_catalogue_materials()
 
 
 @raw_materials_routes.route('/master-search', methods=['GET'])
