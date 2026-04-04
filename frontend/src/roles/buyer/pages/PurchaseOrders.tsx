@@ -2272,15 +2272,15 @@ const PurchaseOrders: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* PO Children Display - Compact summary of sent vendor orders */}
-                  {purchase.po_children && purchase.po_children.length > 0 && (
+                  {/* PO Children Display - Compact summary of vendor orders sent to TD (excludes store-routed) */}
+                  {purchase.po_children && purchase.po_children.filter(pc => ['pending_td_approval', 'approved', 'rejected'].includes(pc.vendor_selection_status || '')).length > 0 && (
                     <div className="border-t border-gray-200 bg-gray-50/50 px-3 py-2">
                       <div className="text-[10px] font-semibold text-gray-500 mb-1.5 flex items-center gap-1">
                         <Package className="w-3 h-3" />
-                        Sent to TD ({purchase.po_children.length})
+                        Sent to TD ({purchase.po_children.filter(pc => ['pending_td_approval', 'approved', 'rejected'].includes(pc.vendor_selection_status || '')).length})
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {purchase.po_children.map((poChild) => (
+                        {purchase.po_children.filter(pc => ['pending_td_approval', 'approved', 'rejected'].includes(pc.vendor_selection_status || '')).map((poChild) => (
                           <div
                             key={`po-child-${getPOChildId(poChild)}`}
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${

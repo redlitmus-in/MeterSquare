@@ -437,7 +437,12 @@ def get_buyer_pending_purchases():
                 else:
                     store_requested_material_names = store_routed_names
 
-                all_store_requests_approved = approved_count == len(store_requests) and len(store_requests) > 0
+                # Only mark fully approved if ALL materials (not just some) were sent to store and approved
+                all_store_requests_approved = (
+                    approved_count == len(store_requests)
+                    and len(store_requests) > 0
+                    and len(store_routed_names) >= len(cr.materials_data or cr.sub_items_data or [])
+                )
                 any_store_request_rejected = rejected_count > 0
 
                 store_requested_count = len(store_requested_material_names)
