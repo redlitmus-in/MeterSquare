@@ -77,6 +77,7 @@ def create_app():
             allowed_origins += [
                 f"http://localhost:{_dev_port}", f"http://127.0.0.1:{_dev_port}",
                 "http://localhost:3000", "http://127.0.0.1:3000",
+                "http://localhost:3001", "http://127.0.0.1:3001",
             ]
         CORS(app, origins=allowed_origins, allow_headers=_cors_headers,
              methods=_cors_methods, supports_credentials=True, max_age=3600)
@@ -90,6 +91,7 @@ def create_app():
             dev_origins = [
                 f"http://localhost:{_dev_port}", f"http://127.0.0.1:{_dev_port}",
                 "http://localhost:3000", "http://127.0.0.1:3000",
+                "http://localhost:3001", "http://127.0.0.1:3001",
             ]
         CORS(app, origins=dev_origins, allow_headers=_cors_headers,
              methods=_cors_methods, supports_credentials=True, max_age=3600)

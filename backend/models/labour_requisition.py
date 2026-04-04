@@ -2,7 +2,7 @@
 Labour Requisition Model for Labour Management System
 Handles site requisition requests from Site Engineers.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from config.db import db
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -22,6 +22,7 @@ class LabourRequisition(db.Model):
     project_id = db.Column(db.Integer, db.ForeignKey("project.project_id"), nullable=False, index=True)
     site_name = db.Column(db.String(255), nullable=False)
     required_date = db.Column(db.Date, nullable=False, index=True)
+    end_date = db.Column(db.Date, nullable=True, index=True)  # Auto-calculated: next day for night shifts
     start_time = db.Column(db.Time, nullable=True)  # Work shift start time
     end_time = db.Column(db.Time, nullable=True)  # Work shift end time
     preferred_worker_ids = db.Column(JSONB, nullable=True)  # Array of preferred worker IDs: [1, 2, 3]
@@ -83,6 +84,16 @@ class LabourRequisition(db.Model):
     arrivals = db.relationship('LabourArrival', back_populates='requisition', lazy='dynamic')
     assignments = db.relationship('WorkerAssignment', backref='requisition', lazy='dynamic')
 
+    def _calculate_end_date(self):
+        """Calculate end date based on shift times. Night shift (end < start) means next day."""
+        if not self.required_date or not self.start_time or not self.end_time:
+            return self.required_date.isoformat() if self.required_date else None
+        start_min = self.start_time.hour * 60 + self.start_time.minute
+        end_min = self.end_time.hour * 60 + self.end_time.minute
+        if end_min <= start_min:
+            return (self.required_date + timedelta(days=1)).isoformat()
+        return self.required_date.isoformat()
+
     def to_dict(self):
         """Serialize requisition to dictionary for JSON responses"""
         # Calculate total workers count from labour_items
@@ -119,6 +130,8 @@ class LabourRequisition(db.Model):
             'project_name': self.project.project_name if self.project else None,
             'site_name': self.site_name,
             'required_date': self.required_date.isoformat() if self.required_date else None,
+            'start_date': self.required_date.isoformat() if self.required_date else None,
+            'end_date': (self.end_date or self.required_date).isoformat() if (self.end_date or self.required_date) else None,
             'start_time': self.start_time.strftime('%H:%M') if self.start_time else None,
             'end_time': self.end_time.strftime('%H:%M') if self.end_time else None,
             'preferred_worker_ids': self.preferred_worker_ids or [],

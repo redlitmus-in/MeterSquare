@@ -33,6 +33,9 @@ __pycache__/
 backend/**/__pycache__/
 backend/**/*.pyc
 
+# Session memory
+.remember/
+
 # IDE
 .vscode/
 .idea/

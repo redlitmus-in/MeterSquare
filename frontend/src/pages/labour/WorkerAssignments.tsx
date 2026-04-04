@@ -626,6 +626,9 @@ const WorkerAssignments: React.FC = () => {
                   <span className="text-xs text-gray-500 hidden md:inline">
                     <CalendarIcon className="w-3 h-3 inline mr-0.5" />
                     {new Date(req.required_date).toLocaleDateString()}
+                    {req.end_date && req.end_date !== req.required_date && (
+                      <span className="text-blue-600"> → {new Date(req.end_date).toLocaleDateString()}</span>
+                    )}
                   </span>
                   <span className="text-xs text-gray-400 truncate hidden lg:inline">{req.project_name || `#${req.project_id}`}</span>
                 </div>
@@ -835,11 +838,19 @@ const WorkerAssignments: React.FC = () => {
                     <p className="text-sm text-gray-900 font-semibold">{detailsRequisition.total_workers_count || detailsRequisition.workers_count} worker{(detailsRequisition.total_workers_count || detailsRequisition.workers_count) !== 1 ? 's' : ''}</p>
                   </div>
                   <div>
-                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Required Date</h3>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Start Date</h3>
                     <p className="text-sm text-gray-900">
                       {new Date(detailsRequisition.required_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
                     </p>
                   </div>
+                  {detailsRequisition.end_date && detailsRequisition.end_date !== detailsRequisition.required_date && (
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">End Date</h3>
+                      <p className="text-sm text-blue-700 font-medium">
+                        {new Date(detailsRequisition.end_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Work Shift</h3>
                     <p className="text-sm text-gray-900">

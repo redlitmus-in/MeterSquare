@@ -942,7 +942,7 @@ const ProfitReportView: React.FC<ProfitReportViewProps> = ({ boq, onClose }) => 
                               <tr>
                                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Req Code</th>
                                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Site</th>
-                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Required Date</th>
+                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Start Date</th>
                                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Skill / Role</th>
                                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Requested By</th>
                                 <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Requested</th>

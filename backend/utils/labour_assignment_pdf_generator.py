@@ -235,7 +235,8 @@ class LabourAssignmentPDFGenerator:
             ['Requisition Code:', requisition_data.get('requisition_code', 'N/A')],
             ['Project Name:', project_name_paragraph],
             ['Site/Location:', site_name_paragraph],
-            ['Required Date:', requisition_data.get('required_date', 'N/A')],
+            ['Start Date:', requisition_data.get('start_date', requisition_data.get('required_date', 'N/A'))],
+            ['End Date:', requisition_data.get('end_date', requisition_data.get('required_date', 'N/A'))],
             ['Work Time:', f"{requisition_data.get('start_time', 'N/A')} - {requisition_data.get('end_time', 'N/A')}"],
             ['Status:', requisition_data.get('status', 'N/A').upper()],
             ['Assignment Status:', requisition_data.get('assignment_status', 'N/A').upper()]

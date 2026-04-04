@@ -911,15 +911,16 @@ def download_assignment_pdf(requisition_id):
 
         # Format dates and times for display (convert UTC to local timezone)
         # Note: required_date is a DATE field (no time component), so no timezone conversion needed
-        if requisition_dict.get('required_date'):
-            # Parse as date string (YYYY-MM-DD format)
-            date_str = requisition_dict['required_date']
-            if isinstance(date_str, str):
-                try:
-                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                    requisition_dict['required_date'] = date_obj.strftime('%B %d, %Y')
-                except:
-                    pass
+        # Format date fields for display
+        for date_field in ['required_date', 'start_date', 'end_date']:
+            if requisition_dict.get(date_field):
+                date_str = requisition_dict[date_field]
+                if isinstance(date_str, str):
+                    try:
+                        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                        requisition_dict[date_field] = date_obj.strftime('%B %d, %Y')
+                    except:
+                        pass
 
         # Format time fields to 12-hour format with AM/PM
         # These are local work shift times, no timezone conversion needed

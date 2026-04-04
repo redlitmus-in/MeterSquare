@@ -385,11 +385,21 @@ def create_requisition():
                 if start_time and end_time and start_time == end_time:
                     return jsonify({"error": "Start time and end time cannot be the same"}), 400
 
+                # Calculate end_date: night shift (end < start) = next day
+                req_date = datetime.strptime(data['required_date'], '%Y-%m-%d').date()
+                end_date = req_date
+                if start_time and end_time:
+                    start_min = start_time.hour * 60 + start_time.minute
+                    end_min = end_time.hour * 60 + end_time.minute
+                    if end_min <= start_min:
+                        end_date = req_date + timedelta(days=1)
+
                 requisition = LabourRequisition(
                     requisition_code=requisition_code,
                     project_id=data['project_id'],
                     site_name=data['site_name'],
-                    required_date=datetime.strptime(data['required_date'], '%Y-%m-%d').date(),
+                    required_date=req_date,
+                    end_date=end_date,
                     start_time=start_time,
                     end_time=end_time,
                     preferred_worker_ids=data.get('preferred_worker_ids', []),
@@ -712,6 +722,17 @@ def update_requisition(requisition_id):
         if requisition.start_time and requisition.end_time and requisition.start_time == requisition.end_time:
             return jsonify({"error": "Start time and end time cannot be the same"}), 400
 
+        # Recalculate end_date based on shift times
+        if requisition.start_time and requisition.end_time and requisition.required_date:
+            start_min = requisition.start_time.hour * 60 + requisition.start_time.minute
+            end_min = requisition.end_time.hour * 60 + requisition.end_time.minute
+            if end_min <= start_min:
+                requisition.end_date = requisition.required_date + timedelta(days=1)
+            else:
+                requisition.end_date = requisition.required_date
+        else:
+            requisition.end_date = requisition.required_date
+
         requisition.last_modified_by = current_user.get('full_name', 'System')
 
         db.session.commit()
@@ -846,12 +867,22 @@ def resubmit_requisition(requisition_id):
                     return jsonify({"error": "workers_count must be between 1 and 500"}), 400
                 requisition.workers_count = count
 
+        # Recalculate end_date based on shift times
+        if requisition.start_time and requisition.end_time and requisition.required_date:
+            start_min = requisition.start_time.hour * 60 + requisition.start_time.minute
+            end_min = requisition.end_time.hour * 60 + requisition.end_time.minute
+            if end_min <= start_min:
+                requisition.end_date = requisition.required_date + timedelta(days=1)
+            else:
+                requisition.end_date = requisition.required_date
+        else:
+            requisition.end_date = requisition.required_date
+
         # Keep status unchanged - just update the data
         # User must manually click "Resend to PM" to send
         requisition.last_modified_by = current_user.get('full_name', 'System')
 
         db.session.commit()
-
 
         return jsonify({
             "success": True,
