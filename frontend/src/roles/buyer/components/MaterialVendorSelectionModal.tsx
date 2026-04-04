@@ -40,6 +40,7 @@ interface MaterialVendorSelectionModalProps {
   onVendorSelected?: () => void;
   onNotesUpdated?: () => void; // Called when supplier notes are saved
   viewMode?: 'buyer' | 'td'; // 'buyer' = full edit mode, 'td' = simplified view for TD to change vendor
+  hideStoreOption?: boolean; // When true, hides "Send to Store" routing option (used in vendor-instead flow)
 }
 
 // Constants
@@ -83,7 +84,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
   onClose,
   onVendorSelected,
   onNotesUpdated,
-  viewMode = 'buyer' // Default to buyer mode
+  viewMode = 'buyer', // Default to buyer mode
+  hideStoreOption = false
 }) => {
   const { user } = useAuthStore();
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -178,6 +180,22 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     });
   };
 
+  // Helper: check if a material belongs to a store-rejected POChild
+  // Used to hide those materials in normal Ongoing flow (they only appear in Rejected tab)
+  const isMaterialInStoreRejectedPOChild = (materialName: string): boolean => {
+    if (!purchase.po_children || purchase.po_children.length === 0) return false;
+    const materialNormalized = normalizeForComparison(materialName);
+    return purchase.po_children.some(poChild => {
+      const isStoreRejected =
+        poChild.vendor_selection_status === 'store_rejected' ||
+        poChild.status === 'store_rejected';
+      if (!isStoreRejected) return false;
+      return poChild.materials?.some(mat =>
+        normalizeForComparison(mat.material_name || '') === materialNormalized
+      );
+    });
+  };
+
   // Initialize per-material notes from purchase data
   useEffect(() => {
     if (!isOpen || !purchase) return;
@@ -206,7 +224,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
     // If fresh data is not available yet (isLoadingFreshData=true), wait
     // If fresh data fetch failed (freshPurchaseData=null after loading complete), use prop as fallback for first init only
 
-    const shouldInitialize = isOpen && vendors.length > 0 && vendorProducts.size > 0 && !isLoadingFreshData;
+    const shouldInitialize = isOpen && vendors.length > 0 && !isLoadingFreshData;
 
     if (!shouldInitialize) return;
 
@@ -238,11 +256,16 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
       // CRITICAL FIX: Filter out materials that are already in approved POChildren
       // This prevents duplicate vendor selection for already-approved materials
       // Also filter out materials that have been sent to store (store_requested_materials)
+      // Exception: when hideStoreOption=true (vendor-instead mode after store rejection),
+      // allow store-requested materials to be shown so the buyer can select a vendor instead.
       const storeRequestedMaterials = purchaseData.store_requested_materials || [];
       const availableMaterials = purchaseData.materials.filter(material => {
         const isApproved = isMaterialInApprovedPOChild(material.material_name);
-        const isSentToStore = storeRequestedMaterials.includes(material.material_name);
-        return !isApproved && !isSentToStore;
+        const isSentToStore = !hideStoreOption && storeRequestedMaterials.includes(material.material_name);
+        // Exclude materials belonging to a store-rejected POChild in normal flow.
+        // In vendor-instead mode (hideStoreOption=true) they must appear so buyer can assign a vendor.
+        const isStoreRejected = !hideStoreOption && isMaterialInStoreRejectedPOChild(material.material_name);
+        return !isApproved && !isSentToStore && !isStoreRejected;
       });
 
       const initialState = availableMaterials.map(material => {
@@ -1816,6 +1839,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                   <div className="flex items-center justify-center py-12">
                     <ModernLoadingSpinners size="sm" />
                   </div>
+                ) : materialVendors.length === 0 && !isLoadingFreshData ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Package className="w-12 h-12 text-gray-300 mb-3" />
+                    <p className="text-gray-500 font-medium">No materials to display</p>
+                    <p className="text-gray-400 text-sm mt-1">Materials could not be loaded for this purchase order.</p>
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     {materialVendors.map((material, materialIdx) => {
@@ -1999,7 +2028,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                         No routing selected
                                       </Badge>
                                       {/* ✅ NEW: Quick "Send to Store" button */}
-                                      {!isMaterialLocked && viewMode === 'buyer' && (
+                                      {!isMaterialLocked && viewMode === 'buyer' && !hideStoreOption && (
                                         <Button
                                           size="sm"
                                           variant="outline"
@@ -3591,7 +3620,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     )
                   ) : (
                     // Buyer Mode: Full status with locked materials
-                    lockedMaterialsCount === materialVendors.length ? (
+                    lockedMaterialsCount === materialVendors.length && materialVendors.length > 0 ? (
                       <span className="font-medium text-amber-600">
                         All materials are locked - Awaiting TD approval
                       </span>

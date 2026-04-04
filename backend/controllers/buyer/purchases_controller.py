@@ -571,6 +571,8 @@ def get_buyer_pending_purchases():
                     and not store_requests_pending
                     and not all_store_requests_approved
                     and has_store_requests
+                    # Only fully rejected if ALL materials were routed to store (none remaining for vendor)
+                    and len(store_routed_names) >= len(cr.materials_data or cr.sub_items_data or [])
                     # Don't mark as fully rejected if vendor-routed materials still need attention
                     and not any(
                         isinstance(info, dict) and info.get('routing') == 'vendor'
@@ -1381,9 +1383,13 @@ def get_buyer_rejected_purchases():
                         POChild.vendor_selection_status.in_(rejected_statuses),
                         # Fallback: Store POChildren where parent CR is store-rejected
                         # (handles legacy data where po_child_id wasn't linked on the IMR)
+                        # IMPORTANT: Only include POChildren that are individually rejected,
+                        # not siblings that are still active (sent_to_store / store_routed)
                         and_(
                             POChild.routing_type == 'store',
-                            ChangeRequest.store_request_status == 'store_rejected'
+                            ChangeRequest.store_request_status == 'store_rejected',
+                            ~POChild.status.in_(['sent_to_store']),
+                            POChild.vendor_selection_status != 'store_routed'
                         )
                     ),
                     POChild.is_deleted == False
@@ -1402,9 +1408,13 @@ def get_buyer_rejected_purchases():
                         POChild.status.in_(rejected_statuses),
                         POChild.vendor_selection_status.in_(rejected_statuses),
                         # Fallback: Store POChildren where parent CR is store-rejected
+                        # IMPORTANT: Only include POChildren that are individually rejected,
+                        # not siblings that are still active (sent_to_store / store_routed)
                         and_(
                             POChild.routing_type == 'store',
-                            ChangeRequest.store_request_status == 'store_rejected'
+                            ChangeRequest.store_request_status == 'store_rejected',
+                            ~POChild.status.in_(['sent_to_store']),
+                            POChild.vendor_selection_status != 'store_routed'
                         )
                     ),
                     POChild.is_deleted == False,

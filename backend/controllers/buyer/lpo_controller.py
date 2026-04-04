@@ -487,8 +487,15 @@ def save_lpo_customization(cr_id):
         try:
             if po_child_id:
                 customization = LPOCustomization.query.filter_by(cr_id=cr_id, po_child_id=po_child_id).first()
+                if not customization:
+                    # Fall back to any existing record for this cr_id (e.g. saved without po_child_id)
+                    customization = LPOCustomization.query.filter_by(cr_id=cr_id).first()
+                    if customization:
+                        customization.po_child_id = po_child_id
             else:
                 customization = LPOCustomization.query.filter_by(cr_id=cr_id, po_child_id=None).first()
+                if not customization:
+                    customization = LPOCustomization.query.filter_by(cr_id=cr_id).first()
         except Exception as table_error:
             db.session.rollback()
             # Table might not exist, try to create it

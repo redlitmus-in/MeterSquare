@@ -494,15 +494,13 @@ def complete_from_store(cr_id):
         ).all()
         has_vendor_po_children = any(pc.routing_type == 'vendor' for pc in existing_po_children)
 
-        # Create store POChild when:
-        # 1. Vendor POChildren exist (split scenario - some vendor, some store)
-        # 2. Not all materials routed yet (partial store - some to store, rest unassigned)
-        # Only skip POChild creation when ALL materials go to store in one shot (no split needed)
+        # Always create a new store POChild for each batch sent to store.
+        # Each separate store request (batch) gets its own POChild with an incremented suffix.
         store_po_child_id = None
         store_po_child_suffix = None
-        needs_store_po_child = (has_vendor_po_children or not all_materials_routed) and bool(grouped_materials)
 
-        if needs_store_po_child:
+        if grouped_materials:
+            # Calculate next suffix from all existing POChildren (vendor + store)
             max_suffix = 0
             for existing_po in existing_po_children:
                 if existing_po.suffix:
@@ -513,54 +511,39 @@ def complete_from_store(cr_id):
                     except (ValueError, AttributeError):
                         pass
 
-            existing_store_po = next(
-                (po for po in existing_po_children
-                 if po.routing_type == 'store' and po.status not in ('store_rejected', 'rejected')),
-                None
+            next_suffix = max_suffix + 1
+            store_po_child = POChild(
+                parent_cr_id=cr.cr_id,
+                suffix=f".{next_suffix}",
+                boq_id=cr.boq_id,
+                project_id=cr.project_id,
+                item_id=cr.item_id,
+                item_name=cr.item_name,
+                submission_group_id=None,
+                materials_data=grouped_materials,
+                materials_total_cost=sum(m.get('total_price', 0) for m in grouped_materials),
+                routing_type='store',
+                vendor_id=None,
+                vendor_name='M2 Store',
+                vendor_selected_by_buyer_id=current_user.get('user_id'),
+                vendor_selected_by_buyer_name=current_user.get('full_name', current_user.get('email')),
+                vendor_selection_date=datetime.utcnow(),
+                vendor_selection_status='store_routed',
+                status='sent_to_store',
+                is_deleted=False
             )
+            db.session.add(store_po_child)
+            db.session.flush()
+            store_po_child_id = store_po_child.id
+            store_po_child_suffix = f".{next_suffix}"
 
-            if not existing_store_po:
-                next_suffix = max_suffix + 1
-                store_po_child = POChild(
-                    parent_cr_id=cr.cr_id,
-                    suffix=f".{next_suffix}",
-                    boq_id=cr.boq_id,
-                    project_id=cr.project_id,
-                    item_id=cr.item_id,
-                    item_name=cr.item_name,
-                    submission_group_id=None,
-                    materials_data=grouped_materials,
-                    materials_total_cost=sum(m.get('total_price', 0) for m in grouped_materials),
-                    routing_type='store',
-                    vendor_id=None,
-                    vendor_name='M2 Store',
-                    vendor_selected_by_buyer_id=current_user.get('user_id'),
-                    vendor_selected_by_buyer_name=current_user.get('full_name', current_user.get('email')),
-                    vendor_selection_date=datetime.utcnow(),
-                    vendor_selection_status='store_routed',
-                    status='sent_to_store',
-                    is_deleted=False
-                )
-                db.session.add(store_po_child)
-                db.session.flush()
-                store_po_child_id = store_po_child.id
-                store_po_child_suffix = f".{next_suffix}"
+            if new_request and store_po_child_id:
+                new_request.po_child_id = store_po_child_id
 
-                if new_request and store_po_child_id:
-                    new_request.po_child_id = store_po_child_id
-
-            # Split/partial scenario: set store_request_status
             cr.store_request_status = 'pending_store_approval'
             if all_materials_routed:
-                cr.status = 'split_to_sub_crs'
+                cr.status = 'split_to_sub_crs' if has_vendor_po_children else 'sent_to_store'
             else:
-                cr.status = 'sent_to_store'
-        else:
-            # ALL materials to store (no split) — update parent CR directly, no POChild
-            if all_materials_routed:
-                cr.status = 'sent_to_store'
-                cr.store_request_status = 'pending_store_approval'
-            elif cr.status in ('pending', 'assigned_to_buyer', 'send_to_buyer', 'approved_by_pm'):
                 cr.status = 'sent_to_store'
 
         cr.purchase_notes = f"Requested from M2 Store by {current_user.get('full_name', current_user.get('email'))} on {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"

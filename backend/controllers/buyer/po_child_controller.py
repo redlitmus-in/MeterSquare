@@ -631,8 +631,9 @@ def reselect_vendor_for_po_child(po_child_id):
             if parent_cr.assigned_to_buyer_user_id != buyer_id and po_child.vendor_selected_by_buyer_id != buyer_id:
                 return jsonify({"error": "This purchase is not assigned to you"}), 403
 
-        # Verify PO Child is in td_rejected status
-        if po_child.vendor_selection_status != 'td_rejected' and po_child.status != 'td_rejected':
+        # Verify PO Child is in td_rejected or store_rejected status
+        allowed_statuses = ('td_rejected', 'store_rejected')
+        if po_child.vendor_selection_status not in allowed_statuses and po_child.status not in allowed_statuses:
             return jsonify({"error": f"Cannot re-select vendor. PO Child status: {po_child.status}, vendor_selection_status: {po_child.vendor_selection_status}"}), 400
 
         # Verify vendor exists and is active
@@ -693,6 +694,9 @@ def reselect_vendor_for_po_child(po_child_id):
         po_child.vendor_selection_status = 'pending_td_approval'
         po_child.status = 'pending_td_approval'
         po_child.rejection_reason = None  # Clear previous rejection reason
+        # If this was a store-rejected POChild, switch routing to vendor
+        if po_child.routing_type == 'store':
+            po_child.routing_type = 'vendor'
         po_child.updated_at = datetime.utcnow()
 
         db.session.commit()
@@ -1994,9 +1998,12 @@ def get_approved_po_children():
             # Get parent CR to check buyer assignment
             parent_cr = batch_crs.get(po_child.parent_cr_id)
 
-            # Skip store POChildren whose parent CR has been store-rejected
-            # (handles legacy data where po_child_id wasn't linked on the IMR)
-            if po_child.routing_type == 'store' and parent_cr and parent_cr.store_request_status == 'store_rejected':
+            # Skip store POChildren that are individually rejected
+            # Do NOT skip based on parent CR status alone — the parent CR may have other
+            # non-rejected store POChildren that still need to show in "Sent to Store"
+            if (po_child.routing_type == 'store' and
+                    po_child.status == 'store_rejected' and
+                    po_child.vendor_selection_status == 'store_rejected'):
                 continue
 
             # For buyer, only show PO children for CRs assigned to them (unless admin viewing)

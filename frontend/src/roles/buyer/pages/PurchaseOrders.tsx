@@ -69,6 +69,7 @@ const PurchaseOrders: React.FC = () => {
   const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isVendorSelectionModalOpen, setIsVendorSelectionModalOpen] = useState(false);
+  const [vendorInsteadMode, setVendorInsteadMode] = useState(false);
   const [isVendorEmailModalOpen, setIsVendorEmailModalOpen] = useState(false);
   const [completingPurchaseId, setCompletingPurchaseId] = useState<number | null>(null);
   const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
@@ -1545,7 +1546,7 @@ const PurchaseOrders: React.FC = () => {
                             </>
                           )}
 
-                          {/* Store-rejected POChildren - show details + select vendor option */}
+                          {/* Store-rejected POChildren - show details + select vendor option (only in rejected tab) */}
                           {isStoreRejected && (
                             <>
                               <Button
@@ -1566,41 +1567,48 @@ const PurchaseOrders: React.FC = () => {
                                 <Eye className="w-3.5 h-3.5 mr-1.5" />
                                 View Details
                               </Button>
-                              <Button
-                                onClick={() => {
-                                  const purchaseLike: Purchase = {
-                                    cr_id: poChild.parent_cr_id,
-                                    formatted_cr_id: poChild.formatted_id,
-                                    project_id: poChild.project_id || 0,
-                                    project_name: poChild.project_name || 'Unknown Project',
-                                    project_code: poChild.project_code,
-                                    client: poChild.client || '',
-                                    location: poChild.location || '',
-                                    boq_id: poChild.boq_id || 0,
-                                    boq_name: poChild.boq_name || '',
-                                    item_name: poChild.item_name || '',
-                                    sub_item_name: '',
-                                    request_type: '',
-                                    reason: '',
-                                    materials: poChild.materials || [],
-                                    materials_count: poChild.materials_count || poChild.materials?.length || 0,
-                                    total_cost: poChild.materials_total_cost || 0,
-                                    approved_by: 0,
-                                    approved_at: null,
-                                    created_at: poChild.created_at || '',
-                                    status: 'pending',
-                                    po_child_id: getPOChildId(poChild),
-                                    child_notes: (poChild as any).child_notes || '',
-                                  } as any;
-                                  setSelectedPurchase(purchaseLike);
-                                  setIsVendorSelectionModalOpen(true);
-                                }}
-                                className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs"
-                                size="sm"
-                              >
-                                <Store className="w-3.5 h-3.5 mr-1.5" />
-                                Select Vendor Instead
-                              </Button>
+                              {activeTab === 'rejected' && (
+                                <Button
+                                  onClick={() => {
+                                    const parentPurchase = rejectedPurchases.find(p => p.cr_id === poChild.parent_cr_id)
+                                      || pendingPurchases.find(p => p.cr_id === poChild.parent_cr_id);
+                                    const purchaseLike: Purchase = {
+                                      ...(parentPurchase || {}),
+                                      cr_id: poChild.parent_cr_id,
+                                      formatted_cr_id: poChild.formatted_id,
+                                      project_id: poChild.project_id || parentPurchase?.project_id || 0,
+                                      project_name: poChild.project_name || parentPurchase?.project_name || '',
+                                      project_code: poChild.project_code || parentPurchase?.project_code,
+                                      client: poChild.client || parentPurchase?.client || '',
+                                      location: poChild.location || parentPurchase?.location || '',
+                                      boq_id: poChild.boq_id || parentPurchase?.boq_id || 0,
+                                      boq_name: poChild.boq_name || parentPurchase?.boq_name || '',
+                                      item_name: poChild.item_name || parentPurchase?.item_name || '',
+                                      sub_item_name: '',
+                                      request_type: '',
+                                      reason: '',
+                                      materials: poChild.materials || [],
+                                      materials_count: poChild.materials?.length || 0,
+                                      total_cost: poChild.materials_total_cost || 0,
+                                      approved_by: 0,
+                                      approved_at: null,
+                                      created_at: poChild.created_at || '',
+                                      status: 'pending',
+                                      po_child_id: getPOChildId(poChild),
+                                      child_notes: (poChild as any).child_notes || '',
+                                      po_children: undefined,
+                                    } as any;
+                                    setVendorInsteadMode(true);
+                                    setSelectedPurchase(purchaseLike);
+                                    setIsVendorSelectionModalOpen(true);
+                                  }}
+                                  className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs"
+                                  size="sm"
+                                >
+                                  <Store className="w-3.5 h-3.5 mr-1.5" />
+                                  Select Vendor Instead
+                                </Button>
+                              )}
                             </>
                           )}
 
@@ -2227,10 +2235,10 @@ const PurchaseOrders: React.FC = () => {
                         </Button>
                       )}
 
-                      {/* Select Vendor for Store Rejection - buyer can try purchasing from vendor instead */}
-                      {isStoreRejectedCR && (
+                      {/* Select Vendor for Store Rejection - only shown in rejected tab */}
+                      {isStoreRejectedCR && activeTab === 'rejected' && (
                         <Button
-                          onClick={() => handleSelectVendor(purchase)}
+                          onClick={() => { setVendorInsteadMode(true); handleSelectVendor(purchase); }}
                           size="sm"
                           className="w-full h-7 text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1"
                         >
@@ -2798,9 +2806,11 @@ const PurchaseOrders: React.FC = () => {
         <MaterialVendorSelectionModal
           purchase={selectedPurchase}
           isOpen={isVendorSelectionModalOpen}
+          hideStoreOption={vendorInsteadMode}
           onClose={() => {
             setIsVendorSelectionModalOpen(false);
             setSelectedPurchase(null);
+            setVendorInsteadMode(false);
           }}
           onVendorSelected={async () => {
             // Remove cache completely and refetch fresh data
