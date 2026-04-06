@@ -618,9 +618,10 @@ def complete_from_store(cr_id):
             final_destination = project.project_name if project else f"Project {cr.project_id}"
             buyer_name = current_user.get('full_name', current_user.get('email'))
 
-            store_po_child_id, _ = _create_store_po_child(
+            store_po_child_id, store_po_child_obj = _create_store_po_child(
                 cr, grouped_materials, buyer_id, buyer_name, existing_po_children
             )
+            store_po_child_suffix = store_po_child_obj.suffix if store_po_child_obj else None
 
             new_request = _create_store_imr(
                 cr, cr_id, grouped_materials, current_user, final_destination,
