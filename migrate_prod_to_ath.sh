@@ -64,8 +64,6 @@ PGPASSWORD="$PROD_DB_PASS" pg_dump \
     -p "$PROD_DB_PORT" \
     --no-owner \
     --no-acl \
-    --clean \
-    --if-exists \
     --no-comments \
     -n public \
     -F p \
@@ -106,12 +104,43 @@ if [ "$CONFIRM" != "yes" ]; then
     exit 0
 fi
 
+# First, drop all existing tables, sequences, and functions in ATH public schema
+echo "  Dropping existing ATH objects..."
 PGPASSWORD="$ATH_DB_PASS" psql \
     -h "$ATH_DB_HOST" \
     -U "$ATH_DB_USER" \
     -d "$ATH_DB_NAME" \
     -p "$ATH_DB_PORT" \
-    -f "$DUMP_FILE" 2>&1 | grep -v "WARNING\|NOTICE\|already exists\|DROP\|CREATE\|ALTER\|SET\|COMMENT" || true
+    -t -A \
+    -c "
+    DO \$\$
+    DECLARE
+        r RECORD;
+    BEGIN
+        -- Drop all tables
+        FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+            EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+        END LOOP;
+        -- Drop all sequences
+        FOR r IN (SELECT sequencename FROM pg_sequences WHERE schemaname = 'public') LOOP
+            EXECUTE 'DROP SEQUENCE IF EXISTS public.' || quote_ident(r.sequencename) || ' CASCADE';
+        END LOOP;
+        -- Drop all types (enums etc)
+        FOR r IN (SELECT typname FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid WHERE n.nspname = 'public' AND t.typtype = 'e') LOOP
+            EXECUTE 'DROP TYPE IF EXISTS public.' || quote_ident(r.typname) || ' CASCADE';
+        END LOOP;
+    END \$\$;
+    " > /dev/null 2>&1
+echo "  ✓ Existing ATH objects dropped"
+
+# Now restore from dump (without --clean since we already cleaned)
+echo "  Restoring production data..."
+PGPASSWORD="$ATH_DB_PASS" psql \
+    -h "$ATH_DB_HOST" \
+    -U "$ATH_DB_USER" \
+    -d "$ATH_DB_NAME" \
+    -p "$ATH_DB_PORT" \
+    -f "$DUMP_FILE" 2>&1 | grep -i "error" | grep -v "already exists\|does not exist" || true
 
 echo "  ✓ Database restore complete"
 echo ""
