@@ -29,7 +29,7 @@ def _get_materials_in_active_po_children(cr_id):
     for pc in active_po_children:
         if pc.materials_data and isinstance(pc.materials_data, list):
             for mat in pc.materials_data:
-                mat_name = mat.get('material_name', '')
+                mat_name = mat.get('material_name', '').strip()
                 if mat_name:
                     materials.add(mat_name)
     return materials
@@ -364,7 +364,7 @@ def complete_from_store(cr_id):
         routed_materials = cr.routed_materials or {}
         materials = [
             mat for mat in materials
-            if (mat.get('material_name') or mat.get('name') or '') not in routed_materials
+            if (mat.get('material_name') or mat.get('name') or '').strip() not in routed_materials
         ]
 
         if not materials:
@@ -375,17 +375,18 @@ def complete_from_store(cr_id):
         if materials_in_po_children:
             materials = [
                 mat for mat in materials
-                if (mat.get('material_name') or mat.get('name') or '') not in materials_in_po_children
+                if (mat.get('material_name') or mat.get('name') or '').strip() not in materials_in_po_children
             ]
             if not materials:
                 return jsonify({"error": "All remaining materials are already assigned to vendors"}), 400
 
         # Filter to selected materials if provided
         if selected_materials and isinstance(selected_materials, list):
-            # Only include materials whose name is in selected_materials list
+            # Strip whitespace from both sides for consistent matching
+            selected_set = {name.strip() for name in selected_materials}
             materials = [
                 mat for mat in materials
-                if (mat.get('material_name') or mat.get('name') or '') in selected_materials
+                if (mat.get('material_name') or mat.get('name') or '').strip() in selected_set
             ]
             if not materials:
                 return jsonify({"error": "No matching materials found in selection"}), 400
@@ -409,7 +410,7 @@ def complete_from_store(cr_id):
 
         # Check availability for all materials first
         for mat in materials:
-            mat_name = mat.get('material_name') or mat.get('name') or ''
+            mat_name = (mat.get('material_name') or mat.get('name') or '').strip()
             mat_qty = mat.get('quantity', 0)
             mat_unit = mat.get('unit', 'pcs')
 
@@ -481,10 +482,10 @@ def complete_from_store(cr_id):
         # Check if ALL materials in CR are now routed to store
         all_cr_materials = cr.materials_data or cr.sub_items_data or []
         all_material_names = {
-            mat.get('material_name') or mat.get('name') or ''
+            (mat.get('material_name') or mat.get('name') or '').strip()
             for mat in all_cr_materials if isinstance(mat, dict)
         } - {''}  # Remove empty string if present
-        all_routed_names = set(cr.routed_materials.keys()) if cr.routed_materials else set()
+        all_routed_names = {k.strip() for k in cr.routed_materials.keys()} if cr.routed_materials else set()
         all_materials_routed = bool(all_material_names) and all_material_names.issubset(all_routed_names)
 
         # Check if existing vendor POChildren exist (split scenario)
@@ -657,7 +658,7 @@ def route_all_to_store(cr_id):
 
         # If specific material names provided, validate they match CR materials
         cr_material_names = {
-            (mat.get('material_name') or mat.get('name') or '')
+            (mat.get('material_name') or mat.get('name') or '').strip()
             for mat in all_materials if isinstance(mat, dict)
         }
 
@@ -667,10 +668,11 @@ def route_all_to_store(cr_id):
             cr_material_names -= materials_in_po_children
 
         if material_names:
-            invalid = set(material_names) - cr_material_names
+            stripped_material_names = [n.strip() for n in material_names]
+            invalid = set(stripped_material_names) - cr_material_names
             if invalid:
                 return jsonify({"error": f"Materials not found in CR: {', '.join(invalid)}"}), 400
-            materials_to_route = material_names
+            materials_to_route = stripped_material_names
         else:
             materials_to_route = list(cr_material_names)
 
@@ -691,9 +693,10 @@ def route_all_to_store(cr_id):
 
         # Build grouped materials for IMR
         grouped_materials = []
+        materials_to_route_set = set(materials_to_route)
         for mat in all_materials:
-            mat_name = mat.get('material_name') or mat.get('name') or ''
-            if mat_name in materials_to_route:
+            mat_name = (mat.get('material_name') or mat.get('name') or '').strip()
+            if mat_name in materials_to_route_set:
                 grouped_materials.append({
                     'material_name': mat_name,
                     'quantity': mat.get('quantity', 0),
@@ -737,10 +740,10 @@ def route_all_to_store(cr_id):
         # Check if all materials are now routed
         all_cr_materials = cr.sub_items_data or cr.materials_data or []
         all_material_names = {
-            (mat.get('material_name') or mat.get('name') or '')
+            (mat.get('material_name') or mat.get('name') or '').strip()
             for mat in all_cr_materials if isinstance(mat, dict)
         } - {''}  # Remove empty string if present
-        all_routed_names = set(cr.routed_materials.keys()) if cr.routed_materials else set()
+        all_routed_names = {k.strip() for k in cr.routed_materials.keys()} if cr.routed_materials else set()
         all_materials_routed = bool(all_material_names) and all_material_names.issubset(all_routed_names)
 
         store_po_child_id = None
