@@ -1130,13 +1130,8 @@ def upload_return_note_delivery_note():
         content_type = file.content_type or 'application/octet-stream'
 
         # Initialize Supabase client based on ENVIRONMENT variable
-        environment = os.environ.get('ENVIRONMENT', 'production')
-        if environment == 'development':
-            supabase_url = os.environ.get('DEV_SUPABASE_URL')
-            supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
-        else:
-            supabase_url = os.environ.get('SUPABASE_URL')
-            supabase_key = os.environ.get('SUPABASE_ANON_KEY')
+        from utils.supabase_config import get_supabase_config
+        supabase_url, supabase_key = get_supabase_config()
 
         if not supabase_url or not supabase_key:
             return jsonify({'success': False, 'error': 'Storage configuration missing'}), 500
@@ -1583,13 +1578,8 @@ def upload_stock_in_document(stock_in_id):
         content_type = file.content_type or 'application/octet-stream'
 
         # Initialize Supabase client based on ENVIRONMENT variable
-        environment = os.environ.get('ENVIRONMENT', 'production')
-        if environment == 'development':
-            supabase_url = os.environ.get('DEV_SUPABASE_URL')
-            supabase_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
-        else:
-            supabase_url = os.environ.get('SUPABASE_URL')
-            supabase_key = os.environ.get('SUPABASE_ANON_KEY')
+        from utils.supabase_config import get_supabase_config
+        supabase_url, supabase_key = get_supabase_config()
 
         if not supabase_url or not supabase_key:
             return jsonify({'success': False, 'error': 'Storage configuration missing'}), 500

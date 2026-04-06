@@ -127,11 +127,9 @@ def _heal_evidence_from_storage(cr_id, expected_count, inspection_created_at):
     Used when evidence_urls contains only empty/broken objects.
     """
     try:
-        import os
         from supabase import create_client
-        environment = os.environ.get('ENVIRONMENT', 'production')
-        supabase_url = os.environ.get('DEV_SUPABASE_URL' if environment == 'development' else 'SUPABASE_URL')
-        supabase_key = os.environ.get('DEV_SUPABASE_KEY' if environment == 'development' else 'SUPABASE_KEY')
+        from utils.supabase_config import get_supabase_config
+        supabase_url, supabase_key = get_supabase_config()
         if not supabase_url or not supabase_key:
             return []
 
@@ -1218,14 +1216,8 @@ def upload_inspection_evidence():
     try:
         import os
         from supabase import create_client
-
-        environment = os.environ.get('ENVIRONMENT', 'production')
-        if environment == 'development':
-            supabase_url = os.environ.get('DEV_SUPABASE_URL')
-            supabase_key = os.environ.get('DEV_SUPABASE_KEY')
-        else:
-            supabase_url = os.environ.get('SUPABASE_URL')
-            supabase_key = os.environ.get('SUPABASE_KEY')
+        from utils.supabase_config import get_supabase_config
+        supabase_url, supabase_key = get_supabase_config()
 
         if not supabase_url or not supabase_key:
             return jsonify({"success": False, "error": "Supabase not configured"}), 500
@@ -1338,16 +1330,9 @@ def upload_return_evidence():
         return access_check
 
     try:
-        import os
         from supabase import create_client
-
-        environment = os.environ.get('ENVIRONMENT', 'production')
-        if environment == 'development':
-            supabase_url = os.environ.get('DEV_SUPABASE_URL')
-            supabase_key = os.environ.get('DEV_SUPABASE_KEY')
-        else:
-            supabase_url = os.environ.get('SUPABASE_URL')
-            supabase_key = os.environ.get('SUPABASE_KEY')
+        from utils.supabase_config import get_supabase_config
+        supabase_url, supabase_key = get_supabase_config()
 
         if not supabase_url or not supabase_key:
             return jsonify({"success": False, "error": "Storage not configured"}), 500

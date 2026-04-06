@@ -23,13 +23,8 @@ log = get_logger()
 estimator_boq_bp = Blueprint('estimator_boq', __name__)
 
 # Supabase configuration based on ENVIRONMENT variable
-environment = os.environ.get('ENVIRONMENT', 'production')
-if environment == 'development':
-    SUPABASE_URL = os.getenv('DEV_SUPABASE_URL')
-    SUPABASE_KEY = os.getenv('DEV_SUPABASE_ANON_KEY')
-else:
-    SUPABASE_URL = os.getenv('SUPABASE_URL')
-    SUPABASE_KEY = os.getenv('SUPABASE_ANON_KEY')
+from utils.supabase_config import get_supabase_config
+SUPABASE_URL, SUPABASE_KEY = get_supabase_config()
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
 # File upload configuration

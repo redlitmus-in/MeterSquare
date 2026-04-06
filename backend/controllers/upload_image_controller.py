@@ -15,13 +15,8 @@ import io
 log = get_logger()
 
 # Configuration constants from environment variables based on ENVIRONMENT
-environment = os.environ.get('ENVIRONMENT', 'production')
-if environment == 'development':
-    supabase_url = os.environ.get('DEV_SUPABASE_URL')
-    supabase_key = os.environ.get('DEV_SUPABASE_KEY')  # Use SERVICE_ROLE key for backend operations
-else:
-    supabase_url = os.environ.get('SUPABASE_URL')
-    supabase_key = os.environ.get('SUPABASE_KEY')  # Use SERVICE_ROLE key for backend operations
+from utils.supabase_config import get_supabase_config
+supabase_url, supabase_key = get_supabase_config()
 SUPABASE_BUCKET = "file_upload"
 ITEM_SUPABASE_BUCKET = "boq_file"
 ALLOWED_EXTENSIONS = {

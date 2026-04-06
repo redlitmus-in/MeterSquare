@@ -337,16 +337,9 @@ def _upload_client_boq_file(file_bytes, boq_id, project_name, file_ext):
         from supabase import create_client as create_supabase_client
 
         SUPABASE_BUCKET = "boq_file"
-        environment = os.environ.get('ENVIRONMENT', 'production')
-
-        if environment == 'development':
-            supabase_url = os.environ.get('DEV_SUPABASE_URL')
-            upload_key = os.environ.get('DEV_SUPABASE_KEY')
-            anon_key = os.environ.get('DEV_SUPABASE_ANON_KEY')
-        else:
-            supabase_url = os.environ.get('SUPABASE_URL')
-            upload_key = os.environ.get('SUPABASE_KEY')
-            anon_key = os.environ.get('SUPABASE_ANON_KEY')
+        from utils.supabase_config import get_supabase_config
+        supabase_url, upload_key = get_supabase_config()
+        anon_key = upload_key
 
         if not supabase_url or not upload_key:
             log.error(f"[SEND_BOQ] Upload: Missing Supabase credentials")
