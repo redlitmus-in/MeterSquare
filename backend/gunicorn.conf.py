@@ -28,9 +28,9 @@ bind = "127.0.0.1:5000"
 # ---------------------------------------------------------------
 # Timeouts
 # ---------------------------------------------------------------
-timeout = 120          # Kill workers that take >120s (prevent hangs)
+timeout = 60           # Kill workers that take >60s (frees stuck workers faster)
 graceful_timeout = 30  # Time to finish in-flight requests on shutdown
-keepalive = 5          # Keep connections alive for 5s (reuse TCP connections)
+keepalive = 10         # Keep connections alive for 10s (reuses TCP connections longer, faster repeat requests)
 
 # ---------------------------------------------------------------
 # Logging — systemd captures stdout/stderr, so log to console

@@ -48,18 +48,34 @@ def get_rate_limit_key():
 
 def init_rate_limiter(app: Flask) -> Limiter:
     """
-    Initialize Flask-Limiter with production-appropriate settings
+    Initialize Flask-Limiter with production-appropriate settings.
+    Uses Redis when available so rate-limit counters are shared across
+    all Gunicorn workers; falls back to in-memory if Redis is unreachable.
     """
     global limiter
 
     # Default limits (applied to all routes)
     default_limits = ["200 per minute", "1000 per hour"] if is_production() else ["10000 per minute"]
 
+    # Shared storage: Redis if reachable, else per-worker memory
+    redis_url = os.getenv('REDIS_URL')
+    storage = "memory://"
+    if redis_url:
+        try:
+            import redis as _redis_check
+            _r = _redis_check.Redis.from_url(redis_url, socket_connect_timeout=2)
+            _r.ping()
+            _r.close()
+            storage = redis_url
+            logger.info("Rate limiter: using Redis (shared across workers)")
+        except Exception:
+            logger.warning("Rate limiter: Redis unreachable, falling back to memory://")
+
     limiter = Limiter(
         app=app,
         key_func=get_rate_limit_key,
         default_limits=default_limits,
-        storage_uri="memory://",  # Use Redis in production: "redis://localhost:6379"
+        storage_uri=storage,
         strategy="fixed-window",
         headers_enabled=True,  # Add X-RateLimit headers to responses
     )
