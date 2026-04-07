@@ -176,6 +176,6 @@ class ChangeRequestConfig:
 # Create singleton instance
 CR_CONFIG = ChangeRequestConfig()
 
-# Validate on import
+# Validate on import — log warning instead of crashing
 if not CR_CONFIG.validate_config():
-    raise ValueError("Change Request configuration validation failed")
+    log.error("Change Request configuration validation failed — using defaults")

@@ -14,9 +14,8 @@ import io
 
 log = get_logger()
 
-# Configuration constants from environment variables based on ENVIRONMENT
+# Configuration constants
 from utils.supabase_config import get_supabase_config
-supabase_url, supabase_key = get_supabase_config()
 SUPABASE_BUCKET = "file_upload"
 ITEM_SUPABASE_BUCKET = "boq_file"
 ALLOWED_EXTENSIONS = {
@@ -35,21 +34,34 @@ MAX_WORKERS = 12
 MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB max file size (increased for CAD files)
 MAX_IMAGE_SIZE = 50 * 1024 * 1024  # 50MB max image size
 
-# Validate Supabase configuration
-if not supabase_url or not supabase_key:
-    log.error("Supabase URL or Key not configured in environment variables")
-    raise ValueError("Missing Supabase configuration. Please set SUPABASE_URL and SUPABASE_KEY environment variables")
+# Lazy-initialized Supabase client — avoids crashing the entire app at import
+# if env vars are temporarily missing. Validated at startup by create_app().
+_supabase_client = None
+_supabase_url_cached = None
 
-# Initialize Supabase client
-try:
-    supabase: Client = create_client(supabase_url, supabase_key)
-except Exception as e:
-    log.error(f"Failed to initialize Supabase client: {str(e)}")
-    raise
 
-# Pre-build base URL for public files
-PUBLIC_URL_BASE = f"{supabase_url}/storage/v1/object/public/{SUPABASE_BUCKET}/"
-IMAGE_PUBLIC_URL_BASE = f"{supabase_url}/storage/v1/object/public/{ITEM_SUPABASE_BUCKET}/"
+def _get_supabase():
+    """Get or initialize the Supabase client on first use."""
+    global _supabase_client, _supabase_url_cached
+    if _supabase_client is None:
+        url, key = get_supabase_config()
+        if not url or not key:
+            raise ValueError("Missing Supabase configuration. Set SUPABASE_URL and SUPABASE_KEY in .env")
+        _supabase_client = create_client(url, key)
+        _supabase_url_cached = url
+    return _supabase_client
+
+
+def _get_public_url_base():
+    """Get the Supabase public URL base for file uploads."""
+    _get_supabase()  # ensure initialized
+    return f"{_supabase_url_cached}/storage/v1/object/public/{SUPABASE_BUCKET}/"
+
+
+def _get_image_url_base():
+    """Get the Supabase public URL base for image uploads."""
+    _get_supabase()  # ensure initialized
+    return f"{_supabase_url_cached}/storage/v1/object/public/{ITEM_SUPABASE_BUCKET}/"
 
 # Global executor for better resource management
 global_executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
@@ -132,7 +144,7 @@ def upload_single_file(path, content, content_type):
     try:
 
         # Direct upload with upsert enabled to overwrite if exists
-        response = supabase.storage.from_(SUPABASE_BUCKET).upload(
+        response = _get_supabase().storage.from_(SUPABASE_BUCKET).upload(
             path=path,
             file=content,
             file_options={
@@ -144,7 +156,7 @@ def upload_single_file(path, content, content_type):
         # Log the response for debugging
 
         # Get the public URL
-        public_url = f"{PUBLIC_URL_BASE}{path}"
+        public_url = f"{_get_public_url_base()}{path}"
         return public_url
 
     except Exception as e:
@@ -172,7 +184,7 @@ def upload_single_image(path, content, content_type):
     try:
 
         # Direct upload with upsert enabled to overwrite if exists
-        response = supabase.storage.from_(ITEM_SUPABASE_BUCKET).upload(
+        response = _get_supabase().storage.from_(ITEM_SUPABASE_BUCKET).upload(
             path=path,
             file=content,
             file_options={
@@ -183,7 +195,7 @@ def upload_single_image(path, content, content_type):
 
 
         # Get the public URL
-        public_url = f"{IMAGE_PUBLIC_URL_BASE}{path}"
+        public_url = f"{_get_image_url_base()}{path}"
         return public_url
 
     except Exception as e:
@@ -491,14 +503,14 @@ def buyer_view_files(cr_id):
                 files_list.append({
                     "filename": filename,
                     "file_path": file_path,
-                    "public_url": f"{PUBLIC_URL_BASE}{file_path}",
+                    "public_url": f"{_get_public_url_base()}{file_path}",
                     "storage_bucket": SUPABASE_BUCKET
                 })
 
         # Also check Supabase storage for any files not in database
         try:
             storage_path = f"buyer/cr_{cr_id}"
-            entries = supabase.storage.from_(SUPABASE_BUCKET).list(path=storage_path)
+            entries = _get_supabase().storage.from_(SUPABASE_BUCKET).list(path=storage_path)
 
             if isinstance(entries, list):
                 # Get filenames from database to avoid duplicates
@@ -511,7 +523,7 @@ def buyer_view_files(cr_id):
                             files_list.append({
                                 "filename": entry['name'],
                                 "file_path": file_path,
-                                "public_url": f"{PUBLIC_URL_BASE}{file_path}",
+                                "public_url": f"{_get_public_url_base()}{file_path}",
                                 "storage_bucket": SUPABASE_BUCKET,
                                 "note": "Found in storage but not in database"
                             })
@@ -566,7 +578,7 @@ def buyer_delete_files(cr_id):
             if filename in current_files:
                 file_path = f"buyer/{cr_id}/{filename}"
                 try:
-                    supabase.storage.from_(SUPABASE_BUCKET).remove([file_path])
+                    _get_supabase().storage.from_(SUPABASE_BUCKET).remove([file_path])
                     deleted_count += 1
                 except Exception as e:
                     log.error(f"Failed to delete {file_path}: {str(e)}")
@@ -616,7 +628,7 @@ def buyer_delete_all_files(cr_id):
             for filename in filenames:
                 file_path = f"buyer/{cr_id}/{filename}"
                 try:
-                    supabase.storage.from_(SUPABASE_BUCKET).remove([file_path])
+                    _get_supabase().storage.from_(SUPABASE_BUCKET).remove([file_path])
                     deleted_count += 1
                 except Exception as e:
                     log.warning(f"Failed to delete {file_path}: {str(e)}")
@@ -755,7 +767,7 @@ def get_item_images(id):
         # Also check Supabase storage for any files not in database
         try:
             storage_path = f"items/{id}"
-            entries = supabase.storage.from_(ITEM_SUPABASE_BUCKET).list(path=storage_path)
+            entries = _get_supabase().storage.from_(ITEM_SUPABASE_BUCKET).list(path=storage_path)
 
             if isinstance(entries, list):
                 # Get filenames from database to avoid duplicates
@@ -767,7 +779,7 @@ def get_item_images(id):
                             file_path = f"{storage_path}/{entry['name']}"
                             images_list.append({
                                 "filename": entry['name'],
-                                "url": f"{IMAGE_PUBLIC_URL_BASE}{file_path}",
+                                "url": f"{_get_image_url_base()}{file_path}",
                                 "path": file_path,
                                 "storage_bucket": ITEM_SUPABASE_BUCKET,
                                 "note": "Found in storage but not in database"
@@ -827,7 +839,7 @@ def delete_item_images(id):
         # Delete file from storage
         file_path = f"items/{id}/{filename}"
         try:
-            supabase.storage.from_(ITEM_SUPABASE_BUCKET).remove([file_path])
+            _get_supabase().storage.from_(ITEM_SUPABASE_BUCKET).remove([file_path])
         except Exception as e:
             log.error(f"Failed to delete {file_path} from storage: {str(e)}")
             return jsonify({"error": f"Failed to delete image from storage: {str(e)}"}), 500
@@ -882,7 +894,7 @@ def delete_all_item_images(id):
                     filename = img.get("filename")
                     file_path = f"items/{id}/{filename}"
                     try:
-                        supabase.storage.from_(ITEM_SUPABASE_BUCKET).remove([file_path])
+                        _get_supabase().storage.from_(ITEM_SUPABASE_BUCKET).remove([file_path])
                         deleted_count += 1
                     except Exception as e:
                         log.warning(f"Failed to delete {file_path}: {str(e)}")

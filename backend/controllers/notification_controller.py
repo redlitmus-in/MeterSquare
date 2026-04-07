@@ -17,11 +17,8 @@ log = get_logger()
 
 notification_bp = Blueprint('notifications', __name__)
 
-# JWT Secret Key — fail fast in production if missing or weak
-_environment = os.getenv('ENVIRONMENT', 'development')
+# JWT Secret Key — validated at startup by create_app(), safe to read here
 SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-here')
-if _environment == 'production' and (not SECRET_KEY or len(SECRET_KEY) < 32 or SECRET_KEY == 'your-secret-key-here'):
-    raise RuntimeError("SECRET_KEY is missing or too weak for production. Set a strong SECRET_KEY in .env.")
 
 def token_required(f):
     """Decorator to require JWT token for protected routes"""

@@ -32,9 +32,42 @@ configure_quiet_logging()
 
 def create_app():
     app = Flask(__name__)
+
+    # ✅ STARTUP VALIDATION: Check ALL required env vars before anything else
+    # Prevents the app from starting with missing config and returning 500 on every request
+    environment = os.getenv("ENVIRONMENT", "development")
+    if environment == "production":
+        required_vars = {
+            "SECRET_KEY": os.getenv("SECRET_KEY"),
+            "DATABASE_URL": os.getenv("DATABASE_URL"),
+            "SUPABASE_URL": os.getenv("SUPABASE_URL"),
+            "SUPABASE_KEY": os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY"),
+            "REDIS_URL": os.getenv("REDIS_URL"),
+        }
+        missing = [k for k, v in required_vars.items() if not v]
+        if missing:
+            import sys
+            msg = f"FATAL: Missing required environment variables for production: {', '.join(missing)}"
+            print(msg, file=sys.stderr, flush=True)
+            raise RuntimeError(msg)
+    elif environment == "ath":
+        required_vars = {
+            "SECRET_KEY": os.getenv("SECRET_KEY"),
+            "ATH_DB_URL": os.getenv("ATH_DB_URL"),
+            "ATH_SUPABASE_URL": os.getenv("ATH_SUPABASE_URL"),
+            "ATH_SUPABASE_KEY": os.getenv("ATH_SUPABASE_KEY") or os.getenv("ATH_SUPABASE_ANON_KEY"),
+            "REDIS_URL": os.getenv("REDIS_URL"),
+        }
+        missing = [k for k, v in required_vars.items() if not v]
+        if missing:
+            import sys
+            msg = f"FATAL: Missing required environment variables for ath: {', '.join(missing)}"
+            print(msg, file=sys.stderr, flush=True)
+            raise RuntimeError(msg)
+
     _secret_key = os.getenv("SECRET_KEY", "default-secret-key")
     # In production, refuse to start with a weak or missing secret key
-    if os.getenv("ENVIRONMENT") == "production":
+    if environment == "production":
         if not _secret_key or _secret_key == "default-secret-key" or len(_secret_key) < 32:
             raise RuntimeError("SECRET_KEY is not set or too short. Refusing to start in production.")
     app.config['SECRET_KEY'] = _secret_key
@@ -468,12 +501,16 @@ def create_app():
     def handle_exception(e):
         """Catch-all error handler for unhandled exceptions"""
         import traceback
+        import sys
 
         # Generate error ID for tracking
         error_id = str(uuid.uuid4())
 
+        tb = traceback.format_exc()
         logger.error(f"Error ID {error_id}: Unhandled exception: {str(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Traceback: {tb}")
+        # Write to stderr so Gunicorn always captures it in journalctl
+        print(f"[ERROR {error_id}] {type(e).__name__}: {e}\n{tb}", file=sys.stderr, flush=True)
 
         # ✅ SECURITY: Show detailed errors only in development
         # Production gets generic message + error_id for support
