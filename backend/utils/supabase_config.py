@@ -21,6 +21,6 @@ def get_supabase_config() -> tuple[str, str]:
         key = os.getenv("ATH_SUPABASE_KEY", "") or os.getenv("ATH_SUPABASE_ANON_KEY", "")
     else:
         url = os.getenv("SUPABASE_URL", "")
-        key = os.getenv("SUPABASE_ANON_KEY", "") or os.getenv("SUPABASE_KEY", "")
+        key = os.getenv("SUPABASE_KEY", "") or os.getenv("SUPABASE_ANON_KEY", "")
 
     return url, key

@@ -93,6 +93,8 @@ const SupportManagement: React.FC = () => {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const hasLoadedOnce = useRef(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [expandedTicketId, setExpandedTicketId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -119,6 +121,7 @@ const SupportManagement: React.FC = () => {
 
   // Comment state
   const [commentText, setCommentText] = useState<Record<number, string>>({});
+  const [commentFiles, setCommentFiles] = useState<Record<number, File[]>>({});
   const [isSendingComment, setIsSendingComment] = useState<Record<number, boolean>>({});
   // Counter to trigger re-sort when comments are marked as read
   const [commentReadCounter, setCommentReadCounter] = useState(0);
@@ -184,8 +187,11 @@ const SupportManagement: React.FC = () => {
   }, []);
 
   const loadTickets = useCallback(async (showLoader = true) => {
+    const isInitial = !hasLoadedOnce.current;
     try {
-      if (showLoader) setIsLoading(true);
+      if (isInitial) setIsLoading(true);
+      else if (showLoader) setIsRefreshing(true);
+
       const params: any = { per_page: 100 };
       if (filterStatus !== 'all') params.status = filterStatus;
       if (filterType !== 'all') params.ticket_type = filterType;
@@ -194,18 +200,17 @@ const SupportManagement: React.FC = () => {
 
       const response = await supportApi.getAllTickets(params);
       if (response.success) {
-        // Check for new tickets before updating state
         checkForNewTickets(response.tickets);
         setTickets(response.tickets);
         setStats(response.statistics);
+        hasLoadedOnce.current = true;
       }
     } catch (error: any) {
-      if (showLoader) {
-        showError('Failed to load tickets');
-      }
+      if (showLoader) showError('Failed to load tickets');
       console.error('Error loading tickets:', error);
     } finally {
-      if (showLoader) setIsLoading(false);
+      setIsLoading(false);
+      setIsRefreshing(false);
     }
   }, [filterStatus, filterType, filterPriority, searchQuery, checkForNewTickets]);
 
@@ -253,7 +258,7 @@ const SupportManagement: React.FC = () => {
     const ticket = actionModal.ticket;
     try {
       setIsProcessing(true);
-      const response = await supportApi.approveTicket(ticket.ticket_id, 'Development Team', actionResponse);
+      const response = await supportApi.approveTicket(ticket.ticket_id, 'Development Team', actionResponse, selectedFiles);
       if (response.success) {
         showSuccess('Ticket approved successfully');
         // Notify the ticket reporter
@@ -287,7 +292,8 @@ const SupportManagement: React.FC = () => {
         ticket.ticket_id,
         rejectionReason,
         'Development Team',  // adminName
-        actionResponse       // response text
+        actionResponse,      // response text
+        selectedFiles
       );
       if (response.success) {
         showSuccess('Ticket rejected');
@@ -353,7 +359,8 @@ const SupportManagement: React.FC = () => {
         ticket.ticket_id,
         newStatus,
         'Development Team',  // adminName
-        actionResponse       // response text
+        actionResponse,      // response text
+        selectedFiles
       );
       if (response.success) {
         showSuccess('Ticket status updated');
@@ -380,27 +387,36 @@ const SupportManagement: React.FC = () => {
   // Send comment as dev team
   const handleSendComment = async (ticketId: number) => {
     const message = commentText[ticketId]?.trim();
-    if (!message) {
-      showError('Please enter a comment');
+    const files = commentFiles[ticketId] || [];
+    if (!message && files.length === 0) {
+      showError('Please enter a comment or attach a file');
       return;
     }
 
-    // Find the ticket to get reporter info for notification
-    const ticket = tickets.find(t => t.ticket_id === ticketId);
-
     try {
       setIsSendingComment(prev => ({ ...prev, [ticketId]: true }));
-      const response = await supportApi.addComment(ticketId, {
-        message,
-        sender_type: 'dev_team',
-        sender_name: 'Dev Team'
-      });
+
+      let response;
+      if (files.length > 0) {
+        const formData = new FormData();
+        formData.append('message', message || '');
+        formData.append('sender_type', 'dev_team');
+        formData.append('sender_name', 'Dev Team');
+        files.forEach(f => formData.append('files', f));
+        response = await supportApi.addCommentWithFiles(ticketId, formData);
+      } else {
+        response = await supportApi.addComment(ticketId, {
+          message,
+          sender_type: 'dev_team',
+          sender_name: 'Dev Team'
+        });
+      }
 
       if (response.success) {
         showSuccess('Comment sent successfully');
         setCommentText(prev => ({ ...prev, [ticketId]: '' }));
-        // Backend handles notification to client via Socket.IO
-        loadTickets(false); // Reload to get updated comments
+        setCommentFiles(prev => ({ ...prev, [ticketId]: [] }));
+        loadTickets(false);
       }
     } catch (error: any) {
       showError(error.response?.data?.error || 'Failed to send comment');
@@ -614,13 +630,22 @@ const SupportManagement: React.FC = () => {
             className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
             title="Refresh"
           >
-            <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
 
       {/* Tickets List */}
-      <div className="space-y-4">
+      <div className="relative space-y-4">
+        {/* Loading overlay for filter/refresh changes */}
+        {isRefreshing && (
+          <div className="absolute inset-0 z-10 bg-white/70 backdrop-blur-[1px] rounded-xl flex items-center justify-center">
+            <div className="flex items-center gap-3 bg-white border border-gray-200 shadow-md rounded-xl px-5 py-3">
+              <RefreshCw className="w-5 h-5 text-blue-600 animate-spin" />
+              <span className="text-sm font-medium text-gray-700">Loading tickets...</span>
+            </div>
+          </div>
+        )}
         {tickets.length === 0 ? (
           <div className="bg-white rounded-xl shadow p-12 text-center">
             <CheckCircle className="w-16 h-16 text-green-300 mx-auto mb-4" />
@@ -876,6 +901,22 @@ const SupportManagement: React.FC = () => {
                                         <strong>Reason:</strong> {entry.reason}
                                       </p>
                                     )}
+                                    {entry.attachments && entry.attachments.length > 0 && (
+                                      <div className="mt-2 flex flex-wrap gap-2">
+                                        {entry.attachments.map((att: any, ai: number) => (
+                                          <a
+                                            key={ai}
+                                            href={att.file_path}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 rounded-full text-xs text-gray-700 hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                                          >
+                                            <Paperclip className="w-3 h-3 text-gray-500" />
+                                            {att.file_name}
+                                          </a>
+                                        ))}
+                                      </div>
+                                    )}
                                     <p className={`text-sm ${config.title} mt-2`}>
                                       — {entry.admin_name}
                                     </p>
@@ -1009,7 +1050,25 @@ const SupportManagement: React.FC = () => {
                                         {new Date(comment.created_at + 'Z').toLocaleString()}
                                       </span>
                                     </div>
-                                    <p className="text-sm text-gray-700 whitespace-pre-wrap">{comment.message}</p>
+                                    {comment.message && (
+                                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{comment.message}</p>
+                                    )}
+                                    {comment.attachments && comment.attachments.length > 0 && (
+                                      <div className="mt-2 flex flex-wrap gap-2">
+                                        {comment.attachments.map((att: any, i: number) => (
+                                          <a
+                                            key={i}
+                                            href={att.file_path}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-gray-200 rounded-lg text-xs text-blue-600 hover:bg-blue-50 transition-colors"
+                                          >
+                                            <Paperclip className="w-3 h-3" />
+                                            {att.file_name}
+                                          </a>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                               </div>
@@ -1017,29 +1076,71 @@ const SupportManagement: React.FC = () => {
 
                             {/* Add New Comment - only for non-closed tickets */}
                             {ticket.status !== 'closed' ? (
-                              <div className="flex gap-2">
-                                <textarea
-                                  value={commentText[ticket.ticket_id] || ''}
-                                  onChange={(e) => setCommentText(prev => ({ ...prev, [ticket.ticket_id]: e.target.value }))}
-                                  placeholder="Add a comment or update for the client..."
-                                  rows={2}
-                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none text-sm"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleSendComment(ticket.ticket_id);
-                                  }}
-                                  disabled={isSendingComment[ticket.ticket_id] || !commentText[ticket.ticket_id]?.trim()}
-                                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end"
-                                >
-                                  {isSendingComment[ticket.ticket_id] ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <Send className="w-4 h-4" />
-                                  )}
-                                </button>
+                              <div className="space-y-2">
+                                <div className="flex gap-2">
+                                  <textarea
+                                    value={commentText[ticket.ticket_id] || ''}
+                                    onChange={(e) => setCommentText(prev => ({ ...prev, [ticket.ticket_id]: e.target.value }))}
+                                    placeholder="Add a comment or update for the client..."
+                                    rows={2}
+                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none text-sm"
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                  <div className="flex flex-col gap-1 self-end">
+                                    <label
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors flex items-center justify-center"
+                                      title="Attach files"
+                                    >
+                                      <Paperclip className="w-4 h-4 text-gray-500" />
+                                      <input
+                                        type="file"
+                                        multiple
+                                        className="hidden"
+                                        accept=".png,.jpg,.jpeg,.gif,.pdf,.doc,.docx,.txt,.xlsx,.xls"
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => {
+                                          e.stopPropagation();
+                                          const files = Array.from(e.target.files || []);
+                                          setCommentFiles(prev => ({ ...prev, [ticket.ticket_id]: [...(prev[ticket.ticket_id] || []), ...files] }));
+                                          e.target.value = '';
+                                        }}
+                                      />
+                                    </label>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleSendComment(ticket.ticket_id);
+                                      }}
+                                      disabled={isSendingComment[ticket.ticket_id] || (!commentText[ticket.ticket_id]?.trim() && !(commentFiles[ticket.ticket_id]?.length))}
+                                      className="p-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                      {isSendingComment[ticket.ticket_id] ? (
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                      ) : (
+                                        <Send className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                                {/* Selected files preview */}
+                                {(commentFiles[ticket.ticket_id]?.length || 0) > 0 && (
+                                  <div className="flex flex-wrap gap-2 px-1" onClick={(e) => e.stopPropagation()}>
+                                    {commentFiles[ticket.ticket_id].map((f, i) => (
+                                      <div key={i} className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-700">
+                                        <Paperclip className="w-3 h-3" />
+                                        <span className="max-w-[160px] truncate">{f.name}</span>
+                                        <button
+                                          onClick={() => setCommentFiles(prev => ({
+                                            ...prev,
+                                            [ticket.ticket_id]: prev[ticket.ticket_id].filter((_, fi) => fi !== i)
+                                          }))}
+                                          className="ml-1 text-purple-400 hover:text-purple-700"
+                                        >×</button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <p className="text-sm text-gray-500 italic">
@@ -1116,42 +1217,28 @@ const SupportManagement: React.FC = () => {
 
       {/* Pagination */}
       {tickets.length > ticketsPerPage && (
-        <div className="flex items-center justify-between mt-6 bg-white rounded-xl shadow border border-gray-200 p-4">
-          <div className="text-sm text-gray-600">
-            Showing {startIndex + 1} to {Math.min(startIndex + ticketsPerPage, tickets.length)} of {tickets.length} tickets
-          </div>
-          <div className="flex items-center gap-2">
+        <div className="flex justify-end mt-6">
+          <div className="inline-flex items-center gap-3 bg-white rounded-xl shadow border border-gray-200 px-4 py-2.5">
             <button
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
               disabled={currentPage === 1}
-              className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1.5 h-9 px-4 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
-              <ChevronLeft className="w-5 h-5" />
+              <ChevronLeft className="w-4 h-4" />
+              Previous
             </button>
 
-            {/* Page Numbers */}
-            <div className="flex items-center gap-1">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`w-10 h-10 rounded-lg font-medium transition-colors ${
-                    currentPage === page
-                      ? 'bg-blue-600 text-white'
-                      : 'border border-gray-300 hover:bg-gray-50 text-gray-700'
-                  }`}
-                >
-                  {page}
-                </button>
-              ))}
-            </div>
+            <span className="text-sm font-medium text-gray-600 whitespace-nowrap">
+              Page <span className="text-gray-900">{currentPage}</span> of <span className="text-gray-900">{totalPages}</span>
+            </span>
 
             <button
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+              onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
               disabled={currentPage === totalPages}
-              className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1.5 h-9 px-4 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
-              <ChevronRight className="w-5 h-5" />
+              Next
+              <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -1196,7 +1283,7 @@ const SupportManagement: React.FC = () => {
                   <p className="text-gray-600 mb-4">
                     Approving ticket <strong>{actionModal.ticket.ticket_number}</strong>
                   </p>
-                  <div className="mb-6">
+                  <div className="mb-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Response (Optional)
                     </label>
@@ -1208,6 +1295,27 @@ const SupportManagement: React.FC = () => {
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 resize-y"
                     />
                   </div>
+                  <input ref={fileInputRef} type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt,.xlsx,.xls,.zip,.rar" onChange={handleFileSelect} className="hidden" />
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Attach Files (Optional)</label>
+                    <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-300 rounded-lg p-3 text-center cursor-pointer hover:border-green-400 transition-colors">
+                      <Paperclip className="w-5 h-5 text-gray-400 mx-auto mb-1" />
+                      <p className="text-sm text-gray-600">Click to attach files</p>
+                    </div>
+                  </div>
+                  {selectedFiles.length > 0 && (
+                    <div className="mb-4 space-y-2">
+                      {selectedFiles.map((file, index) => (
+                        <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            {file.type.startsWith('image/') ? <Image className="w-4 h-4 text-blue-500" /> : <FileText className="w-4 h-4 text-gray-500" />}
+                            <span className="text-sm text-gray-700">{file.name}</span>
+                          </div>
+                          <button type="button" onClick={() => removeFile(index)} className="p-1 text-red-500 hover:bg-red-100 rounded"><X className="w-3 h-3" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex justify-end gap-3">
                     <button
                       onClick={clearModalState}
@@ -1249,7 +1357,7 @@ const SupportManagement: React.FC = () => {
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 resize-y"
                     />
                   </div>
-                  <div className="mb-6">
+                  <div className="mb-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Additional Response (Optional)
                     </label>
@@ -1261,6 +1369,27 @@ const SupportManagement: React.FC = () => {
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 resize-y"
                     />
                   </div>
+                  <input ref={fileInputRef} type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt,.xlsx,.xls,.zip,.rar" onChange={handleFileSelect} className="hidden" />
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Attach Files (Optional)</label>
+                    <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-300 rounded-lg p-3 text-center cursor-pointer hover:border-red-400 transition-colors">
+                      <Paperclip className="w-5 h-5 text-gray-400 mx-auto mb-1" />
+                      <p className="text-sm text-gray-600">Click to attach files</p>
+                    </div>
+                  </div>
+                  {selectedFiles.length > 0 && (
+                    <div className="mb-4 space-y-2">
+                      {selectedFiles.map((file, index) => (
+                        <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            {file.type.startsWith('image/') ? <Image className="w-4 h-4 text-blue-500" /> : <FileText className="w-4 h-4 text-gray-500" />}
+                            <span className="text-sm text-gray-700">{file.name}</span>
+                          </div>
+                          <button type="button" onClick={() => removeFile(index)} className="p-1 text-red-500 hover:bg-red-100 rounded"><X className="w-3 h-3" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex justify-end gap-3">
                     <button
                       onClick={clearModalState}
@@ -1401,7 +1530,7 @@ const SupportManagement: React.FC = () => {
                       <option value="closed">Closed</option>
                     </select>
                   </div>
-                  <div className="mb-6">
+                  <div className="mb-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Status Update Note (Optional)
                     </label>
@@ -1416,6 +1545,27 @@ const SupportManagement: React.FC = () => {
                       This note will appear in the "Development Team Response" section of the ticket.
                     </p>
                   </div>
+                  <input ref={fileInputRef} type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt,.xlsx,.xls,.zip,.rar" onChange={handleFileSelect} className="hidden" />
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Attach Files (Optional)</label>
+                    <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-300 rounded-lg p-3 text-center cursor-pointer hover:border-blue-400 transition-colors">
+                      <Paperclip className="w-5 h-5 text-gray-400 mx-auto mb-1" />
+                      <p className="text-sm text-gray-600">Click to attach files</p>
+                    </div>
+                  </div>
+                  {selectedFiles.length > 0 && (
+                    <div className="mb-4 space-y-2">
+                      {selectedFiles.map((file, index) => (
+                        <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            {file.type.startsWith('image/') ? <Image className="w-4 h-4 text-blue-500" /> : <FileText className="w-4 h-4 text-gray-500" />}
+                            <span className="text-sm text-gray-700">{file.name}</span>
+                          </div>
+                          <button type="button" onClick={() => removeFile(index)} className="p-1 text-red-500 hover:bg-red-100 rounded"><X className="w-3 h-3" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex justify-end gap-3">
                     <button
                       onClick={clearModalState}

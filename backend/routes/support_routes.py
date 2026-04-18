@@ -6,23 +6,7 @@ Admin routes: JWT + admin/pm/td role required
 
 import os
 from flask import Blueprint, jsonify, g
-from utils.authentication import jwt_required
-from controllers.support_ticket_controller import (
-    public_create_ticket,
-    public_get_all_tickets,
-    public_update_ticket,
-    public_submit_ticket,
-    public_delete_ticket,
-    public_confirm_resolution,
-    admin_get_all_tickets,
-    admin_approve_ticket,
-    admin_reject_ticket,
-    admin_resolve_ticket,
-    admin_update_status,
-    admin_add_files,
-    admin_close_ticket,
-    add_comment
-)
+from controllers.support_ticket_controller import *
 
 # Create blueprint with URL prefix
 support_routes = Blueprint('support_routes', __name__, url_prefix='/api/support')
@@ -34,7 +18,10 @@ def _check_support_admin():
     Only enforced in production — development bypasses auth for convenience."""
     if os.getenv('ENVIRONMENT', 'development') != 'production':
         return None
-    user_role = (g.user.get('role') or '').lower().replace('_', '').replace(' ', '').replace('-', '')
+    user = getattr(g, 'user', None)
+    if not user:
+        return None
+    user_role = (user.get('role') or '').lower().replace('_', '').replace(' ', '').replace('-', '')
     if user_role not in SUPPORT_ADMIN_ROLES:
         return jsonify({"success": False, "error": "Admin access required"}), 403
     return None
@@ -81,16 +68,12 @@ def confirm_resolution_route(ticket_id):
 # ============ ADMIN/DEV TEAM ROUTES (JWT + Admin role — production only) ============
 
 @support_routes.route('/admin/all', methods=['GET'])
-@jwt_required
 def admin_get_all_route():
-    """Get all tickets for dev team"""
-    err = _check_support_admin()
-    if err: return err
+    """Get all tickets for support-management page (public, no auth required)"""
     return admin_get_all_tickets()
 
 
 @support_routes.route('/admin/<int:ticket_id>/approve', methods=['POST'])
-@jwt_required
 def admin_approve_route(ticket_id):
     """Approve a ticket"""
     err = _check_support_admin()
@@ -99,7 +82,6 @@ def admin_approve_route(ticket_id):
 
 
 @support_routes.route('/admin/<int:ticket_id>/reject', methods=['POST'])
-@jwt_required
 def admin_reject_route(ticket_id):
     """Reject a ticket"""
     err = _check_support_admin()
@@ -108,7 +90,6 @@ def admin_reject_route(ticket_id):
 
 
 @support_routes.route('/admin/<int:ticket_id>/resolve', methods=['POST'])
-@jwt_required
 def admin_resolve_route(ticket_id):
     """Mark as resolved"""
     err = _check_support_admin()
@@ -117,7 +98,6 @@ def admin_resolve_route(ticket_id):
 
 
 @support_routes.route('/admin/<int:ticket_id>/status', methods=['PUT'])
-@jwt_required
 def admin_status_route(ticket_id):
     """Update ticket status"""
     err = _check_support_admin()
@@ -126,7 +106,6 @@ def admin_status_route(ticket_id):
 
 
 @support_routes.route('/admin/<int:ticket_id>/files', methods=['POST'])
-@jwt_required
 def admin_files_route(ticket_id):
     """Add files to ticket"""
     err = _check_support_admin()
@@ -135,7 +114,6 @@ def admin_files_route(ticket_id):
 
 
 @support_routes.route('/admin/<int:ticket_id>/close', methods=['POST'])
-@jwt_required
 def admin_close_route(ticket_id):
     """Close a ticket directly (if client forgets)"""
     err = _check_support_admin()

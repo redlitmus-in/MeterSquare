@@ -57,6 +57,7 @@ export interface Comment {
   sender_name: string;
   sender_email?: string;
   message: string;
+  attachments?: Attachment[];
   created_at: string;
 }
 
@@ -68,6 +69,7 @@ export interface ResponseHistoryEntry {
   old_status?: string;
   new_status: string;
   closed_by?: 'client' | 'dev_team';
+  attachments?: Attachment[];
   created_at: string;
 }
 
@@ -267,7 +269,15 @@ export const supportApi = {
   /**
    * Approve a ticket (admin only)
    */
-  async approveTicket(ticketId: number, adminName?: string, response?: string): Promise<TicketResponse> {
+  async approveTicket(ticketId: number, adminName?: string, response?: string, files?: File[]): Promise<TicketResponse> {
+    if (files && files.length > 0) {
+      const formData = new FormData();
+      if (adminName) formData.append('admin_name', adminName);
+      if (response) formData.append('response', response);
+      files.forEach(file => formData.append('files', file));
+      const res = await apiClient.post(`/support/admin/${ticketId}/approve`, formData);
+      return res.data;
+    }
     const res = await apiClient.post(`/support/admin/${ticketId}/approve`, { admin_name: adminName, response });
     return res.data;
   },
@@ -275,7 +285,16 @@ export const supportApi = {
   /**
    * Reject a ticket (admin only)
    */
-  async rejectTicket(ticketId: number, reason: string, adminName?: string, response?: string): Promise<TicketResponse> {
+  async rejectTicket(ticketId: number, reason: string, adminName?: string, response?: string, files?: File[]): Promise<TicketResponse> {
+    if (files && files.length > 0) {
+      const formData = new FormData();
+      formData.append('reason', reason);
+      if (adminName) formData.append('admin_name', adminName);
+      if (response) formData.append('response', response);
+      files.forEach(file => formData.append('files', file));
+      const res = await apiClient.post(`/support/admin/${ticketId}/reject`, formData);
+      return res.data;
+    }
     const res = await apiClient.post(`/support/admin/${ticketId}/reject`, { reason, admin_name: adminName, response });
     return res.data;
   },
@@ -317,7 +336,16 @@ export const supportApi = {
   /**
    * Update ticket status (admin only)
    */
-  async updateTicketStatus(ticketId: number, status: string, adminName?: string, response?: string): Promise<TicketResponse> {
+  async updateTicketStatus(ticketId: number, status: string, adminName?: string, response?: string, files?: File[]): Promise<TicketResponse> {
+    if (files && files.length > 0) {
+      const formData = new FormData();
+      formData.append('status', status);
+      if (adminName) formData.append('admin_name', adminName);
+      if (response) formData.append('response', response);
+      files.forEach(file => formData.append('files', file));
+      const res = await apiClient.put(`/support/admin/${ticketId}/status`, formData);
+      return res.data;
+    }
     const res = await apiClient.put(`/support/admin/${ticketId}/status`, { status, admin_name: adminName, response });
     return res.data;
   },
@@ -340,6 +368,13 @@ export const supportApi = {
     sender_email?: string;
   }): Promise<TicketResponse & { comment: any }> {
     const res = await apiClient.post(`/support/${ticketId}/comment`, data);
+    return res.data;
+  },
+
+  async addCommentWithFiles(ticketId: number, formData: FormData): Promise<TicketResponse & { comment: any }> {
+    const res = await apiClient.post(`/support/${ticketId}/comment`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
     return res.data;
   },
 };

@@ -35,7 +35,8 @@ import {
   Search,
   MessageCircle,
   Download,
-  Rocket
+  Rocket,
+  Paperclip
 } from 'lucide-react';
 import { supportApi, SupportTicket } from '@/api/support';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
@@ -121,6 +122,7 @@ const PublicSupportPage: React.FC = () => {
 
   // Comment state
   const [commentText, setCommentText] = useState<Record<number, string>>({});
+  const [commentFiles, setCommentFiles] = useState<Record<number, File[]>>({});
   const [isSendingComment, setIsSendingComment] = useState<Record<number, boolean>>({});
   // Counter to trigger re-sort when comments are marked as read
   const [commentReadCounter, setCommentReadCounter] = useState(0);
@@ -438,8 +440,9 @@ const PublicSupportPage: React.FC = () => {
 
   const handleSendComment = async (ticketId: number) => {
     const message = commentText[ticketId]?.trim();
-    if (!message) {
-      showWarning('Please enter a comment');
+    const files = commentFiles[ticketId] || [];
+    if (!message && files.length === 0) {
+      showWarning('Please enter a comment or attach a file');
       return;
     }
 
@@ -453,16 +456,29 @@ const PublicSupportPage: React.FC = () => {
 
     try {
       setIsSendingComment(prev => ({ ...prev, [ticketId]: true }));
-      const response = await supportApi.addComment(ticketId, {
-        message,
-        sender_type: 'client',
-        sender_name: senderName,
-        sender_email: senderEmail
-      });
+
+      let response;
+      if (files.length > 0) {
+        const formDataObj = new FormData();
+        formDataObj.append('message', message || '');
+        formDataObj.append('sender_type', 'client');
+        formDataObj.append('sender_name', senderName);
+        formDataObj.append('sender_email', senderEmail);
+        files.forEach(f => formDataObj.append('files', f));
+        response = await supportApi.addCommentWithFiles(ticketId, formDataObj);
+      } else {
+        response = await supportApi.addComment(ticketId, {
+          message: message!,
+          sender_type: 'client',
+          sender_name: senderName,
+          sender_email: senderEmail
+        });
+      }
 
       if (response.success) {
         showSuccess('Comment sent successfully');
         setCommentText(prev => ({ ...prev, [ticketId]: '' }));
+        setCommentFiles(prev => ({ ...prev, [ticketId]: [] }));
 
         // Send notification to admin (client sent comment)
         if (ticket) {
@@ -1258,6 +1274,22 @@ const PublicSupportPage: React.FC = () => {
                                           <strong>Reason:</strong> {entry.reason}
                                         </p>
                                       )}
+                                      {entry.attachments && entry.attachments.length > 0 && (
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                          {entry.attachments.map((att: any, ai: number) => (
+                                            <a
+                                              key={ai}
+                                              href={att.file_path}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 rounded-full text-xs text-gray-700 hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                                            >
+                                              <Paperclip className="w-3 h-3 text-gray-500" />
+                                              {att.file_name}
+                                            </a>
+                                          ))}
+                                        </div>
+                                      )}
                                       <p className={`text-sm ${config.title} mt-2`}>
                                         — {entry.admin_name}
                                       </p>
@@ -1404,7 +1436,25 @@ const PublicSupportPage: React.FC = () => {
                                           {new Date(comment.created_at + 'Z').toLocaleString()}
                                         </span>
                                       </div>
-                                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{comment.message}</p>
+                                      {comment.message && (
+                                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{comment.message}</p>
+                                      )}
+                                      {comment.attachments && comment.attachments.length > 0 && (
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                          {comment.attachments.map((att: any, i: number) => (
+                                            <a
+                                              key={i}
+                                              href={att.file_path}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-gray-200 rounded-lg text-xs text-blue-600 hover:bg-blue-50 transition-colors"
+                                            >
+                                              <Paperclip className="w-3 h-3 shrink-0" />
+                                              {att.file_name}
+                                            </a>
+                                          ))}
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
@@ -1412,29 +1462,71 @@ const PublicSupportPage: React.FC = () => {
 
                               {/* Add New Comment - only for non-closed tickets */}
                               {ticket.status !== 'closed' ? (
-                                <div className="flex gap-2">
-                                  <textarea
-                                    value={commentText[ticket.ticket_id] || ''}
-                                    onChange={(e) => setCommentText(prev => ({ ...prev, [ticket.ticket_id]: e.target.value }))}
-                                    placeholder="Add a comment or follow-up question..."
-                                    rows={2}
-                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 resize-none text-sm"
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleSendComment(ticket.ticket_id);
-                                    }}
-                                    disabled={isSendingComment[ticket.ticket_id] || !commentText[ticket.ticket_id]?.trim()}
-                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end"
-                                  >
-                                    {isSendingComment[ticket.ticket_id] ? (
-                                      <RefreshCw className="w-4 h-4 animate-spin" />
-                                    ) : (
-                                      <Send className="w-4 h-4" />
-                                    )}
-                                  </button>
+                                <div className="space-y-2">
+                                  <div className="flex gap-2">
+                                    <textarea
+                                      value={commentText[ticket.ticket_id] || ''}
+                                      onChange={(e) => setCommentText(prev => ({ ...prev, [ticket.ticket_id]: e.target.value }))}
+                                      placeholder="Add a comment or follow-up question..."
+                                      rows={2}
+                                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 resize-none text-sm"
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <div className="flex flex-col gap-1 self-end">
+                                      <label
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors flex items-center justify-center"
+                                        title="Attach files"
+                                      >
+                                        <Paperclip className="w-4 h-4 text-gray-500" />
+                                        <input
+                                          type="file"
+                                          multiple
+                                          className="hidden"
+                                          accept=".png,.jpg,.jpeg,.gif,.pdf,.doc,.docx,.txt,.xlsx,.xls"
+                                          onClick={(e) => e.stopPropagation()}
+                                          onChange={(e) => {
+                                            e.stopPropagation();
+                                            const files = Array.from(e.target.files || []);
+                                            setCommentFiles(prev => ({ ...prev, [ticket.ticket_id]: [...(prev[ticket.ticket_id] || []), ...files] }));
+                                            e.target.value = '';
+                                          }}
+                                        />
+                                      </label>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleSendComment(ticket.ticket_id);
+                                        }}
+                                        disabled={isSendingComment[ticket.ticket_id] || (!commentText[ticket.ticket_id]?.trim() && !(commentFiles[ticket.ticket_id]?.length))}
+                                        className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                      >
+                                        {isSendingComment[ticket.ticket_id] ? (
+                                          <RefreshCw className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                          <Send className="w-4 h-4" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  </div>
+                                  {/* Selected files preview */}
+                                  {(commentFiles[ticket.ticket_id]?.length || 0) > 0 && (
+                                    <div className="flex flex-wrap gap-2 px-1" onClick={(e) => e.stopPropagation()}>
+                                      {commentFiles[ticket.ticket_id].map((f, i) => (
+                                        <div key={i} className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
+                                          <Paperclip className="w-3 h-3" />
+                                          <span className="max-w-[160px] truncate">{f.name}</span>
+                                          <button
+                                            onClick={() => setCommentFiles(prev => ({
+                                              ...prev,
+                                              [ticket.ticket_id]: prev[ticket.ticket_id].filter((_, fi) => fi !== i)
+                                            }))}
+                                            className="ml-1 text-blue-400 hover:text-blue-700"
+                                          >×</button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               ) : (
                                 <p className="text-sm text-gray-500 italic">

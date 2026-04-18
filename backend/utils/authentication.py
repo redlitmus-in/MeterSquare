@@ -44,55 +44,78 @@ EMAIL_PORT = int(os.getenv("EMAIL_PORT", "465"))
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
 SECRET_KEY = os.getenv('SECRET_KEY')
 
-otp_storage = {}
+import json as _json
+
+otp_storage = {}  # in-memory store: key → {otp, role, user_id, email, expires_at}
 _otp_lock = threading.Lock()
 
-# Redis for shared OTP storage across multiple workers
+# Use Redis when available (shared across workers); fall back to in-memory for single-worker dev
 _REDIS_URL = os.getenv('REDIS_URL')
+_USE_REDIS = False
+_redis_client = None
+
 try:
     import redis as _redis
     if _REDIS_URL:
         _redis_client = _redis.Redis.from_url(_REDIS_URL, decode_responses=True, socket_connect_timeout=2)
-    else:
-        _redis_client = None
-        raise ConnectionError("REDIS_URL not configured")
-    _redis_client.ping()
-    _USE_REDIS = True
+        _redis_client.ping()
+        _USE_REDIS = True
 except Exception:
     _USE_REDIS = False
     _redis_client = None
 
+
 def _otp_set(email_id, otp, role=None, user_id=None, email=None, ttl=300):
-    """Store OTP data in Redis (shared across workers) or in-memory fallback."""
+    """Store OTP in Redis or in-memory."""
     expires_at = (datetime.utcnow() + timedelta(seconds=ttl)).timestamp()
     payload = {"otp": otp, "role": role, "expires_at": expires_at}
     if user_id is not None:
         payload["user_id"] = user_id
     if email is not None:
         payload["email"] = email
+
     if _USE_REDIS:
-        import json
-        _redis_client.setex(f"otp:{email_id}", ttl, json.dumps(payload))
+        _redis_client.setex(f"otp:{email_id}", ttl, _json.dumps(payload))
     else:
         with _otp_lock:
             otp_storage[email_id] = payload
 
-def _otp_pop(email_id):
+
+def _otp_peek(email_id):
+    """Read OTP data WITHOUT deleting it. Returns None if missing or expired."""
     if _USE_REDIS:
-        import json
-        pipe = _redis_client.pipeline()
-        pipe.get(f"otp:{email_id}")
-        pipe.delete(f"otp:{email_id}")
-        val, _ = pipe.execute()
+        val = _redis_client.get(f"otp:{email_id}")
         if not val:
             return None
-        return json.loads(val)
+        data = _json.loads(val)
     else:
         with _otp_lock:
-            data = otp_storage.pop(email_id, None)
-        if data and data.get("expires_at") and datetime.utcnow().timestamp() > data["expires_at"]:
+            data = otp_storage.get(email_id)
+        if data is None:
             return None
-        return data
+
+    if data.get("expires_at") and datetime.utcnow().timestamp() > data["expires_at"]:
+        # Expired — clean it up silently
+        _otp_del(email_id)
+        return None
+    return data
+
+
+def _otp_del(email_id):
+    """Delete OTP entry (called only after successful verification)."""
+    if _USE_REDIS:
+        _redis_client.delete(f"otp:{email_id}")
+    else:
+        with _otp_lock:
+            otp_storage.pop(email_id, None)
+
+
+def _otp_pop(email_id):
+    """Legacy: peek + delete in one call (used by SMS/phone OTP path)."""
+    data = _otp_peek(email_id)
+    if data is not None:
+        _otp_del(email_id)
+    return data
 
 
 def parse_user_agent(user_agent_string):
@@ -474,10 +497,10 @@ def verification_otp():
     except ValueError:
         return jsonify({"error": "OTP must be a number"}), 400
     
-    # Atomically pop OTP data so only one request can ever consume it.
-    otp_data = _otp_pop(email_id)
+    # Peek at OTP without deleting — wrong attempts must not consume the OTP
+    otp_data = _otp_peek(email_id)
     if not otp_data:
-        on_login_failed(email_id)  # Audit log - potential brute force attempt
+        on_login_failed(email_id)
         return jsonify({"error": "OTP not found or expired"}), 400
     
     # Check if a specific role was required during login
@@ -528,9 +551,12 @@ def verification_otp():
     # Constant-time comparison prevents timing-based enumeration of OTP values
     import hmac
     if not hmac.compare_digest(str(otp_input), str(stored_otp)):
-        on_login_failed(email_id)  # Audit log failed attempt
+        on_login_failed(email_id)  # Audit log failed attempt — OTP NOT consumed
         return jsonify({"error": "Invalid OTP"}), 400
-    
+
+    # OTP is correct — consume it now so it can't be reused
+    _otp_del(email_id)
+
     # Update last login, status, and timezone
     user.last_login = current_time
     user.user_status = 'online'  # Auto-set online on login
