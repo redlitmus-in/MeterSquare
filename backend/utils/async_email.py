@@ -4,6 +4,7 @@ Asynchronous email sending using threading to prevent blocking
 import threading
 import queue
 import time
+import traceback
 from datetime import datetime, timedelta
 import smtplib
 from email.mime.text import MIMEText
@@ -20,8 +21,8 @@ log = get_logger()
 # Email configuration
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_EMAIL_PASSWORD = os.getenv("SENDER_EMAIL_PASSWORD")
-EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
-EMAIL_PORT = int(os.getenv("EMAIL_PORT", "465"))
+EMAIL_HOST = os.getenv("EMAIL_HOST")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT"))
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
 
@@ -34,6 +35,7 @@ from utils.authentication import otp_storage
 
 def email_worker_thread():
     """Background thread that processes email queue"""
+    log.info("email_worker_thread started, waiting for queue items")
     while True:
         try:
             # Get email data from queue (blocks until available)
@@ -43,9 +45,9 @@ def email_worker_thread():
                 email_queue.task_done()
                 break
 
+            email_type = email_data.get('type', 'otp')
             # Send the email (dispatch by type)
             try:
-                email_type = email_data.get('type', 'otp')
                 if email_type == 'account_blocked':
                     _send_account_blocked_sync(email_data)
                 elif email_type == 'account_unblocked':
@@ -58,8 +60,9 @@ def email_worker_thread():
                     _send_generic_html_sync(email_data)
                 else:
                     send_email_sync(email_data)
+                log.info(f"Successfully processed email job type={email_type}")
             except Exception as e:
-                log.error(f"Error sending email: {e}")
+                log.error(f"Error sending email (type={email_type}): {type(e).__name__}: {e}")
             finally:
                 # Mark task as done only after processing
                 email_queue.task_done()
@@ -68,7 +71,7 @@ def email_worker_thread():
             # No items in queue, continue waiting
             continue
         except Exception as e:
-            log.error(f"Email worker error: {e}")
+            log.error(f"Email worker error: {type(e).__name__}: {e}")
 
 def send_email_sync(email_data):
     """Synchronously send an email (called by worker thread)"""
@@ -187,18 +190,25 @@ def send_email_sync(email_data):
         if EMAIL_USE_TLS:
             # For TLS (like Office 365 on port 587)
             with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
+                log.info("Connected. Starting TLS...")
                 server.starttls()
+                log.info("TLS started. Logging in...")
                 server.login(SENDER_EMAIL, SENDER_EMAIL_PASSWORD)
+                log.info("SMTP login successful. Sending mail...")
                 server.sendmail(SENDER_EMAIL, email_id, message.as_string())
+                log.info(f"Email sent successfully")
         else:
-            # For SSL (like Gmail on port 465)
+            # For SSL (like Gmail on port)
             with smtplib.SMTP_SSL(EMAIL_HOST, EMAIL_PORT) as server:
+                log.info("Connected. Logging in...")
                 server.login(SENDER_EMAIL, SENDER_EMAIL_PASSWORD)
+                log.info("SMTP login successful. Sending mail...")
                 server.sendmail(SENDER_EMAIL, email_id, message.as_string())
+                log.info(f"Email sent successfully")
 
 
     except Exception as e:
-        log.error(f"Failed to send email to {email_data.get('email', 'unknown')}: {e}")
+        log.error(f"Failed to send email to {email_data.get('email', 'unknown')}: {type(e).__name__}: {e}\n{traceback.format_exc()}")
 
 def send_otp_async(email_id):
     """
@@ -212,6 +222,7 @@ def send_otp_async(email_id):
         otp = 100000 + secrets.randbelow(900000)
 
         # Start email worker thread if not running
+        worker_alive = email_worker.is_alive() if email_worker else False
         if email_worker is None or not email_worker.is_alive():
             email_worker = threading.Thread(target=email_worker_thread, daemon=True)
             email_worker.start()
@@ -222,11 +233,12 @@ def send_otp_async(email_id):
             'otp': otp,
             'subject': 'Your OTP Code'
         })
+        log.info(f"Queued OTP email, queue size={email_queue.qsize()}")
 
         return otp
 
     except Exception as e:
-        log.error(f"Error queuing OTP email: {e}")
+        log.error(f"Error queuing OTP email for {email_id}: {type(e).__name__}: {e}\n{traceback.format_exc()}")
         return None
 
 def send_account_blocked_email(email_id, full_name, reason=None):

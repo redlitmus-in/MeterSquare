@@ -105,8 +105,9 @@ def user_register():
         db.session.commit()
 
         # Send welcome OTP for first login (async)
+        log.info(f"user_register(): initiating OTP send")
         otp = send_otp_async(email)
-        
+
         response_data = {
             "message": "User registered successfully. OTP sent to email for first login.",
             "user_id": user.user_id,
@@ -164,6 +165,7 @@ def user_login():
 
         
         # Send OTP to user's email ASYNCHRONOUSLY (instant return)
+        log.info(f"user_login(): initiating OTP send")
         otp = send_otp_async(email)
 
         if otp:
@@ -278,8 +280,9 @@ def send_email():
         if not user:
             return jsonify({"error": "User not found or inactive"}), 404
  
+        log.info(f"send_email(): initiating OTP send")
         otp = send_otp(email)
- 
+
         if otp:
             response_data = {
                 "message": "OTP sent successfully"
@@ -490,6 +493,7 @@ def site_supervisor_login_sms():
                 return jsonify({"error": "Failed to send SMS OTP. Please try again."}), 500
         else:
             # Email fallback
+            log.info(f"site_supervisor_login_sms(): initiating OTP send")
             otp = send_otp_async(email)
             if otp:
                 from utils.authentication import _otp_set

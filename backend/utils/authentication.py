@@ -1,5 +1,6 @@
 import os
 import threading
+import traceback
 from flask import g, jsonify, make_response, request, session, url_for
 import smtplib
 import secrets
@@ -39,8 +40,8 @@ log =  get_logger()
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_EMAIL_PASSWORD = os.getenv("SENDER_EMAIL_PASSWORD")
-EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
-EMAIL_PORT = int(os.getenv("EMAIL_PORT", "465"))
+EMAIL_HOST = os.getenv("EMAIL_HOST")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT"))
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
 SECRET_KEY = os.getenv('SECRET_KEY')
 
@@ -278,7 +279,7 @@ def send_otp(email_id):
     try:
         otp = 100000 + secrets.randbelow(900000)
         _otp_set(email_id, otp)
-        
+
         sender_email = SENDER_EMAIL
         password = SENDER_EMAIL_PASSWORD
         smtp_server = EMAIL_HOST
@@ -445,23 +446,26 @@ def send_otp(email_id):
         # Use appropriate SMTP connection based on configuration
         if EMAIL_USE_TLS:
             # For TLS (like Office 365 on port 587)
+            log.info(f"Connecting via SMTP (TLS)")
             with smtplib.SMTP(smtp_server, smtp_port) as server:
                 server.starttls()
                 server.login(sender_email, password)
                 server.sendmail(sender_email, email_id, message.as_string())
+                log.info(f"Email sent successfully")
         else:
-            # For SSL (like Gmail on port 465)
+            # For SSL (like Gmail on port)
             with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
                 server.login(sender_email, password)
                 server.sendmail(sender_email, email_id, message.as_string())
+                log.info(f"Email sent successfully")
 
         return otp
 
     except smtplib.SMTPException as e:
-        log.error(f"SMTP error occurred: {str(e)}")
+        log.error(f"SMTP error occurred for {email_id}: {str(e)}\n{traceback.format_exc()}")
         return None
     except Exception as e:
-        log.error(f"An error occurred: {str(e)}")
+        log.error(f"An error occurred in send_otp() for {email_id}: {str(e)}\n{traceback.format_exc()}")
         return None
 
 def verification_otp():
