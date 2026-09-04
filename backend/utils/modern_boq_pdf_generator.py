@@ -37,6 +37,25 @@ class ModernBOQPDFGenerator:
         else:
             self.supabase_url = os.environ.get('SUPABASE_URL')
 
+    @staticmethod
+    def _labour_line_total(lab):
+        """Resolve a labour line's total robustly.
+
+        BOQs are persisted with inconsistent keys for the labour total
+        (`total_cost` in some payloads, `total_amount` in others). Fall back
+        across the known keys and finally recompute from hours x rate so the
+        figure is always correct even when no stored total is present.
+        """
+        if not isinstance(lab, dict):
+            return 0.0
+        for key in ('total_cost', 'total_amount', 'amount'):
+            value = lab.get(key)
+            if value:
+                return value
+        hours = lab.get('hours', 0) or 0
+        rate = lab.get('rate_per_hour', 0) or 0
+        return hours * rate
+
     def _setup_styles(self):
         """Setup modern professional styles"""
         # Clean header style
@@ -1117,7 +1136,7 @@ class ModernBOQPDFGenerator:
 
                         labour_cost = 0
                         for lab in labour:
-                            lab_total = lab.get('total_cost', 0)
+                            lab_total = self._labour_line_total(lab)
                             labour_cost += lab_total
                             table_data.append([
                                 '',
@@ -1140,7 +1159,7 @@ class ModernBOQPDFGenerator:
 
                     # Calculations - Get percentages from SUB-ITEM (as per TD modal!)
                     materials_cost = sum([m.get('total_price', 0) for m in sub_item.get('materials', [])])
-                    labour_cost = sum([l.get('total_cost', 0) for l in sub_item.get('labour', [])])
+                    labour_cost = sum([self._labour_line_total(l) for l in sub_item.get('labour', [])])
                     base_cost = materials_cost + labour_cost
 
                     # Get percentages from SUB-ITEM first, fallback to PARENT ITEM
@@ -1375,7 +1394,7 @@ class ModernBOQPDFGenerator:
 
                     # Calculate base cost from materials and labour
                     materials_cost = sum([m.get('total_price', 0) for m in sub_item.get('materials', [])])
-                    labour_cost = sum([l.get('total_cost', 0) for l in sub_item.get('labour', [])])
+                    labour_cost = sum([self._labour_line_total(l) for l in sub_item.get('labour', [])])
                     base_cost = materials_cost + labour_cost
 
                     # Get percentages from SUB-ITEM first, fallback to ITEM
