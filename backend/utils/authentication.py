@@ -66,7 +66,7 @@ except Exception:
     _redis_client = None
 
 
-def _otp_set(email_id, otp, role=None, user_id=None, email=None, ttl=300):
+def _otp_set(email_id, otp, role=None, user_id=None, email=None, ttl=300, grant_login=False):
     """Store OTP in Redis or in-memory."""
     expires_at = (datetime.utcnow() + timedelta(seconds=ttl)).timestamp()
     payload = {"otp": otp, "role": role, "expires_at": expires_at}
@@ -74,6 +74,8 @@ def _otp_set(email_id, otp, role=None, user_id=None, email=None, ttl=300):
         payload["user_id"] = user_id
     if email is not None:
         payload["email"] = email
+    if grant_login:
+        payload["grant_login"] = True
 
     if _USE_REDIS:
         _redis_client.setex(f"otp:{email_id}", ttl, _json.dumps(payload))
@@ -525,7 +527,22 @@ def verification_otp():
         )
     
     user = query.first()
-    
+
+    # Multi-role access: the chosen role may be an active grant rather than the user's own role
+    login_grant = None
+    if not user and required_role and otp_data.get('grant_login'):
+        from utils.role_access import find_active_grant_for_role
+        candidate = db.session.query(User).filter(
+            User.user_id == otp_data.get('user_id'),
+            User.email == email_id,
+            User.is_deleted == False,
+            User.is_active == True
+        ).first()
+        if candidate:
+            login_grant = find_active_grant_for_role(candidate.user_id, required_role)
+            if login_grant:
+                user = candidate
+
     if not user:
         if required_role:
             return jsonify({"error": f"User not found with role '{required_role}' or account inactive"}), 404
@@ -574,6 +591,9 @@ def verification_otp():
 
     # Audit log successful login for security tracking
     on_login_success(user.user_id)
+
+    if login_grant:
+        return _grant_login_response(user, login_grant)
 
     # Get role information safely
     role_permissions = []
@@ -628,6 +648,33 @@ def verification_otp():
     }
     
     response = make_response(jsonify(response_data), 200)
+    response.set_cookie(
+        'access_token',
+        session_token,
+        expires=expiration_time,
+        httponly=True,
+        secure=True,
+        samesite='Strict' if ENVIRONMENT == 'production' else 'Lax'
+    )
+    return response
+
+def _grant_login_response(user, grant):
+    """Complete an OTP login into a granted role (multi-role access)."""
+    from utils.role_access import validate_grant_claims, issue_session_token, ROLE_ACCESS_EXPIRED
+
+    grant, source_user, grant_error = validate_grant_claims({'grant_id': grant.grant_id}, user)
+    if grant_error:
+        return jsonify({"error": grant_error, "error_code": ROLE_ACCESS_EXPIRED}), 403
+
+    session_token, expiration_time, jti, user_data = issue_session_token(user, grant, source_user)
+    record_login_history(user.user_id, login_method='email_otp', jti=jti)
+
+    response = make_response(jsonify({
+        "message": "Login successful",
+        "access_token": session_token,
+        "expires_at": expiration_time.isoformat(),
+        "user": user_data
+    }), 200)
     response.set_cookie(
         'access_token',
         session_token,
@@ -714,21 +761,38 @@ def jwt_required(f):
                 log.warning(f"Blocked user attempted access: user_id={current_user.user_id}")
                 return jsonify({'error': 'Account blocked', 'message': 'Your account has been blocked by an administrator.'}), 403
 
-            # Store user in g object for access in route
-            g.current_user = current_user
-            g.user_id = current_user.user_id
-            g.user = {
-                'user_id': current_user.user_id,
-                'email': current_user.email,
-                'full_name': current_user.full_name,
-                'role_id': current_user.role_id,
-                'role': role_name,
-                'role_name': role_name,  # Add role_name for consistency
-                'department': current_user.department,
-                'phone': current_user.phone,
-                'is_active': current_user.is_active,
-                'user_status': getattr(current_user, 'user_status', None)
-            }
+            # Granted-role session (multi-role access): only tokens issued for a
+            # granted role carry grant_id; every other session skips this block.
+            if data.get('grant_id'):
+                from utils.role_access import validate_grant_claims, build_session_user, ROLE_ACCESS_EXPIRED
+                grant, source_user, grant_error = validate_grant_claims(data, current_user)
+                if grant_error:
+                    return jsonify({
+                        'error': 'Role access ended',
+                        'error_code': ROLE_ACCESS_EXPIRED,
+                        'message': grant_error
+                    }), 403
+                session_user, effective_user = build_session_user(current_user, grant, source_user)
+                g.actual_user = current_user
+                g.current_user = effective_user
+                g.user_id = effective_user.user_id
+                g.user = session_user
+            else:
+                # Store user in g object for access in route
+                g.current_user = current_user
+                g.user_id = current_user.user_id
+                g.user = {
+                    'user_id': current_user.user_id,
+                    'email': current_user.email,
+                    'full_name': current_user.full_name,
+                    'role_id': current_user.role_id,
+                    'role': role_name,
+                    'role_name': role_name,  # Add role_name for consistency
+                    'department': current_user.department,
+                    'phone': current_user.phone,
+                    'is_active': current_user.is_active,
+                    'user_status': getattr(current_user, 'user_status', None)
+                }
 
         except jwt.ExpiredSignatureError:
             log.warning(f"Token has expired for token ending with: ...{token[-10:] if token else 'N/A'}")

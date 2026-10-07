@@ -4,6 +4,7 @@ import { X, Send, User } from 'lucide-react';
 import { Buyer, getAvailableBuyers, assignBoqToBuyer } from '@/services/boqAssignmentService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import GrantedRoleTag from '@/components/ui/GrantedRoleTag';
 
 interface AssignBuyerModalProps {
   isOpen: boolean;
@@ -171,9 +172,12 @@ const AssignBuyerModal: React.FC<AssignBuyerModalProps> = ({
                             </div>
 
                             <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
                               <p className="text-sm font-semibold text-gray-900 truncate">
                                 {buyer.full_name}
                               </p>
+                              <GrantedRoleTag until={(buyer as any).granted_until} />
+                              </div>
                               <p className="text-xs text-gray-500 truncate">{buyer.email}</p>
                             </div>
 

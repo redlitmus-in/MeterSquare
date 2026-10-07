@@ -506,12 +506,9 @@ def get_site_engineers_for_transfer():
             log.warning("Site Engineer role 'siteEngineer' not found in database")
             return jsonify([]), 200
 
-        # Get all users with Site Engineer role
-        site_engineers = User.query.filter_by(
-            role_id=se_role.role_id,
-            is_deleted=False,
-            is_active=True
-        ).all()
+        # Get all users with Site Engineer role (includes active fresh role grants)
+        from utils.role_access import users_with_role, granted_until
+        site_engineers = [se for se in users_with_role(se_role.role_id) if se.is_active]
 
 
         se_list = []
@@ -548,7 +545,8 @@ def get_site_engineers_for_transfer():
                 'full_name': se.full_name,
                 'email': se.email,
                 'phone_number': se.phone,
-                'role_name': se.role.role if se.role else 'siteEngineer',
+                'role_name': 'siteEngineer',
+                'granted_until': granted_until(se),
                 'project_count': project_count,
                 'display_label': f"{se.full_name} ({project_count} project{'s' if project_count != 1 else ''})"
             }

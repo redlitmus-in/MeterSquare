@@ -552,6 +552,7 @@ const MaterialTransfer: React.FC = () => {
                       {siteEngineers.map((se) => (
                         <option key={se.user_id} value={se.user_id}>
                           {se.display_label}
+                          {(se as any).granted_until ? ' · Granted access' : ''}
                         </option>
                       ))}
                     </select>

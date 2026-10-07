@@ -36,6 +36,7 @@ export interface User extends BaseEntity {
   bio?: string;
   is_active: boolean;
   user_status?: string; // 'online' | 'offline'
+  role_access?: import('@/api/roleAccess').RoleAccessInfo; // own role + granted roles (Role Access)
 }
 
 export interface UserCreate {

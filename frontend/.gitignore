@@ -95,7 +95,9 @@ pnpm-lock.yaml.backup
 .nuxt
 
 # Gatsby files
-public
+public/*
+# ...except the user guide PDF (built by backend/docs/build_user_guide.py, served at /MeterSquare-User-Guide.pdf)
+!public/MeterSquare-User-Guide.pdf
 
 # VuePress build output
 .vuepress/dist

@@ -46,6 +46,15 @@ def token_required(f):
             if not current_user_id:
                 return jsonify({'error': 'Invalid token'}), 401
 
+            # Granted-role token: use the session's effective user while the grant is active
+            if data.get('grant_id'):
+                from utils.role_access import validate_grant_claims, ROLE_ACCESS_EXPIRED
+                _grant, _source, grant_error = validate_grant_claims(data)
+                if grant_error:
+                    return jsonify({'error': 'Role access ended', 'error_code': ROLE_ACCESS_EXPIRED,
+                                    'message': grant_error}), 403
+                current_user_id = data.get('effective_user_id') or current_user_id
+
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token has expired'}), 401
         except jwt.InvalidTokenError:

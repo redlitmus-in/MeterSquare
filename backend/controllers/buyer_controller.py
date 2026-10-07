@@ -24,6 +24,7 @@ from config.db import db
 from models.project import Project
 from models.user import User
 from models.role import Role
+from utils.role_access import users_with_role, granted_until
 from config.logging import get_logger
 from datetime import datetime
 
@@ -100,7 +101,7 @@ def get_all_buyers():
             return jsonify({"error": "Buyer role not found"}), 404
 
         # Get buyers
-        buyers = User.query.filter_by(role_id=role.role_id, is_deleted=False).all()
+        buyers = users_with_role(role.role_id)  # includes active fresh role grants
 
         # Pre-fetch ALL projects for all buyers in ONE query
         buyer_ids = [b.user_id for b in buyers]
@@ -130,6 +131,7 @@ def get_all_buyers():
                     assigned_list.append({
                         "user_id": buyer.user_id,
                         "buyer_name": buyer.full_name,
+                        "granted_until": granted_until(buyer),
                         "full_name": buyer.full_name,
                         "email": buyer.email,
                         "phone": buyer.phone,
@@ -141,6 +143,7 @@ def get_all_buyers():
                 unassigned_list.append({
                     "user_id": buyer.user_id,
                     "buyer_name": buyer.full_name,
+                    "granted_until": granted_until(buyer),
                     "full_name": buyer.full_name,
                     "email": buyer.email,
                     "phone": buyer.phone,

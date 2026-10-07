@@ -244,7 +244,11 @@ def get_site_supervisors(project):
         if not role:
             return False
         role_name_lower = role.role.lower().replace('_', '').replace(' ', '').replace('-', '')
-        return role_name_lower in ['siteengineer', 'sitesupervisor', 'se']
+        if role_name_lower in ['siteengineer', 'sitesupervisor', 'se']:
+            return True
+        # Assigned to the project through an active fresh role grant
+        from utils.role_access import user_has_role
+        return user_has_role(user, 'siteEngineer')
 
     # Process direct site_supervisor_id
     if project.site_supervisor_id:

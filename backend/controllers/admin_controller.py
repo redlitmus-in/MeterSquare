@@ -524,7 +524,9 @@ def assign_project_manager(project_id):
             return jsonify({"error": "Project Manager not found or inactive"}), 404
 
         pm_role = Role.query.filter_by(role_id=pm_user.role_id).first()
-        if pm_role and pm_role.role not in ['projectManager', 'technicalDirector', 'admin']:
+        from utils.role_access import user_has_role
+        if pm_role and pm_role.role not in ['projectManager', 'technicalDirector', 'admin'] \
+                and not user_has_role(pm_user, 'projectManager'):
             return jsonify({"error": "User is not a Project Manager, Technical Director, or Admin"}), 400
 
         # Assign PM (convert to JSONB array format)

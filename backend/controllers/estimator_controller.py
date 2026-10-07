@@ -790,6 +790,11 @@ def send_boq_to_technical_director():
         # If specific TD ID provided, use it; otherwise get first available TD
         if td_id:
             td = User.query.filter_by(user_id=td_id, role_id=td_role.role_id, is_deleted=False).first()
+            if not td:
+                from utils.role_access import user_has_role
+                candidate = User.query.filter_by(user_id=td_id, is_deleted=False).first()
+                if candidate and user_has_role(candidate, 'technicalDirector'):
+                    td = candidate
         else:
             td = User.query.filter_by(role_id=td_role.role_id, is_deleted=False, is_active=True).first()
 

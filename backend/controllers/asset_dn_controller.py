@@ -338,6 +338,13 @@ def create_delivery_note():
                     User.full_name == attention_to_name,
                     User.is_active == True
                 ).first()
+                if not se_user:
+                    # Site Engineer through an active fresh role grant
+                    from utils.role_access import user_has_role
+                    for candidate in User.query.filter(User.full_name == attention_to_name, User.is_active == True).all():
+                        if user_has_role(candidate, 'siteEngineer'):
+                            se_user = candidate
+                            break
                 if se_user:
                     attention_to_id = se_user.user_id
 
@@ -598,6 +605,13 @@ def dispatch_delivery_note(adn_id):
                         User.full_name == adn.attention_to,
                         User.is_active == True
                     ).first()
+                    if not se_user:
+                        # Site Engineer through an active fresh role grant
+                        from utils.role_access import user_has_role
+                        for candidate in User.query.filter(User.full_name == adn.attention_to, User.is_active == True).all():
+                            if user_has_role(candidate, 'siteEngineer'):
+                                se_user = candidate
+                                break
                     if se_user:
                         se_user_ids.add(se_user.user_id)
             # Priority 3: project's assigned site supervisor

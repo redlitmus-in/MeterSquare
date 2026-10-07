@@ -8,6 +8,7 @@ from models.boq import *
 from models.project import Project
 from models.po_child import POChild
 from models.user import User
+from utils.role_access import user_has_role, users_with_role, granted_until
 from config.logging import get_logger
 from config.change_request_config import CR_CONFIG
 from services.change_request_workflow import workflow_service
@@ -593,6 +594,11 @@ def send_for_review(cr_id):
                     assigner_user = User.query.filter_by(user_id=assigned_approver_id, is_deleted=False).first()
                     if assigner_user and assigner_user.role:
                         assigner_role = assigner_user.role.role.lower()
+                    # Fresh-grant MEP: route to MEP when they are an MEP on this project
+                    if assigner_user and assigner_role != 'mep' and user_has_role(assigner_user, 'mep'):
+                        cr_project = Project.query.filter_by(project_id=change_request.project_id).first()
+                        if cr_project and assigner_user.user_id in (cr_project.mep_supervisor_id or []):
+                            assigner_role = 'mep'
 
             # Determine the correct approver based on who assigned
             if assigner_role and assigner_role.lower() == 'mep':
@@ -720,7 +726,7 @@ def send_for_review(cr_id):
                     return jsonify({"error": "Selected buyer not found"}), 404
 
                 buyer_role = selected_buyer.role.role.lower() if selected_buyer.role else ''
-                if buyer_role != 'buyer':
+                if buyer_role != 'buyer' and not user_has_role(selected_buyer, 'buyer'):
                     return jsonify({"error": "Selected user is not a buyer"}), 400
 
                 next_role = CR_CONFIG.ROLE_BUYER
@@ -777,7 +783,7 @@ def send_for_review(cr_id):
                     return jsonify({"error": "Selected buyer not found"}), 404
 
                 buyer_role = selected_buyer.role.role.lower() if selected_buyer.role else ''
-                if buyer_role != 'buyer':
+                if buyer_role != 'buyer' and not user_has_role(selected_buyer, 'buyer'):
                     return jsonify({"error": "Selected user is not a buyer"}), 400
 
                 next_role = CR_CONFIG.ROLE_BUYER
@@ -2091,7 +2097,7 @@ def approve_change_request(cr_id):
                     return jsonify({"error": "Selected buyer not found"}), 404
 
                 buyer_role = selected_buyer.role.role.lower() if selected_buyer.role else ''
-                if buyer_role != 'buyer':
+                if buyer_role != 'buyer' and not user_has_role(selected_buyer, 'buyer'):
                     return jsonify({"error": "Selected user is not a buyer"}), 400
 
                 # Set status to send_to_buyer when sending to buyer
@@ -2394,8 +2400,8 @@ def approve_change_request(cr_id):
             # Priority 1: User selected a specific buyer
             if selected_buyer_id:
                 buyer = User.query.filter_by(user_id=selected_buyer_id, is_deleted=False).first()
-                # Verify the user is actually a buyer
-                if buyer and buyer_role and buyer.role_id == buyer_role.role_id:
+                # Verify the user is actually a buyer (own role or active fresh grant)
+                if buyer and buyer_role and (buyer.role_id == buyer_role.role_id or user_has_role(buyer, 'buyer')):
                     pass
                 else:
                     buyer = None
@@ -3343,11 +3349,8 @@ def get_all_buyers():
                 "message": "No buyer role configured"
             }), 200
 
-        # Get all active buyers using role_id
-        buyers = User.query.filter_by(
-            role_id=buyer_role.role_id,
-            is_deleted=False
-        ).all()
+        # Get all active buyers using role_id (includes active fresh role grants)
+        buyers = users_with_role(buyer_role.role_id)
 
         # Calculate online status dynamically: user is online if last_login was within last 5 minutes
         current_time = datetime.utcnow()
@@ -3364,7 +3367,8 @@ def get_all_buyers():
                 'full_name': buyer.full_name,
                 'email': buyer.email,
                 'username': buyer.email,  # Use email as username since User model doesn't have username
-                'is_active': is_online  # Dynamic online status based on last_login
+                'is_active': is_online,  # Dynamic online status based on last_login
+                'granted_until': granted_until(buyer)  # set when listed through a role grant
             })
 
         return jsonify({

@@ -132,6 +132,26 @@ def get_user_role_route(user_id: int) -> str:
         return 'dashboard'
 
 
+# Marker understood by the frontend: show the notification without a link/redirect
+NO_LINK_ACTION_URL = '#no-link'
+
+
+def _holds_granted_route(user_id: int, route_prefix: str) -> bool:
+    """True if the user has an active fresh role grant whose role maps to route_prefix."""
+    try:
+        from models.role import Role
+        from utils.role_access import active_grants_for_user
+        for grant in active_grants_for_user(user_id):
+            if grant.access_type != 'fresh':
+                continue
+            role = Role.query.get(grant.role_id)
+            if role and get_role_route_prefix(role.role) == route_prefix:
+                return True
+    except Exception as e:
+        log.warning(f"Granted-role link check skipped for user {user_id}: {e}")
+    return False
+
+
 def build_notification_action_url(
     user_id: int,
     base_page: str,
@@ -158,6 +178,12 @@ def build_notification_action_url(
     """
     # Get user's role route
     role_route = get_user_role_route(user_id)
+
+    # Recipient is getting this as a temporary (fresh) granted role: a link to their
+    # own role's pages would be wrong, so send it without a link.
+    if fallback_role_route and role_route not in ('dashboard', fallback_role_route) \
+            and _holds_granted_route(user_id, fallback_role_route):
+        return NO_LINK_ACTION_URL
 
     # Use fallback if provided and role route is 'dashboard'
     if role_route == 'dashboard' and fallback_role_route:

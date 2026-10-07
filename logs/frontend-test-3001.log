@@ -1,0 +1,45 @@
+
+  [32m[1mVITE[22m v4.5.14[39m  [2mready in [0m[1m1663[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3001[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.9.114:[1m3001[22m/[39m
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+[2m12:08:13 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/utils/roleSession.ts[22m
+[2m12:08:16 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/api/config.ts[22m
+[2m12:10:14 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/admin/RoleAccess.tsx, /src/index.css[22m
+[2m12:35:41 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/utils/roleSession.ts[22m
+[2m12:35:41 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/layout/ModernSidebar.tsx, /src/index.css[22m
+[2m12:35:41 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/layout/RoleAccessBanner.tsx, /src/index.css[22m
+[2m12:52:48 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/api/roleAccess.ts[22m
+[2m12:52:48 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/admin/RoleAccess.tsx, /src/index.css[22m
+[2m12:55:23 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/roles/project-manager/pages/ChangeRequestsPage.tsx, /src/index.css[22m
+[2m12:55:24 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/components/modals/ApprovalWithBuyerModal.tsx[22m
+[2m12:55:24 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/components/sitesupervisor/AssignBuyerModal.tsx[22m
+[2m1:02:16 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/roles/technical-director/pages/ProjectApprovals.tsx, /src/index.css[22m
+[2m1:02:16 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/roles/project-manager/pages/MyProjects.tsx, /src/index.css[22m
+[2m1:25:26 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/NotificationSystem.tsx, /src/index.css[22m
+[2m1:25:33 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/middleware/notificationMiddleware.ts[22m
+[2m1:25:43 PM[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/middleware/notificationMiddleware.ts[22m
+[2m2:59:12 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/layout/DashboardLayout.tsx, /src/index.css[22m
+[2m3:01:49 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:26:47 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:29:54 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:32:33 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:44:06 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:44:08 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:44:10 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:44:12 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:44:14 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:47:24 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:51:21 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m3:54:13 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m4:03:20 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m4:03:22 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m4:03:24 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m4:06:26 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m4:06:28 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m4:06:30 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m
+[2m4:06:33 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/assistant/GuideAssistant.tsx, /src/index.css[22m

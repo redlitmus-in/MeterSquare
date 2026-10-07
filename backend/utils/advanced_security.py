@@ -1135,6 +1135,18 @@ def register_security_routes(app: Flask):
                         "error": "Account is inactive or not found"
                     }), 401
 
+                # Granted-role token: the role claim only counts while the grant is active
+                if payload.get('grant_id'):
+                    from utils.role_access import validate_grant_claims, ROLE_ACCESS_EXPIRED
+                    _grant, _source, grant_error = validate_grant_claims(payload, user)
+                    if grant_error:
+                        return jsonify({
+                            "success": False,
+                            "error": "Role access ended",
+                            "error_code": ROLE_ACCESS_EXPIRED,
+                            "message": grant_error
+                        }), 403
+
                 # Set g.user for the request
                 g.user = {
                     'user_id': user_id,

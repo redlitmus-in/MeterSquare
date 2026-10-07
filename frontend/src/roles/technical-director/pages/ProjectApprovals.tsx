@@ -65,6 +65,7 @@ import {
   TableRow,
   TableCell,
 } from '@/components/ui/table';
+import GrantedRoleTag from '@/components/ui/GrantedRoleTag';
 
 interface BOQItem {
   id: number;
@@ -3403,6 +3404,7 @@ const ProjectApprovals: React.FC = () => {
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                       <h4 className="font-semibold text-gray-900 text-sm">{pm.pm_name || pm.full_name}</h4>
+                                      <GrantedRoleTag until={(pm as any).granted_until} />
                                       <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-green-100 text-green-700">
                                         <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                                         Online
@@ -3554,6 +3556,7 @@ const ProjectApprovals: React.FC = () => {
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                       <h4 className="font-semibold text-gray-900 text-sm">{pm.pm_name || pm.full_name}</h4>
+                                      <GrantedRoleTag until={(pm as any).granted_until} />
                                       <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-gray-200 text-gray-700">
                                         <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
                                         Offline
@@ -3713,7 +3716,10 @@ const ProjectApprovals: React.FC = () => {
                                       {mep.full_name?.charAt(0) || 'M'}
                                     </div>
                                     <div>
+                                      <div className="flex items-center gap-2">
                                       <p className="font-semibold text-gray-900 text-sm">{mep.full_name}</p>
+                                        <GrantedRoleTag until={(mep as any).granted_until} />
+                                      </div>
                                       <p className="text-xs text-gray-500">{mep.email}</p>
                                     </div>
                                   </div>

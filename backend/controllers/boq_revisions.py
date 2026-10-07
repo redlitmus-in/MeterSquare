@@ -333,6 +333,17 @@ def client_revision_td_mail_send():
                     )
                 ).first()
 
+                if not estimator:
+                    # BOQ created by a user working as Estimator through a fresh role grant
+                    from utils.role_access import user_has_role
+                    for candidate in User.query.filter(
+                        User.is_active == True, User.is_deleted == False,
+                        db.or_(User.full_name == boq.created_by, User.email == boq.created_by)
+                    ).all():
+                        if user_has_role(candidate, 'estimator'):
+                            estimator = candidate
+                            break
+
                 if estimator:
                     estimator_user_id = estimator.user_id
 

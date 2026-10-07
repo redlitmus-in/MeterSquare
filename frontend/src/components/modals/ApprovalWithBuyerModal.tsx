@@ -4,6 +4,7 @@ import { X, CheckCircle, User } from 'lucide-react';
 import { changeRequestService } from '@/services/changeRequestService';
 import { showSuccess, showError, showWarning, showInfo } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
+import GrantedRoleTag from '@/components/ui/GrantedRoleTag';
 
 interface Buyer {
   user_id: number;
@@ -217,6 +218,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                                 <p className="text-sm font-semibold text-gray-900 truncate">
                                   {buyer.full_name}
                                 </p>
+                                <GrantedRoleTag until={(buyer as any).granted_until} />
                                 <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-green-100 text-green-700">
                                   <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                                   Online
@@ -273,6 +275,7 @@ const ApprovalWithBuyerModal: React.FC<ApprovalWithBuyerModalProps> = ({
                                 <p className="text-sm font-semibold text-gray-700 truncate">
                                   {buyer.full_name}
                                 </p>
+                                <GrantedRoleTag until={(buyer as any).granted_until} />
                                 <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-gray-200 text-gray-600">
                                   <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
                                   Offline

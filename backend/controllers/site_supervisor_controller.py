@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from utils.boq_email_service import BOQEmailService
 from models.user import User
 from models.role import Role
+from utils.role_access import current_role_name, users_with_role, user_has_role, granted_until
 from datetime import datetime
 from utils.admin_viewing_context import get_effective_user_context, should_apply_role_filter
 from utils.comprehensive_notification_service import notification_service
@@ -85,7 +86,7 @@ def get_all_sitesupervisor():
         if not role:
             return jsonify({"error": "Role 'siteEngineer' not found"}), 404
 
-        get_sitesupervisors = User.query.filter_by(role_id=role.role_id,is_deleted=False).all()
+        get_sitesupervisors = users_with_role(role.role_id)  # includes active fresh role grants
         assigned_list = []
         unassigned_list = []
 
@@ -179,6 +180,7 @@ def get_all_sitesupervisor():
                 assigned_list.append({
                     "user_id": sitesupervisor.user_id,
                     "sitesupervisor_name": sitesupervisor.full_name,
+                    "granted_until": granted_until(sitesupervisor),
                     "email": sitesupervisor.email,
                     "phone": sitesupervisor.phone,
                     "user_status": getattr(sitesupervisor, 'user_status', 'offline'),
@@ -194,6 +196,7 @@ def get_all_sitesupervisor():
                 unassigned_list.append({
                     "user_id": sitesupervisor.user_id,
                     "sitesupervisor_name": sitesupervisor.full_name,
+                    "granted_until": granted_until(sitesupervisor),
                     "email": sitesupervisor.email,
                     "phone": sitesupervisor.phone,
                     "user_status": getattr(sitesupervisor, 'user_status', 'offline'),
@@ -1166,18 +1169,15 @@ def get_available_buyers():
         if not buyer_role:
             return jsonify({"error": "Buyer role not found"}), 404
 
-        # Get all active buyers
-        buyers = User.query.filter(
-            User.role_id == buyer_role.role_id,
-            User.is_deleted == False,
-            User.is_active == True
-        ).all()
+        # Get all active buyers (includes active fresh role grants)
+        buyers = [b for b in users_with_role(buyer_role.role_id) if b.is_active]
 
         buyers_list = [{
             'user_id': buyer.user_id,
             'full_name': buyer.full_name,
             'email': buyer.email,
-            'phone': buyer.phone
+            'phone': buyer.phone,
+            'granted_until': granted_until(buyer)
         } for buyer in buyers]
 
         return jsonify({
@@ -1202,7 +1202,7 @@ def get_my_assigned_items():
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        role_name = user.role.role if user.role else 'unknown'
+        role_name = current_role_name(user)
 
         if role_name != 'siteEngineer' and role_name != 'admin':
             return jsonify({"error": "Only Site Engineers can access this endpoint"}), 403
@@ -1444,14 +1444,14 @@ def assign_boq_to_buyer(boq_id):
                 "materials_count": 0
             }), 400
 
-        # Verify buyer exists
-        buyer_role = Role.query.filter_by(role='buyer').first()
+        # Verify buyer exists (own buyer role or an active fresh role grant)
         buyer = User.query.filter(
             User.user_id == buyer_id,
-            User.role_id == buyer_role.role_id,
             User.is_deleted == False,
             User.is_active == True
         ).first()
+        if buyer and not user_has_role(buyer, 'buyer'):
+            buyer = None
 
         if not buyer:
             return jsonify({"error": "Buyer not found"}), 404

@@ -108,6 +108,7 @@ const AssetDisposalPage = lazy(() => import('@/roles/production-manager/pages/As
 // Admin Pages - Mix of custom admin pages and role pages
 const AdminUserManagement = lazy(() => import('@/pages/admin/UserManagement'));
 const AdminRoleManagement = lazy(() => import('@/pages/admin/RoleManagement'));
+const RoleAccessPage = lazy(() => import('@/pages/admin/RoleAccess'));
 const AdminBOQManagement = lazy(() => import('@/pages/admin/BOQManagement'));
 const AdminSettings = lazy(() => import('@/pages/admin/Settings'));
 const AdminSignatureUpload = lazy(() => import('@/pages/admin/SignatureUpload'));
@@ -812,6 +813,21 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <>{children}</>;
 };
 
+// Role Access page: Admin or Technical Director by their own role (not through a granted role)
+const RoleAccessRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuthStore();
+  const roleAccess = (user as any)?.role_access;
+  const ownRole = roleAccess?.active_grant_id ? roleAccess.primary_role : (user as any)?.role;
+  const normalized = String(ownRole || '').toLowerCase().replace(/[\s_-]/g, '');
+  const allowed = !roleAccess?.active_grant_id && (normalized === 'admin' || normalized === 'technicaldirector');
+
+  if (!allowed) {
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
 function App() {
   const { getCurrentUser, isAuthenticated, logout, user } = useAuthStore();
   const [isEnvironmentValid, setIsEnvironmentValid] = useState<boolean | null>(null);
@@ -1338,6 +1354,11 @@ function App() {
               <AdminRoute>
                 <AdminRoleManagement />
               </AdminRoute>
+            } />
+            <Route path="role-access" element={
+              <RoleAccessRoute>
+                <RoleAccessPage />
+              </RoleAccessRoute>
             } />
             <Route path="boq-management" element={
               <AdminRoute>

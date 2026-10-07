@@ -228,6 +228,13 @@ const NotificationSystem: React.FC<NotificationSystemProps> = ({
   const handleNotificationAction = useCallback((notification: NotificationData) => {
     const userRole = user?.role || '';
 
+    // ── PRIORITY 0: Sent without a link (notification about a temporary granted role) ──
+    const markedNoLink = notification.actionUrl || notification.metadata?.actionUrl || notification.metadata?.action_url;
+    if (markedNoLink === '#no-link') {
+      markAsRead(String(notification.id));
+      return;
+    }
+
     // ── PRIORITY 1: Smart content-based redirect (handles all 50+ notification types) ──
     const redirectConfig = getNotificationRedirectPath(notification, userRole);
     if (redirectConfig) {

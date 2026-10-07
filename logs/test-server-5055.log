@@ -1,0 +1,27 @@
+Python-dotenv could not parse statement starting at line 62
+Python-dotenv could not parse statement starting at line 62
+Python-dotenv could not parse statement starting at line 62
+Python-dotenv could not parse statement starting at line 62
+2026-10-07 15:55:55,536 - INFO - config.db: Initializing database for environment: development
+2026-10-07 15:55:59,979 - WARNING - utils.advanced_security: Rate limiter: Redis unreachable, falling back to memory://
+TEST SERVER on 5055 -> host=aws-1-us-east-2.pooler.supabase.com port=6543 ref=iqkbmieiyavceuqfoqtw
+2026-10-07 15:56:06,013 - WARNING - dotenv.main: Python-dotenv could not parse statement starting at line 62
+ * Serving Flask app 'app'
+ * Debug mode: off
+2026-10-07 15:56:10,930 - INFO - utils.advanced_security: AUDIT: [INFO] LOGIN_SUCCESS user_id=28 details={"device": {"device_type": "desktop", "browser": "unknown", "os": "unknown", "user_agent": "python-requests/2.31.0"}}
+2026-10-07 16:03:57,179 - INFO - utils.advanced_security: AUDIT: [INFO] LOGIN_SUCCESS user_id=39 details={"device": {"device_type": "desktop", "browser": "Chrome", "os": "Windows", "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"}}
+2026-10-07 16:29:23,018 - INFO - controllers.asset_dn_controller: SE dispatched-assets request for user_id: 39
+2026-10-07 16:29:23,259 - INFO - controllers.asset_dn_controller: PM assigned project IDs: []
+2026-10-07 16:29:23,501 - INFO - controllers.asset_dn_controller: Found 0 projects for SE: []
+2026-10-07 16:29:43,357 - INFO - controllers.asset_dn_controller: SE dispatched-assets request for user_id: 39
+2026-10-07 16:29:43,636 - INFO - controllers.asset_dn_controller: PM assigned project IDs: []
+2026-10-07 16:29:43,907 - INFO - controllers.asset_dn_controller: Found 0 projects for SE: []
+2026-10-07 16:29:46,875 - INFO - controllers.asset_dn_controller: SE dispatched-assets request for user_id: 39
+2026-10-07 16:29:47,142 - INFO - controllers.asset_dn_controller: PM assigned project IDs: []
+2026-10-07 16:29:47,410 - INFO - controllers.asset_dn_controller: Found 0 projects for SE: []
+2026-10-07 16:47:57,730 - INFO - controllers.asset_dn_controller: SE dispatched-assets request for user_id: 39
+2026-10-07 16:47:57,991 - INFO - controllers.asset_dn_controller: PM assigned project IDs: []
+2026-10-07 16:47:58,249 - INFO - controllers.asset_dn_controller: Found 0 projects for SE: []
+2026-10-07 16:50:05,741 - INFO - controllers.asset_dn_controller: SE dispatched-assets request for user_id: 39
+2026-10-07 16:50:06,006 - INFO - controllers.asset_dn_controller: PM assigned project IDs: []
+2026-10-07 16:50:06,253 - INFO - controllers.asset_dn_controller: Found 0 projects for SE: []

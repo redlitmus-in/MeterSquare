@@ -1,0 +1,5 @@
+2026-10-06 13:43:25,808 - INFO - config.db: Initializing database for environment: development
+2026-10-06 13:43:30,807 - WARNING - utils.advanced_security: Rate limiter: Redis unreachable, falling back to memory://
+ * Serving Flask app 'app'
+ * Debug mode: on
+An attempt was made to access a socket in a way forbidden by its access permissions

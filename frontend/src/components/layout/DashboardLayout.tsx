@@ -10,6 +10,8 @@ import { Clock } from 'lucide-react';
 import { sanitizeDocumentTitle } from '@/utils/sanitizer';
 import { useAdminViewStore } from '@/store/adminViewStore';
 import { throttle } from '@/utils/performanceOptimizer';
+import RoleAccessBanner from './RoleAccessBanner';
+import GuideAssistant from '@/components/assistant/GuideAssistant';
 
 const DashboardLayout: React.FC = React.memo(() => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -191,6 +193,9 @@ const DashboardLayout: React.FC = React.memo(() => {
           paddingLeft: typeof window !== 'undefined' && window.innerWidth >= 768 ? `${sidebarWidth}px` : 0
         }}
       >
+        {/* Granted role (Role Access) indicator */}
+        <RoleAccessBanner />
+
         {/* Page content */}
         <main className="flex-1 relative overflow-y-auto overflow-x-hidden focus:outline-none bg-gradient-to-br from-gray-50/50 to-white">
           <div className="min-h-full w-full">
@@ -206,6 +211,9 @@ const DashboardLayout: React.FC = React.memo(() => {
           <NotificationSystem />
         </div>
       )}
+
+      {/* Guide assistant (answers questions from the user guide) - hidden on support pages */}
+      {isLayoutReady && !isSupportPage && <GuideAssistant />}
 
       {/* Admin View Context Indicator - Show only for admin when viewing as another role */}
       {user?.role?.toLowerCase() === 'admin' && viewingAsRoleName && (

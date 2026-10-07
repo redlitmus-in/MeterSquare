@@ -431,6 +431,18 @@ def init_deadline_scheduler(app):
         misfire_grace_time=3600
     )
 
+    # Role Access notices: access starting / ending soon / ended, hand-over reminder to Admin + TD
+    from utils.role_access_notify import run_role_access_notifications
+    scheduler.add_job(
+        func=run_role_access_notifications,
+        args=[app],
+        trigger=CronTrigger(minute=NOTIFY_MINUTE),
+        id='role_access_notifications',
+        name='Role Access Notifications',
+        replace_existing=True,
+        misfire_grace_time=3600
+    )
+
     scheduler.start()
     log.debug(f"[DeadlineScheduler] Started — hourly sweep, notifies each user at {NOTIFY_HOUR}:00 their local time")
     return scheduler

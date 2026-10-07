@@ -157,13 +157,27 @@ def user_login():
 
         user = query.first()
 
+        # Multi-role access: allow a role the user holds through an active grant
+        grant_login = False
+        if not user and db_role_name:
+            try:
+                from utils.role_access import find_active_grant_for_role
+                for candidate in User.query.filter_by(email=email, is_deleted=False, is_active=True).all():
+                    if find_active_grant_for_role(candidate.user_id, db_role_name):
+                        user = candidate
+                        grant_login = True
+                        break
+            except Exception as grant_err:
+                db.session.rollback()
+                log.warning(f"user_login(): role grant lookup skipped: {grant_err}")
+
         if not user:
             if role_name:
                 return jsonify({"error": f"User not found with role '{role_name}' or account inactive"}), 404
             else:
                 return jsonify({"error": "User not found or inactive"}), 404
 
-        
+
         # Send OTP to user's email ASYNCHRONOUSLY (instant return)
         log.info(f"user_login(): initiating OTP send")
         otp = send_otp_async(email)
@@ -171,7 +185,7 @@ def user_login():
         if otp:
             # Update OTP record with user_id and role (works for both Redis and in-memory)
             from utils.authentication import _otp_set
-            _otp_set(email, otp, role=db_role_name, user_id=user.user_id, ttl=300)
+            _otp_set(email, otp, role=db_role_name, user_id=user.user_id, ttl=300, grant_login=grant_login)
 
             response_data = {
                 "message": "OTP sent successfully to your email",
@@ -219,6 +233,19 @@ def handle_get_logged_in_user():
                 "authentication": "Required (Bearer token)"
             }
         }
+
+        # Multi-role access: show the signed-in person (not the shared user) and the grant details
+        if current_user.get("grant_id"):
+            from utils.role_access import role_access_summary
+            from models.user_role_grant import UserRoleGrant
+            actual = getattr(g, "actual_user", None)
+            grant = UserRoleGrant.query.get(current_user["grant_id"])
+            source = grant.source_user if grant else None
+            user_data["user"]["full_name"] = current_user.get("actual_user_name")
+            user_data["user"]["email"] = current_user.get("actual_user_email")
+            if actual:
+                user_data["user"]["role_access"] = role_access_summary(actual, grant, source)
+
         return jsonify(user_data), 200
 
     except Exception as e:

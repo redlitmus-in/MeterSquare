@@ -38,6 +38,7 @@ from utils.response_cache import cached_response, invalidate_cache  # ✅ PERFOR
 from utils.comprehensive_notification_service import notification_service
 from models.user import User
 from models.role import Role
+from utils.role_access import current_role_name, user_has_role, users_with_role, granted_until
 from datetime import datetime
 
 log = get_logger()
@@ -132,7 +133,7 @@ def get_all_pm():
         if not role:
             return jsonify({"error": "Role 'projectManager' not found"}), 404
 
-        get_pms = User.query.filter_by(role_id=role.role_id,is_deleted=False).all()
+        get_pms = users_with_role(role.role_id)  # includes active fresh role grants
         assigned_list = []
         unassigned_list = []
 
@@ -176,6 +177,7 @@ def get_all_pm():
                     assigned_list.append({
                         "user_id": pm.user_id,  # Added user_id for assignment functionality
                         "pm_name": pm.full_name,
+                        "granted_until": granted_until(pm),
                         "email": pm.email,
                         "phone": pm.phone,
                         "is_active": is_online,  # Dynamic online status
@@ -187,6 +189,7 @@ def get_all_pm():
                 unassigned_list.append({
                     "user_id": pm.user_id,
                     "pm_name": pm.full_name,
+                    "granted_until": granted_until(pm),
                     "full_name": pm.full_name,
                     "email": pm.email,
                     "phone": pm.phone,
@@ -643,7 +646,7 @@ def assign_items_to_se():
             return jsonify({"error": "User not found"}), 404
 
         pm_name = pm_user.full_name
-        role_name = pm_user.role.role if pm_user.role else 'unknown'
+        role_name = current_role_name(pm_user)
 
         # Get BOQ and validate
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
@@ -683,7 +686,7 @@ def assign_items_to_se():
 
         # Validate SE exists
         se_user = User.query.get(se_user_id)
-        if not se_user or not se_user.role or se_user.role.role != 'siteEngineer':
+        if not se_user or not user_has_role(se_user, 'siteEngineer'):
             return jsonify({"error": "Invalid Site Engineer"}), 400
 
         se_name = se_user.full_name
@@ -940,7 +943,7 @@ def get_item_assignments(boq_id):
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        role_name = user.role.role if user.role else 'unknown'
+        role_name = current_role_name(user)
 
         # Get BOQ and validate
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()
@@ -1048,7 +1051,7 @@ def unassign_items_from_se():
             return jsonify({"error": "User not found"}), 404
 
         pm_name = pm_user.full_name
-        role_name = pm_user.role.role if pm_user.role else 'unknown'
+        role_name = current_role_name(pm_user)
 
         # Get BOQ and validate
         boq = BOQ.query.filter_by(boq_id=boq_id, is_deleted=False).first()

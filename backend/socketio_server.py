@@ -91,6 +91,22 @@ def authenticate_socket(f):
             data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
             user_id = data.get('user_id')
             role = data.get('role')
+
+            # Granted-role session: only while the grant is active and the token not ended.
+            # "Existing" access then receives the shared user's events.
+            if data.get('grant_id'):
+                from utils.role_access import validate_grant_claims
+                from models.token_blacklist import TokenBlacklist
+                if data.get('jti') and TokenBlacklist.is_blacklisted(data['jti']):
+                    log.warning("[Socket.IO] Connection rejected: role session ended")
+                    disconnect()
+                    return {'error': 'Session ended'}
+                _grant, _source, grant_error = validate_grant_claims(data)
+                if grant_error:
+                    log.warning(f"[Socket.IO] Connection rejected: role access ended for user {user_id}")
+                    disconnect()
+                    return {'error': 'Role access ended'}
+                user_id = data.get('effective_user_id') or user_id
             username = data.get('username', 'Unknown')
 
             if not user_id:

@@ -476,10 +476,27 @@ apiClient.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // Granted role (Role Access) ended or was revoked - return to the user's own role
+    if (
+      error.response?.status === 403 &&
+      error.response?.data?.error_code === 'ROLE_ACCESS_EXPIRED' &&
+      !error.config?.url?.includes('/role-access/')
+    ) {
+      const { handleRoleAccessExpired } = await import('@/utils/roleSession');
+      handleRoleAccessExpired(error.response?.data?.message);
+      return Promise.reject(error);
+    }
+
     // Handle 401 Unauthorized - with consecutive count and debounce
     if (error.response?.status === 401) {
+      // A request sent with an older token (e.g. in flight during a role switch)
+      // says nothing about the current session - don't let it trigger a logout.
+      const sentAuth = error.config?.headers?.Authorization;
+      const currentToken = localStorage.getItem('access_token');
+      const isStaleToken = !!sentAuth && !!currentToken && sentAuth !== `Bearer ${currentToken}`;
+
       // Skip auth endpoints - these 401s are expected for invalid credentials
-      if (!isAuthEndpoint(error.config?.url)) {
+      if (!isStaleToken && !isAuthEndpoint(error.config?.url)) {
         await handleUnauthorized(error.config?.url);
       }
     }

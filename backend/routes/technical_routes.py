@@ -108,13 +108,17 @@ def get_all_meps_route():
         return access_check
 
     try:
-        # Get all users with MEP role
-        meps = db.session.query(User).join(
-            Role, User.role_id == Role.role_id
-        ).filter(
-            Role.role.in_(['mep', 'MEP', 'mep_supervisor', 'MEP Supervisor']),
-            User.is_deleted == False
+        # Get all users with MEP role (includes active fresh role grants)
+        from utils.role_access import users_with_role, granted_until
+        mep_roles = Role.query.filter(
+            Role.role.in_(['mep', 'MEP', 'mep_supervisor', 'MEP Supervisor'])
         ).all()
+        meps, seen = [], set()
+        for mep_role in mep_roles:
+            for mep in users_with_role(mep_role.role_id):
+                if mep.user_id not in seen and not mep.is_deleted:
+                    seen.add(mep.user_id)
+                    meps.append((mep, mep_role.role))
 
         mep_list = [{
             'user_id': mep.user_id,
@@ -122,8 +126,9 @@ def get_all_meps_route():
             'email': mep.email,
             'phone': mep.phone,
             'is_active': mep.is_active,
-            'role': mep.role.role if mep.role else 'Unknown'
-        } for mep in meps]
+            'role': role_name,
+            'granted_until': granted_until(mep)
+        } for mep, role_name in meps]
 
         return jsonify({
             "users": mep_list,

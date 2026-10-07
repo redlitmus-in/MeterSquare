@@ -489,7 +489,8 @@ class NotificationMiddleware {
     toast.message(`${getIcon()} ${notification.title}`, {
       description: `${notification.message}${senderInfo ? `\n${senderInfo}` : ''}`,
       duration: notification.priority === 'urgent' || notification.priority === 'high' ? 8000 : 5000,
-      action: notification.metadata?.actionUrl ? {
+      // '#no-link' = granted-role notification sent without a link
+      action: notification.metadata?.actionUrl && notification.metadata.actionUrl !== '#no-link' ? {
         label: 'View',
         onClick: () => navigateTo(notification.metadata!.actionUrl!)
       } : undefined
@@ -513,7 +514,8 @@ class NotificationMiddleware {
     toastMethod(notification.title, {
       description: notification.message,
       duration,
-      action: notification.metadata?.actionUrl ? {
+      // '#no-link' = granted-role notification sent without a link
+      action: notification.metadata?.actionUrl && notification.metadata.actionUrl !== '#no-link' ? {
         label: 'View',
         onClick: () => navigateTo(notification.metadata!.actionUrl!)
       } : undefined
@@ -574,7 +576,7 @@ class NotificationMiddleware {
         // Add click handler - use SPA navigation to avoid page reload
         browserNotif.onclick = () => {
           window.focus();
-          if (notification.metadata?.actionUrl) {
+          if (notification.metadata?.actionUrl && notification.metadata.actionUrl !== '#no-link') {
             navigateTo(notification.metadata.actionUrl);
           }
           browserNotif.close();

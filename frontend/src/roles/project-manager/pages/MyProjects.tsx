@@ -37,6 +37,7 @@ import DayExtensionRequestModal from '../components/DayExtensionRequestModal';
 import AssignItemToSEModal from '@/components/modals/AssignItemToSEModal';
 import { API_BASE_URL } from '@/api/config';
 import { DeadlineBadge } from '@/utils/deadlineBadge';
+import GrantedRoleTag from '@/components/ui/GrantedRoleTag';
 
 interface BOQDetails {
   boq_detail_id?: number;
@@ -1664,6 +1665,7 @@ const MyProjects: React.FC = () => {
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-1.5">
                                           <p className="font-bold text-sm text-gray-900 truncate">{se.sitesupervisor_name}</p>
+                                          <GrantedRoleTag until={(se as any).granted_until} />
                                           {/* Online/Offline Status */}
                                           <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-green-100 text-green-700">
                                             <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
@@ -1776,6 +1778,7 @@ const MyProjects: React.FC = () => {
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-1.5">
                                           <p className="font-bold text-sm text-gray-700 truncate">{se.sitesupervisor_name}</p>
+                                          <GrantedRoleTag until={(se as any).granted_until} />
                                           {/* Offline Status */}
                                           <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 flex items-center gap-1 bg-gray-200 text-gray-700">
                                             <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>

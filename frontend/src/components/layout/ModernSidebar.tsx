@@ -1,4 +1,4 @@
-import React, { Fragment, useState, useMemo, useCallback, memo } from 'react';
+import React, { Fragment, useState, useMemo, useCallback, useEffect, memo } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -37,7 +37,9 @@ import {
   BanknotesIcon,
   DocumentChartBarIcon,
   ShieldCheckIcon,
-  Cog6ToothIcon
+  Cog6ToothIcon,
+  KeyIcon,
+  ArrowsRightLeftIcon
 } from '@heroicons/react/24/outline';
 import {
   HomeIcon as HomeSolid,
@@ -59,7 +61,8 @@ import {
   ClipboardDocumentListIcon as ClipboardDocumentListSolid,
   BanknotesIcon as BanknotesSolid,
   ShieldCheckIcon as ShieldCheckSolid,
-  Cog6ToothIcon as Cog6ToothSolid
+  Cog6ToothIcon as Cog6ToothSolid,
+  KeyIcon as KeySolid
 } from '@heroicons/react/24/solid';
 import { useAuthStore } from '@/store/authStore';
 import { UserRole } from '@/types';
@@ -74,6 +77,8 @@ import { adminApi } from '@/api/admin';
 import { API_BASE_URL } from '@/api/config';
 import { useSidebarResize } from '@/hooks/useSidebarResize';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
+import { switchToRole } from '@/utils/roleSession';
+import { roleAccessApi } from '@/api/roleAccess';
 
 interface NavigationItem {
   name: string;
@@ -239,6 +244,70 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     sidebarRef,
   } = useSidebarResize();
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [switchingRole, setSwitchingRole] = useState(false);
+  const [switchingKey, setSwitchingKey] = useState<string | null>(null);
+
+  // Multi-role access (Role Access page): own role + active granted roles
+  const roleAccess = (user as any)?.role_access;
+  const canManageRoleAccess = !roleAccess?.active_grant_id;
+  const roleSwitchOptions: { key: string; grantId: number | null; label: string; sub: string; current: boolean }[] =
+    roleAccess && roleAccess.available_grants?.length
+      ? [
+          {
+            key: 'own',
+            grantId: null,
+            label: getRoleDisplayName(roleAccess.primary_role),
+            sub: 'Your role',
+            current: !roleAccess.active_grant_id,
+          },
+          ...roleAccess.available_grants.map((g: any) => ({
+            key: `grant-${g.grant_id}`,
+            grantId: g.grant_id,
+            label: getRoleDisplayName(g.role) === 'User' ? g.role : getRoleDisplayName(g.role),
+            sub: `Granted${g.access_type === 'existing' && g.source_user_name ? ` · ${g.source_user_name}'s access` : ''} · until ${new Date(g.end_date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`,
+            current: roleAccess.active_grant_id === g.grant_id,
+          })),
+        ]
+      : [];
+
+  // Keep granted roles fresh: a grant can be added while the user is signed in
+  const refreshRoleAccess = useCallback(async () => {
+    try {
+      const info = await roleAccessApi.getMyRoles();
+      const current = useAuthStore.getState().user as any;
+      if (!current) return;
+      const prev = current.role_access;
+      const changed =
+        !prev ||
+        prev.active_grant_id !== info.active_grant_id ||
+        JSON.stringify(prev.available_grants || []) !== JSON.stringify(info.available_grants || []);
+      if (!changed) return;
+      const { current_role, active_grant_ended, ...roleAccessInfo } = info as any;
+      const updated = { ...current, role_access: roleAccessInfo };
+      localStorage.setItem('user', JSON.stringify(updated));
+      useAuthStore.setState({ user: updated });
+    } catch {
+      // Non-critical: the switcher simply keeps its last known state
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user) refreshRoleAccess();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSwitchRole = async (grantId: number | null, key: string, label: string) => {
+    if (switchingRole) return;
+    try {
+      setSwitchingRole(true);
+      setSwitchingKey(key);
+      await switchToRole(grantId, label);
+    } catch (error: any) {
+      showError(error.response?.data?.error || error.message || 'Could not switch role');
+      setSwitchingRole(false);
+      setSwitchingKey(null);
+    }
+  };
   const [isOnline, setIsOnline] = useState(user?.user_status === 'online');
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
@@ -432,7 +501,14 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         icon: ShoppingCartIcon,
         iconSolid: ShoppingSolid,
         color: 'text-indigo-600'
-      }
+      },
+      ...(canManageRoleAccess ? [{
+        name: 'Role Access',
+        href: buildPath('/role-access'),
+        icon: KeyIcon,
+        iconSolid: KeySolid,
+        color: 'text-[#243d8a]'
+      }] : [])
     ];
 
     // Project Manager specific navigation items
@@ -786,6 +862,13 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
         color: 'text-[#243d8a]'
       },
       {
+        name: 'Role Access',
+        href: buildPath('/role-access'),
+        icon: KeyIcon,
+        iconSolid: KeySolid,
+        color: 'text-[#243d8a]'
+      },
+      {
         name: 'Signature Upload',
         href: buildPath('/signature-upload'),
         icon: PencilIcon,
@@ -1067,7 +1150,7 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
 
     // Profile removed from sidebar - use header dropdown instead
     return navigation;
-  }, [user?.role_id, viewingAsRole]);
+  }, [user?.role_id, viewingAsRole, canManageRoleAccess]);
 
   const isPathActive = useCallback((href: string) => {
     // Extract the base path from both href and location
@@ -1310,7 +1393,10 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
             <div className="relative">
               {/* User Info Button - Clickable */}
               <button
-                onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                onClick={() => {
+                  if (!userDropdownOpen) refreshRoleAccess();
+                  setUserDropdownOpen(!userDropdownOpen);
+                }}
                 className="w-full bg-gradient-to-r from-gray-50 to-[#243d8a]/5 rounded-lg p-3.5 md:p-3 border border-gray-200 hover:border-[#243d8a]/30 transition-all duration-200"
               >
                 <div className="flex items-center justify-between">
@@ -1380,6 +1466,48 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
                         </span>
                       </div>
                     </div>
+
+                    {/* Switch role - only for users with granted roles */}
+                    {roleSwitchOptions.length > 0 && (
+                      <div className="px-2 py-2 border-b border-gray-100">
+                        <div className="px-2 pb-1 text-[11px] font-bold tracking-wide text-gray-500 flex items-center gap-1.5">
+                          <ArrowsRightLeftIcon className="w-3.5 h-3.5" />
+                          SWITCH ROLE
+                        </div>
+                        {roleSwitchOptions.map((opt) => (
+                          <button
+                            key={opt.key}
+                            onClick={() => !opt.current && handleSwitchRole(opt.grantId, opt.key, opt.label)}
+                            disabled={switchingRole}
+                            role="menuitemradio"
+                            aria-checked={opt.current}
+                            aria-busy={switchingKey === opt.key}
+                            className={clsx(
+                              'w-full flex items-center justify-between gap-2 px-2 py-2 rounded-md text-left transition-colors',
+                              opt.current ? 'bg-[#243d8a]/5' : 'hover:bg-gray-50',
+                              switchingKey === opt.key && 'bg-[#243d8a]/10 ring-1 ring-[#243d8a]/30',
+                              switchingRole && switchingKey !== opt.key && 'opacity-50',
+                              switchingRole && 'cursor-wait'
+                            )}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm md:text-xs font-semibold text-gray-900">{opt.label}</div>
+                              <div className="text-[11px] text-gray-500 truncate">
+                                {switchingKey === opt.key ? 'Switching...' : opt.sub}
+                              </div>
+                            </div>
+                            {switchingKey === opt.key ? (
+                              <span
+                                className="w-4 h-4 rounded-full border-2 border-[#243d8a]/25 border-t-[#243d8a] animate-spin shrink-0"
+                                aria-hidden="true"
+                              />
+                            ) : (
+                              opt.current && <CheckCircleIcon className="w-4 h-4 text-[#243d8a] shrink-0" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                     <Link
                       to={buildRolePath(user?.role || user?.role_id || '', 'profile')}

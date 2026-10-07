@@ -48,6 +48,7 @@ import ExtraMaterialForm from '@/components/change-requests/ExtraMaterialForm';
 import PreliminaryPurchaseForm from '@/components/change-requests/PreliminaryPurchaseForm';
 import { useRealtimeUpdateStore } from '@/store/realtimeUpdateStore';
 import { permissions } from '@/utils/rolePermissions';
+import GrantedRoleTag from '@/components/ui/GrantedRoleTag';
 
 interface Buyer {
   user_id: number;
@@ -2432,6 +2433,7 @@ const ChangeRequestsPage: React.FC = () => {
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2">
                                       <span className="font-semibold text-gray-900">{buyer.full_name || buyer.username}</span>
+                                      <GrantedRoleTag until={(buyer as any).granted_until} />
                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                                         <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
                                         Online
@@ -2484,6 +2486,7 @@ const ChangeRequestsPage: React.FC = () => {
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2">
                                       <span className="font-semibold text-gray-700">{buyer.full_name || buyer.username}</span>
+                                      <GrantedRoleTag until={(buyer as any).granted_until} />
                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
                                         <div className="w-1.5 h-1.5 bg-gray-400 rounded-full"></div>
                                         Offline
