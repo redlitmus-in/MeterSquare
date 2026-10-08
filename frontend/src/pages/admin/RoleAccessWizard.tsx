@@ -73,7 +73,7 @@ const STEP_META: Record<StepKey, { short: string; title: string; body: string }>
   role: {
     short: 'Role',
     title: 'Select the role to give',
-    body: 'Choose the extra role. Their own role is hidden because they already have it. One person can hold several granted roles.',
+    body: 'Choose the extra role. Their own role can be picked only to share another user\'s access in that role. One person can hold several granted roles.',
   },
   type: {
     short: 'Access type',
@@ -163,11 +163,17 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
       .finally(() => setHoldersLoading(false));
   }, [role, user, accessType]);
 
+  // Their own role can only be granted as "Same as existing user"
+  const isOwnRole = !!user && !!role && role.role_id === user.role_id;
+  useEffect(() => {
+    if (isOwnRole) setAccessType('existing');
+  }, [isOwnRole]);
+
   const dateError = !!endDate && endDate < startDate;
   const stepValid: Record<StepKey, boolean> = {
     user: !!user,
     role: !!role,
-    type: true,
+    type: !(isOwnRole && accessType === 'fresh'),
     source: !!source,
     period: !!endDate && !dateError && endDate >= today,
     review: true,
@@ -416,24 +422,37 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
                     {step === 'role' && user && (
                       <>
                         <div className="flex flex-wrap gap-2.5">
-                          {roles
-                            .filter((r) => r.role_id !== user.role_id)
-                            .map((r) => (
+                          {roles.map((r) => {
+                            const own = r.role_id === user.role_id;
+                            const selected = role?.role_id === r.role_id;
+                            return (
                               <button
                                 key={r.role_id}
                                 onClick={() => setRole(r)}
-                                className={`px-4 py-2.5 rounded-full text-sm font-semibold border-2 transition-all ${
-                                  role?.role_id === r.role_id
+                                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold border-2 transition-all ${
+                                  selected
                                     ? 'bg-[#243d8a] border-[#243d8a] text-white shadow-[0_0_0_5px_rgba(36,61,138,0.15)]'
                                     : 'bg-white border-gray-300 text-gray-800 hover:border-[#243d8a]'
                                 }`}
                               >
                                 {roleLabel(r.role)}
+                                {own && (
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                      selected ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
+                                    }`}
+                                  >
+                                    Own role
+                                  </span>
+                                )}
                               </button>
-                            ))}
+                            );
+                          })}
                         </div>
                         <Hint>
-                          {user.full_name}'s own role ({roleLabel(user.role)}) is not listed: they always keep it.
+                          {isOwnRole
+                            ? `${user.full_name} is already a ${roleLabel(user.role)}. This grant shares another ${roleLabel(user.role)}'s projects and data with them (Same as existing user).`
+                            : `${user.full_name}'s own role (${roleLabel(user.role)}) can be picked only to share another ${roleLabel(user.role)}'s access.`}
                         </Hint>
                       </>
                     )}
@@ -443,8 +462,13 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
                         <TypeCard
                           icon={<UserPlus className="w-5 h-5" />}
                           title="Fresh role"
-                          body={`Starts empty as a new ${roleLabel(role.role)}: no projects or data copied from anyone. Projects are assigned to them later, and they appear in the ${roleLabel(role.role)} lists while access is active.`}
+                          body={
+                            isOwnRole
+                              ? `Not available: ${user?.full_name} is already a ${roleLabel(role.role)}.`
+                              : `Starts empty as a new ${roleLabel(role.role)}: no projects or data copied from anyone. Projects are assigned to them later, and they appear in the ${roleLabel(role.role)} lists while access is active.`
+                          }
                           selected={accessType === 'fresh'}
+                          disabled={isOwnRole}
                           onClick={() => setAccessType('fresh')}
                         />
                         <TypeCard
@@ -653,14 +677,18 @@ const TypeCard: React.FC<{
   title: string;
   body: string;
   selected: boolean;
+  disabled?: boolean;
   onClick: () => void;
-}> = ({ icon, title, body, selected, onClick }) => (
+}> = ({ icon, title, body, selected, disabled, onClick }) => (
   <button
     onClick={onClick}
+    disabled={disabled}
     className={`text-left p-5 rounded-2xl border-2 transition-all ${
-      selected
-        ? 'border-[#243d8a] bg-[#243d8a]/5 shadow-[0_0_0_5px_rgba(36,61,138,0.12)]'
-        : 'border-gray-200 hover:border-[#243d8a]/50'
+      disabled
+        ? 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
+        : selected
+          ? 'border-[#243d8a] bg-[#243d8a]/5 shadow-[0_0_0_5px_rgba(36,61,138,0.12)]'
+          : 'border-gray-200 hover:border-[#243d8a]/50'
     }`}
   >
     <div className="flex items-center gap-2 text-[#243d8a]">

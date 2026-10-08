@@ -317,8 +317,9 @@ def create_grant():
             return jsonify({"success": False, "error": "Role not found"}), 404
         if normalize_role(role.role) not in GRANTABLE_ROLES:
             return jsonify({"success": False, "error": f"The {role.role} role cannot be granted"}), 400
-        if user.role_id == role_id:
-            return jsonify({"success": False, "error": "This is already the user's own role"}), 400
+        # Own role: only "Same as existing user" makes sense (cover another holder's work)
+        if user.role_id == role_id and access_type != ACCESS_TYPE_EXISTING:
+            return jsonify({"success": False, "error": "This is already the user's own role. Use 'Same as existing user' to share another user's access."}), 400
 
         if access_type == ACCESS_TYPE_EXISTING:
             if not isinstance(source_user_id, int):
