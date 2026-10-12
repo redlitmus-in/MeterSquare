@@ -38,7 +38,7 @@ def get_current_user_context() -> Dict:
         return {
             'user_id': g.user.get('user_id'),
             'role': user_role,
-            'is_admin': user_role in ADMIN_ROLES
+            'is_admin': SecurityConfig.is_admin_role(user_role)
         }
     return {'user_id': None, 'role': None, 'is_admin': False}
 

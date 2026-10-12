@@ -75,6 +75,7 @@ def find_role_by_name(role_name):
 def _active_filter(query, today):
     return query.filter(
         UserRoleGrant.is_revoked == False,
+        UserRoleGrant.paused_at.is_(None),
         UserRoleGrant.start_date <= today,
         UserRoleGrant.end_date >= today,
     )
@@ -185,6 +186,8 @@ def validate_grant_claims(payload, actual_user=None):
         return None, None, 'This role access is no longer available.'
 
     if not grant.is_active_on(company_today()):
+        if grant.paused_at and not grant.is_revoked:
+            return None, None, 'Your access to this role is paused.'
         return None, None, 'Your access to this role has ended.'
 
     role = Role.query.filter_by(role_id=grant.role_id, is_deleted=False).first()

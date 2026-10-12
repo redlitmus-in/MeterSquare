@@ -67,13 +67,28 @@ def _role_access_url(user):
     return '/technical-director/role-access' if role == 'technicaldirector' else '/admin/role-access'
 
 
-def already_sent(grant_id, event):
-    """True if this grant event was already notified (dedupe via notification metadata)."""
+# End-date notices. When a grant's end date changes, an earlier notice for the old date no longer counts.
+END_DATE_EVENTS = ('ending_soon', 'handover', 'ended', 'ended_projects_left')
+
+
+def _last_sent_at(grant_id, event):
     from models.notification import Notification
-    return db.session.query(Notification.id).filter(
+    return db.session.query(db.func.max(Notification.created_at)).filter(
         Notification.meta_data['grant_id'].as_string() == str(grant_id),
         Notification.meta_data['role_access_event'].as_string() == event,
-    ).first() is not None
+    ).scalar()
+
+
+def already_sent(grant_id, event):
+    """True if this grant event was already notified (dedupe via notification metadata)."""
+    sent_at = _last_sent_at(grant_id, event)
+    if sent_at is None:
+        return False
+    if event in END_DATE_EVENTS:
+        changed_at = _last_sent_at(grant_id, 'changed')
+        if changed_at is not None and changed_at > sent_at:
+            return False
+    return True
 
 
 def _email_html(heading, lines, accent='#243d8a', note=None):
@@ -223,6 +238,77 @@ def notify_revoked(grant, user, role, revoked_by_name):
     )
 
 
+def notify_paused(grant, user, role, paused_by_name):
+    role_label = _role_label(role.role)
+    by = paused_by_name or 'An administrator'
+    title = f'{role_label} access paused'
+    message = (f"{by} paused your {role_label} access. It is not available until it is resumed. "
+               f"Your own role is unchanged.")
+    _send(
+        [user], event='paused', grant=grant, title=title, message=message, priority='high',
+        email_subject=f'MeterSquare: {title}',
+        email_heading=html.escape(title), accent='#b45309',
+        email_lines=[
+            f"Hello {html.escape(user.full_name or '')},",
+            f"{html.escape(by)} paused your <strong>{html.escape(role_label)}</strong> access"
+            f"{html.escape(_access_phrase(grant))}. It does not appear at sign-in or in the role switcher until it is resumed.",
+            'Your own role and its access are unchanged.',
+        ],
+        action_url='/', action_label='Open MeterSquare', ntype='alert',
+    )
+
+
+def notify_resumed(grant, user, role, resumed_by_name, today):
+    role_label = _role_label(role.role)
+    by = resumed_by_name or 'An administrator'
+    title = f'{role_label} access resumed'
+    when = (f"from {_fmt(grant.start_date)}" if grant.start_date > today else 'now')
+    message = (f"{by} resumed your {role_label} access{_access_phrase(grant)}. It is available {when} "
+               f"until 11:59 PM on {_fmt(grant.end_date)}.")
+    _send(
+        [user], event='resumed', grant=grant, title=title, message=message, priority='medium',
+        email_subject=f'MeterSquare: {title}',
+        email_heading=html.escape(title),
+        email_lines=[
+            f"Hello {html.escape(user.full_name or '')},",
+            f"{html.escape(by)} resumed your <strong>{html.escape(role_label)}</strong> access"
+            f"{html.escape(_access_phrase(grant))}.",
+            f"It is available {html.escape(when)} until 11:59 PM on <strong>{_fmt(grant.end_date)}</strong>. "
+            f"Switch to it from your account menu.",
+        ],
+        action_url='/', action_label='Open MeterSquare', ntype='success',
+    )
+
+
+def notify_changed(grant, user, role, old_end, changed_by_name):
+    """Grant edited (extended, shortened, or a scheduled grant changed)."""
+    role_label = _role_label(role.role)
+    by = changed_by_name or 'An administrator'
+    if grant.end_date > old_end:
+        title = f'{role_label} access extended'
+    elif grant.end_date < old_end:
+        title = f'{role_label} access end date changed'
+    else:
+        title = f'{role_label} access updated'
+    period = f"{_fmt(grant.start_date)} to {_fmt(grant.end_date)}"
+    message = (f"{by} updated your {role_label} access{_access_phrase(grant)}. "
+               f"It now runs {period} and ends at 11:59 PM on {_fmt(grant.end_date)}.")
+    _send(
+        [user], event='changed', grant=grant, title=title, message=message, priority='medium',
+        email_subject=f'MeterSquare: {title}',
+        email_heading=html.escape(title),
+        email_lines=[
+            f"Hello {html.escape(user.full_name or '')},",
+            f"{html.escape(by)} updated your <strong>{html.escape(role_label)}</strong> access"
+            f"{html.escape(_access_phrase(grant))}.",
+            f"<strong>New period:</strong> {html.escape(period)} (ends 11:59 PM on the end date).",
+        ],
+        email_note='Your own role does not change.',
+        action_url='/', action_label='Open MeterSquare', ntype='info',
+        extra_meta={'previous_end_date': old_end.isoformat(), 'end_date': grant.end_date.isoformat()},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Scheduled sweep
 # ---------------------------------------------------------------------------
@@ -270,6 +356,9 @@ def sweep_role_access_notifications(today):
                 continue
             role_label = _role_label(role.role)
             days_left = (grant.end_date - today).days
+            # Paused access gets no start / ending reminders; the "ended" notice still goes out
+            if grant.paused_at and days_left >= 0:
+                continue
 
             # Work still assigned to a fresh grantee in the granted role
             # (projects, open change requests, open item assignments)

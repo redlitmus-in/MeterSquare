@@ -217,13 +217,13 @@ const DashboardLayout: React.FC = React.memo(() => {
 
       {/* Admin View Context Indicator - Show only for admin when viewing as another role */}
       {user?.role?.toLowerCase() === 'admin' && viewingAsRoleName && (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-40 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-full px-4 py-2 shadow-lg border border-white/20">
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-40 bg-red-50 text-red-700 rounded-lg pl-3 pr-1.5 py-1.5 shadow-sm border border-red-200">
           <div className="flex items-center gap-2 text-sm font-medium">
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
-              Admin viewing as:
+              <span className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></span>
+              Admin viewing as
             </span>
-            <span className="font-bold">{viewingAsRoleName}</span>
+            <span className="px-2.5 py-0.5 rounded-full bg-[#243d8a] text-white text-xs font-bold">{viewingAsRoleName}</span>
           </div>
         </div>
       )}

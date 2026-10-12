@@ -2,6 +2,11 @@
  * Role Access Page (Admin / Technical Director)
  * Grant a user temporary access to another role, with an end date.
  * Granting uses the step-by-step RoleAccessWizard.
+ * Row actions:
+ *  - Active:    Extend (end date) · Edit (role / access type: ends this access and starts the new one today) · Pause · Revoke
+ *  - Scheduled: Edit · Pause · Revoke
+ *  - Paused:    Resume · Edit · Revoke
+ *  - Expired / Revoked: Renew (prefilled wizard; creates a new grant so the old one stays in history)
  * Access type:
  *  - Fresh role: the user starts empty in that role; projects are assigned to them normally.
  *  - Same as existing user: the user gets the same access as an existing holder of the role.
@@ -9,17 +14,18 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { KeyRound, Plus, RefreshCw, AlertTriangle } from 'lucide-react';
+import { KeyRound, Plus, RefreshCw, AlertTriangle, CalendarPlus, Pencil, RotateCcw, Pause, Play } from 'lucide-react';
 import { showSuccess, showError } from '@/utils/toastHelper';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { roleAccessApi, RoleGrant, RoleGrantCounts } from '@/api/roleAccess';
-import RoleAccessWizard, { roleLabel, formatDate, initials } from './RoleAccessWizard';
+import RoleAccessWizard, { roleLabel, formatDate, initials, addDays, WizardMode } from './RoleAccessWizard';
 
-type TabKey = 'active' | 'scheduled' | 'expired' | 'revoked' | 'all';
+type TabKey = 'active' | 'scheduled' | 'paused' | 'expired' | 'revoked' | 'all';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'active', label: 'Active' },
   { key: 'scheduled', label: 'Scheduled' },
+  { key: 'paused', label: 'Paused' },
   { key: 'expired', label: 'Expired' },
   { key: 'revoked', label: 'Revoked' },
   { key: 'all', label: 'All' },
@@ -36,6 +42,8 @@ const statusBadge = (grant: RoleGrant) => {
     }
     case 'scheduled':
       return { text: `Starts ${formatDate(grant.start_date)}`, cls: 'bg-blue-100 text-blue-900' };
+    case 'paused':
+      return { text: 'Paused', cls: 'bg-orange-100 text-orange-900' };
     case 'expired':
       return { text: 'Expired', cls: 'bg-gray-200 text-gray-700' };
     case 'revoked':
@@ -50,9 +58,12 @@ const RoleAccess: React.FC = () => {
   const [counts, setCounts] = useState<RoleGrantCounts | null>(null);
   const [today, setToday] = useState<string>(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(true);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [wizard, setWizard] = useState<{ mode: WizardMode; grant: RoleGrant | null } | null>(null);
+  const [extendTarget, setExtendTarget] = useState<RoleGrant | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<RoleGrant | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const [pauseTarget, setPauseTarget] = useState<RoleGrant | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
 
   const loadGrants = useCallback(async () => {
     try {
@@ -97,6 +108,36 @@ const RoleAccess: React.FC = () => {
     }
   };
 
+  const confirmPause = async () => {
+    if (!pauseTarget) return;
+    try {
+      setBusyId(pauseTarget.grant_id);
+      const result = await roleAccessApi.pauseGrant(pauseTarget.grant_id);
+      showSuccess(result.message);
+      setPauseTarget(null);
+      setTab('paused');
+      loadGrants();
+    } catch (error: any) {
+      showError(error.response?.data?.error || 'Failed to pause access');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const resume = async (grant: RoleGrant) => {
+    try {
+      setBusyId(grant.grant_id);
+      const result = await roleAccessApi.resumeGrant(grant.grant_id);
+      showSuccess(result.message);
+      setTab(result.grant.status === 'scheduled' ? 'scheduled' : 'active');
+      loadGrants();
+    } catch (error: any) {
+      showError(error.response?.data?.error || 'Failed to resume access');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {/* Header */}
@@ -121,7 +162,7 @@ const RoleAccess: React.FC = () => {
               <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
-              onClick={() => setDrawerOpen(true)}
+              onClick={() => setWizard({ mode: 'create', grant: null })}
               className="flex items-center gap-2 px-5 py-3 bg-[#243d8a] text-white rounded-lg hover:bg-[#1a2d66] transition-colors shadow-md font-semibold"
             >
               <Plus className="w-5 h-5" />
@@ -234,18 +275,68 @@ const RoleAccess: React.FC = () => {
                         <td className="px-4 py-3 text-gray-600">
                           {g.granted_by_name}
                           {g.status === 'revoked' && g.revoked_by_name && (
-                            <div className="text-xs text-gray-500">Revoked by {g.revoked_by_name}</div>
+                            <div className="text-xs text-gray-500">
+                              {g.notes?.startsWith('Replaced') ? g.notes : `Revoked by ${g.revoked_by_name}`}
+                            </div>
+                          )}
+                          {g.status === 'paused' && g.paused_by_name && (
+                            <div className="text-xs text-gray-500">Paused by {g.paused_by_name}</div>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right">
-                          {(g.status === 'active' || g.status === 'scheduled') && (
-                            <button
-                              onClick={() => setRevokeTarget(g)}
-                              className="px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:border-red-600 hover:text-red-700"
-                            >
-                              Revoke
-                            </button>
-                          )}
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-2">
+                            {g.status === 'active' && (
+                              <button
+                                onClick={() => setExtendTarget(g)}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#243d8a]/30 text-sm font-semibold text-[#243d8a] hover:bg-[#243d8a]/5"
+                              >
+                                <CalendarPlus className="w-4 h-4" /> Extend
+                              </button>
+                            )}
+                            {g.status === 'paused' && (
+                              <button
+                                onClick={() => resume(g)}
+                                disabled={busyId === g.grant_id}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#243d8a] text-sm font-semibold text-white hover:bg-[#1a2d66] disabled:opacity-60"
+                              >
+                                <Play className="w-4 h-4" /> Resume
+                              </button>
+                            )}
+                            {(g.status === 'active' || g.status === 'scheduled' || g.status === 'paused') && (
+                              <button
+                                onClick={() => setWizard({ mode: 'edit', grant: g })}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#243d8a]/30 text-sm font-semibold text-[#243d8a] hover:bg-[#243d8a]/5"
+                              >
+                                <Pencil className="w-4 h-4" /> Edit
+                              </button>
+                            )}
+                            {(g.status === 'active' || g.status === 'scheduled') && (
+                              <button
+                                onClick={() => setPauseTarget(g)}
+                                aria-label={`Pause ${g.user_name}'s access`}
+                                title="Pause"
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:border-orange-500 hover:text-orange-700"
+                              >
+                                <Pause className="w-4 h-4" /> Pause
+                              </button>
+                            )}
+                            {(g.status === 'active' || g.status === 'scheduled' || g.status === 'paused') && (
+                              <button
+                                onClick={() => setRevokeTarget(g)}
+                                className="px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:border-red-600 hover:text-red-700"
+                              >
+                                Revoke
+                              </button>
+                            )}
+                            {(g.status === 'expired' || g.status === 'revoked') && (
+                              <button
+                                onClick={() => setWizard({ mode: 'renew', grant: g })}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#243d8a] text-sm font-semibold text-white hover:bg-[#1a2d66]"
+                              >
+                                <RotateCcw className="w-4 h-4" /> Renew
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -258,19 +349,79 @@ const RoleAccess: React.FC = () => {
       </div>
 
       <AnimatePresence>
-        {drawerOpen && (
+        {wizard && (
           <RoleAccessWizard
             today={today}
+            mode={wizard.mode}
+            initial={wizard.grant}
             onClose={() => {
-              setDrawerOpen(false);
+              setWizard(null);
               loadGrants();
             }}
             onGranted={(grant) => {
-              setDrawerOpen(false);
+              setWizard(null);
               setTab(grant.status === 'scheduled' ? 'scheduled' : 'active');
               loadGrants();
             }}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Extend (change end date of active access) */}
+      <AnimatePresence>
+        {extendTarget && (
+          <ExtendDialog
+            grant={extendTarget}
+            today={today}
+            onClose={() => setExtendTarget(null)}
+            onSaved={() => {
+              setExtendTarget(null);
+              loadGrants();
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Pause confirmation */}
+      <AnimatePresence>
+        {pauseTarget && (
+          <motion.div
+            className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              role="dialog"
+              aria-label="Pause role access"
+              className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4"
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+            >
+              <h2 className="text-lg font-bold text-gray-900">Pause role access?</h2>
+              <p className="text-gray-600 text-sm">
+                {pauseTarget.user_name} stops having {roleLabel(pauseTarget.role)} access right away. If they are using
+                it now, they are moved back to {roleLabel(pauseTarget.user_primary_role)} on their next action. The dates
+                stay as they are, and you can resume it at any time before {formatDate(pauseTarget.end_date)}.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setPauseTarget(null)}
+                  className="px-4 py-2 rounded-lg border border-gray-300 font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmPause}
+                  disabled={busyId === pauseTarget.grant_id}
+                  className="px-4 py-2 rounded-lg bg-orange-600 text-white font-semibold hover:bg-orange-700 disabled:opacity-60"
+                >
+                  {busyId === pauseTarget.grant_id ? 'Pausing...' : 'Pause access'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -316,6 +467,126 @@ const RoleAccess: React.FC = () => {
         )}
       </AnimatePresence>
     </div>
+  );
+};
+
+const EXTEND_PICKS = [
+  { label: '+1 day', days: 1 },
+  { label: '+1 week', days: 7 },
+  { label: '+2 weeks', days: 14 },
+  { label: '+1 month', days: 30 },
+];
+const MAX_GRANT_DAYS = 366;
+
+const daysBetween = (fromIso: string, toIso: string) =>
+  Math.round((Date.parse(`${toIso}T00:00:00Z`) - Date.parse(`${fromIso}T00:00:00Z`)) / 86400000);
+
+const ExtendDialog: React.FC<{ grant: RoleGrant; today: string; onClose: () => void; onSaved: () => void }> = ({
+  grant,
+  today,
+  onClose,
+  onSaved,
+}) => {
+  const [endDate, setEndDate] = useState(addDays(grant.end_date, 7));
+  const [saving, setSaving] = useState(false);
+  const minDate = grant.start_date > today ? grant.start_date : today;
+  const tooLong = !!endDate && daysBetween(grant.start_date, endDate) > MAX_GRANT_DAYS;
+  const invalid = !endDate || endDate < minDate || tooLong || endDate === grant.end_date;
+
+  const save = async () => {
+    if (invalid || saving) return;
+    try {
+      setSaving(true);
+      const result = await roleAccessApi.updateGrant(grant.grant_id, { end_date: endDate });
+      showSuccess(result.message || 'Access updated');
+      onSaved();
+    } catch (error: any) {
+      showError(error.response?.data?.error || 'Failed to update access');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <motion.div
+        role="dialog"
+        aria-label="Extend role access"
+        className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4"
+        initial={{ scale: 0.95 }}
+        animate={{ scale: 1 }}
+        exit={{ scale: 0.95 }}
+      >
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Extend role access</h2>
+          <p className="text-gray-600 text-sm mt-1">
+            {grant.user_name} · {roleLabel(grant.role)}
+            {grant.access_type === 'existing' && grant.source_user_name ? ` (${grant.source_user_name}'s access)` : ''}
+          </p>
+        </div>
+        <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-sm">
+          <span className="text-gray-500">Now: </span>
+          <span className="font-mono text-xs">
+            {formatDate(grant.start_date)} → {formatDate(grant.end_date)}
+          </span>
+        </div>
+        <label className="flex flex-col gap-1.5 text-xs font-bold text-gray-600">
+          New end date
+          <input
+            type="date"
+            value={endDate}
+            min={minDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="border border-gray-300 rounded-xl px-3 py-3 text-sm font-normal text-gray-900"
+          />
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-gray-500">From the current end date:</span>
+          {EXTEND_PICKS.map((q) => {
+            const value = addDays(grant.end_date, q.days);
+            return (
+              <button
+                key={q.label}
+                onClick={() => setEndDate(value)}
+                className={`px-3 py-2 rounded-lg border text-xs font-bold transition-colors ${
+                  endDate === value
+                    ? 'bg-[#243d8a] border-[#243d8a] text-white'
+                    : 'border-gray-300 text-[#243d8a] hover:bg-[#243d8a]/5'
+                }`}
+              >
+                {q.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-gray-500">
+          Access ends at 11:59 PM on the new date. An earlier date shortens it. {grant.user_name} is notified.
+        </p>
+        {tooLong && (
+          <div className="text-xs font-bold text-red-700">Access cannot run longer than {MAX_GRANT_DAYS} days from its start.</div>
+        )}
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border border-gray-300 font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={invalid || saving}
+            className="px-4 py-2 rounded-lg bg-[#243d8a] text-white font-semibold hover:bg-[#1a2d66] disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : endDate && endDate < grant.end_date ? 'Shorten access' : 'Extend access'}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 };
 

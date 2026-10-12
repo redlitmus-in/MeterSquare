@@ -123,6 +123,13 @@ class SecurityConfig:
     # Admin roles that can see all data
     ADMIN_ROLES = ['admin', 'pm', 'td', 'technical_director', 'project_manager']
 
+    @staticmethod
+    def is_admin_role(role) -> bool:
+        """Role names are stored as 'technicalDirector', 'Technical Director', 'technical_director'...;
+        compare without case, spaces, underscores or hyphens."""
+        normalized = (role or '').lower().replace(' ', '').replace('_', '').replace('-', '')
+        return normalized in {r.replace('_', '') for r in SecurityConfig.ADMIN_ROLES}
+
     # ============================================
     # Error Handling
     # ============================================

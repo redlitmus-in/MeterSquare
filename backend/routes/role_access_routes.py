@@ -6,7 +6,7 @@ from flask import Blueprint
 from utils.authentication import jwt_required
 from controllers.role_access_controller import (
     list_grants, list_grantable_users, list_roles, list_role_holders,
-    create_grant, revoke_grant, my_roles, switch_role,
+    create_grant, revoke_grant, update_grant, pause_grant, resume_grant, my_roles, switch_role,
 )
 
 role_access_routes = Blueprint('role_access_routes', __name__, url_prefix='/api/role-access')
@@ -29,6 +29,24 @@ def create_grant_route():
 @jwt_required
 def revoke_grant_route(grant_id):
     return revoke_grant(grant_id)
+
+
+@role_access_routes.route('/grants/<int:grant_id>', methods=['PATCH'])
+@jwt_required
+def update_grant_route(grant_id):
+    return update_grant(grant_id)
+
+
+@role_access_routes.route('/grants/<int:grant_id>/pause', methods=['POST'])
+@jwt_required
+def pause_grant_route(grant_id):
+    return pause_grant(grant_id)
+
+
+@role_access_routes.route('/grants/<int:grant_id>/resume', methods=['POST'])
+@jwt_required
+def resume_grant_route(grant_id):
+    return resume_grant(grant_id)
 
 
 @role_access_routes.route('/users', methods=['GET'])

@@ -1,7 +1,7 @@
 import { apiClient } from './config';
 
 export type RoleAccessType = 'fresh' | 'existing';
-export type RoleGrantStatus = 'active' | 'scheduled' | 'expired' | 'revoked';
+export type RoleGrantStatus = 'active' | 'scheduled' | 'paused' | 'expired' | 'revoked';
 
 export interface RoleGrant {
   grant_id: number;
@@ -9,6 +9,7 @@ export interface RoleGrant {
   user_name: string | null;
   user_email: string | null;
   user_primary_role: string | null;
+  user_primary_role_id: number | null;
   role_id: number;
   role: string | null;
   access_type: RoleAccessType;
@@ -22,6 +23,8 @@ export interface RoleGrant {
   granted_by_name: string | null;
   revoked_by_name: string | null;
   revoked_at: string | null;
+  paused_at: string | null;
+  paused_by_name: string | null;
   created_at: string | null;
   projects_still_assigned: number | null;
   open_work: { projects: number; change_requests: number; item_assignments: number; total: number } | null;
@@ -34,6 +37,7 @@ export interface RoleGrantCounts {
   scheduled: number;
   expired: number;
   revoked: number;
+  paused: number;
   all: number;
 }
 
@@ -89,6 +93,15 @@ export interface CreateGrantPayload {
   notes?: string;
 }
 
+export interface UpdateGrantPayload {
+  role_id?: number;
+  access_type?: RoleAccessType;
+  source_user_id?: number | null;
+  start_date?: string;
+  end_date?: string;
+  notes?: string;
+}
+
 export interface SwitchRoleResponse {
   success: boolean;
   access_token: string;
@@ -106,6 +119,21 @@ export const roleAccessApi = {
 
   async createGrant(payload: CreateGrantPayload): Promise<{ grant: RoleGrant; message: string }> {
     const response = await apiClient.post(`${BASE}/grants`, payload);
+    return response.data;
+  },
+
+  async updateGrant(grantId: number, payload: UpdateGrantPayload): Promise<{ grant: RoleGrant; message: string }> {
+    const response = await apiClient.patch(`${BASE}/grants/${grantId}`, payload);
+    return response.data;
+  },
+
+  async pauseGrant(grantId: number): Promise<{ grant: RoleGrant; message: string }> {
+    const response = await apiClient.post(`${BASE}/grants/${grantId}/pause`);
+    return response.data;
+  },
+
+  async resumeGrant(grantId: number): Promise<{ grant: RoleGrant; message: string }> {
+    const response = await apiClient.post(`${BASE}/grants/${grantId}/resume`);
     return response.data;
   },
 

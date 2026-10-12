@@ -151,6 +151,7 @@ def _grant_to_dict(grant, today, roles_by_id, users_by_id):
         'user_name': user.full_name if user else None,
         'user_email': user.email if user else None,
         'user_primary_role': user.role.role if (user and user.role) else None,
+        'user_primary_role_id': user.role_id if user else None,
         'role_id': grant.role_id,
         'role': role.role if role else None,
         'access_type': grant.access_type,
@@ -164,13 +165,15 @@ def _grant_to_dict(grant, today, roles_by_id, users_by_id):
         'granted_by_name': grant.granted_by_name,
         'revoked_by_name': grant.revoked_by_name,
         'revoked_at': grant.revoked_at.isoformat() if grant.revoked_at else None,
+        'paused_at': grant.paused_at.isoformat() if grant.paused_at else None,
+        'paused_by_name': grant.paused_by_name,
         'created_at': grant.created_at.isoformat() if grant.created_at else None,
         'projects_still_assigned': None,
         'open_work': None,
         'open_work_text': None,
     }
     # Fresh grants: work still assigned to the user in that role (for hand-over)
-    if grant.access_type == ACCESS_TYPE_FRESH and role and status in ('active', 'expired', 'revoked'):
+    if grant.access_type == ACCESS_TYPE_FRESH and role and status in ('active', 'paused', 'expired', 'revoked'):
         own_role = user.role.role if (user and user.role) else ''
         if normalize_role(own_role) != normalize_role(role.role):
             work = open_work_for(grant.user_id, role.role)
@@ -203,6 +206,7 @@ def list_grants():
             'scheduled': sum(1 for i in items if i['status'] == 'scheduled'),
             'expired': sum(1 for i in items if i['status'] == 'expired'),
             'revoked': sum(1 for i in items if i['status'] == 'revoked'),
+            'paused': sum(1 for i in items if i['status'] == 'paused'),
             'all': len(items),
         }
         if status_filter != 'all':
@@ -276,6 +280,69 @@ def list_role_holders(role_id):
         return jsonify({"success": False, "error": "Failed to load users for this role"}), 500
 
 
+def _bad(message, status=400):
+    return jsonify({"success": False, "error": message}), status
+
+
+def _check_period(start_date, end_date, today):
+    """Error message for an invalid access period, else None."""
+    if end_date < start_date:
+        return "End date must be on or after the start date"
+    if end_date < today:
+        return "End date cannot be in the past"
+    if (end_date - start_date).days > MAX_GRANT_DAYS:
+        return f"Access period cannot be longer than {MAX_GRANT_DAYS} days"
+    return None
+
+
+def _check_role_target(user, role_id, access_type, source_user_id):
+    """
+    Validate the granted role, access type and shared user for `user`.
+    Returns (role, source_user_id, error_response); source_user_id is None for fresh grants.
+    """
+    if access_type not in ACCESS_TYPES:
+        return None, None, _bad("access_type must be 'fresh' or 'existing'")
+    role = Role.query.filter_by(role_id=role_id, is_deleted=False).first()
+    if not role:
+        return None, None, _bad("Role not found", 404)
+    if normalize_role(role.role) not in GRANTABLE_ROLES:
+        return None, None, _bad(f"The {role.role} role cannot be granted")
+    # Own role: only "Same as existing user" makes sense (cover another holder's work)
+    if user.role_id == role_id and access_type != ACCESS_TYPE_EXISTING:
+        return None, None, _bad("This is already the user's own role. Use 'Same as existing user' to share another user's access.")
+
+    if access_type != ACCESS_TYPE_EXISTING:
+        return role, None, None
+    if not isinstance(source_user_id, int):
+        return None, None, _bad("Choose the existing user whose access to share")
+    if source_user_id == user.user_id:
+        return None, None, _bad("Choose a different user to share access from")
+    source = User.query.filter_by(user_id=source_user_id, is_deleted=False, is_active=True).first()
+    if not source or source.role_id != role_id:
+        return None, None, _bad(f"Selected user does not have the {role.role} role")
+    return role, source_user_id, None
+
+
+def _overlap_error(user, role, start_date, end_date, exclude_grant_id=None):
+    """409 response if the user already holds this role in an overlapping period, else None."""
+    q = UserRoleGrant.query.filter(
+        UserRoleGrant.user_id == user.user_id,
+        UserRoleGrant.role_id == role.role_id,
+        UserRoleGrant.is_revoked == False,
+        UserRoleGrant.start_date <= end_date,
+        UserRoleGrant.end_date >= start_date,
+    )
+    if exclude_grant_id:
+        q = q.filter(UserRoleGrant.grant_id != exclude_grant_id)
+    overlapping = q.first()
+    if not overlapping:
+        return None
+    return _bad(
+        f"{user.full_name} already has {role.role} access from "
+        f"{overlapping.start_date.isoformat()} to {overlapping.end_date.isoformat()}. Revoke it first.", 409
+    )
+
+
 def create_grant():
     if not _can_manage_grants():
         return _forbidden()
@@ -288,63 +355,33 @@ def create_grant():
         notes = (data.get('notes') or '').strip() or None
 
         if not isinstance(user_id, int) or not isinstance(role_id, int):
-            return jsonify({"success": False, "error": "user_id and role_id are required"}), 400
+            return _bad("user_id and role_id are required")
         if access_type not in ACCESS_TYPES:
-            return jsonify({"success": False, "error": "access_type must be 'fresh' or 'existing'"}), 400
+            return _bad("access_type must be 'fresh' or 'existing'")
 
         start_date, err = _parse_date(data.get('start_date'), 'start_date')
         if err:
-            return jsonify({"success": False, "error": err}), 400
+            return _bad(err)
         end_date, err = _parse_date(data.get('end_date'), 'end_date')
         if err:
-            return jsonify({"success": False, "error": err}), 400
+            return _bad(err)
         today = company_today()
-        if end_date < start_date:
-            return jsonify({"success": False, "error": "End date must be on or after the start date"}), 400
-        if end_date < today:
-            return jsonify({"success": False, "error": "End date cannot be in the past"}), 400
-        if (end_date - start_date).days > MAX_GRANT_DAYS:
-            return jsonify({"success": False, "error": f"Access period cannot be longer than {MAX_GRANT_DAYS} days"}), 400
+        err = _check_period(start_date, end_date, today)
+        if err:
+            return _bad(err)
 
         if user_id == _actual_user_id():
-            return jsonify({"success": False, "error": "You cannot grant a role to yourself"}), 400
+            return _bad("You cannot grant a role to yourself")
 
         user = User.query.filter_by(user_id=user_id, is_deleted=False, is_active=True).first()
         if not user:
-            return jsonify({"success": False, "error": "User not found or inactive"}), 404
-        role = Role.query.filter_by(role_id=role_id, is_deleted=False).first()
-        if not role:
-            return jsonify({"success": False, "error": "Role not found"}), 404
-        if normalize_role(role.role) not in GRANTABLE_ROLES:
-            return jsonify({"success": False, "error": f"The {role.role} role cannot be granted"}), 400
-        # Own role: only "Same as existing user" makes sense (cover another holder's work)
-        if user.role_id == role_id and access_type != ACCESS_TYPE_EXISTING:
-            return jsonify({"success": False, "error": "This is already the user's own role. Use 'Same as existing user' to share another user's access."}), 400
-
-        if access_type == ACCESS_TYPE_EXISTING:
-            if not isinstance(source_user_id, int):
-                return jsonify({"success": False, "error": "Choose the existing user whose access to share"}), 400
-            if source_user_id == user_id:
-                return jsonify({"success": False, "error": "Choose a different user to share access from"}), 400
-            source = User.query.filter_by(user_id=source_user_id, is_deleted=False, is_active=True).first()
-            if not source or source.role_id != role_id:
-                return jsonify({"success": False, "error": f"Selected user does not have the {role.role} role"}), 400
-        else:
-            source_user_id = None
-
-        overlapping = UserRoleGrant.query.filter(
-            UserRoleGrant.user_id == user_id,
-            UserRoleGrant.role_id == role_id,
-            UserRoleGrant.is_revoked == False,
-            UserRoleGrant.start_date <= end_date,
-            UserRoleGrant.end_date >= start_date,
-        ).first()
-        if overlapping:
-            return jsonify({
-                "success": False,
-                "error": f"{user.full_name} already has {role.role} access from "
-                         f"{overlapping.start_date.isoformat()} to {overlapping.end_date.isoformat()}. Revoke it first."
-            }), 409
+            return _bad("User not found or inactive", 404)
+        role, source_user_id, err_response = _check_role_target(user, role_id, access_type, source_user_id)
+        if err_response:
+            return err_response
+        err_response = _overlap_error(user, role, start_date, end_date)
+        if err_response:
+            return err_response
 
         grant = UserRoleGrant(
             user_id=user_id,
@@ -415,6 +452,213 @@ def revoke_grant(grant_id):
         db.session.rollback()
         log.error(f"revoke_grant error: {e}")
         return jsonify({"success": False, "error": "Failed to revoke role access"}), 500
+
+
+def update_grant(grant_id):
+    """
+    Change a grant that has not ended.
+    - active:  the end date is changed in place. Changing the role, access type or shared user ends this
+               grant now and starts a new one today (the user may be working in it; their session moves
+               them back to their own role and they switch into the new access).
+    - scheduled / paused: role, access type, shared user, start and end date are changed in place.
+    Expired or revoked access is not edited; it is renewed as a new grant so its history stays as it was.
+    """
+    if not _can_manage_grants():
+        return _forbidden()
+    try:
+        grant = UserRoleGrant.query.get(grant_id)
+        if not grant:
+            return _bad("Grant not found", 404)
+        # Same rule as granting: nobody extends or changes their own extra access
+        if grant.user_id == _actual_user_id():
+            return _bad("You cannot change your own role access", 403)
+        today = company_today()
+        status = grant.status_on(today)
+        if status in ('expired', 'revoked'):
+            return _bad("This access has ended. Use Renew to grant it again.")
+
+        data = request.get_json(silent=True) or {}
+        user = User.query.filter_by(user_id=grant.user_id, is_deleted=False, is_active=True).first()
+        if not user:
+            return _bad("User not found or inactive", 404)
+
+        start_date, end_date = grant.start_date, grant.end_date
+        if 'end_date' in data:
+            end_date, err = _parse_date(data.get('end_date'), 'end_date')
+            if err:
+                return _bad(err)
+        if 'start_date' in data:
+            start_date, err = _parse_date(data.get('start_date'), 'start_date')
+            if err:
+                return _bad(err)
+
+        role_id = data.get('role_id', grant.role_id)
+        access_type = (data.get('access_type') or grant.access_type).lower()
+        source_user_id = data.get('source_user_id', grant.source_user_id) if access_type == ACCESS_TYPE_EXISTING else None
+        if not isinstance(role_id, int):
+            return _bad("role_id must be a number")
+
+        target_changed = (role_id != grant.role_id or access_type != grant.access_type
+                          or source_user_id != grant.source_user_id)
+        replace = status == 'active' and target_changed
+        if status == 'active' and not target_changed and start_date != grant.start_date:
+            return _bad("This access is in use, so its start date cannot change. Change the end date, "
+                        "or change the role to start the new access today.")
+        if replace:
+            start_date = today  # the edited access starts today; the current grant ends now
+        elif start_date != grant.start_date and start_date < today:
+            return _bad("Start date cannot be in the past")
+
+        err = _check_period(start_date, end_date, today)
+        if err:
+            return _bad(err)
+        role, source_user_id, err_response = _check_role_target(user, role_id, access_type, source_user_id)
+        if err_response:
+            return err_response
+        err_response = _overlap_error(user, role, start_date, end_date, exclude_grant_id=grant.grant_id)
+        if err_response:
+            return err_response
+
+        old_end = grant.end_date
+        changed = (target_changed or start_date != grant.start_date or end_date != old_end)
+        notes = ((data.get('notes') or '').strip() or None) if 'notes' in data else grant.notes
+
+        if replace:
+            # End the current grant now and start the edited access as a new grant (keeps history)
+            new_grant = UserRoleGrant(
+                user_id=grant.user_id, role_id=role.role_id, access_type=access_type,
+                source_user_id=source_user_id, start_date=start_date, end_date=end_date, notes=notes,
+                granted_by=_actual_user_id(), granted_by_name=_actual_user_name(),
+            )
+            db.session.add(new_grant)
+            db.session.flush()
+            grant.is_revoked = True
+            grant.revoked_by = _actual_user_id()
+            grant.revoked_by_name = _actual_user_name()
+            grant.revoked_at = datetime.utcnow()
+            grant.notes = f"Replaced by an edit (new access #{new_grant.grant_id})"
+            result_grant = new_grant
+        else:
+            grant.role_id = role.role_id
+            grant.access_type = access_type
+            grant.source_user_id = source_user_id
+            grant.start_date = start_date
+            grant.end_date = end_date
+            grant.notes = notes
+            if end_date != old_end:
+                grant.reminder_sent_at = None  # hand-over reminder can be sent again for the new end date
+            result_grant = grant
+        db.session.commit()
+
+        log.info(f"Role access updated: grant={grant_id} -> {result_grant.grant_id} {start_date}..{end_date} "
+                 f"(was ..{old_end}) role={role.role} type={access_type} replaced={replace} by={_actual_user_id()}")
+
+        if changed:
+            try:
+                from utils.role_access_notify import notify_changed
+                notify_changed(result_grant, user, role, old_end, _actual_user_name())
+            except Exception as notify_err:
+                log.warning(f"Role access change notification failed for grant {grant_id}: {notify_err}")
+
+        users_by_id = {user.user_id: user}
+        if source_user_id:
+            users_by_id[source_user_id] = User.query.get(source_user_id)
+        if replace:
+            message = f"{user.full_name} now has {role.role} access from today until {end_date.isoformat()}"
+        elif status == 'active':
+            message = f"{user.full_name}'s {role.role} access now ends on {end_date.isoformat()}"
+        else:
+            message = f"{user.full_name}'s {status} access was updated"
+        grant = result_grant
+        return jsonify({
+            "success": True,
+            "message": message,
+            "grant": _grant_to_dict(grant, today, {role.role_id: role}, users_by_id),
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"update_grant error: {e}")
+        return jsonify({"success": False, "error": "Failed to update role access"}), 500
+
+
+def _load_managed_grant(grant_id):
+    """(grant, user, role, error_response) for pause/resume, with the same guards as editing."""
+    if not _can_manage_grants():
+        return None, None, None, _forbidden()
+    grant = UserRoleGrant.query.get(grant_id)
+    if not grant:
+        return None, None, None, _bad("Grant not found", 404)
+    if grant.user_id == _actual_user_id():
+        return None, None, None, _bad("You cannot change your own role access", 403)
+    user = User.query.get(grant.user_id)
+    role = Role.query.get(grant.role_id)
+    if not user or not role:
+        return None, None, None, _bad("User or role not found", 404)
+    return grant, user, role, None
+
+
+def pause_grant(grant_id):
+    """Stop access now without ending it. Dates stay; Resume gives the access back."""
+    try:
+        grant, user, role, err_response = _load_managed_grant(grant_id)
+        if err_response:
+            return err_response
+        today = company_today()
+        status = grant.status_on(today)
+        if status not in ('active', 'scheduled'):
+            return _bad(f"Only active or scheduled access can be paused (this one is {status})")
+
+        grant.paused_at = datetime.utcnow()
+        grant.paused_by = _actual_user_id()
+        grant.paused_by_name = _actual_user_name()
+        db.session.commit()
+        log.info(f"Role access paused: grant={grant_id} by={_actual_user_id()}")
+        try:
+            from utils.role_access_notify import notify_paused
+            notify_paused(grant, user, role, grant.paused_by_name)
+        except Exception as notify_err:
+            log.warning(f"Role access pause notification failed for grant {grant_id}: {notify_err}")
+        return jsonify({
+            "success": True,
+            "message": f"{user.full_name}'s {role.role} access is paused",
+            "grant": _grant_to_dict(grant, today, {role.role_id: role}, {user.user_id: user}),
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"pause_grant error: {e}")
+        return jsonify({"success": False, "error": "Failed to pause role access"}), 500
+
+
+def resume_grant(grant_id):
+    try:
+        grant, user, role, err_response = _load_managed_grant(grant_id)
+        if err_response:
+            return err_response
+        today = company_today()
+        status = grant.status_on(today)
+        if status != 'paused':
+            return _bad("This access is not paused" if status != 'expired'
+                        else "This access ended while paused. Use Renew to grant it again.")
+
+        grant.paused_at = None
+        grant.paused_by = None
+        grant.paused_by_name = None
+        db.session.commit()
+        log.info(f"Role access resumed: grant={grant_id} by={_actual_user_id()}")
+        try:
+            from utils.role_access_notify import notify_resumed
+            notify_resumed(grant, user, role, _actual_user_name(), today)
+        except Exception as notify_err:
+            log.warning(f"Role access resume notification failed for grant {grant_id}: {notify_err}")
+        return jsonify({
+            "success": True,
+            "message": f"{user.full_name}'s {role.role} access is back on",
+            "grant": _grant_to_dict(grant, today, {role.role_id: role}, {user.user_id: user}),
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"resume_grant error: {e}")
+        return jsonify({"success": False, "error": "Failed to resume role access"}), 500
 
 
 # ---------------------------------------------------------------------------

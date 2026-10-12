@@ -1,9 +1,13 @@
 /**
  * Grant Role Access - step-by-step wizard (matches the approved walkthrough).
  * Steps: User → Role → Access type → [Choose user, for "Same as existing user"] → Period → Review → Done
+ * Modes:
+ *  - create: a new grant
+ *  - edit:   change a scheduled grant (same user; opens on Period, earlier steps can be revisited)
+ *  - renew:  grant ended or revoked access again, prefilled from the old grant (creates a new grant)
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -43,7 +47,7 @@ export const formatDate = (iso: string) => {
   return `${d} ${MONTHS[m - 1]} ${y}`;
 };
 
-const addDays = (iso: string, days: number) => {
+export const addDays = (iso: string, days: number) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 };
@@ -97,13 +101,25 @@ const STEP_META: Record<StepKey, { short: string; title: string; body: string }>
   },
 };
 
+export type WizardMode = 'create' | 'edit' | 'renew';
+
 interface Props {
   today: string;
   onClose: () => void;
   onGranted: (grant: RoleGrant) => void;
+  mode?: WizardMode;
+  initial?: RoleGrant | null;
 }
 
-const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
+const TITLES: Record<WizardMode, string> = {
+  create: 'Grant role access',
+  edit: 'Edit role access',
+  renew: 'Renew role access',
+};
+
+const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = 'create', initial = null }) => {
+  const prefill = mode !== 'create' ? initial : null;
+  const editingActive = mode === 'edit' && prefill?.status === 'active';
   // Data
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState<GrantableUser[]>([]);
@@ -113,23 +129,42 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
   const [holdersLoading, setHoldersLoading] = useState(false);
 
   // Selections
-  const [user, setUser] = useState<GrantableUser | null>(null);
-  const [role, setRole] = useState<RoleOption | null>(null);
-  const [accessType, setAccessType] = useState<RoleAccessType>('fresh');
+  const [user, setUser] = useState<GrantableUser | null>(() =>
+    prefill
+      ? {
+          user_id: prefill.user_id,
+          full_name: prefill.user_name || '',
+          email: prefill.user_email || '',
+          role_id: prefill.user_primary_role_id ?? 0,
+          role: prefill.user_primary_role,
+        }
+      : null
+  );
+  const [role, setRole] = useState<RoleOption | null>(() =>
+    prefill ? { role_id: prefill.role_id, role: prefill.role || '' } : null
+  );
+  const [accessType, setAccessType] = useState<RoleAccessType>(prefill ? prefill.access_type : 'fresh');
   const [source, setSource] = useState<RoleHolder | null>(null);
-  const [startDate, setStartDate] = useState(today);
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState(mode === 'edit' && prefill ? prefill.start_date : today);
+  const [endDate, setEndDate] = useState(mode === 'edit' && prefill ? prefill.end_date : '');
+  // The shared user is picked once the holders list for the prefilled role has loaded
+  const pendingSourceId = useRef<number | null>(prefill?.source_user_id ?? null);
 
   // Flow
-  const [stepIndex, setStepIndex] = useState(0);
+  // Prefilled flows open on the Period step; Back still reaches the earlier steps
+  const [stepIndex, setStepIndex] = useState(() =>
+    prefill ? (prefill.access_type === 'existing' ? 4 : 3) - (mode === 'edit' ? 1 : 0) : 0
+  );
   const [direction, setDirection] = useState(1);
   const [saving, setSaving] = useState(false);
   const [granted, setGranted] = useState<RoleGrant | null>(null);
 
-  const steps: StepKey[] = useMemo(
-    () => (accessType === 'existing' ? ['user', 'role', 'type', 'source', 'period', 'review'] : ['user', 'role', 'type', 'period', 'review']),
-    [accessType]
-  );
+  const steps: StepKey[] = useMemo(() => {
+    const all: StepKey[] =
+      accessType === 'existing' ? ['user', 'role', 'type', 'source', 'period', 'review'] : ['user', 'role', 'type', 'period', 'review'];
+    // An edit keeps the same user
+    return mode === 'edit' ? all.filter((s) => s !== 'user') : all;
+  }, [accessType, mode]);
   const step = steps[Math.min(stepIndex, steps.length - 1)];
 
   useEffect(() => {
@@ -158,7 +193,13 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
     setHoldersLoading(true);
     roleAccessApi
       .getRoleHolders(role.role_id, user.user_id)
-      .then((d) => setHolders(d.users))
+      .then((d) => {
+        setHolders(d.users);
+        if (pendingSourceId.current) {
+          setSource(d.users.find((h) => h.user_id === pendingSourceId.current) || null);
+          pendingSourceId.current = null;
+        }
+      })
       .catch(() => showError('Failed to load users for this role'))
       .finally(() => setHoldersLoading(false));
   }, [role, user, accessType]);
@@ -176,7 +217,7 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
     type: !(isOwnRole && accessType === 'fresh'),
     source: !!source,
     period: !!endDate && !dateError && endDate >= today,
-    review: true,
+    review: accessType !== 'existing' || !!source,
   };
 
   const goTo = (index: number) => {
@@ -187,20 +228,23 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
   const back = () => stepIndex > 0 && goTo(stepIndex - 1);
 
   const submit = async () => {
-    if (saving || !user || !role) return;
+    if (saving || !user || !role || !stepValid.review) return;
+    const details = {
+      role_id: role.role_id,
+      access_type: accessType,
+      source_user_id: accessType === 'existing' ? source?.user_id ?? null : null,
+      start_date: startDate,
+      end_date: endDate,
+    };
     try {
       setSaving(true);
-      const result = await roleAccessApi.createGrant({
-        user_id: user.user_id,
-        role_id: role.role_id,
-        access_type: accessType,
-        source_user_id: accessType === 'existing' ? source?.user_id ?? null : null,
-        start_date: startDate,
-        end_date: endDate,
-      });
+      const result =
+        mode === 'edit' && prefill
+          ? await roleAccessApi.updateGrant(prefill.grant_id, details)
+          : await roleAccessApi.createGrant({ user_id: user.user_id, ...details });
       setGranted(result.grant);
     } catch (error: any) {
-      showError(error.response?.data?.error || 'Failed to grant role access');
+      showError(error.response?.data?.error || 'Failed to save role access');
     } finally {
       setSaving(false);
     }
@@ -245,7 +289,7 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
     >
       <motion.div
         role="dialog"
-        aria-label="Grant role access"
+        aria-label={TITLES[mode]}
         className="bg-gray-50 w-full max-w-5xl h-full sm:h-[90vh] sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
         initial={{ y: 30, scale: 0.98 }}
         animate={{ y: 0, scale: 1 }}
@@ -256,7 +300,7 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
         <div className="bg-white flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <div>
             <div className="text-xs font-bold tracking-wider text-[#243d8a]">ROLE ACCESS</div>
-            <h2 className="text-xl font-bold text-gray-900">Grant role access</h2>
+            <h2 className="text-xl font-bold text-gray-900">{TITLES[mode]}</h2>
           </div>
           <button onClick={onClose} aria-label="Close" className="p-2 rounded-lg hover:bg-gray-100 text-gray-500">
             <X className="w-5 h-5" />
@@ -316,7 +360,13 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {granted ? (
-            <SuccessView grant={granted} summary={summary} onAnother={reset} onDone={() => onGranted(granted)} />
+            <SuccessView
+              grant={granted}
+              summary={summary}
+              mode={mode}
+              onAnother={reset}
+              onDone={() => onGranted(granted)}
+            />
           ) : (
             <div className="flex flex-col lg:flex-row gap-5 h-full">
               {/* Narrative card */}
@@ -526,9 +576,10 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
                             <input
                               type="date"
                               value={startDate}
-                              min={today}
+                              min={editingActive ? undefined : today}
+                              disabled={editingActive}
                               onChange={(e) => setStartDate(e.target.value)}
-                              className="border border-gray-300 rounded-xl px-3 py-3 text-sm font-normal text-gray-900"
+                              className="border border-gray-300 rounded-xl px-3 py-3 text-sm font-normal text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
                             />
                           </label>
                           <label className="flex flex-col gap-1.5 text-xs font-bold text-gray-600">
@@ -564,6 +615,12 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
                         <div className="flex items-center gap-2 text-xs text-gray-500">
                           <CalendarClock className="w-4 h-4" /> Access ends automatically at 11:59 PM on the end date.
                         </div>
+                        {editingActive && (
+                          <Hint>
+                            This access is in use, so its start date stays. If you changed the role, access type or shared user,
+                            the current access ends now and the new access starts today.
+                          </Hint>
+                        )}
                         {dateError && (
                           <div className="text-xs font-bold text-red-700">End date must be on or after the start date.</div>
                         )}
@@ -617,10 +674,10 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted }) => {
             {step === 'review' ? (
               <button
                 onClick={submit}
-                disabled={saving}
+                disabled={saving || !stepValid.review}
                 className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#243d8a] text-white font-bold hover:bg-[#1a2d66] disabled:opacity-60"
               >
-                {saving ? 'Granting...' : 'Grant access'}
+                {saving ? 'Saving...' : mode === 'edit' ? 'Save changes' : mode === 'renew' ? 'Renew access' : 'Grant access'}
               </button>
             ) : (
               <button
@@ -708,12 +765,13 @@ const ReviewItem: React.FC<{ label: string; value: string; sub?: string }> = ({ 
   </div>
 );
 
-const SuccessView: React.FC<{ grant: RoleGrant; summary: string; onAnother: () => void; onDone: () => void }> = ({
-  grant,
-  summary,
-  onAnother,
-  onDone,
-}) => (
+const SuccessView: React.FC<{
+  grant: RoleGrant;
+  summary: string;
+  mode: WizardMode;
+  onAnother: () => void;
+  onDone: () => void;
+}> = ({ grant, summary, mode, onAnother, onDone }) => (
   <div className="h-full flex flex-col items-center justify-center text-center gap-5 py-10">
     <motion.div
       initial={{ scale: 0.4, opacity: 0 }}
@@ -732,7 +790,13 @@ const SuccessView: React.FC<{ grant: RoleGrant; summary: string; onAnother: () =
     </motion.div>
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="space-y-2 max-w-xl">
       <h3 className="text-2xl font-extrabold text-gray-900">
-        {grant.status === 'scheduled' ? 'Access scheduled' : 'Access granted'}
+        {mode === 'edit'
+          ? 'Access updated'
+          : grant.status === 'scheduled'
+            ? 'Access scheduled'
+            : mode === 'renew'
+              ? 'Access renewed'
+              : 'Access granted'}
       </h3>
       <p className="text-gray-600">{summary}</p>
       <p className="text-sm text-gray-500">
@@ -741,12 +805,14 @@ const SuccessView: React.FC<{ grant: RoleGrant; summary: string; onAnother: () =
       </p>
     </motion.div>
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }} className="flex gap-3">
-      <button
-        onClick={onAnother}
-        className="px-5 py-2.5 rounded-xl border border-gray-300 font-semibold text-gray-700 hover:bg-gray-50"
-      >
-        Grant another
-      </button>
+      {mode === 'create' && (
+        <button
+          onClick={onAnother}
+          className="px-5 py-2.5 rounded-xl border border-gray-300 font-semibold text-gray-700 hover:bg-gray-50"
+        >
+          Grant another
+        </button>
+      )}
       <button onClick={onDone} className="px-6 py-2.5 rounded-xl bg-[#243d8a] text-white font-bold hover:bg-[#1a2d66]">
         Done
       </button>

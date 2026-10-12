@@ -351,7 +351,7 @@ def create_app():
             if hasattr(g, 'user') and g.user:
                 user_role = (g.user.get('role') or '').lower()
                 user_id = g.user.get('user_id')
-                is_admin = user_role in ['admin', 'pm', 'td', 'technical_director', 'project_manager']
+                is_admin = SecurityConfig.is_admin_role(user_role)
 
             # Filter the data
             filtered_data = _filter_response_recursive(data, user_id, user_role, is_admin)

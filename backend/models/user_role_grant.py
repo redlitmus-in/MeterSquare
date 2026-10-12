@@ -40,6 +40,10 @@ class UserRoleGrant(db.Model):
     revoked_by_name = db.Column(db.String(255), nullable=True)
     revoked_at = db.Column(db.DateTime, nullable=True)
     reminder_sent_at = db.Column(db.DateTime, nullable=True)
+    # Paused grants keep their dates but give no access until resumed
+    paused_at = db.Column(db.DateTime, nullable=True)
+    paused_by = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=True)
+    paused_by_name = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
 
@@ -48,13 +52,15 @@ class UserRoleGrant(db.Model):
     role = db.relationship('Role', foreign_keys=[role_id], primaryjoin='UserRoleGrant.role_id == Role.role_id')
 
     def status_on(self, today):
-        """Return 'revoked' | 'scheduled' | 'expired' | 'active' for the given company-local date."""
+        """Return 'revoked' | 'expired' | 'paused' | 'scheduled' | 'active' for the given company-local date."""
         if self.is_revoked:
             return 'revoked'
-        if today < self.start_date:
-            return 'scheduled'
         if today > self.end_date:
             return 'expired'
+        if self.paused_at:
+            return 'paused'
+        if today < self.start_date:
+            return 'scheduled'
         return 'active'
 
     def is_active_on(self, today):
