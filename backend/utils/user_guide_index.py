@@ -159,7 +159,7 @@ def search(query, role=None, limit=6, max_chars=14000):
             text = text[: max(0, max_chars - total)]
         if not text:
             break
-        results.append({'title': s['title'], 'text': text, 'file': s['file']})
+        results.append({'title': s['title'], 'text': text, 'file': s['file'], 'roles': sorted(s['roles'])})
         total += len(text)
     return results
 

@@ -165,8 +165,8 @@ def _grant_to_dict(grant, today, roles_by_id, users_by_id):
         'granted_by_name': grant.granted_by_name,
         'revoked_by_name': grant.revoked_by_name,
         'revoked_at': grant.revoked_at.isoformat() if grant.revoked_at else None,
-        'paused_at': grant.paused_at.isoformat() if grant.paused_at else None,
-        'paused_by_name': grant.paused_by_name,
+        'paused_at': grant.paused_at.isoformat() if grant.is_paused() else None,
+        'paused_by_name': grant.paused_by_name if grant.is_paused() else None,
         'created_at': grant.created_at.isoformat() if grant.created_at else None,
         'projects_still_assigned': None,
         'open_work': None,
@@ -583,8 +583,12 @@ def update_grant(grant_id):
 
 def _load_managed_grant(grant_id):
     """(grant, user, role, error_response) for pause/resume, with the same guards as editing."""
+    from models.user_role_grant import pause_supported
     if not _can_manage_grants():
         return None, None, None, _forbidden()
+    if not pause_supported():
+        return None, None, None, _bad("Pause needs a one-time database update first: run "
+                                      "backend/migrations/add_role_grant_pause.py.", 409)
     grant = UserRoleGrant.query.get(grant_id)
     if not grant:
         return None, None, None, _bad("Grant not found", 404)

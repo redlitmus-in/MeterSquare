@@ -91,33 +91,75 @@ def already_sent(grant_id, event):
     return True
 
 
-def _email_html(heading, lines, accent='#243d8a', note=None):
+def _email_html(heading, lines, note=None, button_url=None, button_label=None):
+    """
+    Role access email in the standard MeterSquare layout (same as the account emails):
+    logo header with the red rule, navy heading, grey body, navy button, grey footer.
+    The logo is embedded as cid:logo by BOQEmailService.send_email.
+    """
     body = ''.join(
-        f'<p style="margin:0 0 10px;font-size:14px;line-height:1.6;color:#374151;">{line}</p>' for line in lines
+        f'<p style="font-size:15px;line-height:1.7;color:#444444;margin:0 0 14px 0;">{line}</p>' for line in lines
     )
     note_html = (
-        f'<p style="margin:16px 0 0;padding:12px 14px;background:#f3f4f6;border-radius:6px;'
-        f'font-size:13px;color:#4b5563;">{note}</p>' if note else ''
-    )
-    return f"""
-    <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-      <div style="background:{accent};padding:18px 24px;">
-        <div style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.08em;">METERSQUARE · ROLE ACCESS</div>
-        <div style="color:#ffffff;font-size:20px;font-weight:700;margin-top:4px;">{heading}</div>
-      </div>
-      <div style="padding:22px 24px;">
-        {body}
-        {note_html}
-      </div>
-      <div style="padding:14px 24px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;">
-        This is an automated message from MeterSquare.
-      </div>
-    </div>
-    """
+        f'<table width="100%" cellpadding="0" cellspacing="0" border="0" '
+        f'style="background-color:#f0f4ff;border-left:3px solid #243d8a;margin:6px 0 22px 0;">'
+        f'<tr><td style="padding:14px 18px;font-size:14px;line-height:1.6;color:#1f2a44;">{note}</td></tr></table>'
+    ) if note else ''
+    button_html = (
+        f'<table cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 26px 0;"><tr>'
+        f'<td style="background-color:#243d8a;border-radius:6px;">'
+        f'<a href="{html.escape(button_url, quote=True)}" style="display:inline-block;padding:12px 26px;'
+        f'font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;">{html.escape(button_label)} &rarr;</a>'
+        f'</td></tr></table>'
+    ) if button_url and button_label else ''
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{heading}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#333333;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6fb;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" border="0"
+               style="background-color:#ffffff;border:1px solid #e0e6f5;border-radius:10px;max-width:600px;width:100%;">
+          <tr>
+            <td style="padding:24px 36px 18px 36px;border-bottom:2px solid #fecaca;text-align:left;">
+              <img src="cid:logo" alt="MeterSquare" style="height:40px;width:auto;display:block;">
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:30px 36px 10px 36px;">
+              <p style="font-size:12px;font-weight:700;color:#dc2626;margin:0 0 6px 0;text-transform:uppercase;letter-spacing:0.8px;">Role Access</p>
+              <h1 style="font-size:22px;font-weight:700;color:#243d8a;margin:0 0 22px 0;">{heading}</h1>
+              {body}
+              {note_html}
+              {button_html}
+              <p style="font-size:15px;line-height:1.7;color:#444444;margin:0 0 26px 0;">
+                Regards,<br><strong style="color:#243d8a;">MeterSquare Team</strong>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 36px;border-top:1px solid #e0e6f5;background-color:#f4f6fb;">
+              <p style="font-size:12px;color:#888888;margin:0;line-height:1.6;">
+                This is an automated notification from MeterSquare ERP. Please do not reply to this email.<br>
+                &copy; 2026 MeterSquare Interiors LLC. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
 
 
 def _send(recipients, *, event, grant, title, message, priority, email_subject, email_heading,
-          email_lines, email_note=None, accent='#243d8a', action_url=None, action_label=None,
+          email_lines, email_note=None, action_url=None, action_label=None,
           ntype='info', extra_meta=None):
     """Deliver one event to each recipient on all three channels. Never raises."""
     if not recipients:
@@ -169,10 +211,14 @@ def _send(recipients, *, event, grant, title, message, priority, email_subject, 
     # 3. Email
     try:
         from utils.boq_email_service import BOQEmailService
+        from utils.email_config import get_app_url
         svc = BOQEmailService()
-        html_body = _email_html(email_heading, email_lines, accent=accent, note=email_note)
+        app_url = get_app_url().rstrip('/')
         for u in recipients:
             if u.email:
+                path = action_url(u) if callable(action_url) else (action_url or '/')
+                html_body = _email_html(email_heading, email_lines, note=email_note,
+                                        button_url=f"{app_url}{path}", button_label=action_label or 'Open MeterSquare')
                 svc.send_email_async(u.email, email_subject, html_body)
     except Exception as e:
         log.warning(f"[RoleAccessNotify] email failed ({event}): {e}")
@@ -227,7 +273,7 @@ def notify_revoked(grant, user, role, revoked_by_name):
     _send(
         [user], event='revoked', grant=grant, title=title, message=message, priority='high',
         email_subject=f'MeterSquare: {title}',
-        email_heading=html.escape(title), accent='#b91c1c',
+        email_heading=html.escape(title),
         email_lines=[
             f"Hello {html.escape(user.full_name or '')},",
             f"{html.escape(revoked_by_name or 'An administrator')} removed your "
@@ -247,7 +293,7 @@ def notify_paused(grant, user, role, paused_by_name):
     _send(
         [user], event='paused', grant=grant, title=title, message=message, priority='high',
         email_subject=f'MeterSquare: {title}',
-        email_heading=html.escape(title), accent='#b45309',
+        email_heading=html.escape(title),
         email_lines=[
             f"Hello {html.escape(user.full_name or '')},",
             f"{html.escape(by)} paused your <strong>{html.escape(role_label)}</strong> access"
@@ -357,7 +403,7 @@ def sweep_role_access_notifications(today):
             role_label = _role_label(role.role)
             days_left = (grant.end_date - today).days
             # Paused access gets no start / ending reminders; the "ended" notice still goes out
-            if grant.paused_at and days_left >= 0:
+            if days_left >= 0 and grant.is_paused():
                 continue
 
             # Work still assigned to a fresh grantee in the granted role
@@ -394,7 +440,7 @@ def sweep_role_access_notifications(today):
                     [user], event='ending_soon', grant=grant, title=f'{role_label} access ends tomorrow',
                     message=f"Your {role_label} access ends at 11:59 PM on {_fmt(grant.end_date)}. Finish or hand over any open work.",
                     priority='high', email_subject=f'MeterSquare: your {role_label} access ends tomorrow',
-                    email_heading=html.escape(f'{role_label} access ends tomorrow'), accent='#b45309',
+                    email_heading=html.escape(f'{role_label} access ends tomorrow'),
                     email_lines=[
                         f"Hello {html.escape(user.full_name or '')},",
                         f"Your <strong>{html.escape(role_label)}</strong> access ends at 11:59 PM on "
@@ -416,7 +462,7 @@ def sweep_role_access_notifications(today):
                              f"They still hold {held_text} as {role_label}. "
                              f"Reassign them before the end date."),
                     priority='high', email_subject=f'MeterSquare: hand over {user.full_name}\'s projects',
-                    email_heading='Hand over projects before access ends', accent='#b45309',
+                    email_heading='Hand over projects before access ends',
                     email_lines=[
                         f"<strong>{html.escape(user.full_name or '')}</strong>'s "
                         f"<strong>{html.escape(role_label)}</strong> access ends {when} "
@@ -436,7 +482,7 @@ def sweep_role_access_notifications(today):
                     [user], event='ended', grant=grant, title=f'{role_label} access has ended',
                     message=f"Your {role_label} access ended on {_fmt(grant.end_date)}. You're back in your own role.",
                     priority='medium', email_subject=f'MeterSquare: your {role_label} access has ended',
-                    email_heading=html.escape(f'{role_label} access has ended'), accent='#4b5563',
+                    email_heading=html.escape(f'{role_label} access has ended'),
                     email_lines=[
                         f"Hello {html.escape(user.full_name or '')},",
                         f"Your <strong>{html.escape(role_label)}</strong> access ended at 11:59 PM on "
@@ -453,7 +499,7 @@ def sweep_role_access_notifications(today):
                         message=(f"{user.full_name}'s {role_label} access ended on {_fmt(grant.end_date)} but they still "
                                  f"hold {held_text} as {role_label}. Reassign them."),
                         priority='urgent', email_subject=f'MeterSquare: projects need a new {role_label}',
-                        email_heading=html.escape(f'Projects need a new {role_label}'), accent='#b91c1c',
+                        email_heading=html.escape(f'Projects need a new {role_label}'),
                         email_lines=[
                             f"<strong>{html.escape(user.full_name or '')}</strong>'s "
                             f"<strong>{html.escape(role_label)}</strong> access ended on {_fmt(grant.end_date)}.",

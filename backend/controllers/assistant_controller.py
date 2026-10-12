@@ -59,8 +59,16 @@ def _role():
     return user.get('role') or ''
 
 
+def _excerpt_owner(excerpt):
+    """'Admin', 'Project Manager and MEP Supervisor', ... for role chapters; '' for sections every role uses."""
+    labels = [ROLE_LABELS.get(r, r) for r in excerpt.get('roles') or []]
+    return ' and '.join(labels)
+
+
 def _system_prompt(role_label, excerpts, suggestions):
-    guide = '\n\n'.join(f"### {e['title']}\n{e['text']}" for e in excerpts) or '(no matching guide sections)'
+    guide = '\n\n'.join(
+        f"### {e['title']}\n(For: {_excerpt_owner(e) or 'all roles'})\n{e['text']}" for e in excerpts
+    ) or '(no matching guide sections)'
     examples = '\n'.join(f"  - {q}" for q in suggestions[:4])
     return f"""You are "Ask AI", the friendly MeterSquare assistant built into the MeterSquare construction ERP.
 You help staff use the application: screens, menus, buttons, steps, statuses, approvals and process flows.
@@ -92,7 +100,15 @@ How to respond:
   related topic you do know, and suggest a Support ticket (account menu, then Support).
 - Questions completely unrelated to work at MeterSquare (weather, news, sports, coding): politely say you
   are here for MeterSquare and construction work questions, and offer an example question.
-- When a task belongs to a different role, say which role does it.
+- Each excerpt says which role it is "For". Give step-by-step instructions only for tasks a {role_label}
+  does (excerpts for {role_label} or for all roles). When the user asks how to do a task whose excerpt
+  is for a different role (for example creating users, giving role access or blocking a user is for the
+  Admin), do NOT list its steps. In one or two sentences say that the task is done by that role and that
+  they should ask them (for user accounts, passwords and access: "please ask your Admin"). Then, if
+  something related is part of the {role_label}'s own work, mention it briefly.
+- Questions about the overall process ("what happens after...", "who approves...", "how does a request
+  reach site?") may explain every role's part at a high level, without click-by-click instructions for
+  the other roles.
 - Never invent MeterSquare screens, menus, buttons, fields, settings or rules. Only mention app features
   and menu names that appear word for word in the excerpts. If unsure whether something exists in the
   app, leave it out. (This applies to the app only; general explanations can use your own knowledge.)

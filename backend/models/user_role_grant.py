@@ -13,13 +13,45 @@ access_type:
                existing holder of that role.
 """
 
+import time
 from datetime import datetime
+
+from sqlalchemy import text
+from sqlalchemy.orm import deferred
+
 from config.db import db
 
 
 ACCESS_TYPE_FRESH = 'fresh'
 ACCESS_TYPE_EXISTING = 'existing'
 ACCESS_TYPES = (ACCESS_TYPE_FRESH, ACCESS_TYPE_EXISTING)
+
+PAUSE_RECHECK_SECONDS = 300
+_pause_columns = {'present': None, 'checked_at': 0.0}
+
+
+def pause_supported():
+    """
+    True once migrations/add_role_grant_pause.py has added the pause columns.
+    Until then the pause columns are never queried, so Role Access keeps working.
+    A missing result is re-checked every few minutes, so running the migration
+    turns Pause on without a code change or restart.
+    """
+    if _pause_columns['present']:
+        return True
+    if _pause_columns['present'] is not None and time.time() - _pause_columns['checked_at'] < PAUSE_RECHECK_SECONDS:
+        return False
+    try:
+        found = db.session.execute(text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'user_role_grants' AND column_name = 'paused_at'"
+        )).first()
+        _pause_columns['present'] = found is not None
+    except Exception:
+        db.session.rollback()
+        _pause_columns['present'] = False
+    _pause_columns['checked_at'] = time.time()
+    return _pause_columns['present']
 
 
 class UserRoleGrant(db.Model):
@@ -40,10 +72,11 @@ class UserRoleGrant(db.Model):
     revoked_by_name = db.Column(db.String(255), nullable=True)
     revoked_at = db.Column(db.DateTime, nullable=True)
     reminder_sent_at = db.Column(db.DateTime, nullable=True)
-    # Paused grants keep their dates but give no access until resumed
-    paused_at = db.Column(db.DateTime, nullable=True)
-    paused_by = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=True)
-    paused_by_name = db.Column(db.String(255), nullable=True)
+    # Paused grants keep their dates but give no access until resumed.
+    # Deferred: only loaded when read, and only read when pause_supported().
+    paused_at = deferred(db.Column(db.DateTime, nullable=True))
+    paused_by = deferred(db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=True))
+    paused_by_name = deferred(db.Column(db.String(255), nullable=True))
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     last_modified_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
 
@@ -57,11 +90,14 @@ class UserRoleGrant(db.Model):
             return 'revoked'
         if today > self.end_date:
             return 'expired'
-        if self.paused_at:
+        if self.is_paused():
             return 'paused'
         if today < self.start_date:
             return 'scheduled'
         return 'active'
+
+    def is_paused(self):
+        return pause_supported() and self.paused_at is not None
 
     def is_active_on(self, today):
         return self.status_on(today) == 'active'
