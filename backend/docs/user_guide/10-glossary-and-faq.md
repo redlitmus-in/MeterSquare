@@ -55,7 +55,7 @@ Open the account menu at the bottom of the sidebar. Under **SWITCH ROLE**, click
 
 ### Why can't I see the Role Access menu?
 
-Only users whose own role is Admin or Technical Director see it. It is hidden while you work in a granted role.
+Only users whose own role is Admin or Technical Director see it. Admin and TD both find **Role Access** as its own item in their sidebar. It is hidden while you work in a granted role: switch back to your own role from the amber banner to see it again.
 
 ### Why does a material request go to the Estimator?
 

@@ -200,6 +200,6 @@ Open **Profit Comparison** to compare the original BOQ with actual purchases.
 
 ## Role Access
 
-The TD can give users temporary access to another role, the same as the Admin. See **Admin → Role Access** for the full steps.
+The TD can give users temporary access to another role, the same as the Admin. In the TD sidebar, click **Role Access** (it is a menu item of its own, not under another menu). The screen and its steps are the same as the Admin's; the full steps are in the Admin chapter, section "Role Access".
 
-The **Role Access** menu is hidden while you are working in a granted role yourself.
+The **Role Access** menu is hidden while you are working in a granted role yourself. Click **Switch back to Technical Director** in the amber banner to see it again.
