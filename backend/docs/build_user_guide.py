@@ -17,12 +17,18 @@ drawn as a role-coloured flowchart in the PDF, e.g.
     Estimator: Create the project and BOQ
     Technical Director: Approve the BOQ
     ```
+
+Screenshots: a line on its own like `![Caption](images/est-new.jpg)` becomes a captioned
+figure. Images live in user_guide/images/ and show sample data only (the PDF is public).
+The build also copies them to frontend/public/user-guide-images/, where the in-app assistant
+(Structo) shows them inside answers.
 """
 
 import argparse
 import datetime
 import html
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -33,6 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GUIDE_DIR = os.path.join(HERE, 'user_guide')
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 DEFAULT_OUT = os.path.join(REPO_ROOT, 'frontend', 'public', 'MeterSquare-User-Guide.pdf')
+IMAGES_OUT = os.path.join(REPO_ROOT, 'frontend', 'public', 'user-guide-images')
 
 ROLE_COLORS = {
     'admin': '#475569',
@@ -94,6 +101,9 @@ li { margin: .8mm 0; }
 .flow .role { color: #fff; font-weight: 700; font-size: 8.5pt; padding: 2mm 3mm; width: 38mm; flex-shrink: 0; display: flex; align-items: center; }
 .flow .text { padding: 2mm 3mm; font-size: 9.5pt; background: #fff; }
 .flow .num { font-weight: 800; margin-right: 1.5mm; opacity: .85; }
+figure.shot { margin: 3mm 0 5mm; page-break-inside: avoid; }
+figure.shot img { display: block; width: 100%; border: 1px solid #d1d5db; border-radius: 2mm; }
+figure.shot figcaption { margin-top: 1.5mm; font-size: 8.5pt; color: #6b7280; font-style: italic; }
 .flow .arrow { text-align: center; color: #9ca3af; font-size: 10pt; line-height: 1; margin: .6mm 0; padding-left: 16mm; text-align: left; }
 """
 
@@ -117,9 +127,21 @@ def flow_to_html(block):
     return '\n'.join(parts)
 
 
+def figure_to_html(caption, src):
+    path = os.path.join(GUIDE_DIR, src)
+    if not os.path.isfile(path):
+        sys.exit(f'Missing screenshot: {path}')
+    uri = pathlib.Path(path).resolve().as_uri()
+    return (f'<figure class="shot"><img src="{uri}" alt="{html.escape(caption)}">'
+            f'<figcaption>{html.escape(caption)}</figcaption></figure>')
+
+
 def preprocess(markdown_text):
-    """Turn ```flow blocks into HTML flowcharts (pandoc passes raw HTML through)."""
-    return re.sub(r"```flow\n(.*?)```", lambda m: '\n' + flow_to_html(m.group(1)) + '\n', markdown_text, flags=re.S)
+    """Turn ```flow blocks into HTML flowcharts and screenshot lines into captioned figures
+    (pandoc passes raw HTML through)."""
+    text = re.sub(r"```flow\n(.*?)```", lambda m: '\n' + flow_to_html(m.group(1)) + '\n', markdown_text, flags=re.S)
+    return re.sub(r'^!\[([^\]]*)\]\(([^)]+)\)\s*$', lambda m: '\n' + figure_to_html(m.group(1), m.group(2)) + '\n',
+                  text, flags=re.M)
 
 
 def cover_html():
@@ -182,6 +204,16 @@ def build(out_path):
                 sys.exit('weasyprint is required (pip install weasyprint).')
             subprocess.run(['weasyprint', html_path, out_path], check=True)
     print(f'Built {out_path}')
+    publish_images()
+
+
+def publish_images():
+    """Copy the screenshots next to the PDF so the in-app assistant (Structo) can show them."""
+    src = os.path.join(GUIDE_DIR, 'images')
+    if os.path.isdir(IMAGES_OUT):
+        shutil.rmtree(IMAGES_OUT)
+    shutil.copytree(src, IMAGES_OUT)
+    print(f'Copied {len(os.listdir(IMAGES_OUT))} screenshots to {IMAGES_OUT}')
 
 
 if __name__ == '__main__':

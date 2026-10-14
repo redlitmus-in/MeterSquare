@@ -65,12 +65,14 @@ def _split_sections(filename, text):
     """Split one markdown file into sections at ## / ### headings, keeping a breadcrumb title."""
     roles = _file_roles(filename)
     sections, h1, h2 = [], '', ''
-    current_title, buf = None, []
+    current_title, buf, images = None, [], []
 
     def flush():
         body = '\n'.join(buf).strip()
         if current_title and body:
-            sections.append({'file': filename, 'title': current_title, 'text': body, 'roles': roles})
+            sections.append({'file': filename, 'title': current_title, 'text': body, 'roles': roles,
+                             'images': list(images)})
+        images.clear()
 
     for line in text.splitlines():
         m = re.match(r'^(#{1,3})\s+(.*)$', line)
@@ -88,6 +90,11 @@ def _split_sections(filename, text):
                 flush(); buf = []
                 base = f"{h1} › {h2}" if h2 else h1
                 current_title = f"{base} › {title}" if base else title
+            continue
+        shot = re.match(r'^!\[([^\]]*)\]\(images/([a-z0-9-]+\.jpg)\)\s*$', line)
+        if shot:
+            # Screenshots stay out of the searchable text; the assistant may show them by file name
+            images.append({'file': shot.group(2), 'caption': shot.group(1)})
             continue
         buf.append(line)
     flush()
@@ -159,7 +166,8 @@ def search(query, role=None, limit=6, max_chars=14000):
             text = text[: max(0, max_chars - total)]
         if not text:
             break
-        results.append({'title': s['title'], 'text': text, 'file': s['file'], 'roles': sorted(s['roles'])})
+        results.append({'title': s['title'], 'text': text, 'file': s['file'], 'roles': sorted(s['roles']),
+                        'images': s.get('images', [])})
         total += len(text)
     return results
 

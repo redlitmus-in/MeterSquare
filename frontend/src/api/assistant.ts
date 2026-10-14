@@ -12,9 +12,15 @@ export interface AssistantStatus {
   suggestions: string[];
 }
 
+export interface AssistantImage {
+  file: string;
+  caption: string;
+}
+
 export interface AssistantAnswer {
   answer: string;
   sources: string[];
+  images?: AssistantImage[];
 }
 
 export const assistantApi = {

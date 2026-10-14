@@ -13,6 +13,8 @@ The **Admin Dashboard** gives a company-wide overview.
 - **Charts**: User Distribution, User Registration Trend, Change Request Activity, Daily Cost Trend, Project Status, Delivery Stats, Material Requests.
 - **Lists**: Top Project Managers, Top Site Engineers, Login Activity (Email OTP vs SMS OTP) and Pending CR Approvals by stage.
 
+![Admin Dashboard](images/dash-adm.jpg)
+
 ## User Management
 
 Open **User Management** to see all users.
@@ -25,8 +27,11 @@ Open **User Management** to see all users.
 
 1. Click **Add User**.
 2. Fill in **Email** (must not already exist), **Full Name**, **Role**, and optionally **Phone** and **Department** (if left blank, the department is set to the role name).
-3. Click **Create**. The user is created as Active.
-4. The user signs in by choosing their role and entering their email. There is no password.
+3. Click **Create**. You see **User created successfully**. The user is created as Active.
+4. A one-time sign-in code (OTP) is emailed to the user straight away.
+5. The user signs in by choosing their role and entering their email. There is no password. If the first code has expired, they click **Send OTP** for a new one.
+
+![Create New User](images/adm-user.jpg)
 
 ### How to activate or deactivate a user
 
@@ -84,8 +89,19 @@ Role Access lets an Admin or Technical Director give a user temporary access to 
 The page shows:
 
 - **Cards**: Active now, Ending within 3 days, Scheduled, Expired or revoked.
-- **Tabs**: Active, Scheduled, Expired, Revoked, All.
-- **Table columns**: User (own role), Granted role, Access type, Period, Status, Granted by, and a **Revoke** button.
+- **Tabs**: Active, Scheduled, Paused, Expired, Revoked, All.
+- **Table columns**: User (own role), Granted role, Access type, Period, Status, Granted by, and the row actions.
+
+### Row actions
+
+| Action | Shown for |
+|---|---|
+| **Extend** | Active |
+| **Edit** | Active, Scheduled, Paused |
+| **Pause** | Active, Scheduled |
+| **Resume** | Paused |
+| **Renew** | Expired, Revoked |
+| **Revoke** | Active, Scheduled, Paused |
 
 Only people whose **own** role is Admin or Technical Director can manage Role Access. Someone working in a granted Admin or TD role cannot.
 
@@ -96,6 +112,7 @@ Only people whose **own** role is Admin or Technical Director can manage Role Ac
 | Active · N days left | Access is in use |
 | Ends in N days / Ends today | Active, 3 days or fewer left |
 | Starts <date> | Scheduled to start later |
+| Paused | Stopped for now by Admin or TD. The row shows who paused it. |
 | Expired | The end date has passed |
 | Revoked | Removed early by Admin or TD |
 
@@ -104,28 +121,79 @@ Only people whose **own** role is Admin or Technical Director can manage Role Ac
 Click **Grant role access**. A step-by-step wizard opens. The step bar at the top shows your progress: click a completed step to go back, use **Back** and **Next** to move between steps.
 
 1. **User**: search by name or email and select the person. You cannot select yourself.
-2. **Role**: choose the role to give. Grantable roles: Admin, Technical Director, Estimator, Project Manager, Production Manager, MEP Supervisor, Site Engineer, Procurement. The person's own role is not listed because they always keep it.
+2. **Role**: choose the role to give. Grantable roles: Admin, Technical Director, Estimator, Project Manager, Production Manager, MEP Supervisor, Site Engineer, Procurement. The person's own role is also listed, with an **Own role** tag. You can choose it only to share another holder's work with them (**Same as existing user**), for example when one Site Engineer covers for another.
 3. **Access type**:
-   - **Fresh role**: starts empty as a new holder of that role. Nothing is copied from anyone. Projects are assigned to them later, and they appear in that role's selection lists while access is active.
+   - **Fresh role**: starts empty as a new holder of that role. Nothing is copied from anyone. Projects are assigned to them later, and they appear in that role's selection lists while access is active. Not available when you chose the person's own role.
    - **Same as existing user**: they get the same projects and data as an existing holder of the role, chosen in the next step.
 4. **Choose user** (only for Same as existing user): pick whose access to share. Each person shows their number of active projects. While using this access, the person's actions are recorded under the chosen user's name.
 5. **Period**: choose **Start date** and **End date**, or use a quick pick (**1 day**, **1 week**, **2 weeks**, **1 month**). Access ends at 11:59 PM on the end date. A future start date makes it **Scheduled**. The maximum period is 366 days.
 6. **Review**: check the summary and click **Grant access**.
 7. The screen shows **Access granted** (or **Access scheduled**). Click **Grant another** or **Done**.
 
+![Grant role access: setting the access period](images/adm-role.jpg)
+
 The person is notified in the app, by desktop notification and by email.
 
 Possible errors:
 
 - **You cannot grant a role to yourself**
-- **This is already the user's own role**
+- **This is already the user's own role. Use 'Same as existing user' to share another user's access.**
 - **Selected user does not have the <role> role**
 - **End date cannot be in the past**
 - **<name> already has <role> access from A to B. Revoke it first.**: there is already an overlapping access for that role.
 
+### How to extend or shorten role access
+
+Use this on an **Active** row to change only the end date.
+
+1. Click **Extend**. The **Extend role access** window shows the current period.
+2. Choose a **New end date**, or use a quick pick: **+1 day**, **+1 week**, **+2 weeks** or **+1 month** (counted from the current end date).
+3. An earlier date shortens the access. The button then reads **Shorten access** instead of **Extend access**.
+4. Click **Extend access** (or **Shorten access**). The person is notified.
+
+The access cannot run longer than 366 days from its start.
+
+### How to edit role access
+
+1. Click **Edit** on an Active, Scheduled or Paused row. The **Edit role access** wizard opens with the current details.
+2. Change the role, access type, shared user or dates, then click **Save changes**.
+3. The screen shows **Access updated**. The person is notified.
+
+How the change is applied depends on the status:
+
+| Status | What happens |
+|---|---|
+| Active | The start date cannot change. If you change the role, access type or shared user, the current access ends now and a new access starts today. The old row moves to **Revoked** with the note "Replaced by an edit". If you change only the end date, it is changed in place. |
+| Scheduled or Paused | All changes are made to the same access. |
+
+### How to pause and resume role access
+
+Pause stops the access for a while without ending it.
+
+1. Click **Pause** on an Active or Scheduled row.
+2. Confirm **Pause access**.
+3. The access moves to the **Paused** tab. The person loses the role at once: it disappears from their login role list and **SWITCH ROLE**. If they are using it, they are moved back to their own role on their next action. The dates stay as they are.
+
+To resume:
+
+1. Open the **Paused** tab and click **Resume**.
+2. The access becomes Active again (or Scheduled, if its start date is still ahead). The person is notified.
+
+If the end date passed while the access was paused, it cannot be resumed. You see **This access ended while paused. Use Renew to grant it again.**
+
+### How to renew role access
+
+Use **Renew** on an Expired or Revoked row to give the same access again.
+
+1. Click **Renew**. The **Renew role access** wizard opens, filled in from the old access.
+2. Check the details and choose new dates.
+3. Click **Renew access**. The screen shows **Access renewed**.
+
+Renew creates a new access. The old row stays in the history as it was.
+
 ### How to revoke role access
 
-1. Click **Revoke** on an Active or Scheduled row.
+1. Click **Revoke** on an Active, Scheduled or Paused row.
 2. Confirm **Revoke access**.
 3. The person loses the role immediately. If they are using it, they are moved back to their own role on their next action. They are notified.
 
@@ -160,6 +228,8 @@ Open **Signature Upload** → **Signatures**. These signatures appear on PDFs se
 2. Use **Change** to replace it, or the bin icon to remove it.
 3. If you changed a **Name** field, click **Save Changes**.
 
+![Signature Upload](images/adm-sig.jpg)
+
 The BOQ MD Signature and the LPO Managing Director signature are the same image, so changing one changes both. Estimators choose whether to include signatures when sending a BOQ to a client, and buyers when sending an LPO to a vendor.
 
 ## CC & Email Settings
@@ -172,6 +242,8 @@ Open **Signature Upload** → **CC & Email Settings**. Addresses listed here are
 2. Click **Add**.
 3. To remove a recipient, click the ✕ next to it.
 
+![CC & Email Settings](images/adm-cc.jpg)
+
 ## Payroll Processing
 
 Open **Payroll Processing** to view locked attendance and payroll cost.
@@ -179,7 +251,9 @@ Open **Payroll Processing** to view locked attendance and payroll cost.
 1. Choose **Start Date**, **End Date** and a **Project** (or All Projects).
 2. Results are grouped by project, with workers, total hours and total cost (AED). Click a project to expand it.
 3. Each worker shows Days, Regular hours, Overtime, Total hours, Rate and Cost. The grand total is shown at the bottom.
-4. Click **Export All** to download a PDF.
+4. Click **Export All** to download a PDF of all projects. To download one project only, click the **PDF** button on that project's row.
+
+![Payroll Processing](images/adm-pay.jpg)
 
 Only attendance that a Project Manager has **locked** appears here. If nothing shows, check that attendance for that period has been locked.
 
@@ -192,6 +266,8 @@ Open **Security Dashboard** to monitor sign-in security.
 - **Recent Security Events**: filter by event type (Login Failed, Login Success, IP Blocked, Suspicious, Rate Limited) and severity.
 
 An IP address is blocked automatically after 10 failed sign-ins. Repeat blocks get longer: 24 hours, then 48 hours, 7 days, 30 days, and after that permanent.
+
+![Security Dashboard](images/adm-sec.jpg)
 
 ## Viewing the app as another role
 

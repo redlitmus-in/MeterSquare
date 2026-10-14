@@ -21,6 +21,8 @@ The dashboard shows:
 - **Pending Day Extension Requests**: click **Review Request** to open Project Approvals.
 - **Active Projects Overview**: each project with its Project Manager, progress, budget used, due date, and whether it is on track or delayed.
 
+![Technical Director Dashboard](images/dash-td.jpg)
+
 ## Project Approvals
 
 Open **Project Approvals**. Search by BOQ ID (B-123), project code (MSQ26), project name or client. Switch between card and table view.
@@ -29,10 +31,10 @@ Open **Project Approvals**. Search by BOQ ID (B-123), project code (MSQ26), proj
 
 | Tab | What it shows |
 |---|---|
-| Pending | BOQs waiting for your approval |
+| Pending | New BOQs waiting for your approval |
 | Approved | BOQs you approved, including those sent to the client |
-| Client Response | BOQs the client confirmed or rejected |
-| Revisions | Client and internal revisions to review |
+| Client Response | BOQs the client confirmed, waiting for a Project Manager |
+| Revisions | Client and internal revisions to review. Internal revisions the Estimator sends back after your rejection appear here under **Internal Revisions**, not in Pending. |
 | Assigned | Projects with a Project Manager assigned |
 | Completed | Completed projects |
 | Rejected by TD | BOQs you rejected |
@@ -51,7 +53,9 @@ Each card shows:
 3. Optional: add **Approval Notes**, then click **Approve Project**.
 4. A comparison opens: the internal version (with costs and margins) next to what the client will receive. Check it and click **Approve**.
 
-The BOQ becomes **Approved**, or **Revision Approved** for a revision. The Estimator is notified and then sends it to the client.
+The BOQ becomes **Approved**. The Estimator is notified and then sends it to the client.
+
+![Approve BOQ from BOQ Details](images/td-boq.jpg)
 
 ### How to reject a BOQ
 
@@ -61,13 +65,22 @@ The BOQ becomes **Approved**, or **Revision Approved** for a revision. The Estim
 
 The BOQ becomes **Rejected**. The Estimator, and the PM if one forwarded it, are notified.
 
+![Reject Project](images/td-rej.jpg)
+
 ### How to review revisions
 
 1. Open the **Revisions** tab and select a project.
 2. Compare the revisions under **Client Revisions** or **Internal Revisions**.
 3. Click **Approve** or **Reject** (rejecting needs a reason).
 
+| Revision | If you approve | If you reject |
+|---|---|---|
+| Internal revision | **Internal Revision Approved**. The Estimator can send it to the client. | **Internal Revision Pending**. It goes back to the Estimator to fix. |
+| Client revision | **Approved**. The Estimator can send it to the client. | **Client Revision Rejected** |
+
 An approved revision shows **Approved - Ready for Client**.
+
+![Project Approvals › Revisions › Client Revisions](images/td-rev.jpg)
 
 ### How to download a BOQ
 
@@ -89,6 +102,8 @@ You can assign a PM only after the client has approved the BOQ. The card then sh
 
 The project moves to **Assigned** and the PM is notified with the project details. The PM now manages the project, its Site Engineers and its purchasing.
 
+![Assign Project Manager](images/td-pm.jpg)
+
 ### How to create a new PM while assigning
 
 1. In the assign window, choose **Create New PM**.
@@ -109,10 +124,12 @@ A Project Manager or MEP Supervisor can ask for more days on a project. Assigned
 2. Review the request: who asked, the current duration and end date, the additional days, the new end date and the reason.
 3. Choose an action:
    - **Approve**: the project's duration and end date are extended.
-   - **Edit**: enter different **Extension Days** and an optional reason, then click **Save Changes**. The request shows "Edited by TD". You must still **Approve** or **Reject** it.
+   - **Edit**: enter a different number in **Edit Extension Days** and an optional reason, then click **Save Changes**. The request shows "Edited by TD". You must still **Approve** or **Reject** it.
    - **Reject**: enter the **Reason for Rejection** and click **Reject**.
 
 The requester is notified.
+
+![Day Extension Request](images/td-ext.jpg)
 
 ## Purchase Orders: approving vendor selections
 
@@ -136,6 +153,8 @@ When Procurement chooses a vendor for a material purchase request, the TD must a
 
 On approved items, click **View LPO** to see the purchase order details. An approved LPO cannot be edited.
 
+![Purchase Orders › Vendor Approvals](images/td.jpg)
+
 ## Purchase Orders: Return Approvals
 
 When delivered material is rejected, the buyer raises a **vendor return request (VRR)**. Open **Purchase Orders** → **Return Approvals**.
@@ -152,7 +171,9 @@ When delivered material is rejected, the buyer raises a **vendor return request 
 
 In **New Vendor Approvals**, review the new vendor's details and the vendor it replaces, then click **Approve Vendor** or **Reject Vendor**.
 
-**Return statuses**: Pending Your Approval, Approved, Rejected, New Vendor Pending Approval, New Vendor Approved, Return In Progress, Returned to Vendor, Awaiting PM Inspection, Completed.
+**Return statuses**: Pending Your Approval, Approved, Rejected, New Vendor Pending, New Vendor Pending Approval, New Vendor Approved, Return In Progress, Returned to Vendor, Awaiting PM Inspection, Completed.
+
+![Return Request Approvals](images/td-ret.jpg)
 
 ## Disposal Approvals
 
@@ -165,6 +186,8 @@ Open **Disposal Approvals** → **Material Disposal**. The tabs are **Pending**,
 3. Choose:
    - **Approve Disposal**, then **Yes, Approve Disposal**. The quantity is permanently removed from inventory.
    - **Reject & Add to Backup**. The quantity is added to backup stock for repair or reuse.
+
+![Material Disposal Approvals](images/td-disp.jpg)
 
 ### Asset Disposal
 
@@ -191,12 +214,16 @@ Compare planned budget with actual spending.
 4. The totals show Total Planned, Total Actual (incl. VAT) and the Balance.
 5. Export with **Excel** or **PDF**.
 
+![Purchase Comparison](images/td-pc.jpg)
+
 ## Profit Comparison
 
 Open **Profit Comparison** to compare the original BOQ with actual purchases.
 
 - **Live Projects** / **Completed**: click **View Comparison** on a project.
-- **Report**: select a project and click **View Report**. The detailed profit report can be filtered by transport, material and item.
+- **Report**: select a project and click **View Report**. The detailed profit report can be filtered by **Transport**, **Material** and **Labour**.
+
+![Profit Comparison: planned against actual](images/td-profit.jpg)
 
 ## Role Access
 

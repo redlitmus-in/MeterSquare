@@ -30,6 +30,8 @@ When a BOQ or request moves to another person (TD, PM, Estimator or Buyer), that
 - **My Performance**: BOQ Approval Rate and Pending Review.
 - **Lists**: Recent Created Projects, Completed Projects, Client Pending, and Client Rejected (marked "Needs Revision").
 
+![Estimator Dashboard](images/dash-est.jpg)
+
 ## Projects & BOQ Management
 
 Open **Projects** in the sidebar.
@@ -46,7 +48,7 @@ Open **Projects** in the sidebar.
 | Send BOQ | BOQs sent for review (to the TD, or to a PM) and waiting for a decision |
 | Approved BOQ | BOQs approved by the TD, sent to the client, or confirmed by the client |
 | Revisions | Client revisions (R1, R2…) and internal revisions after a TD rejection. Sub-tabs: **Client Revisions** and **Internal Revisions** |
-| Rejected BOQ | BOQs rejected by the TD, by a PM or by the client |
+| Rejected BOQ | BOQs rejected by the TD or by a PM. A TD-rejected BOQ you edited but did not re-send also stays here. |
 | Completed BOQ | Projects the PM has completed |
 | Cancelled BOQ | BOQs cancelled because the client did not proceed |
 
@@ -65,6 +67,8 @@ The project gets a code (MSQ01, MSQ02…) and appears in the **Pending** tab. A 
 
 - **To edit**: use **Edit Project** on the card, then **Update Project**.
 - **To delete**: use the bin icon and confirm **Delete Project**.
+
+![Create New Project](images/est-new.jpg)
 
 ### Project card (Pending tab)
 
@@ -95,6 +99,21 @@ The BOQ is saved as **Draft**.
 
 Each item needs at least one material or labour line, and every rate and quantity must be filled in. The form tells you exactly what is missing.
 
+![Create BOQ: item, sub-item, raw materials and labour](images/est-boq.jpg)
+
+![Preliminaries & Approval Works, Terms & Conditions and Total Project Value](images/est-pre.jpg)
+
+### How to import a BOQ from Excel
+
+When you create a BOQ, the bottom of the form also shows **Download Template** and **Import Template**. These buttons are not shown when you edit a BOQ.
+
+1. Click **Download Template** to get the Excel template.
+2. Fill in the items in the template.
+3. In the form, enter the **BOQ Name** first.
+4. Click **Import Template** and choose the file (.xlsx or .xls, up to 10 MB).
+
+The BOQ is created from the file and saved as **Draft**. Any warnings about the file are shown on screen.
+
 ### Leaving the form
 
 - If you close the form, choose **Save as Draft** (recommended) or **Discard Changes**. Uploaded images cannot be kept in a draft.
@@ -104,7 +123,8 @@ Each item needs at least one material or labour line, and every rate and quantit
 ### Editing or deleting a BOQ
 
 - **Edit** (pencil icon) is available when the BOQ is in Draft, Sent for Confirmation, Under Revision or Pending Revision.
-- **Delete** (bin icon) is only available for a Draft BOQ.
+- **Delete** (bin icon) is available on a Draft BOQ, until it is sent.
+- Cards with status **Internal Revision Pending**, **Client Pending Revision** or **Client Revision Rejected** also show **Edit**, **Delete** and **Send to TD**.
 
 ## How to send a BOQ to the Technical Director
 
@@ -112,6 +132,11 @@ Each item needs at least one material or labour line, and every rate and quantit
 - **From a Draft BOQ card**: click **Send to TD**.
 
 The BOQ moves to **Send BOQ** with status **Pending**, and the TD is notified.
+
+While the BOQ waits for the TD, the card shows a label instead of buttons:
+
+- **Pending TD Approval**: sent to the TD after a PM approval.
+- **Revision Pending TD Approval**: an internal revision sent to the TD.
 
 ## How to send a BOQ to a Project Manager for review (optional)
 
@@ -124,6 +149,10 @@ You can ask a PM to review the BOQ before it goes to the TD.
 
 Sending to a PM for review does not assign that PM to the project.
 
+![Send BOQ to Project Manager](images/est-pm.jpg)
+
+![Approved BOQ: a PM-approved BOQ with Send to TD](images/est-pmr.jpg)
+
 ## When the TD approves or rejects
 
 - **Approved**: the BOQ moves to **Approved BOQ** and the TD's comments appear under "Approval Comments". You can now send it to the client.
@@ -135,14 +164,19 @@ Sending to a PM for review does not assign that PM to the project.
 2. Make the changes and click **Update BOQ**.
 3. When asked "Would you like to send this BOQ to the Technical Director for approval now?":
    - **Send to Technical Director**: the status becomes **Pending Revision**.
-   - **Send Later**: it stays in Rejected BOQ until you send it.
+   - **Send Later**: the status becomes **Internal Revision Pending** and it stays in **Rejected BOQ**. The card shows **Edit BOQ** and **Send to TD**. When you are ready, click **Send to TD** on the card.
 4. Track it under **Revisions** → **Internal Revisions**. Select the project to compare the current version with earlier versions, starting from the Original BOQ.
 
-When the TD approves, the status becomes **Revision Approved** and you can send it to the client.
+The TD reviews the revision in **Revisions** → **Internal Revisions**.
+
+- **If the TD approves**: the status becomes **Internal Revision Approved**. The card shows **Send to Client**.
+- **If the TD rejects**: the status goes back to **Internal Revision Pending** and the BOQ returns to **Rejected BOQ**. Edit it and send it again.
+
+![Revisions › Internal Revisions after a TD rejection](images/est-int.jpg)
 
 ## How to send a BOQ to the client
 
-1. On an approved BOQ card, click **Send to Client** (or **Send Revision to Client** for a revision).
+1. On an approved BOQ card in **Approved BOQ**, click **Send to Client**. For an approved client revision you can also use **Send Revision to Client** in **Revisions** → **Client Revisions**.
 2. Enter the **Client Email(s)**. You can enter several, separated by commas, semicolons or new lines.
 3. Optional: add an **Additional Message**.
 4. Optional: open **Customize Email & PDF Content** to edit:
@@ -155,23 +189,33 @@ When the TD approves, the status becomes **Revision Approved** and you can send 
 
 The status becomes **Sent for Confirmation**, the client email is saved on the project, and the TDs are notified that the BOQ was sent to the client.
 
+![Send BOQ to Client](images/est-client.jpg)
+
 ## How to record the client's answer
 
-When the BOQ is **Sent for Confirmation**, the card shows three buttons:
+When the BOQ is **Sent for Confirmation**, the card shows three buttons. These are the only ways to record the client's answer:
 
 - **Client Approved**: the client accepted. The status becomes **Client Confirmed** and the TDs are notified. Next, the TD assigns a Project Manager.
 - **Revisions**: the client wants changes. Choose **Make Revision** (or **Cancel Project**, or **Go Back**). See the next section.
 - **Cancel**: the client does not want to proceed. See "How to cancel a BOQ".
+
+There is no separate button to mark the BOQ as rejected by the client. Use **Revisions** if the client wants changes, or **Cancel** if the client does not proceed.
+
+![An Approved BOQ card with Client Approved, Revisions and Cancel](images/est-ok.jpg)
 
 ## How to make a client revision
 
 1. Click **Revisions** → **Make Revision**.
 2. Edit the BOQ and click **Update BOQ**. The revision number goes up (R1, R2…) and the status becomes **Under Revision**. It now appears in **Revisions** → **Client Revisions**.
 3. Use **Edit Again** if needed, then **Send to TD**. The TD is notified.
-4. **If the TD approves**: click **Send Revision to Client** and send it as before.
-5. **If the TD rejects the revision**: use **Revise BOQ** and send it again, or **Cancel**.
+4. **If the TD approves**: the status becomes **Approved**. On the card in **Approved BOQ**, click **Send to Client**. In **Revisions** → **Client Revisions** the same button reads **Send Revision to Client**. Send it as before.
+5. **If the TD rejects the revision**: the status becomes **Client Revision Rejected**. Use **Revise BOQ** and send it again, or **Cancel**.
 
 In **Revisions** → **Client Revisions**, select a project to compare the current revision with previous ones. Revised BOQs also show a **Compare** button.
+
+![Revisions › Client Revisions](images/est-rev.jpg)
+
+![An approved client revision with Compare and Send to Client](images/est-cmp.jpg)
 
 ## How to cancel a BOQ (client does not proceed)
 
@@ -179,7 +223,9 @@ In **Revisions** → **Client Revisions**, select a project to compare the curre
 2. Enter the **Cancellation Reason**.
 3. Click **Confirm Cancellation**.
 
-The status becomes **Client Cancelled**. The BOQ moves to **Cancelled BOQ** and shows "Project Permanently Cancelled". A completed BOQ cannot be cancelled.
+The status becomes **Client Cancelled**. The BOQ moves to **Cancelled BOQ** and shows "Project Permanently Cancelled". **Cancel** is not shown on completed BOQs.
+
+![Cancel Project / Close BOQ](images/est-cnl.jpg)
 
 ## After the client approves
 
@@ -207,11 +253,11 @@ Click **View Details** (eye icon) to open the full BOQ.
 | PM Approved | PM approved. Send it to the TD. | Approved BOQ |
 | PM Rejected | PM rejected. Edit and resend to the PM. | Rejected BOQ |
 | Pending TD Approval | Sent to the TD after PM approval | Send BOQ |
-| Approved | TD approved. Ready to send to the client. | Approved BOQ |
+| Approved | TD approved the BOQ or a client revision. Ready to send to the client. | Approved BOQ |
 | Rejected | TD rejected | Rejected BOQ |
-| Internal Revision Pending | A TD-rejected BOQ was edited but not yet re-sent | Rejected BOQ |
+| Internal Revision Pending | A TD-rejected BOQ was edited but not yet re-sent, or the TD rejected the internal revision | Rejected BOQ |
 | Pending Revision | Internal revision sent to the TD | Revisions |
-| Revision Approved | TD approved the revision. Ready for the client. | Approved BOQ / Revisions |
+| Internal Revision Approved | TD approved the internal revision. Ready for the client. | Approved BOQ |
 | Under Revision | Client revision being prepared | Revisions |
 | Client Pending Revision | Client revision sent to the TD | Revisions |
 | Client Revision Rejected | TD rejected the client revision | Revisions |
@@ -225,13 +271,19 @@ Click **View Details** (eye icon) to open the full BOQ.
 
 Open **Purchase Request** in the sidebar. These are requests for extra materials on approved projects, raised by Site Engineers or Project Managers.
 
-- A request comes to the Estimator when the PM approves it and it contains **new materials** that are not in the BOQ. Requests with only existing BOQ materials go straight to Procurement.
+- A request comes to the Estimator when the PM approves it and:
+  - it contains **new materials** that are not in the BOQ. Materials picked **From Catalogue** count as new; or
+  - a BOQ material's quantity is already used up or exceeded by earlier requests; or
+  - the PM chooses to send it to the Estimator.
+- Other requests go straight to Procurement.
 - **Tabs**:
   - **Pending**: waiting for you.
   - **Approved**: sent to a buyer or further in the process.
   - **Completed**: purchase completed or routed to the store.
   - **Rejected**.
 - Each card shows the request number (PO-…), project area, requester, date, number of materials and total cost.
+
+![Purchase Requests: Pending Review](images/est-pr.jpg)
 
 ### How to approve a purchase request and assign a buyer
 

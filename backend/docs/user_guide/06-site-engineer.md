@@ -34,6 +34,8 @@ You can sign in with your email or, if a phone number is saved on your account, 
 - **Attention Required**: overdue projects, pending items, pending labour and pending asset returns.
 - **Charts**: work overview, labour requisitions, asset flow and change request activity.
 
+![Site Engineer Dashboard](images/dash-se.jpg)
+
 ## Projects
 
 Open **Projects** (My Projects). The tabs are **Ongoing** and **Completed**. Each card shows the project, client, dates, location and status.
@@ -50,7 +52,9 @@ If you see "No Items Assigned Yet", ask your Project Manager to assign BOQ items
 2. If purchases or asset returns are still open, you see **Cannot Request Completion** with the list of incomplete purchases and returns. Finish those first.
 3. Otherwise click **Send Request**.
 
-The card shows **Pending Approval**. When your PM confirms, it shows **Confirmed**, and the project is **Done** when everyone has confirmed.
+The card shows **Pending Approval**. When your PM confirms, it shows **Confirmed**. The project is **Done** when everyone has confirmed and every purchase and asset return in the project is finished, so your card can show **Confirmed** while the project is not yet **Done**.
+
+![My Projects with Request Completion](images/se-cmp.jpg)
 
 ## Material Purchase (requesting extra materials)
 
@@ -61,23 +65,27 @@ Use **Material Purchase** when site needs materials for an assigned project.
 1. Open **Material Purchase** and click **MATERIAL PURCHASE**.
 2. Select **Project Name**, **Area**, **BOQ**, **BOQ Item** and one or more **Sub-Items (Scopes)**. If earlier requests exist for this item, they are shown so you do not duplicate them.
 3. For each sub-item, the **BOQ Materials Allocation Status** shows how much is allocated, already requested or purchased, and still available.
-4. Add materials:
+4. Add materials in one of two ways:
    - **Existing BOQ material**: pick it from **Select Material** and enter the **Request Quantity**. You cannot request more than the BOQ allocation.
-   - **New material**: click **Add New**, then **From Catalogue** (search by name, brand or category) or **Enter Manually**. Enter the name, optional brand, size and specification, the **Request Quantity**, the **Unit**, and a **Justification** of at least 10 characters.
-5. If you included existing materials, write a **Common Justification for Existing Materials** (at least 10 characters).
+   - **New material**: click **Add New**, then **From Catalogue** (search by name, brand or category) or **Enter Manually**. Enter the name, optional brand, size and specification, the **Request Quantity**, the **Unit**, and a **Justification** of at least 10 characters. Materials picked from the catalogue also count as new.
+
+   One request uses one way only: once a sub-item uses **Select Material**, **Add New** is disabled for the others, and the other way round. Put existing and new materials in separate requests.
+5. For existing materials, write a **Common Justification for Existing Materials** (at least 10 characters).
 6. Optional: add **Remarks**.
 7. The **Approval Routing** box shows where the request will go:
-   - with new materials: SE → PM → Estimator → Buyer → TD;
-   - with existing materials only: SE → PM → Buyer → TD.
+   - new materials (including catalogue materials): SE → PM → Estimator → Buyer → TD;
+   - existing BOQ materials: SE → PM → Buyer → TD.
 8. Click **Create Purchase Request**.
 
 The request is saved in the **Pending** tab. It has not been sent yet.
+
+![Material Purchase: a request in Pending with Send to PM](images/se.jpg)
 
 ### How to send a request for approval
 
 In the **Pending** tab, click **Send to PM** on the request. It goes to the person who assigned you the item: your Project Manager, or the MEP Supervisor for MEP items.
 
-To remove a request you have not sent, click **Delete**.
+Before you send it, you can **Edit** the request, or click **Delete** to remove it.
 
 ### Tabs
 
@@ -97,8 +105,11 @@ To remove a request you have not sent, click **Delete**.
 | PM Approval Pending | Waiting for your PM |
 | PM Approved - Under Review | PM approved, next approver reviewing |
 | Sent to Estimator | New materials being priced |
-| Sent to Buyer / Awaiting Purchase | With Procurement |
+| Sent to Buyer | Sent to Procurement |
+| Awaiting Purchase | Assigned to a buyer, purchase not started |
 | TD Approval Pending | Waiting for the TD to approve the vendor |
+| TD Approved - Final Review | The TD approved; final checks before purchase |
+| Approved | Approved |
 | Vendor Approved | Vendor approved, purchase in progress |
 | Split to Vendors | Bought from more than one vendor |
 | Sent to M2 Store | Purchased. The vendor delivers to the store, then it comes to you. |
@@ -121,6 +132,8 @@ Open **Material Receipts**. Tabs: **Pending**, **Materials** (Returnable Materia
 
 The delivery becomes **Delivered**. The buyer and the Production Manager are notified, and the materials become returnable.
 
+![Confirm Receipt on a delivery note](images/se-rec.jpg)
+
 ### How to return unused or damaged materials
 
 **Step 1: select the materials**
@@ -140,6 +153,8 @@ The delivery becomes **Delivered**. The buyer and the Production Manager are not
 2. Enter the **Return Date** and **Driver Name** (required), plus the **Vehicle Number**, **Driver Contact** and transport fee.
 3. Upload the delivery document (required; PDF, JPG, PNG or DOC, up to 10 MB). Add notes if needed.
 4. Click **Create RDN**. It is created as a **Draft**.
+
+![Step 2: Create Return Delivery Note](images/se-ret.jpg)
 
 **Step 3: issue and dispatch**
 
@@ -167,16 +182,20 @@ Open **Site Assets**. Tabs: **My Assets**, **Requisitions**, **Rejected**, **Ret
 
 The request goes to your Project Manager, then to the Production Manager for dispatch.
 
+![Request Assets](images/se-ar.jpg)
+
 | Status | Meaning |
 |---|---|
 | Draft | Not yet sent |
 | Pending PM Approval | Waiting for your PM |
+| PM Approved | Approved by your PM |
 | PM Rejected | Rejected by your PM. Edit and resend. |
 | Pending Store Approval | PM approved. Waiting for the Production Manager. |
 | Store Rejected | Rejected by the store. Edit and resend. |
 | Ready for Dispatch | Approved by the store |
 | Dispatched | On its way, or a delivery note was created |
 | Completed | You confirmed receipt |
+| Cancelled | The request was cancelled |
 
 Rejected requests appear in **Rejected**. Click **Edit** and **Resend**.
 
@@ -188,12 +207,16 @@ Rejected requests appear in **Rejected**. Click **Edit** and **Resend**.
 
 You can also click **Confirm Receipt** on the requisition.
 
+![Site Assets: Dispatched - Pending Your Receipt](images/se-arv.jpg)
+
 ### How to return assets
 
 1. In **My Assets** → **Received at Your Sites**, tick the items and click **Return Selected**.
 2. Split the quantity by condition: **Good**, **Fair**, **Poor** or **Damaged**. Fair, Poor and Damaged need a description.
 3. Add a reason and click **Create Return Note**.
 4. In **Returns**, click **Issue**, then **Dispatch**. Enter the driver name, vehicle number and driver contact (required), plus the transport fee, an optional file and notes.
+
+![Create Return Delivery Note for assets, split by condition](images/se-ast.jpg)
 
 The Production Manager receives and processes the return.
 
@@ -208,6 +231,8 @@ The Production Manager receives and processes the return.
 5. Optional: choose **Preferred Workers**.
 6. Click **Create Requisition(s)**.
 7. On the requisition, click **Send to PM** and confirm.
+
+![Create Labour Requisition](images/se-lab.jpg)
 
 The tabs are **Pending**, **Approved**, **Rejected** and **Assigned**.
 
@@ -228,6 +253,8 @@ After the PM approves, the Production Manager assigns workers. The workers recei
 
 **Status badges**: Awaiting, Working, Left and No Show. Use **Quick Select** to act on many workers at once (for example **Mark Arrived** for all pending workers).
 
+![Arrival Confirmation](images/se-arr.jpg)
+
 ### Attendance Logs
 
 Open **Labour** → **Attendance Logs** and select the project and date.
@@ -236,3 +263,5 @@ Open **Labour** → **Attendance Logs** and select the project and date.
 - You can also **Clock In** (choose the labour role, which links the hours to the right BOQ labour item) and **Clock Out** here.
 
 Your Project Manager then locks the attendance for payroll.
+
+![Attendance Logs](images/se-att.jpg)

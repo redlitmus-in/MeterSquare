@@ -4,6 +4,8 @@ MeterSquare is the company's construction ERP. It covers the full life of a proj
 
 Each person signs in with a **role**. The role decides which menus, pages and approvals you see.
 
+Screenshots in this guide show sample data and may differ slightly from your screen.
+
 ## Roles in MeterSquare
 
 | Role | Main job in MeterSquare |
@@ -99,6 +101,8 @@ If an administrator ends your session, your next action takes you to the login p
 
 Every role has a dashboard with counters and charts for its own work (for example pending approvals, purchase orders, deliveries or stock alerts). A clock and today's date appear at the top right of dashboard pages.
 
+![The sidebar and a dashboard (Estimator shown)](images/dash-est.jpg)
+
 ### Sidebar menu by role
 
 | Role | Menu |
@@ -129,7 +133,13 @@ Click your name at the bottom of the sidebar to open the account menu:
 3. Update **Full Name**, **Email Address**, **Phone Number** or **Department**. Full name and email are required.
 4. Click **Save Changes**.
 
-The Profile tab also shows your role, account status and joined date. Sign-in is by email code only, so there is no password to change.
+The Profile tab also shows your role, account status and joined date.
+
+The page has three more tabs: **Security**, **Preferences** and **Activity**.
+
+- Sign-in uses one-time codes sent to your email (or phone), so there is no password to manage.
+- **Two-Factor Authentication** on the **Security** tab shows **Not Enabled**, because every sign-in already needs a one-time code.
+- You can also sign out from the **Security** tab.
 
 ## Notifications
 
@@ -157,7 +167,9 @@ Click **View All** in the panel to open it. You can:
 
 ### Email
 
-Important events (approvals, assignments, purchase orders, role access) are also emailed.
+- Emails for most workflow steps (approvals, assignments, purchase orders) are sent only when you are **Offline**. If you are **Online**, you get the notification in the app only. Set your status in the account menu.
+- Role access emails (access granted, paused, resumed, changed, removed or ended) are always sent.
+- Some account emails are also always sent, for example when your account is activated, deactivated, blocked or unblocked.
 
 ## Support (Bug Register)
 
@@ -198,6 +210,25 @@ Use Support to report a problem or request a new feature.
 
 You are notified when your ticket is approved, rejected, resolved, put in review or in progress, or gets a comment.
 
+## Ask AI (Structo)
+
+The **Ask AI** button sits at the bottom right of every page except **Support**. It opens **Structo**, the MeterSquare assistant. Structo answers how-to questions from this user guide, for the role you are working in. It cannot see or change your projects, BOQs or other records.
+
+### How to ask a question
+
+1. Click **Ask AI**. The Structo panel opens.
+2. Type your question, for example "How do I return unused material?", and send it.
+3. Read the answer. Where it helps, the answer includes a screenshot of the screen from this guide (sample data); click it to open it full size. Use the full-screen button to make the panel larger, and the new-conversation button to start again.
+4. Click the ✕ at the top of the panel to close it.
+
+The **User guide (PDF)** link at the bottom of the panel downloads this full guide.
+
+### Hiding the button
+
+- Click the small ✕ on the **Ask AI** button to hide it.
+- A thin handle stays on the right edge of the screen. Click it to show the button again.
+- Your choice is remembered.
+
 ## Working in more than one role
 
 An Admin or Technical Director can give you **temporary access to another role**, for example an Estimator who also works as a Project Manager for two weeks. Your own role never changes.
@@ -230,11 +261,23 @@ If your granted role is **Site Engineer**, sign in with your own role and then s
 - If you are using it at that moment, your next action shows **Your role access has ended. Returning to your role…** and you are moved back to your own role.
 - The role disappears from the login role list and from **SWITCH ROLE**.
 
+### When access is paused
+
+An Admin or TD can **pause** your access for a while instead of ending it.
+
+- A paused role disappears from the login role list and from **SWITCH ROLE** until it is resumed.
+- If you are using it when it is paused, you are moved back to your own role on your next action.
+- The dates do not change. When the access is resumed, the role comes back.
+- If the end date passes while it is paused, the access ends.
+
 ### Role access notifications you may receive
 
 - **New <role> access** (or **access scheduled** if it starts later)
 - **<role> access is now active** (on the start day of a scheduled access)
 - **<role> access ends tomorrow**: finish or hand over open work
+- **<role> access paused**
+- **<role> access resumed**
+- **<role> access extended**, **<role> access end date changed** or **<role> access updated** (the Admin or TD changed it)
 - **<role> access removed** (revoked)
 - **<role> access has ended**
 

@@ -41,9 +41,11 @@ All purchased materials go to the **M2 Store** first, where they are inspected. 
   - Completed (purchase orders / split POs)
   - Store Pipeline (pending vendor / at store)
   - Deliveries (in transit / delivered)
-  - Vendors (active / inactive)
-- **Attention Required**: orders that need action, rejected POs and pending deliveries.
+  - Vendors (approved / pending)
+- **Attention Required**: shown only when there are more than 5 orders that need action, any rejected POs, or more than 3 pending deliveries.
 - **Charts**: Purchase Order Pipeline, M2 Store Pipeline, Delivery Status, Purchase Activity.
+
+![Buyer Dashboard](images/dash-buy.jpg)
 
 ## Purchase Orders
 
@@ -63,13 +65,13 @@ Open **Purchase Orders**. This is your main working page.
 | Pending Approval | Sent to Store | Waiting for the Production Manager to approve a store request |
 | Pending Approval | Vendor Pending TD | Waiting for the TD to approve the vendor |
 | Rejected | | Rejected by the TD (purchase or vendor), or by the store |
-| Completed | | Completed purchases |
+| Completed | | Completed purchases, including those sent to the M2 Store (**Routed to M2 Store**) |
 
 ### What to do at each stage
 
 1. **New purchase (no vendor yet)**: **Select Vendor**, **Get from Store**, **Edit Prices** or **View Details**.
 2. **Waiting for the TD**: the card shows "Vendor Selection Pending – Waiting for TD approval".
-3. **Vendor approved**: send the LPO with **Email** and/or **WhatsApp**, then click **Complete & Send to Store**.
+3. **Vendor approved**: send the LPO with **Email** and/or **WhatsApp**. Once either is sent, **Complete & Send to Store** appears. Click it.
 4. **Rejected**:
    - **Select New Vendor** after the TD rejected the vendor.
    - **Select Vendor Instead** after the store rejected a store request.
@@ -77,9 +79,9 @@ Open **Purchase Orders**. This is your main working page.
 
 ## How to select a vendor and send for TD approval
 
-1. Click **Select Vendor**. The **Select Vendors for Materials** window lists each material with how many vendors offer it.
+1. Click **Select Vendor**. The **Select Vendors for Materials** window lists each material with how many vendors offer it. The **AI-Powered Vendor Selection** banner at the top of the window is for information only.
 2. Expand a material to compare vendors: their products, unit price and estimated total.
-   - **Edit a vendor's price**: you can save it for this purchase only, or update the vendor's product price permanently.
+   - **Edit a vendor's price**: enter the new price, then click **This BOQ** to use it for this purchase only, or **All Future** to update the vendor's product price permanently.
    - **Compare with the BOQ estimate**: each price shows Over Budget, Under Budget or On Budget.
    - **Supplier notes**: add notes for the vendor (for example exact cut sizes) and click **Save**. Notes are highlighted in the LPO.
 3. Choose a vendor for each material. To take a material from the M2 Store instead, click **Send to Store** on it.
@@ -95,6 +97,10 @@ Open **Purchase Orders**. This is your main working page.
 
 Once sent, you cannot add more materials to that vendor submission, so check carefully before sending.
 
+A split PO card (PO-x.1) that has not been sent yet has its own **Send for TD Approval** button. Click it to send that vendor's PO. The card then shows **Sent to TD**.
+
+![Select Vendors for Materials: confirming the selection](images/buy.jpg)
+
 The TD is notified.
 
 - **Approved**: the purchase moves to **Ongoing → Vendor Approved**.
@@ -108,14 +114,16 @@ If the store already has the materials, you can take them from stock instead of 
    - **Available**: tick these (they are pre-selected).
    - **Already Sent to Store**.
    - **Not Available**: these must be bought from a vendor.
-2. Click **Request Selected**.
+2. Click **Request Selected**. A store request is created.
+
+![Get from M2 Store](images/buy-st.jpg)
 
 The Production Manager is notified and approves or rejects the request.
 
-- **Approved**: the item shows **Store Approved**. Click **Mark as Complete**.
-- **Rejected**: it goes to **Rejected**. Click **Select Vendor Instead**.
+- **Approved**: you are notified ("Material Request Approved"). The purchase completes automatically and moves to **Completed**. You do not need to do anything.
+- **Rejected**: you are notified with the reason ("Store Material Request Rejected"). The notification links to the **Rejected** tab. Click **Select Vendor Instead**.
 
-Any remaining materials can still be bought from a vendor.
+Any remaining materials can still be bought from a vendor. The purchase completes when all its materials are covered.
 
 ## How to edit negotiated prices
 
@@ -140,21 +148,31 @@ You can send the LPO only after the TD approves the vendor.
 2. Check the preview and the LPO PDF.
 3. Click **Send WhatsApp**.
 
-The card then shows **Sent to Vendor**.
+### What the card shows after sending
+
+| Purchase | After Email | After WhatsApp only |
+|---|---|---|
+| Single vendor | **Sent to Vendor** | The **Email** button stays. The WhatsApp button shows **Sent**. |
+| Split PO (PO-x.1) | **Sent to Vendor**. Both buttons are hidden. | **Sent to Vendor**. Both buttons are hidden. |
+
+**Complete & Send to Store** appears as soon as either one is sent.
 
 ## How to complete a purchase
 
 After sending the LPO, click **Complete & Send to Store**.
 
 - **For a split PO** (PO-x.1): first choose the **Site Engineer / Recipient** who will receive the materials on site.
-- The purchase becomes **Routed to M2 Store** and moves to **Pending Approval → Sent to Store**.
+- The purchase becomes **Routed to M2 Store** and moves to **Completed**.
 - A material request is created for the M2 Store automatically, one per purchase.
 - The Production Manager is told a vendor delivery is coming, and the requester is told the purchase was routed to the store.
+
+![Choosing the receiving Site Engineer before Complete & Send to Store](images/buy-lpo.jpg)
 
 Next, the vendor delivers to the M2 Store.
 
 1. The Production Manager inspects the delivery. You are notified if it was **fully approved**, **partially approved** or **fully rejected**.
-2. The Production Manager stocks it in and dispatches it to site. You are notified when it is dispatched and when the Site Engineer confirms delivery.
+2. The Production Manager stocks it in and creates a Delivery Note to site. When the Delivery Note is issued, you get a "Materials Being Prepared" notification.
+3. The Production Manager dispatches it. You are notified when it is dispatched and when the Site Engineer confirms delivery.
 
 A purchase split across several vendors is complete when all its vendor POs are complete.
 
@@ -173,6 +191,8 @@ When the Production Manager rejects delivered materials at inspection, you arran
 4. Optional: set an **SLA Deadline**, **SLA Notes** and **Notes**.
 5. Click **Create Return Request**.
 
+![Create Return Request from Rejected Deliveries](images/buy-ret.jpg)
+
 The return request (VRR) goes to the TD for approval.
 
 ### How to follow a return request
@@ -185,6 +205,8 @@ Open **Vendor Returns** → **Return Requests**. Filter by All, Pending Approval
 - **Confirm Replacement at Store**: enter an optional vendor reference and proof. The Production Manager inspects the replacement, and the request completes when they approve it.
 - **Select New Vendor**: for a new-vendor resolution. The TD approves the new vendor, then click **Generate LPO for New Vendor**. The new purchase appears in Purchase Orders.
 - **View Full Timeline**: see the inspection history.
+
+![Confirm Replacement at Store](images/buy-rr.jpg)
 
 ### Return statuses
 
@@ -223,6 +245,8 @@ Only **Active** vendors are offered when selecting vendors. Use **Edit** to upda
 3. Enter the **Product/Service Name**, Category, Description, Unit and **Unit Price (AED)**.
 4. Click **Add Product**.
 
+![A vendor's Products & Services](images/buy-ven.jpg)
+
 Vendor product prices are used to compare vendors when you select one.
 
 ## Store
@@ -244,6 +268,8 @@ Use this to transfer materials yourself, either to a site or to the M2 Store.
 5. Click **Create Delivery Note**. It is created as a draft.
 6. In **Transfer History**, click **Dispatch**, then **Dispatch Now**. The delivery is **In Transit**. A PDF is available.
 
+![Buyer Material Transfer](images/buy-tr.jpg)
+
 Transfers to the M2 Store are received by the Production Manager under **Stock In → Buyer Transfers**.
 
 ### Raw Materials
@@ -252,3 +278,5 @@ Open **Store** → **Raw Materials** to manage the raw materials catalog used in
 
 - **Materials** tab: click **Add Material** and enter the name, description, brand, size, specification, unit, **Unit Price (AED)** and category.
 - **Items & Sub-Items** tab: link materials to items with **Link Material**.
+
+![Raw Materials Catalog](images/buy-cat.jpg)

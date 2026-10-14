@@ -1,20 +1,25 @@
 /**
- * "Ask AI": MeterSquare assistant that answers questions about using the ERP
+ * "Ask AI" opens Structo: the MeterSquare assistant that answers questions about using the ERP
  * from the user guide (backend: /api/assistant). It cannot see or change records.
+ * Answers can include guide screenshots ("[screenshot: <file>]" lines).
  * Opens as a floating glass panel, or full screen with the expand button.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, X, Send, FileDown, RotateCcw, Maximize2, Minimize2 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
-import { assistantApi, AssistantStatus, AssistantTurn } from '@/api/assistant';
+import { assistantApi, AssistantImage, AssistantStatus, AssistantTurn } from '@/api/assistant';
 
 interface ChatMessage extends AssistantTurn {
   sources?: string[];
+  images?: AssistantImage[];
   error?: boolean;
 }
 
+const ASSISTANT_NAME = 'Structo';
 const GUIDE_PDF_URL = '/MeterSquare-User-Guide.pdf';
+const GUIDE_IMAGES_URL = '/user-guide-images';
+const SCREENSHOT_LINE = /^\s*\[screenshot:\s*([a-z0-9-]+\.jpg)\s*\]\s*$/i;
 const EXPANDED_KEY = 'ask-ai-expanded';
 const LAUNCHER_HIDDEN_KEY = 'ask-ai-launcher-hidden';
 const storageKey = (userId?: number) => `guide-assistant-chat-${userId ?? 'anon'}`;
@@ -132,7 +137,27 @@ function FlowDiagram({ lines }: { lines: string[] }) {
 
 const FENCE = '```';
 
-function AnswerText({ text }: { text: string }) {
+// A guide screenshot inside an answer; opens full size in a new tab
+function Screenshot({ file, caption }: { file: string; caption: string }) {
+  const src = `${GUIDE_IMAGES_URL}/${file}`;
+  return (
+    <figure className="my-1">
+      <a href={src} target="_blank" rel="noopener noreferrer" title="Open full size">
+        <img
+          src={src}
+          alt={caption}
+          loading="lazy"
+          className="w-full rounded-xl border border-[#243d8a]/15 shadow-sm hover:shadow-md transition-shadow"
+        />
+      </a>
+      <figcaption className="mt-1 text-[11px] text-gray-500 italic">
+        {caption} <span className="not-italic text-gray-400">· sample data</span>
+      </figcaption>
+    </figure>
+  );
+}
+
+function AnswerText({ text, images }: { text: string; images?: AssistantImage[] }) {
   const blocks: React.ReactNode[] = [];
   let list: { ordered: boolean; items: string[] } | null = null;
   let fence: { lang: string; lines: string[] } | null = null;
@@ -178,6 +203,16 @@ function AnswerText({ text }: { text: string }) {
     }
     if (fence) {
       fence.lines.push(line);
+      return;
+    }
+    // Screenshot tags: only images the server confirmed for this answer
+    const shot = line.match(SCREENSHOT_LINE);
+    if (shot) {
+      const image = images?.find((im) => im.file === shot[1].toLowerCase());
+      if (image) {
+        flushList(`l${idx}`);
+        blocks.push(<Screenshot key={`s${idx}`} file={image.file} caption={image.caption} />);
+      }
       return;
     }
     const ordered = line.match(/^\s*\d+[.)]\s+(.*)$/);
@@ -302,7 +337,10 @@ const GuideAssistant: React.FC = () => {
     setSending(true);
     try {
       const result = await assistantApi.ask(text, history);
-      setMessages((prev) => [...prev, { role: 'assistant', content: result.answer, sources: result.sources }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: result.answer, sources: result.sources, images: result.images },
+      ]);
     } catch (error: any) {
       setMessages((prev) => [
         ...prev,
@@ -397,7 +435,7 @@ const GuideAssistant: React.FC = () => {
         {open && (
           <motion.div
             role="dialog"
-            aria-label="Ask AI: MeterSquare assistant"
+            aria-label={`${ASSISTANT_NAME}: MeterSquare assistant`}
             style={{ position: 'fixed' }}
             initial={{ opacity: 0, y: 24, ...panelBox }}
             animate={{ opacity: 1, y: 0, ...panelBox }}
@@ -417,7 +455,7 @@ const GuideAssistant: React.FC = () => {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="font-extrabold text-[13px] text-gray-900 flex items-center gap-2">
-                  Ask AI
+                  {ASSISTANT_NAME}
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#243d8a]/10 text-[#243d8a]">
                     MeterSquare
                   </span>
@@ -471,7 +509,7 @@ const GuideAssistant: React.FC = () => {
                         </div>
                       )}
                       <div className={`font-extrabold text-gray-900 ${expanded ? 'text-xl' : 'text-sm'}`}>
-                        Hi {firstName}, how can I help?
+                        Hi {firstName}, I'm {ASSISTANT_NAME}. How can I help?
                       </div>
                       <div className="text-xs text-gray-600 mt-1">
                         Ask me how to do anything in MeterSquare: screens, steps, statuses or who approves what.
@@ -479,7 +517,7 @@ const GuideAssistant: React.FC = () => {
                     </div>
                     {notConfigured && (
                       <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900">
-                        Ask AI is not configured yet. You can still download the full user guide below.
+                        {ASSISTANT_NAME} is not configured yet. You can still download the full user guide below.
                       </div>
                     )}
                     {!!status?.suggestions?.length && !notConfigured && (
@@ -529,7 +567,7 @@ const GuideAssistant: React.FC = () => {
                             : 'bg-white/85 backdrop-blur border-white/80 text-gray-700'
                         }`}
                       >
-                        <AnswerText text={m.content} />
+                        <AnswerText text={m.content} images={m.images} />
                         {!!m.sources?.length && (
                           <div className="mt-2.5 pt-2 border-t border-gray-100">
                             <div className="text-[10px] font-bold tracking-wide text-gray-400 mb-1">FROM THE GUIDE</div>

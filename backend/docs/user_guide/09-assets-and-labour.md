@@ -5,21 +5,26 @@ These processes involve several roles. This chapter shows who does what, in orde
 ## Asset requisition: from request to return
 
 ```flow
-Site Engineer: Requests assets (Site Assets, Request Asset) and clicks Send to PM
+Site Engineer: Requests assets (Site Assets, Request Asset, Submit Request). The request is saved as a Draft
+Site Engineer: Clicks Send for Approval on the request, then Send to PM
 Project Manager: Approves in Asset Requisition Approvals (or rejects with a reason)
 Production Manager: Approves after checking stock (Returnable Assets, Stock Out)
 Production Manager: Creates the Asset Delivery Note (ADN) and dispatches it
 Site Engineer: Receives the assets on site (Receive Selected or Receive All)
-Site Engineer: Returns assets with a return note: Issue, then Dispatch
-Production Manager: Receives and processes the return: stock, repair, or disposal
-Technical Director: Approves any disposal
+Site Engineer: Returns assets with a return note, split by condition (Good, Fair, Poor, Damaged): Issue, then Dispatch
+Production Manager: Verifies each item and chooses Return to Stock, Send to Repair, Dispose or Write Off
+Technical Director: Approves or rejects any Dispose or Write Off
 ```
 
 Key points:
 
-- A request can be rejected by the PM or by the store. The Site Engineer can edit and resend it.
-- Stock is checked when the Production Manager approves, and deducted when the ADN is dispatched.
-- Returned assets are checked by condition: OK, Damaged, Needs Repair or Lost. Each is returned to stock, sent to repair, or sent to the TD for disposal.
+- **Submit Request** only saves a **Draft**. The PM does not see it until you click **Send for Approval** and confirm with **Send to PM**.
+- Only drafts and requests rejected by the PM can be edited and sent again. After a PM rejection the button reads **Resend**.
+- A rejection by the store (Production Manager) is final. Create a new request if the assets are still needed.
+- Stock is checked when the Production Manager approves. It is deducted when the ADN is dispatched, or when the request is dispatched directly without an ADN.
+- When returning, the Site Engineer splits the quantity by condition: **Good**, **Fair**, **Poor** or **Damaged**.
+- The Production Manager verifies each item as **OK**, **Damaged**, **Needs Repair** or **Lost**, then chooses **Return to Stock**, **Send to Repair**, **Dispose** or **Write Off**.
+- **Dispose** and **Write Off** go to the TD for approval. Stock is reduced only when the TD approves. If the TD rejects, the asset goes back to stock or to repair.
 
 ## Labour: from requisition to payroll
 

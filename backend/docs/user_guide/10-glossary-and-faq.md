@@ -55,11 +55,24 @@ Open the account menu at the bottom of the sidebar. Under **SWITCH ROLE**, click
 
 ### Why can't I see the Role Access menu?
 
-Only users whose own role is Admin or Technical Director see it. Admin and TD both find **Role Access** as its own item in their sidebar. It is hidden while you work in a granted role: switch back to your own role from the amber banner to see it again.
+Only users whose own role is Admin or Technical Director can use it. Admin and TD both find **Role Access** as its own item in their sidebar.
+
+- A TD working in a granted role does not see the menu item.
+- A user working in a granted Admin role still sees **Role Access** in the menu. The page itself is available only in your own Admin or Technical Director role.
+
+Switch back to your own role from the amber banner to use it again.
 
 ### Why does a material request go to the Estimator?
 
-Requests that include **new materials** (not in the BOQ) must be priced by the Estimator. Requests with only existing BOQ materials go directly to a buyer.
+The Estimator must price **new materials**. A request goes to the Estimator when:
+
+- it has materials added with **Add New**, either **From Catalogue** or **Enter Manually**. Catalogue materials count as new because they are not in the BOQ.
+- it has a BOQ material whose BOQ quantity is already used up or exceeded by earlier requests.
+- the Project Manager chooses to send it to the Estimator.
+
+Requests with only existing BOQ materials, within the BOQ quantity, go to a buyer.
+
+One request holds either existing BOQ materials (**Select Material**) or new materials (**Add New**), not both. To request both kinds, create two requests.
 
 ### Why is the Approve button disabled on a material request?
 
@@ -75,7 +88,7 @@ The Production Manager rejects it at inspection with evidence. Procurement then 
 
 ### How do I return unused material from site?
 
-The Site Engineer uses **Material Receipts** → **Returnable Materials**: select materials and split them by condition, create the RDN, then issue and dispatch it.
+The Site Engineer opens **Material Receipts** → the **Materials** tab → **Returnable Materials**. Click **Select Materials** on the project, split the quantities by condition, then click **Create RDN**. Issue and dispatch the RDN.
 
 ### Why doesn't attendance show in payroll?
 
@@ -85,6 +98,6 @@ Only attendance that the Project Manager has **locked** appears in **Payroll Pro
 
 Open the account menu → **Support** → **New Ticket**, attach a screenshot, and submit.
 
-### Can the MeterSquare Assistant change my data?
+### Can Structo (Ask AI) change my data?
 
-No. The assistant only answers questions about how to use MeterSquare. It cannot see or change projects, BOQs or any records.
+No. Structo, opened with the **Ask AI** button, only answers questions about how to use MeterSquare, from this guide. It cannot see or change projects, BOQs or any records.
