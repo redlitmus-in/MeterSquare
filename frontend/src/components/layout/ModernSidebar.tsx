@@ -79,6 +79,7 @@ import { useSidebarResize } from '@/hooks/useSidebarResize';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { switchToRole } from '@/utils/roleSession';
 import { roleAccessApi } from '@/api/roleAccess';
+import { blockedRoutesOf, withoutBlockedMenus } from '@/utils/roleAccessMenus';
 
 interface NavigationItem {
   name: string;
@@ -250,6 +251,8 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
   // Multi-role access (Role Access page): own role + active granted roles
   const roleAccess = (user as any)?.role_access;
   const canManageRoleAccess = !roleAccess?.active_grant_id;
+  const blockedRoutes = blockedRoutesOf(user);
+  const blockedRoutesKey = blockedRoutes.join('|');
   const roleSwitchOptions: { key: string; grantId: number | null; label: string; sub: string; current: boolean }[] =
     roleAccess && roleAccess.available_grants?.length
       ? [
@@ -1149,8 +1152,9 @@ const ModernSidebar: React.FC<SidebarProps> = memo(({ sidebarOpen, setSidebarOpe
     }
 
     // Profile removed from sidebar - use header dropdown instead
-    return navigation;
-  }, [user?.role_id, viewingAsRole, canManageRoleAccess]);
+    // A granted role limited to some menus shows only those menus
+    return withoutBlockedMenus(navigation, blockedRoutes);
+  }, [user?.role_id, viewingAsRole, canManageRoleAccess, blockedRoutesKey]);
 
   const isPathActive = useCallback((href: string) => {
     // Extract the base path from both href and location

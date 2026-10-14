@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import ModernSidebar from './ModernSidebar';
 import NotificationSystem from '@/components/NotificationSystem';
 import { useAuthStore } from '@/store/authStore';
 import { useNotificationStore } from '@/store/notificationStore';
-import { getRoleDisplayName } from '@/utils/roleRouting';
+import { buildRolePath, getRoleDisplayName } from '@/utils/roleRouting';
+import { blockedRoutesOf, isBlockedPath } from '@/utils/roleAccessMenus';
+import { showWarning } from '@/utils/toastHelper';
 import { MobileMenuButton } from './MobileMenuButton';
 import { Clock } from 'lucide-react';
 import { sanitizeDocumentTitle } from '@/utils/sanitizer';
@@ -40,6 +42,7 @@ const DashboardLayout: React.FC = React.memo(() => {
   const { unreadCount } = useNotificationStore();
   const { viewingAsRoleName } = useAdminViewStore();
   const location = useLocation();
+  const navigate = useNavigate();
 
   // Memoize page name calculation
   const getPageName = useCallback(() => {
@@ -82,6 +85,15 @@ const DashboardLayout: React.FC = React.memo(() => {
     day: 'numeric',
     year: 'numeric'
   }), [currentTime]);
+
+  // A granted role limited to some menus: the other menus' pages go back to the dashboard
+  const blockedRoutes = blockedRoutesOf(user);
+  useEffect(() => {
+    if (!isBlockedPath(location.pathname, blockedRoutes)) return;
+    showWarning('This page is not part of your access for this role.');
+    navigate(buildRolePath(user?.role || '', '/dashboard'), { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, blockedRoutes.join('|')]);
 
   // Update browser title with user role and notification count
   useEffect(() => {

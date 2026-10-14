@@ -235,7 +235,7 @@ An Admin or Technical Director can give you **temporary access to another role**
 
 ### Two kinds of access
 
-- **Fresh role**: you start as a new person in that role, with no projects. Projects are assigned to you in that role while your access is active, and you appear in that role's selection lists with a small **Granted · until <date>** tag.
+- **Fresh role**: you start as a new person in that role, with no projects. Projects are assigned to you in that role while your access is active, and you appear in that role's selection lists with a small **Granted · until <date>** tag. Your Admin or TD may give you only some of the role's menus: you then see only those menus (and the dashboard), and the email you receive lists them.
 - **Same as existing user**: you see and work on exactly what another holder of that role sees (their projects, BOQs, requests and approvals). Your actions in that role are recorded under that person's name.
 
 ### How to sign in with a granted role

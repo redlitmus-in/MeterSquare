@@ -258,12 +258,25 @@ def notify_granted(grant, user, role, today):
             f"{by} has given you <strong>{html.escape(role_label)}</strong> access"
             f"{html.escape(_access_phrase(grant))}.",
             f"<strong>Period:</strong> {html.escape(period)} (ends 11:59 PM on the end date).",
+        ] + _menus_line(grant, role) + [
             f"Sign in with your usual email and choose <strong>{html.escape(role_label)}</strong>, "
             f"or switch roles from your account menu at any time.",
         ],
         email_note='Your own role does not change. The extra access ends automatically.',
         action_url='/', action_label='Open MeterSquare', ntype='success',
     )
+
+
+def _menus_line(grant, role):
+    """Email line listing the menus of a grant limited to some menus (empty for the whole role)."""
+    try:
+        from utils.role_menus import menu_labels
+        labels = menu_labels(role.role, grant.menu_keys())
+    except Exception:
+        labels = []
+    if not labels:
+        return []
+    return [f"<strong>Menus:</strong> {html.escape(', '.join(labels))} (and the dashboard)."]
 
 
 def notify_revoked(grant, user, role, revoked_by_name):

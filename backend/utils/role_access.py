@@ -150,8 +150,15 @@ def user_has_role(user, role_name):
     if user.role and normalize_role(user.role.role) == normalize_role(role_name):
         return True
     try:
-        grant = find_active_grant_for_role(user.user_id, role_name)
-        return bool(grant and grant.access_type == ACCESS_TYPE_FRESH)
+        # A person can hold several grants of one role (fresh, and shares of other holders): any fresh one counts
+        role = find_role_by_name(role_name)
+        if not role:
+            return False
+        return _active_filter(UserRoleGrant.query.filter(
+            UserRoleGrant.user_id == user.user_id,
+            UserRoleGrant.role_id == role.role_id,
+            UserRoleGrant.access_type == ACCESS_TYPE_FRESH,
+        ), company_today()).first() is not None
     except Exception:
         return False
 
@@ -264,6 +271,20 @@ def role_access_summary(actual_user, grant=None, source_user=None):
         db.session.rollback()
         log.warning(f"role_access_summary: {e}")
 
+    # A grant limited to some menus: which menus, and which pages the app should hide
+    allowed_menus, blocked = None, []
+    if grant:
+        try:
+            from utils.role_menus import blocked_routes, menu_labels
+            granted_role = Role.query.filter_by(role_id=grant.role_id).first()
+            keys = grant.menu_keys()
+            if keys and granted_role:
+                allowed_menus = menu_labels(granted_role.role, keys)
+                blocked = blocked_routes(granted_role.role, keys)
+        except Exception as e:
+            db.session.rollback()
+            log.warning(f"role_access_summary menus: {e}")
+
     return {
         'primary_role': primary_role,
         'primary_role_id': actual_user.role_id,
@@ -271,6 +292,8 @@ def role_access_summary(actual_user, grant=None, source_user=None):
         'active_access_type': grant.access_type if grant else None,
         'active_source_user_name': source_user.full_name if source_user else None,
         'active_end_date': grant.end_date.isoformat() if grant else None,
+        'active_allowed_menus': allowed_menus,
+        'active_blocked_routes': blocked,
         'available_grants': grants,
     }
 

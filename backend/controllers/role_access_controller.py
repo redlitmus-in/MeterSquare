@@ -10,6 +10,7 @@ Users log in with the same email (choosing the granted role) or switch roles
 from the account menu. Access ends automatically after end_date.
 """
 
+import json
 from datetime import datetime, date
 
 import jwt
@@ -22,12 +23,13 @@ from config.logging import get_logger
 from models.user import User
 from models.role import Role
 from models.project import Project
-from models.user_role_grant import UserRoleGrant, ACCESS_TYPES, ACCESS_TYPE_EXISTING, ACCESS_TYPE_FRESH
+from models.user_role_grant import UserRoleGrant, ACCESS_TYPES, ACCESS_TYPE_EXISTING, ACCESS_TYPE_FRESH, menus_supported
 from utils.role_access import (
     SECRET_KEY, GRANT_MANAGER_ROLES, GRANTABLE_ROLES, ROLE_ACCESS_EXPIRED,
     normalize_role, company_today, validate_grant_claims, issue_session_token,
     role_access_summary,
 )
+from utils.role_menus import menus_for_role, clean_selection, menu_labels
 
 log = get_logger()
 
@@ -167,6 +169,8 @@ def _grant_to_dict(grant, today, roles_by_id, users_by_id):
         'revoked_at': grant.revoked_at.isoformat() if grant.revoked_at else None,
         'paused_at': grant.paused_at.isoformat() if grant.is_paused() else None,
         'paused_by_name': grant.paused_by_name if grant.is_paused() else None,
+        'allowed_menus': grant.menu_keys(),
+        'allowed_menu_labels': menu_labels(role.role, grant.menu_keys()) if role else [],
         'created_at': grant.created_at.isoformat() if grant.created_at else None,
         'projects_still_assigned': None,
         'open_work': None,
@@ -254,6 +258,78 @@ def list_roles():
     return jsonify({"success": True, "roles": [{'role_id': r.role_id, 'role': r.role} for r in roles]}), 200
 
 
+def list_user_open_grants(user_id):
+    """A user's grants still in place (active, scheduled, paused), so the wizard can show them and
+    not offer those roles again. Light on purpose: no open-work lookups."""
+    if not _can_manage_grants():
+        return _forbidden()
+    try:
+        today = company_today()
+        grants = UserRoleGrant.query.filter(
+            UserRoleGrant.user_id == user_id,
+            UserRoleGrant.is_revoked == False,
+            UserRoleGrant.end_date >= today,
+        ).order_by(UserRoleGrant.start_date.asc()).all()
+        roles_by_id = {r.role_id: r for r in Role.query.filter(Role.role_id.in_({gr.role_id for gr in grants})).all()} if grants else {}
+        source_ids = {gr.source_user_id for gr in grants if gr.source_user_id}
+        sources = {u.user_id: u for u in User.query.filter(User.user_id.in_(source_ids)).all()} if source_ids else {}
+        items = []
+        for gr in grants:
+            status = gr.status_on(today)
+            if status not in ('active', 'scheduled', 'paused'):
+                continue
+            role = roles_by_id.get(gr.role_id)
+            source = sources.get(gr.source_user_id)
+            items.append({
+                'grant_id': gr.grant_id,
+                'role_id': gr.role_id,
+                'role': role.role if role else None,
+                'access_type': gr.access_type,
+                'source_user_id': gr.source_user_id,
+                'source_user_name': source.full_name if source else None,
+                'start_date': gr.start_date.isoformat(),
+                'end_date': gr.end_date.isoformat(),
+                'status': status,
+            })
+        return jsonify({"success": True, "grants": items}), 200
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"list_user_open_grants error: {e}")
+        return jsonify({"success": False, "error": "Failed to load this user's access"}), 500
+
+
+def list_role_menus(role_id):
+    """The role's menus, for giving only some of them with a fresh grant."""
+    if not _can_manage_grants():
+        return _forbidden()
+    role = Role.query.filter_by(role_id=role_id, is_deleted=False).first()
+    if not role:
+        return jsonify({"success": False, "error": "Role not found"}), 404
+    return jsonify({
+        "success": True,
+        "role": role.role,
+        "menus": menus_for_role(role.role),
+        "supported": menus_supported(),
+    }), 200
+
+
+def _menu_selection(data, role, access_type, current=None):
+    """
+    allowed_menus to store for a grant: (json_text_or_None, error_response).
+    Only fresh grants can be limited; 'Same as existing user' always gives the whole role.
+    """
+    if access_type != ACCESS_TYPE_FRESH:
+        return None, None
+    if 'allowed_menus' not in data:
+        return current, None
+    keys, err = clean_selection(role.role, data.get('allowed_menus'))
+    if err:
+        return None, _bad(err)
+    if keys and not menus_supported():
+        return None, _bad("Choosing menus needs a database update first. Give the whole role for now.")
+    return (json.dumps(keys) if keys else None), None
+
+
 def list_role_holders(role_id):
     """Existing holders of a role (for 'Same as existing user')."""
     if not _can_manage_grants():
@@ -323,24 +399,34 @@ def _check_role_target(user, role_id, access_type, source_user_id):
     return role, source_user_id, None
 
 
-def _overlap_error(user, role, start_date, end_date, exclude_grant_id=None):
-    """409 response if the user already holds this role in an overlapping period, else None."""
+def _overlap_error(user, role, start_date, end_date, access_type, source_user_id, exclude_grant_id=None):
+    """
+    409 response if the same access already exists in an overlapping period, else None.
+    One person may share several holders' access in the same role (e.g. cover two Project Managers);
+    what cannot repeat is the same shared holder, or a second fresh grant of the role.
+    """
     q = UserRoleGrant.query.filter(
         UserRoleGrant.user_id == user.user_id,
         UserRoleGrant.role_id == role.role_id,
+        UserRoleGrant.access_type == access_type,
         UserRoleGrant.is_revoked == False,
         UserRoleGrant.start_date <= end_date,
         UserRoleGrant.end_date >= start_date,
     )
+    if access_type == ACCESS_TYPE_EXISTING:
+        q = q.filter(UserRoleGrant.source_user_id == source_user_id)
     if exclude_grant_id:
         q = q.filter(UserRoleGrant.grant_id != exclude_grant_id)
     overlapping = q.first()
     if not overlapping:
         return None
-    return _bad(
-        f"{user.full_name} already has {role.role} access from "
-        f"{overlapping.start_date.isoformat()} to {overlapping.end_date.isoformat()}. Revoke it first.", 409
-    )
+    period = f"from {overlapping.start_date.isoformat()} to {overlapping.end_date.isoformat()}"
+    if access_type == ACCESS_TYPE_EXISTING:
+        source = User.query.get(source_user_id)
+        what = f"already shares {source.full_name if source else 'this user'}'s {role.role} access {period}"
+    else:
+        what = f"already has {role.role} access as a fresh role {period}"
+    return _bad(f"{user.full_name} {what}. Use Edit or Extend on that access instead.", 409)
 
 
 def create_grant():
@@ -379,7 +465,10 @@ def create_grant():
         role, source_user_id, err_response = _check_role_target(user, role_id, access_type, source_user_id)
         if err_response:
             return err_response
-        err_response = _overlap_error(user, role, start_date, end_date)
+        err_response = _overlap_error(user, role, start_date, end_date, access_type, source_user_id)
+        if err_response:
+            return err_response
+        allowed_menus, err_response = _menu_selection(data, role, access_type)
         if err_response:
             return err_response
 
@@ -394,11 +483,13 @@ def create_grant():
             granted_by=_actual_user_id(),
             granted_by_name=_actual_user_name(),
         )
+        if allowed_menus:
+            grant.allowed_menus = allowed_menus
         db.session.add(grant)
         db.session.commit()
 
         log.info(f"Role access granted: grant={grant.grant_id} user={user_id} role={role.role} "
-                 f"type={access_type} {start_date}..{end_date} by={_actual_user_id()}")
+                 f"type={access_type} {start_date}..{end_date} menus={allowed_menus or 'all'} by={_actual_user_id()}")
 
         try:
             from utils.role_access_notify import notify_granted
@@ -515,12 +606,21 @@ def update_grant(grant_id):
         role, source_user_id, err_response = _check_role_target(user, role_id, access_type, source_user_id)
         if err_response:
             return err_response
-        err_response = _overlap_error(user, role, start_date, end_date, exclude_grant_id=grant.grant_id)
+        err_response = _overlap_error(user, role, start_date, end_date, access_type, source_user_id,
+                                      exclude_grant_id=grant.grant_id)
         if err_response:
             return err_response
 
+        # Selected menus: kept unless sent again; a different role starts with the whole role
+        old_keys = grant.menu_keys() if grant.access_type == ACCESS_TYPE_FRESH else None
+        current_menus = json.dumps(old_keys) if (old_keys and role.role_id == grant.role_id) else None
+        allowed_menus, err_response = _menu_selection(data, role, access_type, current_menus)
+        if err_response:
+            return err_response
+        menus_changed = allowed_menus != (json.dumps(old_keys) if old_keys else None)
+
         old_end = grant.end_date
-        changed = (target_changed or start_date != grant.start_date or end_date != old_end)
+        changed = (target_changed or menus_changed or start_date != grant.start_date or end_date != old_end)
         notes = ((data.get('notes') or '').strip() or None) if 'notes' in data else grant.notes
 
         if replace:
@@ -530,6 +630,8 @@ def update_grant(grant_id):
                 source_user_id=source_user_id, start_date=start_date, end_date=end_date, notes=notes,
                 granted_by=_actual_user_id(), granted_by_name=_actual_user_name(),
             )
+            if allowed_menus:
+                new_grant.allowed_menus = allowed_menus
             db.session.add(new_grant)
             db.session.flush()
             grant.is_revoked = True
@@ -545,6 +647,8 @@ def update_grant(grant_id):
             grant.start_date = start_date
             grant.end_date = end_date
             grant.notes = notes
+            if menus_supported():
+                grant.allowed_menus = allowed_menus  # takes effect on the user's next request
             if end_date != old_end:
                 grant.reminder_sent_at = None  # hand-over reminder can be sent again for the new end date
             result_grant = grant
@@ -565,6 +669,8 @@ def update_grant(grant_id):
             users_by_id[source_user_id] = User.query.get(source_user_id)
         if replace:
             message = f"{user.full_name} now has {role.role} access from today until {end_date.isoformat()}"
+        elif status == 'active' and menus_changed and end_date == old_end:
+            message = f"{user.full_name}'s {role.role} menus were updated"
         elif status == 'active':
             message = f"{user.full_name}'s {role.role} access now ends on {end_date.isoformat()}"
         else:

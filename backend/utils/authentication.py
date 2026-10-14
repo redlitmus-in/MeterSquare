@@ -773,6 +773,11 @@ def jwt_required(f):
                         'message': grant_error
                     }), 403
                 session_user, effective_user = build_session_user(current_user, grant, source_user)
+                # Grants limited to some menus: block the endpoints of the other menus
+                from utils.role_menus import menu_block_message
+                blocked = menu_block_message(grant, session_user['role'])
+                if blocked:
+                    return jsonify({'error': 'Not in your access', 'error_code': 'MENU_NOT_GRANTED', 'message': blocked}), 403
                 g.actual_user = current_user
                 g.current_user = effective_user
                 g.user_id = effective_user.user_id

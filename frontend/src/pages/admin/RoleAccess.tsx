@@ -244,7 +244,18 @@ const RoleAccess: React.FC = () => {
                         <td className="px-4 py-3 font-semibold text-gray-900">{roleLabel(g.role)}</td>
                         <td className="px-4 py-3">
                           {g.access_type === 'fresh' ? (
-                            <span className="font-medium">Fresh role</span>
+                            <div>
+                              <div className="font-medium">Fresh role</div>
+                              {!!g.allowed_menu_labels?.length && (
+                                <div
+                                  className="text-xs text-gray-500"
+                                  title={`Only: ${g.allowed_menu_labels.join(', ')}`}
+                                >
+                                  Only {g.allowed_menu_labels.length} menu{g.allowed_menu_labels.length > 1 ? 's' : ''}:{' '}
+                                  {g.allowed_menu_labels.map((l) => l.split(' › ').pop()).join(', ')}
+                                </div>
+                              )}
+                            </div>
                           ) : (
                             <div>
                               <div className="font-medium">Same as existing user</div>

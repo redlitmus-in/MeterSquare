@@ -1147,6 +1147,16 @@ def register_security_routes(app: Flask):
                             "error_code": ROLE_ACCESS_EXPIRED,
                             "message": grant_error
                         }), 403
+                    # Grants limited to some menus: block the endpoints of the other menus
+                    from utils.role_menus import menu_block_message
+                    blocked = menu_block_message(_grant, payload.get('role'))
+                    if blocked:
+                        return jsonify({
+                            "success": False,
+                            "error": "Not in your access",
+                            "error_code": "MENU_NOT_GRANTED",
+                            "message": blocked
+                        }), 403
 
                 # Set g.user for the request
                 g.user = {

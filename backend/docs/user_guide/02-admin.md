@@ -124,11 +124,15 @@ Click **Grant role access**. A step-by-step wizard opens. The step bar at the to
 2. **Role**: choose the role to give. Grantable roles: Admin, Technical Director, Estimator, Project Manager, Production Manager, MEP Supervisor, Site Engineer, Procurement. The person's own role is also listed, with an **Own role** tag. You can choose it only to share another holder's work with them (**Same as existing user**), for example when one Site Engineer covers for another.
 3. **Access type**:
    - **Fresh role**: starts empty as a new holder of that role. Nothing is copied from anyone. Projects are assigned to them later, and they appear in that role's selection lists while access is active. Not available when you chose the person's own role.
-   - **Same as existing user**: they get the same projects and data as an existing holder of the role, chosen in the next step.
-4. **Choose user** (only for Same as existing user): pick whose access to share. Each person shows their number of active projects. While using this access, the person's actions are recorded under the chosen user's name.
-5. **Period**: choose **Start date** and **End date**, or use a quick pick (**1 day**, **1 week**, **2 weeks**, **1 month**). Access ends at 11:59 PM on the end date. A future start date makes it **Scheduled**. The maximum period is 366 days.
-6. **Review**: check the summary and click **Grant access**.
-7. The screen shows **Access granted** (or **Access scheduled**). Click **Grant another** or **Done**.
+     Below it, choose the menus to give:
+     - **All menus** (default): the whole role.
+     - **Only selected menus**: tick the menus they may use, grouped as in that role's sidebar (for example only **Purchase Orders** and **Store › Raw Materials** for Procurement). Use **Select all** or **Clear**. Tick at least one. The dashboard is always included.
+   - **Same as existing user**: they get the same projects and data as an existing holder of the role. Pick that person in the list that appears below. Each person shows their number of active projects. While using this access, the person's actions are recorded under the chosen user's name. This type always gives the whole role.
+4. **Period**: choose **Start date** and **End date**, or use a quick pick (**1 day**, **1 week**, **2 weeks**, **1 month**). Access ends at 11:59 PM on the end date. A future start date makes it **Scheduled**. The maximum period is 366 days.
+5. **Review**: check the summary, including **Menus** for a Fresh role, and click **Grant access**.
+6. The screen shows **Access granted** (or **Access scheduled**). Click **Grant another** or **Done**.
+
+With **Only selected menus**, the other menus are hidden from the person's sidebar, their pages open the dashboard instead, and their actions are refused. The list shows "Only N menus" under **Fresh role**. To change the menus later, click **Edit**; on access already in use, menu changes apply straight away.
 
 ![Grant role access: setting the access period](images/adm-role.jpg)
 
@@ -140,7 +144,9 @@ Possible errors:
 - **This is already the user's own role. Use 'Same as existing user' to share another user's access.**
 - **Selected user does not have the <role> role**
 - **End date cannot be in the past**
-- **<name> already has <role> access from A to B. Revoke it first.**: there is already an overlapping access for that role.
+- **<name> already shares <person>'s <role> access from A to B** (or **already has <role> access as a fresh role**): that exact access already exists in an overlapping period. Use **Edit** or **Extend** on it instead.
+
+One person can hold the same role more than once at the same time when each grant shares a different person, for example covering two Project Managers. In the wizard, a role they already hold shows a **Has access** tag but can still be chosen. On the **Access type** step, the person already shared shows **Already shared until <date>** and cannot be picked again, and **Fresh role** is unavailable if they already have that role as a fresh role. They switch between the grants from the account menu.
 
 ### How to extend or shorten role access
 

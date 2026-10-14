@@ -25,6 +25,9 @@ export interface RoleGrant {
   revoked_at: string | null;
   paused_at: string | null;
   paused_by_name: string | null;
+  /** Menu keys a fresh grant is limited to; null = the whole role */
+  allowed_menus: string[] | null;
+  allowed_menu_labels: string[];
   created_at: string | null;
   projects_still_assigned: number | null;
   open_work: { projects: number; change_requests: number; item_assignments: number; total: number } | null;
@@ -78,9 +81,31 @@ export interface RoleAccessInfo {
   active_access_type: RoleAccessType | null;
   active_source_user_name: string | null;
   active_end_date: string | null;
+  /** Set when the active grant gives only some menus */
+  active_allowed_menus?: string[] | null;
+  /** Role-less base paths (e.g. '/vendors') the app hides for this grant */
+  active_blocked_routes?: string[];
   available_grants: AvailableGrant[];
   current_role?: string;
   active_grant_ended?: boolean;
+}
+
+export interface UserOpenGrant {
+  grant_id: number;
+  role_id: number;
+  role: string | null;
+  access_type: RoleAccessType;
+  source_user_id: number | null;
+  source_user_name: string | null;
+  start_date: string;
+  end_date: string;
+  status: RoleGrantStatus;
+}
+
+export interface RoleMenu {
+  key: string;
+  label: string;
+  group: string | null;
 }
 
 export interface CreateGrantPayload {
@@ -88,6 +113,8 @@ export interface CreateGrantPayload {
   role_id: number;
   access_type: RoleAccessType;
   source_user_id?: number | null;
+  /** Fresh grants only: menu keys to give; null = the whole role */
+  allowed_menus?: string[] | null;
   start_date: string;
   end_date: string;
   notes?: string;
@@ -97,6 +124,7 @@ export interface UpdateGrantPayload {
   role_id?: number;
   access_type?: RoleAccessType;
   source_user_id?: number | null;
+  allowed_menus?: string[] | null;
   start_date?: string;
   end_date?: string;
   notes?: string;
@@ -157,6 +185,17 @@ export const roleAccessApi = {
       params: excludeUserId ? { exclude_user_id: excludeUserId } : {},
       headers: { 'X-Skip-Cache': 'true' },
     });
+    return response.data;
+  },
+
+  /** The user's grants still in place (active, scheduled, paused) */
+  async getUserOpenGrants(userId: number): Promise<{ grants: UserOpenGrant[] }> {
+    const response = await apiClient.get(`${BASE}/users/${userId}/grants`, { headers: { 'X-Skip-Cache': 'true' } });
+    return response.data;
+  },
+
+  async getRoleMenus(roleId: number): Promise<{ menus: RoleMenu[]; supported: boolean }> {
+    const response = await apiClient.get(`${BASE}/roles/${roleId}/menus`);
     return response.data;
   },
 

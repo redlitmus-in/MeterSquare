@@ -5,7 +5,7 @@ from flask import Blueprint
 
 from utils.authentication import jwt_required
 from controllers.role_access_controller import (
-    list_grants, list_grantable_users, list_roles, list_role_holders,
+    list_grants, list_grantable_users, list_roles, list_role_holders, list_role_menus, list_user_open_grants,
     create_grant, revoke_grant, update_grant, pause_grant, resume_grant, my_roles, switch_role,
 )
 
@@ -55,6 +55,12 @@ def list_grantable_users_route():
     return list_grantable_users()
 
 
+@role_access_routes.route('/users/<int:user_id>/grants', methods=['GET'])
+@jwt_required
+def list_user_open_grants_route(user_id):
+    return list_user_open_grants(user_id)
+
+
 @role_access_routes.route('/roles', methods=['GET'])
 @jwt_required
 def list_roles_route():
@@ -65,6 +71,12 @@ def list_roles_route():
 @jwt_required
 def list_role_holders_route(role_id):
     return list_role_holders(role_id)
+
+
+@role_access_routes.route('/roles/<int:role_id>/menus', methods=['GET'])
+@jwt_required
+def list_role_menus_route(role_id):
+    return list_role_menus(role_id)
 
 
 # Signed-in user (validates the token itself so an ended grant can still switch back)

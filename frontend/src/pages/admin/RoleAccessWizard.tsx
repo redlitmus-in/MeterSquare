@@ -1,6 +1,8 @@
 /**
  * Grant Role Access - step-by-step wizard (matches the approved walkthrough).
- * Steps: User → Role → Access type → [Choose user, for "Same as existing user"] → Period → Review → Done
+ * Steps: User → Role → Access type → Period → Review → Done
+ * The access type step also holds its details: for "Same as existing user" the person whose access
+ * is shared, for "Fresh role" whether to give all of the role's menus or only selected ones.
  * Modes:
  *  - create: a new grant
  *  - edit:   change a scheduled grant (same user; opens on Period, earlier steps can be revisited)
@@ -30,9 +32,12 @@ import {
   RoleOption,
   RoleHolder,
   RoleAccessType,
+  RoleMenu,
+  UserOpenGrant,
 } from '@/api/roleAccess';
 
-type StepKey = 'user' | 'role' | 'type' | 'source' | 'period' | 'review';
+type StepKey = 'user' | 'role' | 'type' | 'period' | 'review';
+type MenuMode = 'all' | 'some';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -61,11 +66,23 @@ export const initials = (name?: string | null) =>
     .slice(0, 2)
     .toUpperCase();
 
-const QUICK_PICKS = [
-  { label: '1 day', days: 0 },
-  { label: '1 week', days: 6 },
-  { label: '2 weeks', days: 13 },
-  { label: '1 month', days: 29 },
+/** Same day N months later (clamped to the month's last day) */
+const addMonths = (iso: string, months: number) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m - 1 + months, Math.min(d, last))).toISOString().slice(0, 10);
+};
+
+// Quick picks: the end date of a period that starts on the start date (inclusive)
+const QUICK_PICKS: { group: string; items: { label: string; end: (start: string) => string }[] }[] = [
+  {
+    group: 'Months',
+    items: [1, 2, 3].map((n) => ({ label: `${n} month${n > 1 ? 's' : ''}`, end: (st: string) => addDays(addMonths(st, n), -1) })),
+  },
+  {
+    group: 'Weeks',
+    items: [1, 2, 3, 4].map((n) => ({ label: `${n} week${n > 1 ? 's' : ''}`, end: (st: string) => addDays(st, n * 7 - 1) })),
+  },
 ];
 
 const STEP_META: Record<StepKey, { short: string; title: string; body: string }> = {
@@ -82,12 +99,7 @@ const STEP_META: Record<StepKey, { short: string; title: string; body: string }>
   type: {
     short: 'Access type',
     title: 'Choose Fresh or Same as existing user',
-    body: 'Fresh role starts empty: nothing is copied from anyone and projects are assigned to them later. Same as existing user gives them exactly what another holder of the role sees.',
-  },
-  source: {
-    short: 'Choose user',
-    title: 'Choose whose access to share',
-    body: 'They will see and work on the same projects, BOQs, change requests and approvals as the person you pick. Their actions are recorded under that person\'s name.',
+    body: 'Fresh role starts empty and can give all of the role\'s menus or only the ones you tick. Same as existing user gives them exactly what another holder of the role sees: pick that person below.',
   },
   period: {
     short: 'Period',
@@ -145,6 +157,14 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
   );
   const [accessType, setAccessType] = useState<RoleAccessType>(prefill ? prefill.access_type : 'fresh');
   const [source, setSource] = useState<RoleHolder | null>(null);
+  // Grants already in force for each user, so roles they hold can be shown and not picked twice
+  const [openGrants, setOpenGrants] = useState<UserOpenGrant[]>([]);
+  const [openGrantsLoading, setOpenGrantsLoading] = useState(false);
+  // Fresh role: all of the role's menus, or only the ticked ones
+  const [menus, setMenus] = useState<RoleMenu[]>([]);
+  const [menusSupported, setMenusSupported] = useState(true);
+  const [menuMode, setMenuMode] = useState<MenuMode>(prefill?.allowed_menus?.length ? 'some' : 'all');
+  const [pickedMenus, setPickedMenus] = useState<string[]>(prefill?.allowed_menus || []);
   const [startDate, setStartDate] = useState(mode === 'edit' && prefill ? prefill.start_date : today);
   const [endDate, setEndDate] = useState(mode === 'edit' && prefill ? prefill.end_date : '');
   // The shared user is picked once the holders list for the prefilled role has loaded
@@ -152,20 +172,44 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
 
   // Flow
   // Prefilled flows open on the Period step; Back still reaches the earlier steps
-  const [stepIndex, setStepIndex] = useState(() =>
-    prefill ? (prefill.access_type === 'existing' ? 4 : 3) - (mode === 'edit' ? 1 : 0) : 0
-  );
+  const [stepIndex, setStepIndex] = useState(() => (prefill ? 3 - (mode === 'edit' ? 1 : 0) : 0));
   const [direction, setDirection] = useState(1);
   const [saving, setSaving] = useState(false);
   const [granted, setGranted] = useState<RoleGrant | null>(null);
 
   const steps: StepKey[] = useMemo(() => {
-    const all: StepKey[] =
-      accessType === 'existing' ? ['user', 'role', 'type', 'source', 'period', 'review'] : ['user', 'role', 'type', 'period', 'review'];
+    const all: StepKey[] = ['user', 'role', 'type', 'period', 'review'];
     // An edit keeps the same user
     return mode === 'edit' ? all.filter((s) => s !== 'user') : all;
-  }, [accessType, mode]);
+  }, [mode]);
   const step = steps[Math.min(stepIndex, steps.length - 1)];
+
+  // The picked user's grants still in place (fetched per user: the full grants list is slow)
+  useEffect(() => {
+    setOpenGrants([]);
+    if (!user) return;
+    let current = true;
+    setOpenGrantsLoading(true);
+    roleAccessApi
+      .getUserOpenGrants(user.user_id)
+      .then((d) => d.grants)
+      // Fallback: the full grants list (slower) when the quick check is not available
+      .catch(() =>
+        roleAccessApi
+          .getGrants('all')
+          .then((d) =>
+            d.grants.filter(
+              (g) => g.user_id === user.user_id && ['active', 'scheduled', 'paused'].includes(g.status)
+            ) as UserOpenGrant[]
+          )
+      )
+      .then((grants) => current && setOpenGrants(grants))
+      .catch(() => current && showError("Could not check this user's current access"))
+      .finally(() => current && setOpenGrantsLoading(false));
+    return () => {
+      current = false;
+    };
+  }, [user]);
 
   useEffect(() => {
     roleAccessApi
@@ -204,21 +248,57 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
       .finally(() => setHoldersLoading(false));
   }, [role, user, accessType]);
 
+  // The role's menus (for a Fresh role with only some menus). A different role starts with all menus.
+  useEffect(() => {
+    setMenus([]);
+    if (!role) return;
+    if (!prefill || role.role_id !== prefill.role_id) {
+      setMenuMode('all');
+      setPickedMenus([]);
+    }
+    roleAccessApi
+      .getRoleMenus(role.role_id)
+      .then((d) => {
+        setMenus(d.menus);
+        setMenusSupported(d.supported);
+      })
+      .catch(() => showError('Failed to load the menus for this role'));
+  }, [role, prefill]);
+
+  // Roles this user already holds through another grant (the grant being edited does not count)
+  const userGrants = user ? openGrants.filter((g) => g.grant_id !== prefill?.grant_id) : [];
+  const grantsOfRole = (roleId: number) => userGrants.filter((g) => g.role_id === roleId);
+  // What cannot be given twice: the role as Fresh again, or the same person's access again
+  const heldFresh = role ? grantsOfRole(role.role_id).find((g) => g.access_type === 'fresh') : undefined;
+  const sharedFrom = (holderId: number) =>
+    role
+      ? grantsOfRole(role.role_id).find((g) => g.access_type === 'existing' && g.source_user_id === holderId)
+      : undefined;
+  const grantText = (g: UserOpenGrant) =>
+    `${g.access_type === 'existing' ? `Same as ${g.source_user_name || 'existing user'}` : 'Fresh role'} · ` +
+    `${formatDate(g.start_date)} → ${formatDate(g.end_date)}`;
+
   // Their own role can only be granted as "Same as existing user"
   const isOwnRole = !!user && !!role && role.role_id === user.role_id;
   useEffect(() => {
-    if (isOwnRole) setAccessType('existing');
-  }, [isOwnRole]);
+    if (isOwnRole || heldFresh) setAccessType('existing');
+  }, [isOwnRole, heldFresh]);
 
   const dateError = !!endDate && endDate < startDate;
   const stepValid: Record<StepKey, boolean> = {
-    user: !!user,
+    user: !!user && !openGrantsLoading,
     role: !!role,
-    type: !(isOwnRole && accessType === 'fresh'),
-    source: !!source,
+    type:
+      accessType === 'existing'
+        ? !!source && !sharedFrom(source.user_id)
+        : !isOwnRole && !heldFresh && (menuMode === 'all' || pickedMenus.length > 0),
     period: !!endDate && !dateError && endDate >= today,
-    review: accessType !== 'existing' || !!source,
+    review: accessType === 'existing' ? !!source : menuMode === 'all' || pickedMenus.length > 0,
   };
+  const limitedMenus = accessType === 'fresh' && menuMode === 'some' && pickedMenus.length < menus.length;
+  const pickedLabels = menus
+    .filter((m) => pickedMenus.includes(m.key))
+    .map((m) => (m.group ? `${m.group} › ${m.label}` : m.label));
 
   const goTo = (index: number) => {
     setDirection(index > stepIndex ? 1 : -1);
@@ -233,6 +313,7 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
       role_id: role.role_id,
       access_type: accessType,
       source_user_id: accessType === 'existing' ? source?.user_id ?? null : null,
+      allowed_menus: limitedMenus ? pickedMenus : null,
       start_date: startDate,
       end_date: endDate,
     };
@@ -255,6 +336,8 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
     setRole(null);
     setAccessType('fresh');
     setSource(null);
+    setMenuMode('all');
+    setPickedMenus([]);
     setStartDate(today);
     setEndDate('');
     setGranted(null);
@@ -267,7 +350,8 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
       ? `${user.full_name} (${roleLabel(user.role)}) gets ${roleLabel(role.role)} access` +
         (accessType === 'existing' && source
           ? ` with the same projects and data as ${source.full_name}`
-          : ' as a fresh role, starting with no projects') +
+          : ' as a fresh role, starting with no projects' +
+            (limitedMenus ? `, with only these menus: ${pickedLabels.join(', ')}` : '')) +
         `, from ${formatDate(startDate)} until ${formatDate(endDate)}, 11:59 PM.`
       : '';
 
@@ -411,7 +495,9 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
                       <div>
                         <span className="text-gray-500">Access: </span>
                         <span className="font-semibold text-gray-900">
-                          {accessType === 'fresh' ? 'Fresh role' : `Same as ${source?.full_name || 'existing user'}`}
+                          {accessType === 'fresh'
+                            ? `Fresh role${limitedMenus ? ` · ${pickedMenus.length} menus` : ''}`
+                            : `Same as ${source?.full_name || 'existing user'}`}
                         </span>
                       </div>
                     )}
@@ -466,6 +552,31 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
                             ))
                           )}
                         </div>
+                        {user && openGrantsLoading && (
+                          <div className="text-xs text-gray-500">Checking {user.full_name}'s current access...</div>
+                        )}
+                        {user && !openGrantsLoading && userGrants.length > 0 && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-1.5"
+                          >
+                            <div className="text-xs font-bold text-amber-900">{user.full_name} already has:</div>
+                            {userGrants.map((g) => (
+                              <div key={g.grant_id} className="flex flex-wrap items-center gap-2 text-xs text-amber-900">
+                                <span className="font-bold">{roleLabel(g.role)}</span>
+                                <span>{grantText(g)}</span>
+                                <span className="px-1.5 py-0.5 rounded-full bg-white border border-amber-200 font-bold capitalize">
+                                  {g.status}
+                                </span>
+                              </div>
+                            ))}
+                            <div className="text-[11px] text-amber-800">
+                              These roles cannot be given again while that access is in place. To change it, use Edit, Extend or
+                              Revoke in the Role Access list.
+                            </div>
+                          </motion.div>
+                        )}
                       </>
                     )}
 
@@ -475,10 +586,12 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
                           {roles.map((r) => {
                             const own = r.role_id === user.role_id;
                             const selected = role?.role_id === r.role_id;
+                            const held = grantsOfRole(r.role_id);
                             return (
                               <button
                                 key={r.role_id}
                                 onClick={() => setRole(r)}
+                                title={held.length ? `Already has: ${held.map(grantText).join('; ')}` : undefined}
                                 className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold border-2 transition-all ${
                                   selected
                                     ? 'bg-[#243d8a] border-[#243d8a] text-white shadow-[0_0_0_5px_rgba(36,61,138,0.15)]'
@@ -486,6 +599,15 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
                                 }`}
                               >
                                 {roleLabel(r.role)}
+                                {held.length > 0 && (
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                      selected ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
+                                    }`}
+                                  >
+                                    Has {held.length > 1 ? `${held.length} grants` : 'access'}
+                                  </span>
+                                )}
                                 {own && (
                                   <span
                                     className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
@@ -499,6 +621,12 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
                             );
                           })}
                         </div>
+                        {userGrants.length > 0 && (
+                          <Hint>
+                            Roles marked "Has" are already given to {user.full_name}. You can still give the same role again
+                            to share a different person's access; the person already shared is not offered again.
+                          </Hint>
+                        )}
                         <Hint>
                           {isOwnRole
                             ? `${user.full_name} is already a ${roleLabel(user.role)}. This grant shares another ${roleLabel(user.role)}'s projects and data with them (Same as existing user).`
@@ -508,64 +636,92 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
                     )}
 
                     {step === 'type' && role && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <TypeCard
-                          icon={<UserPlus className="w-5 h-5" />}
-                          title="Fresh role"
-                          body={
-                            isOwnRole
-                              ? `Not available: ${user?.full_name} is already a ${roleLabel(role.role)}.`
-                              : `Starts empty as a new ${roleLabel(role.role)}: no projects or data copied from anyone. Projects are assigned to them later, and they appear in the ${roleLabel(role.role)} lists while access is active.`
-                          }
-                          selected={accessType === 'fresh'}
-                          disabled={isOwnRole}
-                          onClick={() => setAccessType('fresh')}
-                        />
-                        <TypeCard
-                          icon={<Copy className="w-5 h-5" />}
-                          title="Same as existing user"
-                          body={`Gets the same projects and data as a ${roleLabel(role.role)} you choose in the next step.`}
-                          selected={accessType === 'existing'}
-                          onClick={() => setAccessType('existing')}
-                        />
-                      </div>
-                    )}
+                      <div className="space-y-5">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <TypeCard
+                            icon={<UserPlus className="w-5 h-5" />}
+                            title="Fresh role"
+                            body={
+                              isOwnRole
+                                ? `Not available: ${user?.full_name} is already a ${roleLabel(role.role)}.`
+                                : heldFresh
+                                  ? `Not available: ${user?.full_name} already has ${roleLabel(role.role)} as a fresh role until ${formatDate(heldFresh.end_date)}. Use Edit or Extend on it.`
+                                  : `Starts empty as a new ${roleLabel(role.role)}: no projects or data copied from anyone. Give all of the role's menus or only the ones you tick below.`
+                            }
+                            selected={accessType === 'fresh'}
+                            disabled={isOwnRole || !!heldFresh}
+                            onClick={() => setAccessType('fresh')}
+                          />
+                          <TypeCard
+                            icon={<Copy className="w-5 h-5" />}
+                            title="Same as existing user"
+                            body={`Gets the same projects and data as a ${roleLabel(role.role)} you pick below.`}
+                            selected={accessType === 'existing'}
+                            onClick={() => setAccessType('existing')}
+                          />
+                        </div>
 
-                    {step === 'source' && role && (
-                      <>
-                        <div className="text-sm font-bold text-gray-700">
-                          {roleLabel(role.role)} whose access to share
-                        </div>
-                        <div className="space-y-1.5">
-                          {holdersLoading ? (
-                            <div className="py-10 text-center text-sm text-gray-500">Loading...</div>
-                          ) : holders.length === 0 ? (
-                            <div className="py-8 text-center text-sm text-gray-500">
-                              No other users have this role yet. Go back and choose Fresh role.
-                            </div>
-                          ) : (
-                            holders.map((h) => (
-                              <PersonRow
-                                key={h.user_id}
-                                name={h.full_name}
-                                sub={h.project_count != null ? `${h.project_count} active projects` : h.email}
-                                selected={source?.user_id === h.user_id}
-                                onClick={() => setSource(h)}
-                              />
-                            ))
-                          )}
-                        </div>
-                        {source && user && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-[#243d8a]/5 rounded-xl p-4 text-sm text-gray-800"
-                          >
-                            {user.full_name} will see {source.full_name}'s projects, BOQs, change requests and approvals.
-                          </motion.div>
+                        {accessType === 'fresh' && !isOwnRole && !heldFresh && (
+                          <MenuPicker
+                            roleName={roleLabel(role.role)}
+                            menus={menus}
+                            supported={menusSupported}
+                            mode={menuMode}
+                            picked={pickedMenus}
+                            editingActive={editingActive}
+                            onMode={setMenuMode}
+                            onPicked={setPickedMenus}
+                          />
                         )}
-                        <Hint>While using this access, their actions are recorded under the chosen user's name.</Hint>
-                      </>
+
+                        {accessType === 'existing' && (
+                          <div className="space-y-3 border-t border-gray-100 pt-4">
+                            <div className="text-sm font-bold text-gray-700">
+                              {roleLabel(role.role)} whose access to share
+                            </div>
+                            <div className="max-h-[40vh] overflow-y-auto space-y-1.5 pr-1">
+                              {holdersLoading ? (
+                                <div className="py-8 text-center text-sm text-gray-500">Loading...</div>
+                              ) : holders.length === 0 ? (
+                                <div className="py-6 text-center text-sm text-gray-500">
+                                  No other users have this role yet. Choose Fresh role instead.
+                                </div>
+                              ) : (
+                                holders.map((h) => {
+                                  const shared = sharedFrom(h.user_id);
+                                  return (
+                                    <PersonRow
+                                      key={h.user_id}
+                                      name={h.full_name}
+                                      sub={h.project_count != null ? `${h.project_count} active projects` : h.email}
+                                      right={shared ? `Already shared until ${formatDate(shared.end_date)}` : undefined}
+                                      disabled={!!shared}
+                                      selected={source?.user_id === h.user_id}
+                                      onClick={() => setSource(h)}
+                                    />
+                                  );
+                                })
+                              )}
+                            </div>
+                            {source && user && sharedFrom(source.user_id) && (
+                              <div className="text-xs font-bold text-red-700">
+                                {user.full_name} already shares {source.full_name}'s access. Pick another person, or use Edit
+                                or Extend on the existing access.
+                              </div>
+                            )}
+                            {source && user && !sharedFrom(source.user_id) && (
+                              <motion.div
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="bg-[#243d8a]/5 rounded-xl p-4 text-sm text-gray-800"
+                              >
+                                {user.full_name} will see {source.full_name}'s projects, BOQs, change requests and approvals.
+                              </motion.div>
+                            )}
+                            <Hint>While using this access, their actions are recorded under the chosen user's name.</Hint>
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     {step === 'period' && (
@@ -593,24 +749,28 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
                             />
                           </label>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs text-gray-500">Quick pick:</span>
-                          {QUICK_PICKS.map((q) => {
-                            const value = addDays(startDate, q.days);
-                            return (
-                              <button
-                                key={q.label}
-                                onClick={() => setEndDate(value)}
-                                className={`px-3 py-2 rounded-lg border text-xs font-bold transition-colors ${
-                                  endDate === value
-                                    ? 'bg-[#243d8a] border-[#243d8a] text-white'
-                                    : 'border-gray-300 text-[#243d8a] hover:bg-[#243d8a]/5'
-                                }`}
-                              >
-                                {q.label}
-                              </button>
-                            );
-                          })}
+                        <div className="space-y-2">
+                          {QUICK_PICKS.map((g) => (
+                            <div key={g.group} className="flex flex-wrap items-center gap-2">
+                              <span className="w-16 text-xs text-gray-500">{g.group}:</span>
+                              {g.items.map((q) => {
+                                const value = q.end(startDate);
+                                return (
+                                  <button
+                                    key={q.label}
+                                    onClick={() => setEndDate(value)}
+                                    className={`px-3 py-2 rounded-lg border text-xs font-bold transition-colors ${
+                                      endDate === value
+                                        ? 'bg-[#243d8a] border-[#243d8a] text-white'
+                                        : 'border-gray-300 text-[#243d8a] hover:bg-[#243d8a]/5'
+                                    }`}
+                                  >
+                                    {q.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ))}
                         </div>
                         <div className="flex items-center gap-2 text-xs text-gray-500">
                           <CalendarClock className="w-4 h-4" /> Access ends automatically at 11:59 PM on the end date.
@@ -637,6 +797,13 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
                             value={accessType === 'fresh' ? 'Fresh role' : 'Same as existing user'}
                             sub={accessType === 'existing' && source ? `${source.full_name}'s access` : 'Starts with no projects'}
                           />
+                          {accessType === 'fresh' && (
+                            <ReviewItem
+                              label="Menus"
+                              value={limitedMenus ? `${pickedMenus.length} of ${menus.length} menus` : 'All menus of the role'}
+                              sub={limitedMenus ? pickedLabels.join(', ') : undefined}
+                            />
+                          )}
                           <ReviewItem
                             label="Period"
                             value={`${formatDate(startDate)} → ${formatDate(endDate)}`}
@@ -709,12 +876,18 @@ const PersonRow: React.FC<{
   sub?: string | null;
   right?: string;
   selected: boolean;
+  disabled?: boolean;
   onClick: () => void;
-}> = ({ name, sub, right, selected, onClick }) => (
+}> = ({ name, sub, right, selected, disabled, onClick }) => (
   <button
     onClick={onClick}
+    disabled={disabled}
     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left border-2 transition-all ${
-      selected ? 'border-[#243d8a] bg-[#243d8a]/5 shadow-[0_0_0_4px_rgba(36,61,138,0.1)]' : 'border-transparent hover:bg-gray-50'
+      disabled
+        ? 'border-transparent opacity-60 cursor-not-allowed'
+        : selected
+          ? 'border-[#243d8a] bg-[#243d8a]/5 shadow-[0_0_0_4px_rgba(36,61,138,0.1)]'
+          : 'border-transparent hover:bg-gray-50'
     }`}
   >
     <div className="w-9 h-9 rounded-full bg-[#243d8a]/10 text-[#243d8a] font-bold text-xs flex items-center justify-center shrink-0">
@@ -724,10 +897,108 @@ const PersonRow: React.FC<{
       <div className="text-sm font-semibold text-gray-900 truncate">{name}</div>
       {sub && <div className="text-xs text-gray-500 truncate">{sub}</div>}
     </div>
-    {right && <span className="text-xs font-semibold text-gray-600">{right}</span>}
+    {right && (
+      <span className={`text-xs font-semibold ${disabled ? 'px-2 py-0.5 rounded-full bg-amber-100 text-amber-800' : 'text-gray-600'}`}>
+        {right}
+      </span>
+    )}
     {selected && <Check className="w-4 h-4 text-[#243d8a] shrink-0" />}
   </button>
 );
+
+const MenuPicker: React.FC<{
+  roleName: string;
+  menus: RoleMenu[];
+  supported: boolean;
+  mode: MenuMode;
+  picked: string[];
+  editingActive: boolean;
+  onMode: (m: MenuMode) => void;
+  onPicked: (keys: string[]) => void;
+}> = ({ roleName, menus, supported, mode, picked, editingActive, onMode, onPicked }) => {
+  // Sidebar groups (e.g. Labour > Requisition Approvals, Attendance Lock)
+  const groups: { name: string | null; items: RoleMenu[] }[] = [];
+  menus.forEach((m) => {
+    const last = groups[groups.length - 1];
+    if (last && last.name === m.group && m.group) last.items.push(m);
+    else groups.push({ name: m.group, items: [m] });
+  });
+  const toggle = (key: string) =>
+    onPicked(picked.includes(key) ? picked.filter((k) => k !== key) : [...picked, key]);
+  const pill = (value: MenuMode, label: string, disabled = false) => (
+    <button
+      onClick={() => onMode(value)}
+      disabled={disabled}
+      className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+        mode === value ? 'bg-[#243d8a] text-white shadow' : 'text-gray-700 hover:bg-white'
+      }`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="space-y-3 border-t border-gray-100 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-bold text-gray-700">{roleName} menus to give</div>
+        <div className="inline-flex rounded-xl bg-gray-100 p-1">
+          {pill('all', 'All menus')}
+          {pill('some', 'Only selected menus', !supported || menus.length === 0)}
+        </div>
+      </div>
+      {!supported && (
+        <Hint>Choosing menus is not available until the database update is applied. The whole role is given.</Hint>
+      )}
+      {mode === 'some' && supported && (
+        <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+          <div className="flex items-center gap-3 text-xs">
+            <span className="text-gray-500">
+              {picked.length} of {menus.length} selected
+            </span>
+            <button onClick={() => onPicked(menus.map((m) => m.key))} className="font-bold text-[#243d8a] hover:underline">
+              Select all
+            </button>
+            <button onClick={() => onPicked([])} className="font-bold text-[#243d8a] hover:underline">
+              Clear
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[38vh] overflow-y-auto pr-1">
+            {groups.map((g, gi) => (
+              <div key={`${g.name}-${gi}`} className={g.name ? 'sm:col-span-2 space-y-1.5' : ''}>
+                {g.name && <div className="text-[11px] font-bold uppercase tracking-wide text-gray-500 mt-1">{g.name}</div>}
+                <div className={g.name ? 'grid grid-cols-1 sm:grid-cols-2 gap-2.5' : ''}>
+                  {g.items.map((m) => {
+                    const on = picked.includes(m.key);
+                    return (
+                      <label
+                        key={m.key}
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border-2 cursor-pointer text-sm transition-all ${
+                          on ? 'border-[#243d8a] bg-[#243d8a]/5 font-semibold text-gray-900' : 'border-gray-200 text-gray-700 hover:border-[#243d8a]/40'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() => toggle(m.key)}
+                          className="w-4 h-4 accent-[#243d8a]"
+                        />
+                        {m.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          {picked.length === 0 && <div className="text-xs font-bold text-red-700">Tick at least one menu.</div>}
+          <Hint>
+            The dashboard is always included. Menus that are not ticked are hidden, and their pages and actions are
+            blocked for this access.{editingActive ? ' Menu changes apply straight away.' : ''}
+          </Hint>
+        </motion.div>
+      )}
+    </div>
+  );
+};
 
 const TypeCard: React.FC<{
   icon: React.ReactNode;
