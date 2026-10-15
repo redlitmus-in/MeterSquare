@@ -73,9 +73,15 @@ Open **Inventory Management** → **Materials Catalog**.
 ### How to request disposal of a damaged or wasted material
 
 1. Click the orange warning icon on the material's row. It is shown only when stock is above 0.
+
+![Step 1: the Request Material Disposal window](images/prod-dispose-1.jpg)
+
 2. Enter the **Quantity to Dispose**. The estimated value is calculated.
 3. Choose a **Reason for Disposal**: Damaged/Defective, Expired, Wasted, Obsolete, Lost/Missing or Other.
 4. Add **Additional Notes**.
+
+![Step 4: quantity, reason and notes filled in](images/prod-dispose-4.jpg)
+
 5. Click **Submit for TD Approval**.
 
 Stock does not change until the Technical Director approves. On approval, current stock is reduced.
@@ -92,16 +98,36 @@ There are three header buttons:
 
 ### How to inspect a vendor delivery
 
+![Stock In: Vendor Deliveries shows a red badge for waiting deliveries](images/prod-inspect-0.jpg)
+
 1. Click **Vendor Deliveries**. The **Inspection Centre** opens.
+
+![Step 1: the Inspection Centre, Pending Inspections](images/prod-inspect-1.jpg)
+
 2. In **Pending Inspections**, click **Inspect** on the delivery. A replacement delivery from a vendor return carries a **Replacement** badge.
+
+![Step 2: the Inspect Delivery form](images/prod-inspect-2.jpg)
+
 3. For each material, enter the **Accepted** quantity. The rejected quantity is calculated. Use **Accept All** or **Reject All** as shortcuts.
+
+![Step 3: 48 accepted, 2 rejected calculated](images/prod-inspect-3.jpg)
+
 4. For anything rejected, choose a **Rejection Reason**: Quality Defect, Wrong Specification, Quantity Shortage, Damaged in Transit, Expired / Outdated or Other. Notes are optional.
+
+![Step 4: Rejection Reason chosen](images/prod-inspect-4.jpg)
+
 5. Fill in **Transport Details**: Driver Name, Vehicle Number, Reference / PO Number.
+
+![Step 5: Transport Details filled in](images/prod-inspect-5.jpg)
+
 6. Add **Overall Inspection Notes**.
 7. Upload **Inspection Evidence**. This is required if anything is rejected. You can upload images (up to 2 MB), PDF (up to 10 MB) or video (up to 50 MB).
+
+![Step 7: evidence attached, ready to Submit Inspection](images/prod-inspect-7.jpg)
+
 8. Click **Submit Inspection**.
 
-![Inspect Delivery](images/prod-insp.jpg)
+![Step 8: submitted, Record Stock In opens pre-filled from the inspection](images/prod-inspect-8.jpg)
 
 What happens next:
 
@@ -120,20 +146,32 @@ Submitting an inspection does **not** add stock. Stock is added when you complet
 ### How to record Stock In
 
 1. Click **Record Stock In**, or **Stock In** on an inspected delivery.
+
+![Step 1: the Record Stock In form](images/prod-stockin-1.jpg)
+
 2. Select the **Project** and the **Material**. If the material is not in the catalog, choose **+ Create New Material**.
 3. Enter **Quantity Received** and **Actual Purchase Price (AED)**. The total is calculated.
+
+![Step 3: project, material, quantity and price entered](images/prod-stockin-3.jpg)
+
 4. Optional: enter the **Reference Number (PO/Invoice)** and **Notes**.
 5. Enter transport details: **Driver Name**, **Vehicle Number** and the transport fee (default 1.00 AED per unit).
    - Use **Recent Deliveries** or **Last Delivery** to reuse details from the same truck.
    - Materials from the same delivery share one batch reference. Only the first material should carry the transport fee.
+
+![Step 5: reference number and driver entered](images/prod-stockin-5.jpg)
+
 6. Upload the **Delivery Note from Vendor** (PDF, JPG, PNG, DOC or DOCX, up to 10 MB).
+
+![Step 6: the vendor's delivery note attached](images/prod-stockin-6.jpg)
+
 7. Click **Confirm Stock In**, then **Confirm**.
 
 Current stock increases by the quantity. For an inspected delivery with several materials, the form lists them all; click **Confirm Stock In (N materials)** and then **Confirm All**.
 
 If an accepted material is not in the catalog, it is listed under **Not in Inventory Catalog**. Click **Add Material** on it to add it to the catalog and include it in the Stock In.
 
-![Record Stock In](images/prod-in.jpg)
+![Not in Inventory Catalog: Add Material on the accepted material](images/prod-stockin-catalog.jpg)
 
 ### How to add a new material
 
@@ -152,6 +190,8 @@ Buyers can send materials to the M2 Store directly.
 1. Click **Buyer Transfers**.
 2. In the **Pending** tab, check the transfer and click **Receive**.
 
+![Step 2: Buyer Transfers, Pending, with Receive](images/prod-transfer-2.jpg)
+
 The materials are added to inventory. The **History** tab keeps received transfers, each with a PDF.
 
 ## Stock Out (material requests and delivery notes)
@@ -167,8 +207,16 @@ The table shows Request #, Project, Requester, Material, Qty, Stock / Destinatio
 ### How to approve or reject a material request
 
 1. In **Pending**, check the stock shown for the materials.
+
+![Step 1: Pending material requests with the stock shown](images/prod-approve-1.jpg)
+
 2. Click **Approve**. The button is disabled when stock is not enough.
+
+![Step 2: the request is Approved and moved to the Approved tab](images/prod-approve-2.jpg)
+
 3. Or click **Reject** and enter a **Rejection Reason**.
+
+![Step 3: the Reject Request window with the reason](images/prod-approve-3.jpg)
 
 What happens:
 
@@ -188,24 +236,43 @@ On Stock Out, a vendor delivery row shows **Confirm Receipt** instead of **Appro
 ### How to create a Delivery Note (DN) to site
 
 1. In **Approved**, click **Create DN** on the request. If the stock is not enough, the row shows **Awaiting Stock** instead.
+
+![Step 1: the Approved tab with Create DN](images/prod-dn-1.jpg)
+
 2. Check the project and **Attention To (Site Engineer)**. This is pre-selected from the buyer's chosen recipient or the project's Site Engineer.
+
+![Step 2: Create Delivery Note with Attention To pre-selected](images/prod-dn-2.jpg)
+
 3. Enter:
    - **Delivery Date** (default today)
    - **Requested By** (pre-filled)
    - the transport fee (default 1.00 AED per unit, must be above 0)
    - **Driver Name** (letters only), **Vehicle Number** and **Driver Contact**
+
+![Step 3: Create Delivery Note with transport details filled in](images/prod-dn-3.jpg)
+
 4. Check the items and add **Notes**.
 5. Click **Create Delivery Note**.
 
 The DN is created as **Draft** and appears in **Draft DN**. It is numbered MDN-<year>-<number>.
 
+![The new DN in Draft DN, with Issue and Cancel](images/prod-dn-5.jpg)
+
 ### How to issue and dispatch a Delivery Note
 
 1. In **Draft DN**, click **Issue** and confirm. The DN becomes **Issued** and the buyer is notified that materials are being prepared. You can **Cancel** a DN only while it is a draft.
-2. In **Issued DN**, click **Dispatch** and confirm. The DN becomes **In Transit**. The project's Site Engineers and the buyer are notified with the materials, vehicle and driver.
-3. The Site Engineer confirms receipt on site. The DN becomes **Delivered** (or **Partial** if less arrived) and the request becomes **Fulfilled**. The buyer and the Production Managers are notified.
 
-![Dispatch Delivery Note](images/prod.jpg)
+![Step 1: confirm in Issue Delivery Note](images/prod-issue-1.jpg)
+
+![Step 1: the DN is Issued and shows Dispatch](images/prod-dispatch-1.jpg)
+
+2. In **Issued DN**, click **Dispatch** and confirm. The DN becomes **In Transit**. The project's Site Engineers and the buyer are notified with the materials, vehicle and driver.
+
+![Step 2: confirm in Dispatch Delivery Note](images/prod-dispatch-2.jpg)
+
+![Step 2: the DN is In Transit](images/prod-dispatch-3.jpg)
+
+3. The Site Engineer confirms receipt on site. The DN becomes **Delivered** (or **Partial** if less arrived) and the request becomes **Fulfilled**. The buyer and the Production Managers are notified.
 
 Every DN can be downloaded as a PDF or printed.
 
@@ -241,15 +308,26 @@ Site Engineers return unused or damaged material with a **Return Delivery Note (
 
 ### How to receive and process a return
 
+![Receive Returns: an RDN In Transit with Confirm Receipt](images/prod-return-0.jpg)
+
 1. When the RDN is **In Transit**, click **Confirm Receipt**. Later, use **Process Items** for anything left unprocessed.
+
+![Step 1: the Confirm & Process Return Delivery window](images/prod-return-1.jpg)
+
 2. Each item shows its condition from site (**Good**, **Damaged** or **Defective**) and the return reason. Choose the action:
    - **Good** → **Add to Stock**: added to current stock.
    - **Damaged/Defective** → **Send for Repair**: added to backup stock and listed under **Repair**.
    - **Damaged/Defective** → **Mark for Disposal**: sent to the TD for approval. A note explaining why is required.
+
+![Step 2: Add to Stock for good items, Send for Repair with a note for the damaged one](images/prod-return-2.jpg)
+
 3. Optional: add **General Acceptance Notes**.
+
+![Step 3: General Acceptance Notes filled in](images/prod-return-3.jpg)
+
 4. Click **Process** on each item, or **Confirm & Process All**.
 
-![Confirm & Process Return Delivery](images/prod-ret.jpg)
+![Step 4: the return is listed as Received](images/prod-return-4.jpg)
 
 When every item is processed, the return is complete.
 
@@ -292,6 +370,8 @@ To dispose of an asset:
 3. Choose a reason: Damaged Beyond Repair, Obsolete / Outdated, End of Life, Lost / Missing, Safety Hazard or Other.
 4. Add notes and click **Submit Request**.
 
+![Step 4: the Request Disposal window filled in](images/prod-assetdispose-4.jpg)
+
 The quantity is taken out of available stock straight away, and the request goes to the TD for approval.
 
 ### How to add assets (Asset Stock In)
@@ -300,8 +380,11 @@ The quantity is taken out of available stock straight away, and the request goes
 2. Choose or type the **Asset Category**, and enter the **Quantity**. For a new category, choose the **Tracking Mode**: Quantity Based or Individual.
 3. Optional: **Vendor**, **Invoice Number**, **Purchase Date**, **Unit Cost**, **Total Cost**, **Condition** (New, Second Hand, Refurbished or Repaired) and **Notes**.
 4. Attach the **DN/Invoice/Receipt** document. This is required.
+
+![Step 4: the New Stock In form filled in with the document attached](images/prod-assetin-4.jpg)
+
 5. For individual tracking, enter each item's **Serial Number**.
-6. Click **Create Stock In**.
+6. Click **Create Stock In** (for a new category the button reads **Create Category & Stock In**).
 
 The available quantity increases. The **Stock In History** table lists every entry.
 
@@ -314,34 +397,50 @@ Asset requests come from Site Engineers after the Project Manager approves them.
 **How to handle an asset request:**
 
 1. In **Pending**, open **Details** to check the request.
-2. Click **Approve** on the row. Stock is checked; if it is not enough you see "Insufficient stock". Or click **Reject** on the row and enter a reason.
+2. Click **Approve** on the row. The **Approve Requisition** window opens: add optional notes and confirm. Stock is checked; if it is not enough you see "Insufficient stock". Or click **Reject** on the row and enter a reason.
+
+![Step 2: the Approve Requisition window](images/prod-assetreq-2.jpg)
+
 3. The Site Engineer is notified.
 
 **How to create and dispatch an Asset Delivery Note (ADN):**
 
+![Asset Stock Out, Ready tab: Create DN on the request](images/prod-adn-0.jpg)
+
 1. In **Ready**, click **Create DN** on the request.
+
+![Step 1: the New Asset Delivery Note (ADN) form](images/prod-adn-1.jpg)
+
 2. Check the project and site location. Choose **Attention To** (the Site Engineer).
 3. Enter **Vehicle Number**, **Driver Name**, **Driver Contact** and the transport fee.
+
+![Step 3: Attention To and transport details filled in](images/prod-adn-3.jpg)
+
 4. Select the items:
    - quantity-based assets with their quantity;
    - individual assets by serial number.
 5. Add notes and click **Create Delivery Note**. The ADN is created as a draft and the request shows **Dispatched**.
 6. In **Draft ADN**, click **Dispatch** on the ADN and confirm. There is no Issue step: the ADN goes from **Draft** straight to **In Transit**. Stock is deducted and the Site Engineer is notified. In-transit ADNs are listed under **Issued ADN**.
-7. The Site Engineer receives the assets on site. The ADN becomes **Delivered** and the request **Completed**.
 
-![New Asset Delivery Note (ADN)](images/prod-ast.jpg)
+![Step 6: Dispatch on the draft ADN and the confirmation](images/prod-adn-6.jpg)
+
+7. The Site Engineer receives the assets on site. The ADN becomes **Delivered** and the request **Completed**.
 
 ### How to process returned assets
 
 1. Open **Returnable Assets** → **Process Returns**. The tabs are **Pending** and **History**.
+
+![Step 1: Process Returns, a received return with Process](images/prod-assetret-1.jpg)
+
 2. When a return is **In Transit**, click **Receive**.
 3. Click **Process**. For each item set the **Verified Condition** (OK, Damaged, Needs Repair or Lost), add notes, and choose the **Action**:
    - **Return to Stock**: available quantity goes up.
    - **Send to Repair**: listed under Repair.
    - **Dispose** or **Write Off**: sent to the TD for approval.
-4. Click **Process All Items**.
 
-![Receive Returns for assets](images/prod-arr.jpg)
+![Step 3: the Process Return window with the actions per item](images/prod-assetret-3.jpg)
+
+4. Click **Process All Items**.
 
 ### Asset Repair and Disposal
 
@@ -376,17 +475,25 @@ Open **Labour** → **Assign Workers**. The tabs are **Pending Assignment** and 
 
 ### How to assign workers to a labour requisition
 
+![Pending Assignment: click Assign on the requisition](images/prod-workers-0.jpg)
+
 1. Click **Assign** on an approved requisition.
+
+![Step 1: Assign Workers opens with the preferred workers auto-selected](images/prod-workers-1.jpg)
+
 2. Select **exactly** the number of workers required.
    - Preferred workers are selected automatically.
    - Shortcut buttons: **Low Rate**, **High Rate**, **Single Skill**, **Multi Skill**.
    - Workers already booked on another project are blocked.
    - Use **Add New Worker** to add someone on the spot.
+
+![Step 2: Assign Workers, 6 of 6 selected](images/prod-workers-2.jpg)
+
 3. Click **Assign Selected**.
 4. Enter the transport details: **Driver Name**, **Driver Contact**, **Vehicle Number** and the transport fee.
 5. Check the workers to be notified, then click **Confirm & Send**.
 
-![Assign Workers](images/prod-wk.jpg)
+![Steps 4-5: Confirm Assignment with transport details and Confirm & Send](images/prod-workers-5.jpg)
 
 Each worker receives a WhatsApp message, and the Site Engineer can then confirm their arrival. The transport fee is added to payroll cost.
 

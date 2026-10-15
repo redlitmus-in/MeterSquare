@@ -47,29 +47,49 @@ Each card shows:
 
 ### How to review a BOQ the Estimator sent you
 
+![For Approval: the BOQ card with the eye icon](images/pm-review-1.jpg)
+
 1. In **For Approval**, click the eye icon (**View Details**).
+
+![Step 1: BOQ Details with Approve, Reject and Download](images/pm-review-2.jpg)
+
 2. Choose:
    - **Edit**: change the BOQ in the full BOQ editor and save.
    - **Approve**: add optional comments and confirm. The BOQ goes back to the Estimator as **PM Approved**, ready to send to the TD.
    - **Reject**: enter the reason. The BOQ goes back to the Estimator as **PM Rejected**.
 
-![BOQ Details opened from For Approval, with Approve, Reject and Download](images/pm-boq.jpg)
+![Step 2: Approve BOQ with optional comments](images/pm-review-3.jpg)
+
+![Step 2: Reject BOQ with the rejection reason](images/pm-review-4.jpg)
 
 ### How to assign BOQ items to a Site Engineer
 
 In **card view**:
 
+![Pending: the project card with the assign icon](images/pm-assign-1.jpg)
+
 1. On the project card, click **Assign Items to Site Engineer**. It is greyed out when all items are already assigned.
+
+![Step 1: the Assign Site Engineer window](images/pm-assign-2.jpg)
+
 2. On the left, choose **Select Existing SE** and pick a Site Engineer. Each one shows their current projects.
    - Or choose **Create New SE**: enter Full Name, Email and Phone, then click **Create & Select SE**.
+
+![Step 2: Create New SE with Full Name, Email and Phone](images/pm-assign-6.jpg)
+
+![Step 2: a Site Engineer picked](images/pm-assign-3.jpg)
+
 3. On the right, under **Items to Assign**, tick the items. Picking an SE selects all items; untick any you want to give to someone else. Already assigned items are listed under **Assigned Items**.
+
+![Step 3: items ticked under Items to Assign](images/pm-assign-4.jpg)
+
 4. Click **Confirm Assignment**.
+
+![Step 4: the card shows the Site Engineer and 0 items pending](images/pm-assign-5.jpg)
 
 In **table view**, a project with no Site Engineer yet shows **Assign Site Engineer**. It assigns one Site Engineer to the whole project. Here, people with temporary Site Engineer access show a **Granted · until <date>** tag.
 
 The Site Engineer is notified, and the project moves to **Assigned**. Each Site Engineer can be assigned to at most **3 projects**.
-
-![Assigning BOQ items to a Site Engineer](images/pm-se.jpg)
 
 ### How to edit or remove a Site Engineer
 
@@ -78,6 +98,10 @@ On the project card, use the icons next to the Site Engineer's name:
 - **Edit Site Engineer Details**: change the Full Name, Email or Phone, then click **Save Changes**.
 - **Delete Site Engineer**: confirm **Delete**. This removes the user from the system.
 
+![Edit Site Engineer with Save Changes](images/pm-seedit-1.jpg)
+
+![Delete Site Engineer confirmation](images/pm-seedit-2.jpg)
+
 ### How to confirm project completion
 
 When Site Engineers finish, they request completion.
@@ -85,12 +109,19 @@ When Site Engineers finish, they request completion.
 In **card view**:
 
 1. Click the **x/y confirmations** button on the card. It pulses orange when a Site Engineer has requested completion.
+
+![Step 1: the card shows 0/1 confirmations](images/pm-complete-1.jpg)
+
 2. The panel lists each Site Engineer assignment with one of: "SE requested completion", "Awaiting SE completion request" or "PM confirmed".
 3. Click **Confirm Complete** for each finished assignment.
+
+![Step 3: Completion Confirmation Details with Confirm Complete](images/pm-complete-2.jpg)
 
 In **table view**, click **SE Requested Completion - Click to Approve**, then **Confirm Complete** in **Approve Completion Request**.
 
 When everyone has confirmed, the project is marked complete automatically ("Project automatically marked as complete!"). The BOQ appears in the Estimator's **Completed BOQ** tab.
+
+![All assignments confirmed: the project is marked complete](images/pm-complete-3.jpg)
 
 The project does **not** complete while any material purchase in the project is still unfinished or any asset return is still open. You then see "Project will auto-complete when all purchases and returns are finished".
 
@@ -99,19 +130,28 @@ The project does **not** complete while any material purchase in the project is 
 ### How to request a day extension
 
 1. Open the BOQ and click **Request Extension**, or click the clock badge on an assigned project card.
+
+![Step 1: the Request Day Extension window](images/pm-extension-1.jpg)
+
 2. Enter **Additional Days Requested**. The new end date is previewed.
+
+![Step 2: days entered, new end date previewed](images/pm-extension-2.jpg)
+
 3. Enter the **Reason for Extension**.
+
+![Step 3: reason entered, ready to Send Request](images/pm-extension-3.jpg)
+
 4. Click **Send Request**.
 
-The Technical Director is notified and approves, edits or rejects it. You cannot send another request while one is pending. The request history shows Pending TD Approval, Approved or Rejected.
+![Step 4: the request shows Pending TD Approval and a new request is blocked](images/pm-extension-4.jpg)
 
-![Request Day Extension](images/pm-ext.jpg)
+The Technical Director is notified and approves, edits or rejects it. You cannot send another request while one is pending. The request history shows Pending TD Approval, Approved or Rejected.
 
 ## Material Purchase (change requests)
 
 Site Engineers and PMs request extra materials for an approved project through **Material Purchase**. These requests are also called change requests (CR) or purchase requests (PO-…).
 
-In the Project Manager view, prices are hidden. The MEP Supervisor sees prices.
+In a request's details, prices are hidden for the Project Manager (the MEP Supervisor sees them). The purchase request form shows each material's rate.
 
 ### How a material purchase request moves
 
@@ -144,33 +184,49 @@ Site Engineer: Confirms delivery on site
 
 ### How to approve or reject a Site Engineer's request
 
+![SE Requested: requests waiting for the Project Manager](images/pm-approve-1.jpg)
+
 1. In **SE Requested**, click **Review Details**. Use **Edit** to change quantities or materials if needed.
+
+![Step 1: the request details](images/pm-approve-2.jpg)
+
 2. Approve it:
    - **Approve & Send to Estimator** is shown when the request has new materials. The Estimator is notified.
    - **Approve & Send to Buyer** is shown when all materials are existing. Choose the buyer under **Assign to Procurement**. Buyers are grouped Online and Offline; an offline buyer gets an email; people with temporary Procurement access show a **Granted** tag. Add optional comments and click **Approve & Assign**.
+
+![Step 2: Approve Change Request, choose the buyer under Assign to Procurement](images/pm-approve-3.jpg)
+
 3. Or click **Reject**, enter the reason and click **Submit Rejection**. The Site Engineer is notified.
 
-![SE Requested: requests waiting for the Project Manager](images/pm-exc.jpg)
-
-![Approve Change Request: choosing the buyer under Assign to Procurement](images/pm.jpg)
+![Step 3: Reject Change Request with Submit Rejection](images/pm-approve-4.jpg)
 
 ### How to create your own material purchase request
 
 1. Click **MATERIAL PURCHASE**.
 2. On the **Materials** tab, select the **Project Name**, **Area**, **BOQ**, **BOQ Item** and **Sub-Items (Scopes)**.
+
+![Step 2: Materials tab with project, area, BOQ, BOQ item and sub-item selected](images/pm-mpr-1.jpg)
+
 3. For each sub-item, add materials in one of two ways:
    - **Select Material**: pick an existing material from the BOQ.
    - **Add New** for a material not in the BOQ, then choose **From Catalogue** (search by name, brand or category) or **Enter Manually** (name and optional brand, size and specification).
 
    One request uses one way only. Once a sub-item uses **Select Material**, **Add New** is disabled for the others ("Another sub-item is using … mode"), and the other way round. Put existing and new materials in separate requests.
 
-   Existing BOQ materials are tagged **BOQ**, new ones **NEW**. Fully used materials show "Fully Consumed".
+   Materials picked from the catalogue are labelled **Catalogue Item**. A BOQ material that is fully used shows "Fully Consumed".
+
+![Step 3: Add New with From Catalogue and Enter Manually](images/pm-mpr-2.jpg)
+
+![Step 3: From Catalogue, searching the catalogue](images/pm-mpr-3.jpg)
+
 4. Enter the **Request Quantity** and **Unit** for each material. The quantity cannot exceed what is allocated in the BOQ.
 5. Write a **Justification** (at least 10 characters):
    - one for each new material;
    - one common justification for the existing materials.
 6. Optional: add **Remarks**.
 7. Click **Create Purchase Request**. The request is saved as a draft under **My Requests → Drafts (Not Sent)**.
+
+![Step 7: quantity, justification and Approval Routing, ready to Create Purchase Request](images/pm-mpr-4.jpg)
 
 ### How to send your draft
 
@@ -179,15 +235,21 @@ In **Drafts (Not Sent)**, click:
 - **Send to Estimator** when the request has new materials, or
 - **Send to Buyer** when all materials are existing. Choose the buyer and click **Approve & Assign**.
 
+![Drafts (Not Sent) with Send to Buyer and Send to Estimator](images/pm-mpr-5.jpg)
+
 ### How to request preliminaries
 
 On the **Preliminaries** tab of **MATERIAL PURCHASE**:
 
 1. Choose from the preliminaries selected in the BOQ.
-2. Enter the **Purchase Amount (AED)** and an optional justification and remarks.
-3. Click **Create Request**. It is saved as pending and can be sent to a buyer later.
 
-![Request Purchase: the Preliminaries tab](images/pm-pr.jpg)
+![Step 1: Preliminaries tab with a preliminary ticked](images/pm-prelim-1.jpg)
+
+2. Enter the **Purchase Amount (AED)** and an optional justification and remarks.
+
+![Step 2: Purchase Amount and justification entered, then Create Request](images/pm-prelim-2.jpg)
+
+3. Click **Create Request**. It is saved as pending and can be sent to a buyer later.
 
 ### Change request statuses
 
@@ -214,10 +276,16 @@ When a buyer splits a purchase across vendors, the request shows a **Split into 
 Site Engineers request returnable assets (tools and equipment) for site. Open **Asset Requisition Approvals**. The tabs are **Pending**, **Approved** and **Rejected**.
 
 1. Review the request: purpose, required date, site location, assets and urgency.
-2. Click **Approve** (optional notes). It goes to the Production Manager for final approval and dispatch.
+
+![Step 1: a request in Pending with Approve and Reject](images/pm-asset-1.jpg)
+
+2. Click **Approve**, add optional notes and confirm with **Approve & Forward**. It goes to the Production Manager for final approval and dispatch.
+
+![Step 2: the request shows Approved](images/pm-asset-2.jpg)
+
 3. Or click **Reject** and enter the **Rejection Reason**. The Site Engineer can edit and resend it.
 
-![Asset Requisition Approvals](images/pm-ast.jpg)
+![Step 3: Reject Requisition with the Rejection Reason](images/pm-asset-3.jpg)
 
 ## Labour: Requisition Approvals
 
@@ -225,15 +293,26 @@ Open **Labour** → **Requisition Approvals**. Tabs: **My Pending**, **SE Pendin
 
 ### How to approve Site Engineer labour requests
 
+![Labour Requisition Approvals: SE Pending](images/pm-labour-1.jpg)
+
 1. In **SE Pending**, click **View** to see the labour items, number of workers, dates, shift and preferred workers.
+
+![Step 1: the requisition details from View](images/pm-labour-3.jpg)
+
 2. Click **Approve**. It goes to the Production Manager to assign workers.
+
+![Step 2: the requisition shows Approved by PM](images/pm-labour-2.jpg)
+
 3. Or click **Reject** and enter the reason. The Site Engineer can edit and resend it.
 
-![Labour Requisition Approvals: SE Pending](images/pm-lab.jpg)
+![Step 3: Reject Requisition with the reason](images/pm-labour-4.jpg)
 
 ### How to create your own labour requisition
 
 1. Click **New Requisition**.
+
+![Step 1: the Create Labour Requisition window](images/pm-labreq-1.jpg)
+
 2. Select the **Project**. The site is filled in automatically.
 3. Enter the **Start Date**, **Start Time** and **End Time**. The end date is calculated; for a night shift it becomes the next day.
 4. Optional: choose **Preferred Workers**.
@@ -241,20 +320,30 @@ Open **Labour** → **Requisition Approvals**. Tabs: **My Pending**, **SE Pendin
 6. Click **Create N Requisition(s)** (N is the number of labour items). One requisition is created holding all the items.
 7. In **My Pending**, click **Send to Production**. The Production Manager is notified to assign workers.
 
+![Step 7: the requisition in My Pending with Send to Production](images/pm-labreq-2.jpg)
+
+![Step 7: View details of your requisition with Send to Production](images/pm-labreq-3.jpg)
+
 ## Labour: Attendance Lock
 
 Locked attendance is what goes to payroll. Open **Labour** → **Attendance Lock**.
 
 1. Choose the **Project** (default: All Projects) and, optionally, a **Date**.
+
+![Step 1: project and date chosen, records in Pending Lock](images/pm-attlock-1.jpg)
+
 2. Review the records in **Pending Lock**: worker, clock in/out, hours, overtime and cost. Click **View** for the full detail (regular and overtime hours, rate, break, overtime multiplier, total cost).
+
+![Step 2: one record opened with View](images/pm-attlock-2.jpg)
+
 3. Lock the records you have checked:
    - **Lock** on one row, or
    - tick rows and click **Lock Selected**, or
    - **Lock All for Day**, shown once you have chosen both a project and a date.
 
-Locked records move to **Locked** and the Admin is notified for payroll. Only locked attendance appears in **Payroll Processing**.
+![Step 3: two rows locked](images/pm-attlock-3.jpg)
 
-![Attendance Lock: one record opened with View](images/att.jpg)
+Locked records move to **Locked** and the Admin is notified for payroll. Only locked attendance appears in **Payroll Processing**.
 
 ### How hours and cost are calculated
 

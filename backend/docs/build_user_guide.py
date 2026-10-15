@@ -127,11 +127,33 @@ def flow_to_html(block):
     return '\n'.join(parts)
 
 
+PDF_IMAGE_WIDTH = 1000  # px: sharp at A4 width, keeps the PDF small (the assistant uses the full-size files)
+_pdf_image_dir = {'path': None}
+
+
+def _pdf_image(path):
+    """A smaller copy of a screenshot for the PDF (falls back to the original without Pillow)."""
+    out_dir = _pdf_image_dir['path']
+    if not out_dir:
+        return path
+    try:
+        from PIL import Image
+    except ImportError:
+        return path
+    out = os.path.join(out_dir, os.path.basename(path))
+    if not os.path.exists(out):
+        img = Image.open(path).convert('RGB')
+        if img.width > PDF_IMAGE_WIDTH:
+            img = img.resize((PDF_IMAGE_WIDTH, round(img.height * PDF_IMAGE_WIDTH / img.width)), Image.LANCZOS)
+        img.save(out, quality=72, optimize=True, progressive=True)
+    return out
+
+
 def figure_to_html(caption, src):
     path = os.path.join(GUIDE_DIR, src)
     if not os.path.isfile(path):
         sys.exit(f'Missing screenshot: {path}')
-    uri = pathlib.Path(path).resolve().as_uri()
+    uri = pathlib.Path(_pdf_image(path)).resolve().as_uri()
     return (f'<figure class="shot"><img src="{uri}" alt="{html.escape(caption)}">'
             f'<figcaption>{html.escape(caption)}</figcaption></figure>')
 
@@ -165,6 +187,8 @@ def build(out_path):
         sys.exit(f'No guide files found in {GUIDE_DIR}')
 
     with tempfile.TemporaryDirectory() as tmp:
+        _pdf_image_dir['path'] = os.path.join(tmp, 'pdf-images')
+        os.makedirs(_pdf_image_dir['path'])
         combined = os.path.join(tmp, 'guide.md')
         with open(combined, 'w', encoding='utf-8') as out:
             for f in files:
@@ -190,6 +214,9 @@ def build(out_path):
             doc = doc.replace(cover.strip(), '', 1)
             doc = doc.replace('<body>', '<body>\n' + cover, 1)
         doc = re.sub(r'<header id="title-block-header">.*?</header>', '', doc, flags=re.S)
+        # Steps split by screenshots continue their numbering (WeasyPrint ignores <ol start>)
+        doc = re.sub(r'<ol start="(\d+)"',
+                     lambda m: f'<ol start="{m.group(1)}" style="counter-reset: list-item {int(m.group(1)) - 1}"', doc)
         # embed the stylesheet (file links are unreliable across platforms)
         doc = doc.replace('</head>', '<style>\n' + CSS + '\n</style>\n</head>', 1)
         with open(html_path, 'w', encoding='utf-8') as fh:

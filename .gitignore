@@ -48,3 +48,8 @@ Thumbs.db
 *.backup
 *.backup.*
 *.bak
+
+# User guide screenshots: generated from the demo, kept out of git.
+# backend/docs/build_user_guide.py copies them into frontend/public for the in-app assistant.
+backend/docs/user_guide/images/
+frontend/public/user-guide-images/

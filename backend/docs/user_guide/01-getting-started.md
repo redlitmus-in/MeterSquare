@@ -46,11 +46,28 @@ There are no passwords. You sign in with a one-time code (OTP) sent to your emai
 ### How to sign in with email
 
 1. Open MeterSquare. The page shows **Welcome to MeterSquare**.
+
+![Step 1: the sign-in page with the Select Your Role list open](images/gs-signin-1.jpg)
+
 2. In **Select Your Role**, choose your role (Admin, Technical Director, Estimator, Project Manager, Production Manager, MEP Supervisor, Site Engineer or Procurement).
+
+![Step 2: role chosen (Site Engineer shows the Login Method, with Email selected)](images/gs-signin-2.jpg)
+
 3. Type your email in **Email Address**.
+
+![Step 3: role chosen and email entered, ready to Send OTP](images/gs-signin-3.jpg)
+
 4. Click **Send OTP**. You will see **OTP Sent Successfully!**. Check your email.
+
+![Step 4: OTP Sent Successfully! and the Enter OTP screen](images/gs-signin-4.jpg)
+
 5. On the **Enter OTP** screen, type the 6-digit code. It verifies automatically when all 6 digits are entered, or click **Verify & Login**.
+
+![Step 5: type the 6-digit code on the Enter OTP screen](images/gs-signin-5.jpg)
+
 6. You land on your role's dashboard.
+
+![Step 6: your role's dashboard (Site Engineer shown)](images/gs-signin-6.jpg)
 
 To change the email, click **← Back to email**.
 
@@ -63,8 +80,16 @@ After sending, the screen shows **Resend OTP in 30s**. When the countdown ends, 
 When you choose **Site Engineer**, a **Login Method** choice appears: **Phone (SMS)** or **Email** (Email is the default).
 
 1. Choose **Phone (SMS)**.
+
+![Step 1: Phone (SMS) chosen, with the country code and phone number fields](images/gs-sms-1.jpg)
+
 2. Pick the country code (default +971 UAE) and type your phone number. The number of digits must match the country (for example 9 digits for UAE, 10 for India).
+
+![Step 2: the country code list open and a 9-digit UAE number entered](images/gs-sms-2.jpg)
+
 3. Click **Send OTP** and enter the code from the SMS.
+
+![Step 3: OTP sent by SMS to the masked phone number](images/gs-sms-3.jpg)
 
 ### OTP rules
 
@@ -129,17 +154,29 @@ Click your name at the bottom of the sidebar to open the account menu:
 ## Profile Settings
 
 1. Open the account menu and click **Profile Settings**.
+
+![Step 1: Profile Settings in the account menu](images/gs-profile-1.jpg)
+
 2. Click **Edit Profile**.
-3. Update **Full Name**, **Email Address**, **Phone Number** or **Department**. Full name and email are required.
+
+![Step 2: the Profile tab with the Edit Profile button](images/gs-profile-2.jpg)
+
+3. Update **Full Name**, **Email Address**, **Phone Number**, **Department**, **Address** or **Professional Bio**. Full name and email are required.
+
+![Step 3: the fields in edit mode, with Save Changes at the top](images/gs-profile-3.jpg)
+
 4. Click **Save Changes**.
 
 The Profile tab also shows your role, account status and joined date.
 
 The page has three more tabs: **Security**, **Preferences** and **Activity**.
 
-- Sign-in uses one-time codes sent to your email (or phone), so there is no password to manage.
+- Sign-in uses one-time codes sent to your email (or phone).
+- The **Security** tab lists **Password** (with **Change Password**), **Two-Factor Authentication** and your sessions (**View Sessions**).
 - **Two-Factor Authentication** on the **Security** tab shows **Not Enabled**, because every sign-in already needs a one-time code.
 - You can also sign out from the **Security** tab.
+
+![The Security tab: Two-Factor Authentication shows Not Enabled, and Sign Out](images/gs-profile-4.jpg)
 
 ## Notifications
 
@@ -178,11 +215,23 @@ Use Support to report a problem or request a new feature.
 ### How to raise a support ticket
 
 1. Open the account menu and click **Support**. The **Bug Register** page opens.
+
+![Step 1: click Support in the account menu](images/gs-support-1.jpg)
+
 2. Click **New Ticket**. Your name, role and email are filled in automatically.
+
+![Step 2: the Create New Ticket form, with your name, email and role filled in](images/gs-support-2.jpg)
+
 3. Choose a **Ticket Type**: Bug, Issue, Implementation or Feature Request.
 4. Choose a **Priority**: Low, Medium, High or Critical.
+
+![Step 4: Ticket Type Bug and Priority High selected](images/gs-support-4.jpg)
+
 5. Enter a **Title** and describe the problem in **Current Concern**.
 6. Add at least one screenshot or file with **Upload Files** (required; up to 10 MB each; images, PDF, Word, Excel, text).
+
+![Step 6: title, concern and an uploaded screenshot, ready to Submit Ticket](images/gs-support-6.jpg)
+
 7. Optional: **Concern Implementation** (what you would like changed), **Implementation Files**, **Description**.
 8. Click **Submit Ticket**. To finish later, click **Save as Draft** (only a title is needed).
 
@@ -216,9 +265,20 @@ The **Ask AI** button sits at the bottom right of every page except **Support**.
 
 ### How to ask a question
 
+![The Ask AI button at the bottom right, with the small ✕ to hide it](images/gs-ask-0.jpg)
+
 1. Click **Ask AI**. The Structo panel opens.
+
+![Step 1: the Structo panel with suggested questions](images/gs-ask-1.jpg)
+
 2. Type your question, for example "How do I return unused material?", and send it.
+
+![Step 2: the question typed in the box, ready to send](images/gs-ask-2.jpg)
+
 3. Read the answer. Where it helps, the answer includes a screenshot of the screen from this guide (sample data); click it to open it full size. Use the full-screen button to make the panel larger, and the new-conversation button to start again.
+
+![Step 3: an answer with steps and a guide screenshot](images/gs-ask-3.jpg)
+
 4. Click the ✕ at the top of the panel to close it.
 
 The **User guide (PDF)** link at the bottom of the panel downloads this full guide.
@@ -228,6 +288,8 @@ The **User guide (PDF)** link at the bottom of the panel downloads this full gui
 - Click the small ✕ on the **Ask AI** button to hide it.
 - A thin handle stays on the right edge of the screen. Click it to show the button again.
 - Your choice is remembered.
+
+![The hidden button leaves a thin handle on the right edge](images/gs-ask-4.jpg)
 
 ## Working in more than one role
 
@@ -242,13 +304,20 @@ An Admin or Technical Director can give you **temporary access to another role**
 
 On the login page, choose the granted role in **Select Your Role**, enter your usual email and complete the code.
 
+![Choose the granted role (Project Manager here) in Select Your Role](images/gs-granted-1.jpg)
+
 If your granted role is **Site Engineer**, sign in with your own role and then switch roles from the account menu (the Site Engineer sign-in only accepts people whose own role is Site Engineer).
 
 ### How to switch roles while signed in
 
 1. Open the account menu at the bottom of the sidebar.
 2. Under **SWITCH ROLE** you see **Your role** and each granted role with its end date (for example "Granted · until 13 Oct"). The current one has a tick.
+
+![Step 2: SWITCH ROLE in the account menu, with your role and a granted role](images/gs-switch-2.jpg)
+
 3. Click the role you want. You will see **Switching to <role>…**, then that role's dashboard opens.
+
+![Step 3: the granted role's dashboard, with the amber banner and Switch back button](images/gs-switch-3.jpg)
 
 ### While you work in a granted role
 
@@ -259,13 +328,13 @@ If your granted role is **Site Engineer**, sign in with your own role and then s
 
 - Access ends automatically at **11:59 PM on the end date** (company time), or earlier if an Admin/TD revokes it.
 - If you are using it at that moment, your next action shows **Your role access has ended. Returning to your role…** and you are moved back to your own role.
-- The role disappears from the login role list and from **SWITCH ROLE**.
+- The role disappears from **SWITCH ROLE**, and signing in with that role no longer works (the login page always lists every role).
 
 ### When access is paused
 
 An Admin or TD can **pause** your access for a while instead of ending it.
 
-- A paused role disappears from the login role list and from **SWITCH ROLE** until it is resumed.
+- A paused role disappears from **SWITCH ROLE**, and signing in with it does not work until it is resumed.
 - If you are using it when it is paused, you are moved back to your own role on your next action.
 - The dates do not change. When the access is resumed, the role comes back.
 - If the end date passes while it is paused, the access ends.

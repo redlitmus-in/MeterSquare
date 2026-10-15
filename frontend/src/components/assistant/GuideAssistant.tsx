@@ -159,7 +159,8 @@ function Screenshot({ file, caption }: { file: string; caption: string }) {
 
 function AnswerText({ text, images }: { text: string; images?: AssistantImage[] }) {
   const blocks: React.ReactNode[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
+  // start: the first number of an ordered list, so steps continue after a screenshot (2., 3., ...)
+  let list: { ordered: boolean; items: string[]; start: number } | null = null;
   let fence: { lang: string; lines: string[] } | null = null;
 
   const flushFence = (key: string) => {
@@ -180,7 +181,11 @@ function AnswerText({ text, images }: { text: string; images?: AssistantImage[] 
     if (!list) return;
     const Tag = list.ordered ? 'ol' : 'ul';
     blocks.push(
-      <Tag key={key} className={`${list.ordered ? 'list-decimal' : 'list-disc'} pl-5 space-y-1 marker:text-[#243d8a]`}>
+      <Tag
+        key={key}
+        start={list.ordered && list.start > 1 ? list.start : undefined}
+        className={`${list.ordered ? 'list-decimal' : 'list-disc'} pl-5 space-y-1 marker:text-[#243d8a]`}
+      >
         {list.items.map((item, idx) => (
           <li key={idx}>{renderInline(item, `${key}-${idx}`)}</li>
         ))}
@@ -215,16 +220,16 @@ function AnswerText({ text, images }: { text: string; images?: AssistantImage[] 
       }
       return;
     }
-    const ordered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    const ordered = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
     const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
     const heading = line.match(/^#{1,4}\s+(.*)$/);
     if (ordered || bullet) {
       const isOrdered = !!ordered;
       if (!list || list.ordered !== isOrdered) {
         flushList(`l${idx}`);
-        list = { ordered: isOrdered, items: [] };
+        list = { ordered: isOrdered, items: [], start: ordered ? Number(ordered[1]) : 1 };
       }
-      list.items.push((ordered || bullet)![1]);
+      list.items.push(ordered ? ordered[2] : bullet![1]);
       return;
     }
     flushList(`l${idx}`);

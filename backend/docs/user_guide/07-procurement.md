@@ -79,21 +79,39 @@ Open **Purchase Orders**. This is your main working page.
 
 ## How to select a vendor and send for TD approval
 
+![Purchase Orders, Pending Purchase: click Select Vendor on the purchase](images/buy-vendor-0.jpg)
+
 1. Click **Select Vendor**. The **Select Vendors for Materials** window lists each material with how many vendors offer it. The **AI-Powered Vendor Selection** banner at the top of the window is for information only.
+
+![Step 1: the Select Vendors for Materials window](images/buy-vendor-1.jpg)
+
 2. Expand a material to compare vendors: their products, unit price and estimated total.
    - **Edit a vendor's price**: enter the new price, then click **This BOQ** to use it for this purchase only, or **All Future** to update the vendor's product price permanently.
    - **Compare with the BOQ estimate**: each price shows Over Budget, Under Budget or On Budget.
    - **Supplier notes**: add notes for the vendor (for example exact cut sizes) and click **Save**. Notes are highlighted in the LPO.
+
+![Step 2: the material expanded, vendors compared](images/buy-vendor-2.jpg)
+
 3. Choose a vendor for each material. To take a material from the M2 Store instead, click **Send to Store** on it.
+
+![Step 3: a vendor chosen for the material](images/buy-vendor-3.jpg)
+
 4. Check the **Selection Summary**: totals by vendor, compared with the BOQ total.
 5. Review the **LPO** (purchase order). Changes save automatically. You can edit:
    - Quotation Ref#, Subject, LPO Message;
    - VAT (on/off, percentage or amount);
    - Delivery Terms and Payment Terms;
    - whether to include the MD signature, company stamp and TD signature (uploaded by the Admin).
+
+![Steps 4-5: the Selection Summary and the LPO details](images/buy-vendor-4.jpg)
+
 6. Submit:
    - **One vendor for everything**: click **Submit for TD Approval**, then **Confirm & Submit**.
    - **Several vendors**: click **Send This Vendor to TD** on each vendor group, check the LPO, and click **Confirm & Send to TD**. A separate PO (PO-x.1, PO-x.2…) is created for each vendor.
+
+![Step 6: several vendors, Send This Vendor to TD on each vendor group](images/buy-vendor-split-6.jpg)
+
+![Step 6: sent, the card shows Vendor Pending TD Approval](images/buy-vendor-6.jpg)
 
 Once sent, you cannot add more materials to that vendor submission, so check carefully before sending.
 
@@ -114,9 +132,10 @@ If the store already has the materials, you can take them from stock instead of 
    - **Available**: tick these (they are pre-selected).
    - **Already Sent to Store**.
    - **Not Available**: these must be bought from a vendor.
-2. Click **Request Selected**. A store request is created.
 
-![Get from M2 Store](images/buy-st.jpg)
+![Step 1: Get from M2 Store, the available material ticked](images/buy-store-1.jpg)
+
+2. Click **Request Selected**. A store request is created.
 
 The Production Manager is notified and approves or rejects the request.
 
@@ -127,7 +146,14 @@ Any remaining materials can still be bought from a vendor. The purchase complete
 
 ## How to edit negotiated prices
 
-Click **Edit Prices** on a new purchase. Change the unit price per material and click **Save Changes**. The negotiated prices are used for vendor selection and in the LPO. The window shows the original total, the negotiated total and the difference.
+![Pending Purchase card: click Edit Prices](images/buy-prices-0.jpg)
+
+1. Click **Edit Prices** on a new purchase.
+2. Change the unit price per material and click **Save Changes**.
+
+![Step 2: Edit Negotiated Prices, changing a unit price](images/buy-prices-2.jpg)
+
+The negotiated prices are used for vendor selection and in the LPO. The window shows the original total, the negotiated total and the difference.
 
 ## How to send the LPO to the vendor
 
@@ -135,17 +161,32 @@ You can send the LPO only after the TD approves the vendor.
 
 ### By email
 
+![Vendor Approved: the card with Email and WhatsApp](images/buy-email-0.jpg)
+
 1. Click **Email**.
+
+![Step 1: the Send to Vendor window](images/buy-email-1.jpg)
+
 2. Confirm the vendor's email address. You can enter several, separated by commas.
+
+![Step 2: the vendor email and the LPO details](images/buy-email-2.jpg)
+
 3. Add **CC Recipients** if needed. The Admin's default CC addresses are included; untick any you do not want.
 4. Optional: add attachments.
 5. The **LPO PDF** is attached automatically. Click **Preview** to check it. It cannot be edited after TD approval, so make LPO changes during vendor selection.
 6. Click **Preview Email**, adjust the greeting, message, instructions and delivery requirements, then click **Send Email**.
 
+![Step 6: Preview Email, editing the greeting and message before Send Email](images/buy-emailprev-6.jpg)
+
+![Step 6: sent, the card shows Sent to Vendor and Complete & Send to Store](images/buy-email-6.jpg)
+
 ### By WhatsApp
 
 1. Click **WhatsApp**. It shows **No Phone** if the vendor has no phone number saved.
 2. Check the preview and the LPO PDF.
+
+![Step 2: the WhatsApp Preview with the message and the LPO PDF](images/buy-whatsapp-2.jpg)
+
 3. Click **Send WhatsApp**.
 
 ### What the card shows after sending
@@ -183,15 +224,25 @@ When the Production Manager rejects delivered materials at inspection, you arran
 ### How to create a return request
 
 1. Open **Vendor Returns** → **Rejected Deliveries**. Search by CR ID or vendor.
+
+![Step 1: Rejected Deliveries](images/buy-return-1.jpg)
+
 2. Click **Create Return Request** on the delivery. Review the rejected materials (quantity, price, reason) and the inspection evidence.
+
+![Step 2: the Create Return Request window](images/buy-return-2.jpg)
+
 3. Choose the **Resolution Type**:
    - **Refund**: the vendor refunds or issues a credit note.
    - **Replacement**: the vendor replaces the material.
    - **New Vendor**: buy from another vendor. Select it.
-4. Optional: set an **SLA Deadline**, **SLA Notes** and **Notes**.
-5. Click **Create Return Request**.
 
-![Create Return Request from Rejected Deliveries](images/buy-ret.jpg)
+![Step 3: Replacement chosen](images/buy-return-3.jpg)
+
+4. Optional: set an **SLA Deadline**, **SLA Notes** and **Notes**.
+
+![Step 4: SLA Deadline and SLA Notes filled in](images/buy-return-4.jpg)
+
+5. Click **Create Return Request**.
 
 The return request (VRR) goes to the TD for approval.
 
@@ -229,11 +280,17 @@ Open **Vendors** (Vendor Management). Search vendors and filter by category and 
 ### How to add a vendor
 
 1. Click **Add Vendor**.
+
+![Step 1: Vendor Management with Add Vendor](images/buy-addvendor-1.jpg)
+
 2. Enter:
    - **Company Name** and **Email** (required);
    - Category (or **+ Add New Category**) and Status (**Active** or **Inactive**);
    - Contact Person, Country, Phone and the tax number (TRN or GST, depending on the country);
    - optionally the address.
+
+![Step 2: the Add New Vendor form filled in](images/buy-addvendor-2.jpg)
+
 3. Click **Add Vendor**.
 
 Only **Active** vendors are offered when selecting vendors. Use **Edit** to update a vendor and **Delete** to remove one.
@@ -241,11 +298,15 @@ Only **Active** vendors are offered when selecting vendors. Use **Edit** to upda
 ### How to add a vendor's products
 
 1. Click **View** on the vendor.
+
+![Step 1: the vendor's page with Products & Services and Add Product](images/buy-products-1.jpg)
+
 2. Under **Products & Services**, click **Add Product**.
 3. Enter the **Product/Service Name**, Category, Description, Unit and **Unit Price (AED)**.
-4. Click **Add Product**.
 
-![A vendor's Products & Services](images/buy-ven.jpg)
+![Step 3: the Add New Product window filled in](images/buy-products-3.jpg)
+
+4. Click **Add Product**.
 
 Vendor product prices are used to compare vendors when you select one.
 
@@ -264,8 +325,14 @@ Use this to transfer materials yourself, either to a site or to the M2 Store.
    - **Construction Site (Direct)**: also select the **Site Engineer** and **Project**.
    - **M2 Store (Warehouse)**.
 3. Click **Add Material** for each material (name, quantity, unit).
+
+![Step 3: Site Engineer, project and materials entered](images/buy-tr-3.jpg)
+
 4. Enter the **Transfer Date**, vehicle, driver, driver contact, transfer fee and notes.
 5. Click **Create Delivery Note**. It is created as a draft.
+
+![Step 5: transport details filled in, Create Delivery Note](images/buy-tr-5.jpg)
+
 6. In **Transfer History**, click **Dispatch**, then **Dispatch Now**. The delivery is **In Transit**. A PDF is available.
 
 ![Buyer Material Transfer](images/buy-tr.jpg)
@@ -280,3 +347,5 @@ Open **Store** → **Raw Materials** to manage the raw materials catalog used in
 - **Items & Sub-Items** tab: link materials to items with **Link Material**.
 
 ![Raw Materials Catalog](images/buy-cat.jpg)
+
+![Add Material: the Add New Raw Material window, Create Material](images/buy-raw-1.jpg)

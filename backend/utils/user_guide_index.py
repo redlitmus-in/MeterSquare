@@ -26,6 +26,10 @@ FILE_ROLES = {
     'procurement': {'buyer'},
     'production-manager': {'productionmanager'},
 }
+# Sections of a role chapter that another role also does (chapter, ## section) -> extra roles
+SECTION_EXTRA_ROLES = {
+    ('admin', 'Role Access (temporary extra roles)'): {'technicaldirector'},
+}
 
 _STOPWORDS = set("""
 a an the and or of to in on for with by at from is are was were be been it this that these those as do does did
@@ -66,13 +70,18 @@ def _split_sections(filename, text):
     roles = _file_roles(filename)
     sections, h1, h2 = [], '', ''
     current_title, buf, images = None, [], []
+    last_step = [0]  # number of the last numbered step seen in this section (0 = before the steps)
+    last_raw, step_offset = [0], [0]
 
     def flush():
         body = '\n'.join(buf).strip()
         if current_title and body:
-            sections.append({'file': filename, 'title': current_title, 'text': body, 'roles': roles,
+            stem = re.sub(r'^\d+[-_]', '', os.path.splitext(filename)[0])
+            extra = SECTION_EXTRA_ROLES.get((stem, h2), set())
+            sections.append({'file': filename, 'title': current_title, 'text': body, 'roles': roles | extra,
                              'images': list(images)})
         images.clear()
+        last_step[0] = last_raw[0] = step_offset[0] = 0
 
     for line in text.splitlines():
         m = re.match(r'^(#{1,3})\s+(.*)$', line)
@@ -93,11 +102,35 @@ def _split_sections(filename, text):
             continue
         shot = re.match(r'^!\[([^\]]*)\]\(images/([a-z0-9-]+\.jpg)\)\s*$', line)
         if shot:
-            # Screenshots stay out of the searchable text; the assistant may show them by file name
-            images.append({'file': shot.group(2), 'caption': shot.group(1)})
+            # Screenshots stay out of the searchable text; the assistant may show them by file name.
+            # 'step' = the numbered step the screenshot follows (0 = before the steps).
+            images.append({'file': shot.group(2), 'caption': shot.group(1), 'step': last_step[0]})
             continue
+        step = re.match(r'^(\d+)[.)]\s', line)
+        if step:
+            # number on through lists that restart at 1 (Step 1: 1-5, Step 2: 1-4 -> 1-9)
+            n = int(step.group(1))
+            if n <= last_raw[0]:
+                step_offset[0] += last_raw[0]
+            last_raw[0] = n
+            last_step[0] = step_offset[0] + n
         buf.append(line)
     flush()
+
+    # A sub-section without its own screenshot (e.g. "How to reject a BOQ") can show one from its topic
+    # (the same ## section and its sub-sections), offered after the section's own screenshots.
+    topic = lambda s: ' › '.join(s['title'].split(' › ')[:2])
+    by_topic = {}
+    for s in sections:
+        by_topic.setdefault(topic(s), []).extend(s['images'])
+    for s in sections:
+        own = {img['file'] for img in s['images']}
+        seen, related = set(own), []
+        for img in by_topic[topic(s)]:
+            if img['file'] not in seen:
+                seen.add(img['file'])
+                related.append(img)
+        s['related_images'] = related
     return sections
 
 
@@ -167,7 +200,7 @@ def search(query, role=None, limit=6, max_chars=14000):
         if not text:
             break
         results.append({'title': s['title'], 'text': text, 'file': s['file'], 'roles': sorted(s['roles']),
-                        'images': s.get('images', [])})
+                        'images': s.get('images', []), 'related_images': s.get('related_images', [])})
         total += len(text)
     return results
 
