@@ -16,7 +16,8 @@ import requests
 from flask import g, request, jsonify
 
 from config.logging import get_logger
-from utils.user_guide_index import search, section_count, normalize_role, overview_sections, sections_titled
+from utils.user_guide_index import (search, section_count, normalize_role, overview_sections, sections_titled,
+                                    role_mentions, guide_tokens)
 
 log = get_logger()
 
@@ -59,6 +60,82 @@ DEFAULT_SUGGESTIONS = ['How do I switch roles?', 'Where do I see my notification
 def _role():
     user = getattr(g, 'user', None) or {}
     return user.get('role') or ''
+
+
+# "show it in images", "screenshot please", "I didn't see?" ...
+PICTURE_REQUEST = re.compile(
+    r"\b(?:images?|screen ?shots?|pictures?|pics?|photos?|snaps?|visuals?|proof|show me|show it"
+    r"|did ?n.?t see|did ?not see|can.?t see|cannot see|not (?:showing|visible))\b", re.I)
+
+
+# Messages that get no screenshots: greetings and small talk
+SMALL_TALK = re.compile(r"^\W*(?:hi|hii+|hello|hey|thanks?|thank you|thx|ok(?:ay)?|cool|great|bye|good (?:morning|afternoon|evening)"
+                        r"|who are you|what is your name)\W*$", re.I)
+# "How do I ..." questions: steps only for the asker's own work, so screenshots only of their own screens
+HOW_TO = re.compile(r"\bhow (?:do|can|to|should|would)\b|\bsteps?\b|\bprocedure\b", re.I)
+
+
+MAX_EXCERPTS = 8
+MAX_EXCERPT_CHARS = 16000
+
+
+def _question_parts(message):
+    """A question about several things ("internal and external revision") -> one part per thing."""
+    parts = [p.strip() for p in re.split(r'\s+(?:and|vs\.?|versus|&)\s+|\s*,\s*', message, flags=re.I)]
+    parts = [p for p in parts if p]
+    # each part must name a thing of its own ("receive and process a return" is one task)
+    return parts if len(parts) > 1 and all(len(guide_tokens(p)) >= 2 for p in parts) else [message]
+
+
+def _titled(question, sections):
+    """Sections with screenshots whose own title the question mostly names ("create a delivery note")."""
+    asked = set(guide_tokens(question))
+    out = []
+    for e in sections:
+        title = set(guide_tokens(e['title'].split(' › ')[-1]))
+        if e.get('images') and title and len(title & asked) / len(title) >= 0.5:
+            out.append(e)
+    return out
+
+
+def _search_question(message, topic, role):
+    """
+    Guide sections for the question, plus its focus: the sections whose screenshots the answer must
+    show in full, so a question about two things shows both things' screens. Returns
+    (excerpts, focus, named): named are the focus titles the question itself asks about (shown even
+    when the answer's wording doesn't match them).
+    """
+    context = ' '.join(topic)
+    whole = search(f'{message} {context}', role=role)
+    parts = _question_parts(message)
+    if len(parts) == 1:
+        best = next((e for e in whole if e.get('images')), None)
+        focus = ([best] if best else []) + [e for e in _titled(message, whole[:4]) if e is not best]
+        return whole, focus, set()
+
+    # "... and external revision in estimator": every part is about the Estimator
+    roles_named = ' '.join(f'in {word}' for word in role_mentions(message))
+    per_part = [search(f'{part} {roles_named} {context}', role=role, limit=4) for part in parts]
+    focus = []
+    for found in per_part:
+        best = next((e for e in found if e.get('images')), None)
+        if best and best['title'] not in {f['title'] for f in focus}:
+            focus.append(best)
+    named = {e['title'] for e in focus}
+    # each part's sections first, taking turns, then the rest of the whole question's
+    merged, seen, total = [], set(), 0
+    for e in focus + [e for row in zip(*per_part) for e in row] + whole + [e for found in per_part for e in found]:
+        if e['title'] in seen or len(merged) >= MAX_EXCERPTS or total + len(e['text']) > MAX_EXCERPT_CHARS:
+            continue
+        seen.add(e['title'])
+        merged.append(e)
+        total += len(e['text'])
+    return merged, focus, named
+
+
+def _is_follow_up(text):
+    """A message that names no topic of its own (a picture request or a few words)."""
+    return bool(PICTURE_REQUEST.search(text)) or len(text.split()) <= 4
 
 
 def _excerpt_owner(excerpt):
@@ -164,9 +241,19 @@ How to respond:
   prefer that excerpt's own screenshots, else one of its same-topic screenshots. Never use a screenshot
   listed under a different excerpt. Write its tag alone on its own line, exactly as listed (for
   example [screenshot: pm-se.jpg]), right after the step it matches. When the user asks for a screenshot,
-  picture or proof, show every listed screenshot that matches. Only use tags listed in the excerpts. No
-  screenshots for greetings, definitions or other roles' tasks. Never invent a tag. If no listed
-  screenshot shows that screen, give the steps without one.
+  picture or proof, show every listed screenshot that matches. Only use tags listed in the excerpts.
+  Never invent a tag. If no listed screenshot shows that screen, give the steps without one.
+- The user should never have to ask for pictures. Every answer about a MeterSquare screen, feature,
+  status, approval or process, including explanations ("what is an internal revision?", "where do I see
+  X?", "what happens after Y?"), ALWAYS shows the listed screenshots of the excerpts it explains, even
+  when they are another role's screens: write one short line saying what it shows (and whose screen it
+  is, e.g. "the Estimator's Revisions tab"), then its tag alone on the next line, placed next to the part
+  of the answer it shows. The only answers without screenshots are greetings and small talk, general
+  knowledge not about the app, off-topic questions, and how-to steps for a task another role does.
+- When the user asks to see something ("show it in images", "screenshot", "I didn't see"), show the listed
+  screenshots of the topic of the conversation if the message names none. Never say the guide has no
+  screenshots for a topic when its excerpts list some. The app shows each tag as the picture itself, so
+  never mention tags, file names or browser settings to the user.
 - Step-by-step like the user guide: when an excerpt's screenshots say "(under step N)", the app itself
   shows each one under the matching step of your answer. For that task: do NOT write those screenshot
   tags or any note about them yourself; keep the excerpt's steps in the same order, one step per
@@ -209,9 +296,20 @@ def assistant_chat():
     role = _role()
     role_label = ROLE_LABELS.get(normalize_role(role), role or 'User')
 
-    # Retrieve with the question plus the previous user turn (follow-ups like "and then?")
-    last_user = next((t['content'] for t in reversed(history) if t['role'] == 'user'), '')
-    excerpts = search(f"{message} {last_user}", role=role)
+    # Retrieve with the question plus the topic of the conversation: follow-ups like "and then?",
+    # "show it in images" or "I didn't see?" name no topic, so look back to the last real question
+    topic = []
+    for turn in reversed(history):
+        if turn['role'] != 'user':
+            continue
+        topic.append(turn['content'])
+        if not _is_follow_up(turn['content']):
+            break
+        if len(topic) >= 3:
+            break
+    wants_pictures = bool(PICTURE_REQUEST.search(message))
+    excerpts, focus, named = _search_question(message, topic, role)
+    searched = len(excerpts)  # the sections about this question (overview and glossary are added below)
     # Short or conversational messages match little: always give the role overview too
     vague = any(p in message.lower() for p in VAGUE_PHRASES)
     if len(excerpts) < 3 or len(message.split()) <= 4 or vague:
@@ -263,7 +361,16 @@ def assistant_chat():
         log.error("Assistant: unexpected Groq response shape")
         return jsonify({'success': False, 'error': 'The assistant could not answer right now. Please try again.'}), 502
 
-    answer, images = _screenshots(answer, excerpts, normalize_role(role))
+    # Every answer about the app shows its screenshots without being asked; explanations and picture
+    # requests may show any role's screens ('asked' / 'auto'), "how do I" steps only the asker's own ('own')
+    if wants_pictures:
+        pictures = 'asked'
+    elif vague or SMALL_TALK.match(message):
+        pictures = ''
+    else:
+        pictures = 'own' if HOW_TO.search(message) else 'auto'
+    answer, images = _screenshots(answer, excerpts, normalize_role(role), pictures, excerpts[:searched],
+                                  focus, named)
 
     # Don't cite guide sections for answers that say the guide doesn't cover the question
     not_covered = re.search(
@@ -281,7 +388,7 @@ def assistant_chat():
 # A screenshot tag anywhere in the answer, even in *italics*, `code` or indented under a step
 SCREENSHOT_TAG = re.compile(r'[*_`]*\[screenshot:\s*([a-z0-9-]+\.jpg)\s*\][*_`]*(?:[ \t]*\([^()\n]{0,80}\))?', re.I)
 STEP_LINE = re.compile(r'^\s*\d+[.)]\s')
-MAX_SCREENSHOTS = 8
+MAX_SCREENSHOTS = 12
 
 
 def _guide_steps(text):
@@ -307,8 +414,8 @@ def _layout_steps(answer, source, used, allowed):
     The section's tags placed by the model are replaced by this layout. Other sections' tags stay.
     """
     shots = [img for img in source.get('images') or [] if 'step' in img]
-    if len({img['step'] for img in shots}) < 2:
-        return answer
+    if len({img['step'] for img in shots}) < 2 or not re.search(r'(?m)^\s*\d+[.)]\s', answer):
+        return answer  # no steps to place them under: keep the model's own placement
     files = {img['file'] for img in shots}
     lines = [ln for ln in answer.split('\n')
              if not (ln.startswith('[screenshot: ') and ln[13:-1] in files)
@@ -406,17 +513,28 @@ def _answered_excerpts(answer, excerpts):
     return []
 
 
-def _screenshots(answer, excerpts, role_n=''):
+AUTO_SCREENSHOTS = 4  # an explanation the model left without pictures gets up to this many
+
+
+def _screenshots(answer, excerpts, role_n='', pictures='', topic_excerpts=None, focus=None, named=()):
     """
-    Screenshots shown with an answer: only those of the guide sections the answer follows (at most 3,
-    no repeats), each on a clean line of its own. A step-by-step answer without one gets the best
-    section's screenshot after its steps.
+    Screenshots shown with an answer: only those of the guide sections the answer follows (at most
+    MAX_SCREENSHOTS, no repeats), each on a clean line of its own. A step-by-step answer without one
+    gets the best section's screenshot after its steps; an explanation or picture request ('auto' /
+    'asked') shows the screens of each focus section (one per thing asked about), or else the topic's.
     """
-    # Only the asker's own work gets screenshots: sections for their role or for every role
-    own_work = [e for e in excerpts if not e.get('roles') or role_n in e.get('roles')]
+    # Screenshots come from the asker's own work (sections for their role or for every role), or,
+    # for explanations and picture requests, from any role's sections about the question
+    is_own = lambda e: not e.get('roles') or role_n in e.get('roles')
+    own_work = [e for e in excerpts if is_own(e)]
     sources = _answered_excerpts(answer, own_work)
+    any_role = pictures in ('asked', 'auto')
+    focus = [e for e in focus or [] if any_role or (pictures == 'own' and is_own(e))]
+    if any_role:
+        others = topic_excerpts if topic_excerpts is not None else excerpts
+        sources += [e for e in _answered_excerpts(answer, others) if e not in sources]
     allowed = {}
-    for e in sources:
+    for e in sources + focus:
         for img in _offered_images(e):
             allowed.setdefault(img['file'], img['caption'])
     used = []
@@ -449,4 +567,45 @@ def _screenshots(answer, excerpts, role_n=''):
         answer = '\n'.join(lines)
         used.append(own[0]['file'])
         allowed[own[0]['file']] = own[0]['caption']
+
+    # Each thing the question asks about shows its full set of screens, in the guide's order: a focus
+    # section the answer explains (or one of several the question names) gets the screenshots the
+    # answer left out, after the last one shown, or after the answer under the section's name
+    if focus:
+        titles = {e['title'] for e in sources}
+        for e in focus:
+            files = [img['file'] for img in e.get('images') or []]
+            missing = [img for img in e.get('images') or [] if img['file'] not in used]
+            if not missing or (e['title'] not in titles and e['title'] not in named):
+                continue  # all shown, or the answer is about something else
+            missing = missing[:max(0, MAX_SCREENSHOTS - len(used))]
+            if not missing:
+                break
+            for img in missing:
+                used.append(img['file'])
+                allowed[img['file']] = img['caption']
+            tags = [t for img in missing for t in ('', f"[screenshot: {img['file']}]")]
+            lines = answer.split('\n')
+            shown_at = [i for i, ln in enumerate(lines) if ln.startswith('[screenshot: ') and ln[13:-1] in files]
+            if shown_at:
+                end = shown_at[-1]
+                if end + 1 < len(lines) and lines[end + 1].lstrip().startswith(('–', '-')) and 'screenshot' not in lines[end + 1]:
+                    end += 1  # keep the shown screenshot's own caption line with it
+                lines[end + 1:end + 1] = tags
+            else:
+                owner = _excerpt_owner(e)
+                lines += ['', f"**{e['title'].split(' › ')[-1]}**" + (f" ({owner})" if owner else '')] + tags
+            answer = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines))
+
+    # About the app but no picture placed: show the screenshots of the sections the answer is about
+    if any_role and not used:
+        limit = MAX_SCREENSHOTS if pictures == 'asked' else AUTO_SCREENSHOTS
+        shown = []
+        for e in sources:
+            for img in e.get('images') or []:
+                if img['file'] not in used and len(used) < limit:
+                    used.append(img['file'])
+                    allowed[img['file']] = img['caption']
+                    shown += ['', f"[screenshot: {img['file']}]"]
+        answer = '\n'.join([answer] + shown)
     return answer, [{'file': n, 'caption': allowed[n]} for n in used]

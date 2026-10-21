@@ -8,6 +8,7 @@ question with BM25, with a small boost for sections about the asker's role.
 The index reloads automatically when a guide file changes.
 """
 
+import difflib
 import math
 import os
 import re
@@ -57,6 +58,60 @@ def _tokens(text):
                 w = w[: -len(suffix)]
                 break
         out.append(w)
+    return out
+
+
+# Words users say for what the guide calls something else (stemmed token -> guide tokens)
+_SYNONYMS = {
+    'extern': ['client'],  # "external revision" = client revision
+}
+
+
+# How users name a role in a question -> normalized role
+_ROLE_WORDS = [
+    (r'\bestimat\w*', 'estimator'),
+    (r'\btechnical director\b|\btd\b', 'technicaldirector'),
+    (r'\bproject manager\b|\bpm\b', 'projectmanager'),
+    (r'\bmep\b', 'mep'),
+    (r'\bsite (?:engineer|supervisor)\b|\bse\b', 'siteengineer'),
+    (r'\bbuyer\b|\bprocurement\b', 'buyer'),
+    (r'\bproduction manager\b|\bm2 store\b|\bstore manager\b', 'productionmanager'),
+    (r'\badmin\w*', 'admin'),
+]
+
+
+# A role named as the place the question is about ("revisions in estimator", "the TD's screen"),
+# not as the other party of a task ("send a BOQ to the Technical Director")
+_ROLE_CONTEXT = (r"(?:\b(?:in|for|as|of|by|inside|within|under)\s+(?:the\s+|an?\s+)?(?:{0})"
+                 r"|(?:{0})(?:'s|s'|\s+(?:role|side|screens?|module|dashboard|view|login|account|chapter|menu|page|tab)s?\b))")
+
+
+def _role_matches(text):
+    for pattern, role in _ROLE_WORDS:
+        for m in re.finditer(_ROLE_CONTEXT.format(pattern), text, re.I):
+            yield role, re.search(pattern, m.group(0), re.I).group(0)
+
+
+def mentioned_roles(text):
+    """Roles the question is about ("revisions in estimator", "the TD's dashboard", ...)."""
+    return {role for role, _word in _role_matches(text)}
+
+
+def role_mentions(text):
+    """The words the question names those roles with, e.g. ['estimator']."""
+    return [word for _role, word in _role_matches(text)]
+
+
+def _query_tokens(query, df):
+    """The question's tokens, with misspellings ("revistion") corrected to the guide's words and synonyms added."""
+    out = []
+    for t in _tokens(query):
+        if t not in df and len(t) >= 5:
+            close = difflib.get_close_matches(t, _SYNONYMS.keys(), n=1, cutoff=0.8) \
+                or difflib.get_close_matches(t, df.keys(), n=1, cutoff=0.8)
+            t = close[0] if close else t
+        out.append(t)
+        out += _SYNONYMS.get(t, [])
     return out
 
 
@@ -173,9 +228,11 @@ def search(query, role=None, limit=6, max_chars=14000):
     sections, df, avgdl = _index['sections'], _index['df'], _index['avgdl']
     if not sections:
         return []
-    q = _tokens(query)
+    q = _query_tokens(query, df)
     n = len(sections)
     role_n = normalize_role(role)
+    # A role named in the question ("revisions in estimator") outranks the asker's own role
+    named = mentioned_roles(query)
     k1, b = 1.4, 0.75
     scored = []
     for s in sections:
@@ -186,7 +243,14 @@ def search(query, role=None, limit=6, max_chars=14000):
                 continue
             idf = math.log(1 + (n - df[t] + 0.5) / (df[t] + 0.5))
             score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * s['len'] / avgdl))
-        if score and role_n and role_n in s['roles']:
+        if score:
+            # the section's own title in the question ("Admin Dashboard", "receive and process a return")
+            own_title = s.setdefault('title_tokens', set(_tokens(s['title'].split(' › ')[-1])))
+            if own_title:
+                score *= 1 + 0.6 * len(own_title & set(q)) / len(own_title)
+        if score and named and named & s['roles']:
+            score *= 1.6
+        elif score and role_n and role_n in s['roles']:
             score *= 1.35
         if score:
             scored.append((score, s))
@@ -244,3 +308,8 @@ def sections_titled(title_suffix):
 def section_count():
     _ensure_index()
     return len(_index['sections'])
+
+
+def guide_tokens(text):
+    """The words of the text the search matches on (no stopwords, lightly stemmed)."""
+    return _tokens(text)

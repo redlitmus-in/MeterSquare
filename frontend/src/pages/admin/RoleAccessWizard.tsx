@@ -506,7 +506,7 @@ const RoleAccessWizard: React.FC<Props> = ({ today, onClose, onGranted, mode = '
               </div>
 
               {/* Step content */}
-              <div className="flex-1 min-w-0 bg-white border border-gray-200 rounded-2xl p-5 overflow-hidden">
+              <div className="flex-1 min-w-0 bg-white border border-gray-200 rounded-2xl p-5 overflow-x-hidden overflow-y-auto">
                 <AnimatePresence mode="wait" custom={direction} initial={false}>
                   <motion.div
                     key={step}
@@ -961,7 +961,7 @@ const MenuPicker: React.FC<{
               Clear
             </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[38vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {groups.map((g, gi) => (
               <div key={`${g.name}-${gi}`} className={g.name ? 'sm:col-span-2 space-y-1.5' : ''}>
                 {g.name && <div className="text-[11px] font-bold uppercase tracking-wide text-gray-500 mt-1">{g.name}</div>}
