@@ -139,7 +139,8 @@ const FENCE = '```';
 
 // A guide screenshot inside an answer; opens full size in a new tab
 function Screenshot({ file, caption }: { file: string; caption: string }) {
-  const src = `${GUIDE_IMAGES_URL}/${file}`;
+  // The guide's screenshots are published as WebP copies (est-new.jpg -> est-new.webp)
+  const src = `${GUIDE_IMAGES_URL}/${file.replace(/\.jpg$/i, '.webp')}`;
   return (
     <figure className="my-1">
       <a href={src} target="_blank" rel="noopener noreferrer" title="Open full size">

@@ -98,6 +98,8 @@ pnpm-lock.yaml.backup
 public/*
 # ...except the user guide PDF (built by backend/docs/build_user_guide.py, served at /MeterSquare-User-Guide.pdf)
 !public/MeterSquare-User-Guide.pdf
+# ...and the screenshots Structo shows in its answers (WebP copies written by the same build)
+!public/user-guide-images/
 
 # VuePress build output
 .vuepress/dist

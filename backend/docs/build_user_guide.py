@@ -20,8 +20,8 @@ drawn as a role-coloured flowchart in the PDF, e.g.
 
 Screenshots: a line on its own like `![Caption](images/est-new.jpg)` becomes a captioned
 figure. Images live in user_guide/images/ and show sample data only (the PDF is public).
-The build also copies them to frontend/public/user-guide-images/, where the in-app assistant
-(Structo) shows them inside answers.
+The build also writes WebP copies to frontend/public/user-guide-images/ (committed to git, so
+production builds include them), where the in-app assistant (Structo) shows them inside answers.
 """
 
 import argparse
@@ -235,12 +235,21 @@ def build(out_path):
 
 
 def publish_images():
-    """Copy the screenshots next to the PDF so the in-app assistant (Structo) can show them."""
+    """
+    WebP copies of the screenshots next to the PDF, where the in-app assistant (Structo) shows them
+    (est-new.jpg -> est-new.webp). Unlike the originals they are committed to git, so every build
+    includes them; WebP keeps them about half the size at full resolution.
+    """
+    from PIL import Image
     src = os.path.join(GUIDE_DIR, 'images')
     if os.path.isdir(IMAGES_OUT):
         shutil.rmtree(IMAGES_OUT)
-    shutil.copytree(src, IMAGES_OUT)
-    print(f'Copied {len(os.listdir(IMAGES_OUT))} screenshots to {IMAGES_OUT}')
+    os.makedirs(IMAGES_OUT)
+    names = sorted(f for f in os.listdir(src) if f.lower().endswith('.jpg'))
+    for name in names:
+        out = os.path.join(IMAGES_OUT, os.path.splitext(name)[0] + '.webp')
+        Image.open(os.path.join(src, name)).convert('RGB').save(out, 'WEBP', quality=80, method=6)
+    print(f'Wrote {len(names)} screenshots to {IMAGES_OUT}')
 
 
 if __name__ == '__main__':
