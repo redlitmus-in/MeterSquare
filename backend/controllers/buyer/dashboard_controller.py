@@ -202,7 +202,7 @@ def get_buyer_dashboard_analytics():
                     continue
 
             # ✅ FIX: Skip if all materials are handled by POChildren (complete split)
-            total_mats_dashboard = len(cr.materials_data or cr.sub_items_data or [])
+            total_mats_dashboard = len(cr.get_materials())
 
             # Count materials in POChildren
             po_child_mats_dashboard = 0

@@ -441,7 +441,7 @@ def get_buyer_pending_purchases():
                 all_store_requests_approved = (
                     approved_count == len(store_requests)
                     and len(store_requests) > 0
-                    and len(store_routed_names) >= len(cr.materials_data or cr.sub_items_data or [])
+                    and len(store_routed_names) >= len(cr.get_materials())
                 )
                 any_store_request_rejected = rejected_count > 0
 
@@ -490,7 +490,7 @@ def get_buyer_pending_purchases():
             # ✅ FIX: Check if all materials are handled by POChildren
             # Only hide parent if POChildren exist AND handle all unrouted materials
             # Don't hide if vendor selections are in parent CR (not POChildren)
-            total_materials_count = len(cr.materials_data or cr.sub_items_data or [])
+            total_materials_count = len(cr.get_materials())
             routed_count = len(routed_materials)
 
             # Count materials in POChildren
@@ -577,7 +577,7 @@ def get_buyer_pending_purchases():
                     and not all_store_requests_approved
                     and has_store_requests
                     # Only fully rejected if ALL materials were routed to store (none remaining for vendor)
-                    and len(store_routed_names) >= len(cr.materials_data or cr.sub_items_data or [])
+                    and len(store_routed_names) >= len(cr.get_materials())
                     # Don't mark as fully rejected if vendor-routed materials still need attention
                     and not any(
                         isinstance(info, dict) and info.get('routing') == 'vendor'
@@ -768,7 +768,7 @@ def get_buyer_completed_purchases():
                     continue
 
             # ✅ FIX: Skip if all materials are handled by POChildren (complete split)
-            total_materials_completed = len(cr.materials_data or cr.sub_items_data or [])
+            total_materials_completed = len(cr.get_materials())
 
             # Count materials in POChildren
             po_child_materials_completed = 0

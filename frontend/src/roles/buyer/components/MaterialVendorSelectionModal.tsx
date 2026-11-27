@@ -32,6 +32,7 @@ import { buyerVendorService, Vendor, VendorProduct } from '../services/buyerVend
 import { toast } from 'sonner';
 import ModernLoadingSpinners from '@/components/ui/ModernLoadingSpinners';
 import { useAuthStore } from '@/store/authStore';
+import VendorSelectionSummary, { VendorSummaryRow } from './VendorSelectionSummary';
 
 interface MaterialVendorSelectionModalProps {
   purchase: Purchase;
@@ -885,6 +886,39 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
         };
       });
   };
+
+  // Unit price of the first selected vendor: negotiated price, else the vendor's lowest matching product price
+  const getSelectedVendorUnitPrice = (material: MaterialVendorState): number | null => {
+    const selectedVendor = material.selected_vendors[0];
+    if (!selectedVendor) return null;
+    if (selectedVendor.negotiated_price) return selectedVendor.negotiated_price;
+
+    const vendorProductsList = vendorProducts.get(selectedVendor.vendor_id) || [];
+    const vendorCategory = vendors.find(v => v.vendor_id === selectedVendor.vendor_id)?.category?.toLowerCase().trim() || '';
+    const prices = vendorProductsList
+      .filter(p => isProductMatchingMaterial(
+        p.product_name?.toLowerCase().trim() || '',
+        p.category?.toLowerCase().trim() || '',
+        vendorCategory,
+        material.material_name.toLowerCase()
+      ))
+      .map(p => p.unit_price || 0)
+      .filter(p => p > 0);
+    return prices.length > 0 ? Math.min(...prices) : null;
+  };
+
+  // Rows for the pre-submit summary: every material in the PO with its vendor and pricing
+  const buildSummaryRows = (materials: MaterialVendorState[]): VendorSummaryRow[] =>
+    materials.map(m => ({
+      material_name: m.material_name,
+      sub_item_name: m.sub_item_name,
+      quantity: m.quantity,
+      unit: m.unit,
+      vendor_name: m.routing_type === 'store' ? undefined : m.selected_vendors[0]?.vendor_name,
+      routed_to_store: m.routing_type === 'store',
+      unit_price: m.routing_type === 'store' ? null : getSelectedVendorUnitPrice(m),
+      boq_unit_price: purchase.materials?.find(pm => pm.material_name === m.material_name)?.unit_price || null,
+    }));
 
   const handleToggleSelectionMode = (materialName: string) => {
     setMaterialVendors(prev => prev.map(m =>
@@ -1912,31 +1946,8 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                                     const boqTotalAmount = boqUnitPrice * material.quantity;
 
                                     // Calculate vendor price
-                                    let vendorTotalAmount: number | null = null;
-                                    if (material.selected_vendors.length > 0) {
-                                      const selectedVendor = material.selected_vendors[0];
-
-                                      // Use negotiated price if available
-                                      if (selectedVendor.negotiated_price) {
-                                        vendorTotalAmount = selectedVendor.negotiated_price * material.quantity;
-                                      } else {
-                                        // Otherwise, try to find lowest price from vendor's matching products
-                                        const vendorProductsList = vendorProducts.get(selectedVendor.vendor_id) || [];
-                                        const vendorCategory = vendors.find(v => v.vendor_id === selectedVendor.vendor_id)?.category?.toLowerCase().trim() || '';
-                                        const matchingProducts = vendorProductsList.filter(p => {
-                                          const productName = p.product_name?.toLowerCase().trim() || '';
-                                          const productCategory = p.category?.toLowerCase().trim() || '';
-                                          return isProductMatchingMaterial(productName, productCategory, vendorCategory, material.material_name.toLowerCase());
-                                        });
-
-                                        if (matchingProducts.length > 0) {
-                                          const lowestPrice = Math.min(...matchingProducts.map(p => p.unit_price || 0).filter(p => p > 0));
-                                          if (lowestPrice > 0) {
-                                            vendorTotalAmount = lowestPrice * material.quantity;
-                                          }
-                                        }
-                                      }
-                                    }
+                                    const vendorUnitPrice = getSelectedVendorUnitPrice(material);
+                                    const vendorTotalAmount = vendorUnitPrice !== null ? vendorUnitPrice * material.quantity : null;
 
                                     return (
                                       <div className="flex items-center gap-2">
@@ -3741,7 +3752,7 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+                    className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {/* Confirmation Header */}
@@ -3755,9 +3766,9 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                     </div>
 
                     {/* Confirmation Body */}
-                    <div className="px-6 py-5">
+                    <div className="px-6 py-5 overflow-y-auto">
                       <p className="text-gray-700 mb-4">
-                        You have selected <span className="font-semibold text-gray-900">{totalVendorSelections} vendor(s)</span> for <span className="font-semibold text-gray-900">{selectedCount} material(s)</span>.
+                        You have selected <span className="font-semibold text-gray-900">{totalVendorSelections} vendor(s)</span> for <span className="font-semibold text-gray-900">{selectedCount} of {unlockedMaterials.length} material(s)</span>.
                       </p>
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
                         <p className="text-sm text-blue-900">
@@ -3770,27 +3781,12 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                         </p>
                       </div>
 
-                      {/* Summary of selections */}
-                      <div className="max-h-60 overflow-y-auto space-y-2">
-                        {materialVendors.filter(m => m.selected_vendors.length > 0).map((m, idx) => (
-                          <div key={idx} className="text-xs bg-gray-50 rounded p-2">
-                            <div className="font-medium text-gray-900 mb-1 flex items-center justify-between">
-                              <span>{m.material_name}</span>
-                              <Badge className="text-[10px]">{m.selection_mode}</Badge>
-                            </div>
-                            {m.selected_vendors.map((v, vIdx) => (
-                              <div key={vIdx} className="flex items-center justify-between text-gray-700 pl-3">
-                                <span>→ {v.vendor_name}</span>
-                                {v.send_individually && (
-                                  <Badge className="bg-purple-100 text-purple-800 text-[9px]">
-                                    Separate PO
-                                  </Badge>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        ))}
-                      </div>
+                      {/* Full PO summary: every material, including any still without a vendor */}
+                      <VendorSelectionSummary
+                        rows={buildSummaryRows(unlockedMaterials)}
+                        currency={CURRENCY_CODE}
+                        poLabel={purchase.formatted_cr_id || `PO-${purchase.cr_id}`}
+                      />
 
                       {/* Project Info */}
                       <div className="mt-4 pt-4 border-t border-gray-200">
@@ -3879,14 +3875,25 @@ const MaterialVendorSelectionModal: React.FC<MaterialVendorSelectionModalProps> 
                       {/* Materials List */}
                       <div className="mb-4">
                         <div className="text-xs text-gray-500 mb-2">Materials to be sent ({vendorSendConfirmation.materials.length})</div>
-                        <div className="max-h-40 overflow-y-auto space-y-2 border border-gray-200 rounded-lg p-2">
-                          {vendorSendConfirmation.materials.map((mat, idx) => (
-                            <div key={idx} className="bg-gray-50 rounded px-3 py-2 text-sm">
-                              <div className="font-medium text-gray-900">{mat.material_name}</div>
-                              <div className="text-xs text-gray-500">{mat.quantity} {mat.unit}</div>
-                            </div>
-                          ))}
-                        </div>
+                        <VendorSelectionSummary
+                          rows={buildSummaryRows(
+                            vendorSendConfirmation.materials.map(mat =>
+                              materialVendors.find(m => m.material_name === mat.material_name) ?? {
+                                material_name: mat.material_name,
+                                quantity: mat.quantity,
+                                unit: mat.unit,
+                                selected_vendors: [{
+                                  vendor_id: vendorSendConfirmation.vendor_id,
+                                  vendor_name: vendorSendConfirmation.vendor_name,
+                                  send_individually: false
+                                }],
+                                expanded: false,
+                                selection_mode: 'single' as const
+                              }
+                            )
+                          )}
+                          currency={CURRENCY_CODE}
+                        />
                       </div>
 
                       {/* Info about adding more materials later */}

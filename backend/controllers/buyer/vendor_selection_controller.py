@@ -178,7 +178,7 @@ def select_vendor_for_purchase(cr_id):
                 "status": cr.status,
                 "cr_id": cr_id,
                 "item_name": cr.item_name or f"CR #{cr_id}",
-                "materials_count": len(cr.materials_data) if cr.materials_data else 0,
+                "materials_count": len(cr.get_materials()),
                 "total_cost": cr.materials_total_cost,
                 "vendor_id": vendor_id,
                 "vendor_name": vendor.company_name,
@@ -201,7 +201,7 @@ def select_vendor_for_purchase(cr_id):
                 "status": cr.status,
                 "cr_id": cr_id,
                 "item_name": cr.item_name or f"CR #{cr_id}",
-                "materials_count": len(cr.materials_data) if cr.materials_data else 0,
+                "materials_count": len(cr.get_materials()),
                 "total_cost": cr.materials_total_cost,
                 "vendor_id": vendor_id,
                 "vendor_name": vendor.company_name,
@@ -694,8 +694,8 @@ def select_vendor_for_material(cr_id):
 
         # Same source the buyer UI renders (sub_items_data preferred), so the completion
         # check matches the materials the buyer actually selected vendors for.
-        cr_materials = cr.sub_items_data or cr.materials_data
-        if cr_materials and isinstance(cr_materials, list):
+        cr_materials = cr.get_materials()
+        if cr_materials:
             for material in cr_materials:
                 material_name = material.get('material_name')
                 # Skip materials that have already been routed
@@ -1794,7 +1794,7 @@ def td_approve_vendor(cr_id):
             "status": cr.status,
             "cr_id": cr_id,
             "item_name": cr.item_name or f"CR #{cr_id}",
-            "materials_count": len(cr.materials_data) if cr.materials_data else 0,
+            "materials_count": len(cr.get_materials()),
             "total_cost": cr.materials_total_cost,
             "vendor_id": cr.selected_vendor_id,
             "vendor_name": cr.selected_vendor_name,

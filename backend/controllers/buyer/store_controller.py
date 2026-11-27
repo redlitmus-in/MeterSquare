@@ -27,8 +27,7 @@ def _normalize_material_name(name):
 def _get_cr_materials(cr):
     """Get materials from CR with consistent source ordering.
     Always prefers sub_items_data over materials_data."""
-    materials = cr.sub_items_data or cr.materials_data or []
-    return materials if isinstance(materials, list) else []
+    return cr.get_materials()
 
 
 def _merge_duplicate_materials(materials):

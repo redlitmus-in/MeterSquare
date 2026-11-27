@@ -193,6 +193,14 @@ class ChangeRequest(db.Model):
         """
         return f"PO-{self.cr_id}"
 
+    def get_materials(self):
+        """Materials list the buyer works on: sub_items_data, falling back to materials_data.
+        Use this for counts and completeness checks so they match what the buyer UI shows."""
+        for materials in (self.sub_items_data, self.materials_data):
+            if materials and isinstance(materials, list):
+                return materials
+        return []
+
     def calculate_recommended_routing(self):
         """
         Calculate the recommended routing based on material type only
