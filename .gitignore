@@ -49,6 +49,15 @@ Thumbs.db
 *.backup.*
 *.bak
 
+# Build / deployment artifacts
+msq-kol-update.zip
+msq-kol-*.zip
+msq-ath-*.zip
+frontend/dist/
+
+# Office lock files
+.~lock.*#
+
 # User guide screenshots (originals): generated from the demo, kept out of git.
 # backend/docs/build_user_guide.py writes WebP copies to frontend/public/user-guide-images/,
 # which ARE committed so production builds include them.

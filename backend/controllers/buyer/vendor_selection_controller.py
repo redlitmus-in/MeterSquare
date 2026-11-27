@@ -692,8 +692,11 @@ def select_vendor_for_material(cr_id):
             for info in routed_materials.values()
         )
 
-        if cr.materials_data and isinstance(cr.materials_data, list):
-            for material in cr.materials_data:
+        # Same source the buyer UI renders (sub_items_data preferred), so the completion
+        # check matches the materials the buyer actually selected vendors for.
+        cr_materials = cr.sub_items_data or cr.materials_data
+        if cr_materials and isinstance(cr_materials, list):
+            for material in cr_materials:
                 material_name = material.get('material_name')
                 # Skip materials that have already been routed
                 if material_name in routed_materials:
